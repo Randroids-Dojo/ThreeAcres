@@ -1,0 +1,1674 @@
+// The card table: the plate in the middle, the hand along the bottom, the
+// ledger and pegboard on top, seed scoops for energy and the lantern for End
+// day. It reads the run, sends plays to the rules, and animates what the rules
+// report. The rules never wait for an animation: a skipped or reloaded night
+// shows exactly what a watched one would.
+
+import type { GameContext } from '../../shell/types';
+import { PRESETS } from '../../sim/presets';
+import {
+  CARDS,
+  costOf,
+  endDay,
+  energyMax,
+  FIRST_HAND,
+  moveTargets,
+  newMeta,
+  newRun,
+  playCard,
+  recordRun,
+  ripeTonight,
+  SEASON_NAMES,
+  SEEDS,
+  targetsFor,
+  toss,
+  TUNING,
+  UNLOCK_ORDER,
+  whyNot,
+  type Card,
+  type Ev,
+  type Harvest,
+  type Meta,
+  type Plot,
+  type RunState,
+} from './rules';
+import { ease, Seq } from './view/anim';
+import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
+import { Board } from './view/board';
+import { faceUrl } from './view/faces';
+import { Sheets } from './sheets';
+
+export interface Prefs {
+  fast: boolean;
+}
+
+export interface SaveData {
+  v: 1;
+  run: RunState;
+  meta: Meta;
+  prefs: Prefs;
+  /** First-run lessons done, in order. */
+  taught: number;
+}
+
+interface Held {
+  uid: number;
+  /** Trowel: the crop picked to move. */
+  from: number | null;
+}
+
+interface Press {
+  uid: number;
+  id: number;
+  x0: number;
+  y0: number;
+  x: number;
+  y: number;
+  dragging: boolean;
+  long: boolean;
+  timer: number;
+}
+
+interface CardEl {
+  el: HTMLDivElement;
+  img: HTMLImageElement;
+  key: string;
+}
+
+const PENTA = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3];
+export function ladder(n: number): number {
+  return PENTA[n % 5] * Math.pow(2, Math.floor(n / 5) * 0.5);
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html) e.innerHTML = html;
+  return e;
+};
+
+const clonePlots = (p: readonly Plot[]): Plot[] => p.map((x) => ({ ...x, crop: x.crop ? { ...x.crop } : null }));
+
+export const LESSONS = ['carrot', 'radish', 'water', 'lantern', 'bloom', 'peg'] as const;
+
+export class Table {
+  readonly el = el('div', 'sb');
+  private tableEl = el('div', 'sb-table');
+  private ledger = el('div', 'sb-ledger');
+  private ledSeason = el('b', 'sb-led-season');
+  private ledDay = el('span', 'sb-led-day');
+  private ledTally = el('span', 'sb-led-tally');
+  private purse = el('div', 'sb-purse');
+  private book = el('button', 'sb-book');
+  private peg = el('div', 'sb-peg');
+  private pegImg = el('img', 'sb-peg-wood');
+  private pegBack = el('i', 'sb-pin back');
+  private pegFront = el('i', 'sb-pin front');
+  private pegXs: number[] = [];
+  private boardWrap = el('div', 'sb-boardwrap');
+  readonly board = new Board();
+  private bench = el('div', 'sb-bench');
+  private scoops = el('div', 'sb-scoops');
+  private tonightEl = el('div', 'sb-tonight');
+  private tin = el('button', 'sb-tin');
+  private tinCount = el('span', 'sb-count');
+  private heap = el('button', 'sb-heap');
+  private heapCount = el('span', 'sb-count');
+  private lantern = el('button', 'sb-lantern');
+  private flame = el('i', 'sb-flame');
+  private pages = el('div', 'sb-pages');
+  private handEl = el('div', 'sb-hand');
+  private fx = el('div', 'sb-fx');
+  private hint = el('div', 'sb-hint');
+  private note = el('div', 'sb-note');
+  private dark = el('div', 'sb-night');
+  readonly sheets: Sheets;
+
+  run!: RunState;
+  meta: Meta = newMeta();
+  prefs: Prefs = { fast: false };
+  taught = 0;
+  /** What the board shows: the plots as of the last thing animated. */
+  shown: Plot[] = [];
+  shownEarned = 0;
+  shownCoins = 0;
+  shownDay = 1;
+  /** The hand as shown (the old hand stays up through the night). */
+  handShown: Card[] = [];
+  held: Held | null = null;
+  cursor = 5;
+  private hover: number | null = null;
+  private press: Press | null = null;
+  private cards = new Map<number, CardEl>();
+  /** The night, or a card in flight: input waits while it runs. */
+  seq: Seq | null = null;
+  private small: Seq[] = [];
+  private intensity = 0;
+  private hot = 0;
+  private raf = 0;
+  private last = 0;
+  private running = false;
+  layout: 'phone' | 'wide' = 'phone';
+  private W = 0;
+  private cardW = 110;
+  private cardH = 154;
+  private handRect = { x: 0, y: 0, w: 0, h: 0 };
+  private hoverCard: number | null = null;
+  private hoverTimer = 0;
+  frames = 0;
+  frameMs: number[] = [];
+  /** Scores shown on screen this session, in order, for checks. */
+  shownScores: number[] = [];
+  /** Harvest scores the rules reported, in order, to check the screen against. */
+  ruleScores: number[] = [];
+  private shakeT = 0;
+  private shakeAmp = 0;
+  private ro: ResizeObserver;
+
+  constructor(private ctx: GameContext) {
+    this.sheets = new Sheets(this, ctx);
+    const t = this.tableEl;
+    t.style.backgroundImage = `url(${woodUrl()})`;
+    this.ledger.append(this.ledSeason, this.ledDay, this.ledTally);
+    this.book.innerHTML = '<span class="sb-book-spine"></span><span class="sb-book-title">Almanac</span>';
+    this.book.setAttribute('aria-label', 'Almanac: pause and settings');
+    this.pegImg.alt = '';
+    this.peg.append(this.pegImg, this.pegBack, this.pegFront);
+    this.boardWrap.append(this.board.canvas);
+    const lanternImg = el('img');
+    lanternImg.src = lanternUrl();
+    lanternImg.alt = '';
+    this.lantern.append(lanternImg, this.flame, el('span', 'sb-label', 'End day'));
+    this.lantern.setAttribute('aria-label', 'End day: blow out the lantern (E)');
+    const tinImg = el('img');
+    tinImg.src = tinUrl();
+    tinImg.alt = '';
+    this.tin.append(tinImg, this.tinCount);
+    this.tin.setAttribute('aria-label', 'Seed tin: your deck');
+    this.heap.append(el('span', 'sb-heap-pile'), this.heapCount, el('span', 'sb-label', 'Spent'));
+    this.heap.setAttribute('aria-label', 'Spent cards. Drop a card here to toss it, once a day.');
+    this.bench.append(this.scoops, this.tonightEl, this.tin, this.heap, this.lantern);
+    t.append(this.ledger, this.purse, this.book, this.peg, this.boardWrap, this.pages, this.bench, this.handEl, this.dark, this.fx, this.hint, this.note);
+    this.el.append(t, this.sheets.el);
+    ctx.root.append(this.el);
+
+    this.book.onclick = () => this.sheets.menu();
+    this.lantern.onclick = () => this.endDay();
+    this.tin.onclick = () => this.sheets.deck('tin');
+    this.heap.onclick = () => {
+      if (this.held) this.tossHeld();
+      else this.sheets.deck('spent');
+    };
+    this.bindBoard();
+    this.ro = new ResizeObserver(() => this.relayout());
+    this.ro.observe(ctx.root);
+    window.addEventListener('keydown', this.onKey);
+    window.addEventListener('pointermove', this.onMove, { passive: false });
+    window.addEventListener('pointerup', this.onUp);
+    window.addEventListener('pointercancel', this.onUp);
+  }
+
+  // ---------------------------------------------------------------- run lifecycle
+
+  load(data: SaveData | null): void {
+    if (data && data.v === 1 && data.run && data.meta) {
+      this.run = data.run;
+      this.meta = data.meta;
+      this.prefs = { ...{ fast: false }, ...data.prefs };
+      this.taught = data.taught ?? LESSONS.length;
+    } else {
+      this.meta = data?.meta ?? newMeta();
+      this.taught = 0;
+      this.fresh(null);
+      return;
+    }
+    this.syncAll();
+    this.afterSync();
+  }
+
+  /** Start a new run. The very first run deals the teaching hand. */
+  fresh(seed: number | null, teach = this.meta.runs === 0 && this.taught < LESSONS.length): void {
+    const s = seed ?? ((Date.now() ^ (Math.random() * 0x7fffffff)) | 0);
+    this.run = newRun(s, this.meta, teach ? FIRST_HAND : undefined).s;
+    if (!teach) this.taught = Math.max(this.taught, LESSONS.length);
+    this.held = null;
+    this.seq?.finish();
+    this.seq = null;
+    this.sheets.close();
+    this.syncAll();
+    this.save();
+    this.afterSync();
+  }
+
+  private afterSync(): void {
+    if (this.run.phase === 'shop') this.sheets.stall();
+    else if (this.run.phase === 'over') this.sheets.entry();
+  }
+
+  saveData(): SaveData {
+    return { v: 1, run: this.run, meta: this.meta, prefs: this.prefs, taught: this.taught };
+  }
+
+  save(): void {
+    const s = this.run;
+    const where = s.phase === 'shop' ? `${SEASON_NAMES[s.season]} market` : s.phase === 'over' ? `${SEASON_NAMES[s.season]}, run over` : `${SEASON_NAMES[s.season]}, day ${s.day}`;
+    this.ctx.save(this.saveData(), `Year ${s.year} ${where}, ${s.coins} coins`);
+  }
+
+  /** Put the display back in step with the rules. */
+  syncAll(): void {
+    this.shown = clonePlots(this.run.plots);
+    this.shownEarned = this.run.earned;
+    this.shownCoins = this.run.coins;
+    this.shownDay = this.run.day;
+    this.handShown = [...this.run.hand];
+    this.board.anims.clear();
+    this.board.night = 0;
+    this.flame.classList.remove('out');
+    this.relayout();
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    this.raf = requestAnimationFrame(this.frame);
+  }
+
+  stop(): void {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+    this.cancelPress();
+    clearTimeout(this.hoverTimer);
+  }
+
+  dispose(): void {
+    this.stop();
+    this.ro.disconnect();
+    window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('pointerup', this.onUp);
+    window.removeEventListener('pointercancel', this.onUp);
+  }
+
+  get busy(): boolean {
+    return !!this.seq && !this.seq.done;
+  }
+
+  get speed(): number {
+    return this.prefs.fast ? 2.2 : 1;
+  }
+
+  // ---------------------------------------------------------------- layout
+
+  relayout(): void {
+    const r = this.ctx.root.getBoundingClientRect();
+    const W = Math.round(r.width) || window.innerWidth;
+    const H = Math.round(r.height) || window.innerHeight;
+    this.W = W;
+    const wide = W >= 820 && W > H * 1.05;
+    this.layout = wide ? 'wide' : 'phone';
+    this.el.dataset.layout = this.layout;
+    this.el.toggleAttribute('data-narrow', W < 400);
+    this.el.toggleAttribute('data-short', H < 600);
+    const safeT = parseFloat(getComputedStyle(this.el).getPropertyValue('--sbsafe-t')) || 0;
+    const safeB = parseFloat(getComputedStyle(this.el).getPropertyValue('--sbsafe-b')) || 0;
+    const place = (e: HTMLElement, x: number, y: number, w: number, h: number) => {
+      e.style.left = `${Math.round(x)}px`;
+      e.style.top = `${Math.round(y)}px`;
+      e.style.width = `${Math.round(w)}px`;
+      e.style.height = `${Math.round(h)}px`;
+    };
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    let boardBox: { x: number; y: number; w: number; h: number };
+    if (!wide) {
+      const top = safeT + 8;
+      this.cardW = Math.round(Math.min(112, Math.max(84, Math.min(W * 0.255, H * 0.118))));
+      this.cardH = Math.round(this.cardW * 1.4);
+      const handH = this.cardH + 26;
+      place(this.ledger, 64, top, W - 64 - 116, 50);
+      place(this.purse, W - 112, top, 56, 50);
+      place(this.book, W - 52, top, 44, 50);
+      place(this.peg, 10, top + 56, W - 20, 26);
+      const benchH = 80;
+      const handY = H - safeB - handH;
+      const benchY = handY - benchH;
+      boardBox = { x: 0, y: top + 84, w: W, h: benchY - (top + 84) };
+      place(this.bench, 6, benchY, W - 12, benchH);
+      this.pages.style.display = 'none';
+      this.handRect = { x: 0, y: handY, w: W, h: handH + safeB };
+    } else {
+      const P = Math.round(Math.max(300, Math.min(380, W * 0.28)));
+      const sx = W - P - 18;
+      this.cardW = Math.round(Math.min(150, Math.max(76, H * 0.17)));
+      this.cardH = Math.round(this.cardW * 1.4);
+      const handH = Math.round(Math.max(this.cardH + 30, Math.min(250, H * 0.28)));
+      place(this.ledger, sx, 16, P - 64, 64);
+      place(this.purse, sx + P - 58, 16, 58, 64);
+      place(this.book, sx + P - 58, 86, 58, 44);
+      place(this.peg, sx, 90, P - 66, 32);
+      this.pages.style.display = '';
+      place(this.pages, sx, 140, P, Math.max(80, H - 140 - 230 - handH * 0.0));
+      place(this.bench, sx, H - 214, P, 200);
+      boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
+      this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
+    }
+    place(this.boardWrap, boardBox.x, boardBox.y, boardBox.w, boardBox.h);
+    place(this.handEl, this.handRect.x, this.handRect.y, this.handRect.w, this.handRect.h);
+    this.board.layout(boardBox.w, boardBox.h, dpr, this.run?.cols ?? 4, this.run?.rows ?? 4, !wide || H < 600);
+    if (this.run) this.board.setSeason(this.run.season, (this.run.year - 1) * 4 + this.run.season + 1);
+    const pr = this.peg.getBoundingClientRect();
+    const pw = Math.round(pr.width || W - 20);
+    const ph = Math.round(pr.height || 26);
+    const pegArt = pegboardUrl(pw, ph, wide ? 31 : 31);
+    this.pegImg.src = pegArt.url;
+    this.pegXs = pegArt.xs;
+    if (this.run) this.renderAll();
+  }
+
+  // ---------------------------------------------------------------- rendering the table
+
+  renderAll(): void {
+    this.renderLedger();
+    this.renderBench();
+    this.renderPages();
+    this.renderHand();
+    this.renderHint();
+  }
+
+  private renderLedger(): void {
+    const s = this.run;
+    const season = SEASON_NAMES[s.season];
+    this.ledSeason.textContent = `${season[0].toUpperCase()}${season.slice(1)}, year ${s.year}`;
+    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'Market day' : 'The run is over';
+    this.ledTally.innerHTML = `<b>${Math.round(this.shownEarned)}</b> of ${s.quota}`;
+    this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
+    this.placePegs();
+  }
+
+  private placePegs(): void {
+    const xs = this.pegXs;
+    if (!xs.length) return;
+    const k = Math.max(0, Math.min(1, this.shownEarned / Math.max(1, this.run.quota)));
+    const hole = (v: number) => xs[Math.round(v * (xs.length - 1))];
+    const front = hole(k);
+    const back = (this.pegBackK ?? 0) <= k ? hole(this.pegBackK ?? 0) : hole(0);
+    this.pegFront.style.transform = `translate(${front}px, 0)`;
+    this.pegBack.style.transform = `translate(${back}px, 0)`;
+    this.peg.classList.toggle('met', this.shownEarned >= this.run.quota && this.run.quota > 0);
+  }
+  private pegBackK = 0;
+
+  private renderBench(): void {
+    const s = this.run;
+    const max = energyMax(s);
+    while (this.scoops.children.length < max) {
+      const i = el('img');
+      i.alt = '';
+      this.scoops.append(i);
+    }
+    while (this.scoops.children.length > max) this.scoops.lastElementChild!.remove();
+    [...this.scoops.children].forEach((c, i) => {
+      const full = i < s.energy || this.busy;
+      const img = c as HTMLImageElement;
+      const src = scoopUrl(full);
+      if (img.getAttribute('src') !== src) img.src = src;
+      img.classList.toggle('empty', !full);
+    });
+    this.scoops.setAttribute('aria-label', `${s.energy} of ${max} energy`);
+    this.tinCount.textContent = String(s.draw.length);
+    this.heapCount.textContent = String(s.discard.length);
+    this.heap.classList.toggle('can-toss', !!this.held && !s.tossed && s.phase === 'day');
+    this.heap.classList.toggle('tossed', s.tossed);
+    const wx = s.tonight.map((w) => `<img src="${faceUrl(w, false)}" alt="${CARDS[w].name} tonight">`).join('');
+    if (this.tonightEl.dataset.w !== s.tonight.join()) {
+      this.tonightEl.innerHTML = wx;
+      this.tonightEl.dataset.w = s.tonight.join();
+    }
+    this.lantern.disabled = s.phase !== 'day';
+  }
+
+  private renderPages(): void {
+    const key = this.run.pages.join();
+    if (this.pages.dataset.k === key) return;
+    this.pages.dataset.k = key;
+    this.pages.innerHTML = '';
+    this.pages.append(el('h4', '', this.run.pages.length ? 'Almanac pages kept' : 'No almanac pages yet'));
+    for (const p of this.run.pages) this.pages.append(this.sheets.pageEl(p, null));
+  }
+
+  /** Fan the hand. */
+  renderHand(): void {
+    const hand = this.handShown;
+    const live = new Set(hand.map((c) => c.uid));
+    for (const [uid, c] of this.cards) {
+      if (!live.has(uid) && !c.el.classList.contains('flying')) {
+        c.el.remove();
+        this.cards.delete(uid);
+      }
+    }
+    const n = hand.length;
+    const { cardW: cw, cardH: ch } = this;
+    const R = this.handRect;
+    const avail = R.w - 24;
+    const gap = n > 1 ? Math.min(cw * 0.92, (avail - cw) / (n - 1)) : 0;
+    const total = cw + gap * (n - 1);
+    const x0 = (R.w - total) / 2;
+    hand.forEach((card, i) => {
+      let c = this.cards.get(card.uid);
+      const key = `${card.id}${card.up ? '+' : ''}`;
+      if (!c) {
+        const d = el('div', 'sb-card');
+        const img = el('img');
+        img.draggable = false;
+        img.alt = '';
+        d.append(img);
+        d.dataset.uid = String(card.uid);
+        d.dataset.type = CARDS[card.id].type;
+        d.addEventListener('pointerdown', (e) => this.onCardDown(e, card.uid));
+        d.addEventListener('pointerenter', (e) => this.onCardEnter(e, card.uid));
+        d.addEventListener('pointerleave', () => this.onCardLeave(card.uid));
+        d.addEventListener('contextmenu', (e) => e.preventDefault());
+        // New cards come out of the tin.
+        const tr = this.tin.getBoundingClientRect();
+        const hr = this.handEl.getBoundingClientRect();
+        d.style.transition = 'none';
+        d.style.transform = `translate(${tr.left - hr.left}px, ${tr.top - hr.top}px) scale(0.3) rotate(-20deg)`;
+        d.style.opacity = '0';
+        this.handEl.append(d);
+        c = { el: d, img, key: '' };
+        this.cards.set(card.uid, c);
+        void d.offsetWidth;
+        d.style.transition = '';
+        d.style.opacity = '';
+      }
+      if (c.key !== key) {
+        c.img.src = faceUrl(card.id, card.up);
+        c.key = key;
+        c.el.setAttribute('aria-label', `${CARDS[card.id].name}${card.up ? ', select' : ''}, costs ${costOf(card.id, card.up)}`);
+      }
+      c.el.style.width = `${cw}px`;
+      c.el.style.height = `${ch}px`;
+      const mid = (n - 1) / 2;
+      const off = i - mid;
+      const held = this.held?.uid === card.uid;
+      const hov = this.hoverCard === card.uid && !this.held;
+      const afford = this.run.phase === 'day' && costOf(card.id, card.up) <= this.run.energy;
+      let x = x0 + i * gap;
+      let y = R.h - ch - (this.layout === 'phone' ? 14 : 18) + off * off * 2.2;
+      let rot = off * 3.2;
+      let sc = 1;
+      if (held) {
+        y -= ch * 0.3;
+        rot = 0;
+        sc = 1.1;
+      } else if (hov) {
+        y -= ch * 0.14;
+        rot *= 0.4;
+      }
+      if (!c.el.classList.contains('dragging')) c.el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${sc})`;
+      c.el.style.zIndex = String(held ? 50 : hov ? 40 : 10 + i);
+      c.el.classList.toggle('held', held);
+      c.el.classList.toggle('dear', !afford && this.run.phase === 'day');
+      c.el.dataset.key = String(i + 1);
+    });
+  }
+
+  // ---------------------------------------------------------------- frame
+
+  private frame = (now: number) => {
+    if (!this.running) return;
+    const t0 = performance.now();
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+    this.frames++;
+    if (this.seq && !this.seq.done) this.seq.update(dt * this.speed);
+    for (const s of this.small) s.update(dt * this.speed);
+    this.small = this.small.filter((s) => !s.done);
+    // Music lifts during a harvest run, then settles.
+    const target = this.hot > 0 ? 1 : 0;
+    this.hot = Math.max(0, this.hot - dt);
+    this.intensity += (target - this.intensity) * Math.min(1, dt * (target > this.intensity ? 6 : 0.9));
+    this.ctx.audio.mood({
+      game: 'deck',
+      intensity: this.intensity,
+      hour: 12,
+      season: this.run.season,
+      weather: 'sun',
+      scene: this.sheets.open && this.sheets.kind === 'menu' ? 'menu' : 'farm',
+      night: 0,
+      speed: 1,
+      tired: false,
+      rules: PRESETS.sunup.rules,
+    });
+    // Table shake on big harvests.
+    if (this.shakeT > 0) {
+      this.shakeT = Math.max(0, this.shakeT - dt);
+      const a = this.shakeAmp * (this.shakeT / 0.4);
+      this.tableEl.style.transform = `translate(${Math.sin(now * 0.09) * a}px, ${Math.cos(now * 0.13) * a * 0.6}px)`;
+      if (this.shakeT === 0) this.tableEl.style.transform = '';
+    }
+    this.board.tonight = this.busy ? [] : this.shown.map((_, i) => ripeTonight(this.run, i));
+    const nk = this.board.night.toFixed(3);
+    if (this.dark.dataset.k !== nk) {
+      this.dark.dataset.k = nk;
+      this.dark.style.opacity = nk;
+    }
+    this.board.draw(this.shown, dt);
+    this.frameMs.push(performance.now() - t0);
+    if (this.frameMs.length > 600) this.frameMs.splice(0, 300);
+    this.raf = requestAnimationFrame(this.frame);
+  };
+
+  // ---------------------------------------------------------------- the board
+
+  private bindBoard(): void {
+    const c = this.board.canvas;
+    const pos = (e: PointerEvent) => {
+      const r = c.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    c.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse' || this.press?.dragging) return;
+      const p = pos(e);
+      const i = this.board.pick(p.x, p.y);
+      if (i !== this.hover) {
+        this.hover = i;
+        this.updateHighlight();
+      }
+    });
+    c.addEventListener('pointerleave', () => {
+      this.hover = null;
+      this.updateHighlight();
+    });
+    c.addEventListener('pointerup', (e) => {
+      if (this.press) return;
+      if (this.busy) {
+        this.skip();
+        return;
+      }
+      const p = pos(e);
+      const i = this.board.pick(p.x, p.y);
+      if (this.held) {
+        const t = CARDS[this.cardOf(this.held.uid)!.id].target;
+        if (t === 'board' && this.board.onPlate(p.x, p.y)) this.tryPlay(null);
+        else if (i !== null) this.tryPlay(i);
+      } else if (i !== null) {
+        this.cursor = i;
+        this.inspect(i);
+      }
+    });
+    // A tap anywhere skips a running night.
+    this.tableEl.addEventListener('pointerdown', (e) => {
+      if (this.busy && this.seq && !(e.target as HTMLElement).closest('.sb-book')) this.skip();
+    });
+  }
+
+  private cardOf(uid: number): Card | undefined {
+    return this.run.hand.find((c) => c.uid === uid);
+  }
+
+  private heldIndex(): number {
+    return this.held ? this.run.hand.findIndex((c) => c.uid === this.held!.uid) : -1;
+  }
+
+  updateHighlight(): void {
+    const h = this.board.hl;
+    h.valid = [];
+    h.area = [];
+    h.all = false;
+    h.water = false;
+    h.deny = false;
+    h.hover = null;
+    h.cursor = this.ctx.device() === 'key' && this.run.phase === 'day' && !this.busy ? this.cursor : null;
+    const idx = this.heldIndex();
+    if (idx >= 0 && !this.busy) {
+      const card = this.run.hand[idx];
+      const def = CARDS[card.id];
+      const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
+      h.water = card.id === 'can' || card.id === 'hose' || card.id === 'mulch' || card.id === 'rain' || card.id === 'storm';
+      if (def.target === 'board') {
+        h.all = true;
+      } else if (def.target === 'move' && this.held!.from !== null) {
+        h.valid = moveTargets(this.run, idx, this.held!.from);
+        h.area = [this.held!.from];
+        h.hover = aim;
+        h.deny = aim !== null && !h.valid.includes(aim);
+      } else {
+        h.valid = targetsFor(this.run, idx);
+        h.hover = aim;
+        h.deny = aim !== null && !h.valid.includes(aim);
+        if (aim !== null && !h.deny) h.area = this.areaOf(card, aim);
+      }
+    }
+  }
+
+  private areaOf(card: Card, i: number): number[] {
+    const s = this.run;
+    const r = Math.floor(i / s.cols);
+    const c = i % s.cols;
+    if (card.id === 'can') return s.plots.map((_, j) => j).filter((j) => Math.floor(j / s.cols) === r || (card.up && j % s.cols === c));
+    if (card.id === 'beehive' || card.id === 'scarecrow') {
+      const out: number[] = [];
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr;
+        const cc = c + dc;
+        if (rr >= 0 && rr < s.rows && cc >= 0 && cc < s.cols) out.push(rr * s.cols + cc);
+      }
+      return out;
+    }
+    return [i];
+  }
+
+  // ---------------------------------------------------------------- cards: touch and mouse
+
+  private onCardDown(e: PointerEvent, uid: number): void {
+    if (e.button > 0) return;
+    e.preventDefault();
+    if (this.busy) {
+      this.skip();
+      return;
+    }
+    if (this.run.phase !== 'day') return;
+    this.cancelPress();
+    const p: Press = { uid, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, dragging: false, long: false, timer: 0 };
+    p.timer = window.setTimeout(() => {
+      if (this.press !== p || p.dragging) return;
+      p.long = true;
+      this.ctx.audio.cue('deck.hover');
+      const c = this.cardOf(uid);
+      if (c) this.sheets.detail(c);
+    }, 460);
+    this.press = p;
+  }
+
+  private onMove = (e: PointerEvent) => {
+    const p = this.press;
+    if (!p || e.pointerId !== p.id) return;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (!p.dragging && !p.long && Math.hypot(p.x - p.x0, p.y - p.y0) > 9) {
+      clearTimeout(p.timer);
+      const card = this.cardOf(p.uid);
+      if (!card) return;
+      p.dragging = true;
+      if (this.held?.uid !== p.uid) {
+        this.held = { uid: p.uid, from: null };
+        this.ctx.audio.cue('deck.pick');
+      }
+      const c = this.cards.get(p.uid)!;
+      c.el.classList.add('dragging');
+      this.sheets.closeDetail();
+    }
+    if (p.dragging) {
+      e.preventDefault();
+      const c = this.cards.get(p.uid);
+      const hr = this.handEl.getBoundingClientRect();
+      if (c) c.el.style.transform = `translate(${p.x - hr.left - this.cardW / 2}px, ${p.y - hr.top - this.cardH * 0.75}px) rotate(-2deg) scale(0.86)`;
+      const br = this.board.canvas.getBoundingClientRect();
+      const i = this.board.pick(p.x - br.left, p.y - br.top);
+      if (i !== this.hover) {
+        this.hover = i;
+        this.updateHighlight();
+      }
+      const over = this.heapHit(p.x, p.y);
+      this.heap.classList.toggle('over', over);
+    }
+  };
+
+  private onUp = (e: PointerEvent) => {
+    const p = this.press;
+    if (!p || e.pointerId !== p.id) return;
+    clearTimeout(p.timer);
+    this.press = null;
+    const c = this.cards.get(p.uid);
+    if (p.dragging) {
+      c?.el.classList.remove('dragging');
+      this.heap.classList.remove('over');
+      const br = this.board.canvas.getBoundingClientRect();
+      const bx = p.x - br.left;
+      const by = p.y - br.top;
+      const card = this.cardOf(p.uid);
+      if (card && this.heapHit(p.x, p.y)) {
+        this.tossHeld();
+      } else if (card && CARDS[card.id].target === 'board' && this.board.onPlate(bx, by)) {
+        this.tryPlay(null);
+      } else if (card) {
+        const i = this.board.pick(bx, by);
+        if (i !== null) {
+          if (!this.tryPlay(i) && CARDS[card.id].target !== 'move') this.putDown();
+        } else this.putDown();
+      }
+      this.hover = null;
+      this.updateHighlight();
+      this.renderHand();
+      return;
+    }
+    // A long press leaves the card up close until the next tap.
+    if (p.long) return;
+    // A tap: pick up, or put down.
+    if (this.held?.uid === p.uid) this.putDown();
+    else this.pickUp(p.uid);
+  };
+
+  private cancelPress(): void {
+    if (!this.press) return;
+    clearTimeout(this.press.timer);
+    this.cards.get(this.press.uid)?.el.classList.remove('dragging');
+    this.press = null;
+  }
+
+  private heapHit(x: number, y: number): boolean {
+    const r = this.heap.getBoundingClientRect();
+    return x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 8 && y <= r.bottom + 8;
+  }
+
+  private onCardEnter(e: PointerEvent, uid: number): void {
+    if (e.pointerType !== 'mouse' || this.press) return;
+    this.hoverCard = uid;
+    this.ctx.audio.cue('deck.hover', { gain: 0.5 });
+    this.renderHand();
+    clearTimeout(this.hoverTimer);
+    this.hoverTimer = window.setTimeout(() => {
+      const c = this.cardOf(uid);
+      if (c && this.hoverCard === uid && !this.held) this.sheets.detail(c, true);
+    }, 420);
+  }
+
+  private onCardLeave(uid: number): void {
+    if (this.hoverCard !== uid) return;
+    this.hoverCard = null;
+    clearTimeout(this.hoverTimer);
+    this.sheets.closeDetail(true);
+    this.renderHand();
+  }
+
+  pickUp(uid: number): void {
+    if (this.busy || this.run.phase !== 'day') return;
+    const card = this.cardOf(uid);
+    if (!card) return;
+    this.sheets.closeDetail();
+    this.held = { uid, from: null };
+    this.ctx.audio.cue('deck.pick');
+    if (costOf(card.id, card.up) > this.run.energy) this.say('Not enough seed in the scoops for that one.', null);
+    this.updateHighlight();
+    this.renderHand();
+    this.renderBench();
+    this.renderHint();
+  }
+
+  putDown(quiet = false): void {
+    if (!this.held) return;
+    this.held = null;
+    if (!quiet) this.ctx.audio.cue('deck.drop');
+    this.updateHighlight();
+    this.renderHand();
+    this.renderBench();
+    this.renderHint();
+  }
+
+  // ---------------------------------------------------------------- playing
+
+  /** Play the held card on a plot (or the board). Returns false if refused. */
+  tryPlay(plot: number | null): boolean {
+    if (this.busy || !this.held) return false;
+    const idx = this.heldIndex();
+    if (idx < 0) return false;
+    const card = this.run.hand[idx];
+    const def = CARDS[card.id];
+    if (def.target === 'move') {
+      if (plot === null) return false;
+      if (this.held.from === null) {
+        const why = whyNot(this.run, idx, plot, moveTargets(this.run, idx, plot)[0]);
+        if (why || !targetsFor(this.run, idx).includes(plot)) {
+          this.deny(plot, why ?? 'Needs a crop with room to move.');
+          return false;
+        }
+        this.held.from = plot;
+        this.ctx.audio.cue('deck.pick', { pitch: 1.2 });
+        this.say('Now pick where it goes.', plot);
+        this.updateHighlight();
+        return true;
+      }
+      return this.commit(idx, this.held.from, plot);
+    }
+    return this.commit(idx, def.target === 'board' ? null : plot);
+  }
+
+  private commit(idx: number, plot: number | null, to?: number): boolean {
+    const why = whyNot(this.run, idx, plot, to);
+    if (why) {
+      this.deny(plot, why);
+      return false;
+    }
+    const card = this.run.hand[idx];
+    const cEl = this.cards.get(card.uid);
+    const from = cEl?.el.getBoundingClientRect();
+    const before = clonePlots(this.run.plots);
+    const ev = playCard(this.run, idx, plot, to)!;
+    for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
+    this.held = null;
+    this.handShown = [...this.run.hand];
+    this.ctx.audio.cue('deck.play');
+    this.flyCard(card, cEl, from, plot ?? null, () => this.landPlay(ev, before));
+    this.learn(ev);
+    this.save();
+    this.updateHighlight();
+    this.renderHand();
+    this.renderBench();
+    this.renderLedger();
+    return true;
+  }
+
+  /** The card arcs to its plot (or the middle of the plate) and is gone. */
+  private flyCard(card: Card, c: CardEl | undefined, from: DOMRect | undefined, plot: number | null, land: () => void): void {
+    if (!c || !from) {
+      land();
+      return;
+    }
+    this.cards.delete(card.uid);
+    const d = c.el;
+    d.classList.add('flying');
+    d.classList.remove('held', 'dragging');
+    const hr = this.handEl.getBoundingClientRect();
+    const br = this.board.canvas.getBoundingClientRect();
+    const target = plot !== null ? this.board.centre(plot) : { x: this.board.bx + (this.board.T * this.board.cols) / 2, y: this.board.by + (this.board.T * this.board.rows) / 2 };
+    const x0 = from.left - hr.left;
+    const y0 = from.top - hr.top;
+    const x1 = br.left - hr.left + target.x - this.cardW * 0.5;
+    const y1 = br.top - hr.top + target.y - this.cardH * 0.5;
+    d.style.transition = 'none';
+    const reduced = this.ctx.settings().reducedMotion;
+    const s = new Seq();
+    const dur = reduced ? 0.12 : 0.34;
+    s.tween(0, dur, (k) => {
+      const e = ease.inOut(k);
+      const x = x0 + (x1 - x0) * e;
+      const y = y0 + (y1 - y0) * e - Math.sin(Math.PI * e) * (reduced ? 0 : 90);
+      const sc = 1 - e * 0.62;
+      d.style.transform = `translate(${x}px, ${y}px) rotate(${(1 - e) * -6 + e * 14}deg) scale(${sc})`;
+      d.style.opacity = String(k > 0.8 ? 1 - (k - 0.8) * 5 : 1);
+    });
+    s.at(dur, () => {
+      d.remove();
+      land();
+    });
+    this.small.push(s);
+  }
+
+  /** What a played card did, shown on the board as it lands. */
+  private landPlay(ev: Ev[], before: Plot[]): void {
+    const b = this.board;
+    const reduced = this.ctx.settings().reducedMotion;
+    for (const e of ev) {
+      switch (e.t) {
+        case 'plant': {
+          const c = b.centre(e.plot);
+          b.emit('dust', c.x, c.y + b.T * 0.2, reduced ? 3 : 8, { col: '#7a5a3a', spread: 50, up: 40, size: 4 });
+          this.bounce(e.uid);
+          this.ctx.audio.cue('deck.plant', { pan: this.pan(e.plot) });
+          break;
+        }
+        case 'water':
+          for (const i of e.plots) {
+            b.splash[i] = 1;
+            const c = b.centre(i);
+            b.emit('drop', c.x, c.y - b.T * 0.25, reduced ? 1 : 4, { col: '#6aa0d0', spread: 30, up: 50, size: 5, life: 0.5 });
+          }
+          this.ctx.audio.cue('deck.water', { gain: Math.min(1, 0.4 + e.plots.length * 0.05) });
+          break;
+        case 'grow':
+          for (const g of e.growth) this.bounce(g.uid);
+          this.ctx.audio.cue('deck.grow');
+          break;
+        case 'compost':
+        case 'mulch': {
+          const c = b.centre(e.plot);
+          b.emit('dust', c.x, c.y, 8, { col: e.t === 'mulch' ? '#e2bf68' : '#4a3424', spread: 40, up: 30 });
+          break;
+        }
+        case 'move':
+          this.ctx.audio.cue('deck.plant');
+          break;
+        case 'clear':
+          for (const i of e.plots) {
+            const c = b.centre(i);
+            b.emit('spark', c.x, c.y - b.T * 0.3, 5, { col: '#c8352a', spread: 60, up: 60, size: 3 });
+          }
+          break;
+        case 'object': {
+          const c = b.centre(e.plot);
+          b.emit('dust', c.x, c.y + b.T * 0.2, 10, { col: '#8a6a48', spread: 50, up: 30 });
+          this.ctx.audio.cue('deck.plant', { pitch: 0.8 });
+          break;
+        }
+        case 'weather':
+          this.ctx.audio.cue('deck.weather');
+          break;
+        case 'harvest':
+          this.harvestNow(e.h);
+          break;
+        case 'quota':
+          this.ctx.audio.cue('deck.quota');
+          break;
+        case 'draw':
+          this.ctx.audio.cue('deck.draw');
+          break;
+        default:
+          break;
+      }
+    }
+    this.shown = clonePlots(this.run.plots);
+    // A crop cut by the shears stays up until its harvest has popped.
+    for (const e of ev) if (e.t === 'harvest') this.shown[e.h.plot].crop = before[e.h.plot].crop;
+    this.handShown = [...this.run.hand];
+    this.renderAll();
+    this.updateHighlight();
+  }
+
+  /** Shears: one harvest, scored on the spot. */
+  private harvestNow(h: Harvest): void {
+    const s = new Seq();
+    this.scoreHarvest(s, 0, h, 0, 1);
+    s.then(() => {
+      this.shown = clonePlots(this.run.plots);
+      this.shownEarned = this.run.earned;
+      this.shownCoins = this.run.coins;
+      this.renderLedger();
+    });
+    this.small.push(s);
+  }
+
+  private bounce(uid: number): void {
+    const a = { lift: 0, scale: 1, tilt: 0, alpha: 1, stage: null, glow: 0 };
+    this.board.anims.set(uid, a);
+    const s = new Seq();
+    s.tween(0, 0.32, (k) => {
+      a.scale = 1 + ease.pop(k) * 0.16;
+      a.lift = ease.pop(k) * 0.06;
+    });
+    s.at(0.33, () => this.board.anims.delete(uid));
+    this.small.push(s);
+  }
+
+  private deny(plot: number | null, why: string): void {
+    this.ctx.audio.cue('deck.deny');
+    if (plot !== null) this.board.shake(plot);
+    this.say(why, plot);
+  }
+
+  private pan(plot: number): number {
+    const c = plot % this.run.cols;
+    return ((c + 0.5) / this.run.cols) * 1.2 - 0.6;
+  }
+
+  tossHeld(): void {
+    const idx = this.heldIndex();
+    if (idx < 0 || this.busy) return;
+    if (this.run.tossed) {
+      this.say('One toss a day. The heap is full for today.', null);
+      this.ctx.audio.cue('deck.deny');
+      return;
+    }
+    const card = this.run.hand[idx];
+    const ev = toss(this.run, idx);
+    if (!ev) return;
+    this.held = null;
+    const c = this.cards.get(card.uid);
+    if (c) {
+      this.cards.delete(card.uid);
+      c.el.classList.add('flying');
+      const hr = this.handEl.getBoundingClientRect();
+      const r = this.heap.getBoundingClientRect();
+      c.el.style.transform = `translate(${r.left - hr.left}px, ${r.top - hr.top - 20}px) rotate(30deg) scale(0.3)`;
+      c.el.style.opacity = '0';
+      setTimeout(() => c.el.remove(), 320);
+    }
+    this.ctx.audio.cue('deck.remove');
+    for (const e of ev) if (e.t === 'draw') this.ctx.audio.cue('deck.draw');
+    this.handShown = [...this.run.hand];
+    this.save();
+    this.updateHighlight();
+    this.renderAll();
+  }
+
+  // ---------------------------------------------------------------- notes, hints and inspecting
+
+  /** A short ink note on the table near a plot, gone after a moment. Not a stack: one at a time. */
+  say(text: string, plot: number | null): void {
+    const n = this.note;
+    n.textContent = text;
+    const br = this.boardWrap.getBoundingClientRect();
+    const tr = this.tableEl.getBoundingClientRect();
+    let x = br.left - tr.left + br.width / 2;
+    let y = br.top - tr.top + this.board.by - 8;
+    if (plot !== null) {
+      const c = this.board.centre(plot);
+      x = br.left - tr.left + c.x;
+      y = br.top - tr.top + c.y - this.board.T * 0.7;
+    }
+    n.style.left = `${Math.round(Math.max(90, Math.min(this.W - 90, x)))}px`;
+    n.style.top = `${Math.round(Math.max(60, y))}px`;
+    n.classList.remove('on');
+    void n.offsetWidth;
+    n.classList.add('on');
+    clearTimeout(this.noteTimer);
+    this.noteTimer = window.setTimeout(() => n.classList.remove('on'), 2200);
+  }
+  private noteTimer = 0;
+
+  private inspect(i: number): void {
+    const p = this.run.plots[i];
+    const at = `${'ABCDE'[i % this.run.cols]}${Math.floor(i / this.run.cols) + 1}`;
+    if (p.crop) {
+      const c = p.crop;
+      const left = c.days - c.age;
+      const state = left <= 0 ? (c.pest ? 'ripe, but pests are on it' : 'ripe') : `${left} more ${left === 1 ? 'night' : 'nights'} to ripen`;
+      this.say(`${at}: ${CARDS[c.kind].name}, ${state}. ${p.wet ? 'Wet.' : 'Dry.'}`, i);
+    } else if (p.obj) this.say(`${at}: ${CARDS[p.obj].name}. ${CARDS[p.obj].text}`, i);
+    else this.say(`${at}: bare soil, ${p.wet ? 'wet' : 'dry'}.`, i);
+  }
+
+  /** First-run lessons: one short line at a time, near the thing it means, until it's done. */
+  renderHint(): void {
+    const h = this.hint;
+    const s = this.run;
+    const lesson = LESSONS[this.taught];
+    const dayOk = lesson === 'bloom' || lesson === 'peg' ? s.day === 2 : s.day === 1;
+    const show = !!lesson && dayOk && s.year === 1 && s.season === 0 && s.phase === 'day' && !this.busy && !this.sheets.open && !this.sheets.detailOpen;
+    if (!show) {
+      h.classList.remove('on');
+      return;
+    }
+    const dev = this.ctx.device();
+    const tap = dev === 'touch' ? 'Tap' : 'Click';
+    const keys = dev === 'key';
+    let text = '';
+    let anchor: DOMRect | null = null;
+    const tr = this.tableEl.getBoundingClientRect();
+    switch (lesson) {
+      case 'carrot': {
+        const held = this.held && this.cardOf(this.held.uid)?.id === 'carrot';
+        text = held ? (keys ? 'Pick a plot with the arrows, then Enter.' : `Now ${tap.toLowerCase()} a plot to sow it.`) : keys ? 'Press 1 to take up the carrot.' : `${tap} the carrot packet to take it up.`;
+        anchor = held ? this.boardWrap.getBoundingClientRect() : this.handEl.getBoundingClientRect();
+        break;
+      }
+      case 'radish':
+        text = 'Sow a radish beside the carrot. Next to a carrot it yields 2 more.';
+        anchor = this.boardWrap.getBoundingClientRect();
+        break;
+      case 'bloom':
+        text = 'The carrot ripens tonight. Each radish pulled before it, to its left or above, adds 1 bloom.';
+        anchor = this.boardWrap.getBoundingClientRect();
+        break;
+      case 'peg':
+        text = 'Each harvest pays yield × bloom onto the pegboard. Reach the brass hole by day 6.';
+        anchor = this.peg.getBoundingClientRect();
+        break;
+      case 'water':
+        text = 'Seeds grow only in wet soil. Water their row with the can.';
+        anchor = this.boardWrap.getBoundingClientRect();
+        break;
+      case 'lantern':
+        text = keys ? 'Press E, or blow out the lantern, to end the day.' : 'Blow out the lantern to end the day.';
+        anchor = this.lantern.getBoundingClientRect();
+        break;
+    }
+    h.textContent = text;
+    h.dataset.lesson = lesson;
+    h.classList.add('on');
+    const hw = Math.min(lesson === 'carrot' || lesson === 'lantern' ? 210 : 260, this.W - 24);
+    h.style.width = `${hw}px`;
+    let x = anchor.left - tr.left + anchor.width / 2 - hw / 2;
+    let y: number;
+    if (lesson === 'lantern') {
+      x = anchor.left - tr.left - hw + 20;
+      y = anchor.top - tr.top - 64;
+    } else if (lesson === 'peg') {
+      y = anchor.bottom - tr.top + 8;
+    } else if (lesson === 'carrot' && !(this.held && this.cardOf(this.held.uid)?.id === 'carrot')) {
+      y = anchor.top - tr.top - (this.layout === 'phone' ? 70 : 60);
+    } else {
+      y = this.layout === 'phone' ? anchor.top - tr.top + 4 : anchor.top - tr.top + 8;
+    }
+    h.style.left = `${Math.round(Math.max(10, Math.min(this.W - hw - 10, x)))}px`;
+    h.style.top = `${Math.round(Math.max(8, y))}px`;
+  }
+
+  /** Mark lessons done by what just happened. */
+  private learn(ev: Ev[]): void {
+    const lesson = LESSONS[this.taught];
+    if (!lesson) return;
+    const did = (pred: (e: Ev) => boolean) => ev.some(pred);
+    let done = false;
+    if (lesson === 'carrot') done = did((e) => e.t === 'plant' && e.kind === 'carrot');
+    else if (lesson === 'radish') done = did((e) => e.t === 'plant' && e.kind === 'radish');
+    else if (lesson === 'water') done = did((e) => e.t === 'water');
+    else if (lesson === 'lantern') done = did((e) => e.t === 'dusk');
+    else if (lesson === 'bloom') done = did((e) => e.t === 'plant' && e.kind === 'radish');
+    else if (lesson === 'peg') done = did((e) => e.t === 'dusk');
+    if (done) {
+      this.taught++;
+      // Skip lessons the player has already done on their own.
+      while (LESSONS[this.taught] === 'radish' && this.run.plots.some((p) => p.crop?.kind === 'radish')) this.taught++;
+      while (LESSONS[this.taught] === 'water' && this.run.plots.some((p) => p.wet)) this.taught++;
+      if (this.run.day > 1) while (['carrot', 'radish', 'water', 'lantern'].includes(LESSONS[this.taught] ?? '')) this.taught++;
+      if (this.run.day > 2 || this.run.season > 0) this.taught = LESSONS.length;
+      this.save();
+    }
+    this.renderHint();
+  }
+
+  // ---------------------------------------------------------------- end of day, the night, the cascade
+
+  endDay(): void {
+    if (this.busy || this.run.phase !== 'day') return;
+    this.putDown(true);
+    this.sheets.closeDetail();
+    const before = clonePlots(this.run.plots);
+    const handBefore = [...this.run.hand];
+    const ev = endDay(this.run);
+    for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
+    if ((this.run.phase as string) === 'over') recordRun(this.meta, this.run, UNLOCK_ORDER);
+    this.learn(ev);
+    this.save();
+    this.ctx.audio.cue('deck.endday');
+    this.shown = before;
+    this.handShown = handBefore.filter((c) => !ev.some((e) => e.t === 'discardExcess' && e.cards.some((x) => x.uid === c.uid)));
+    this.night(ev);
+  }
+
+  /** Build and run the night from the rules' report. */
+  private night(ev: Ev[]): void {
+    const b = this.board;
+    const s = new Seq();
+    const reduced = this.ctx.settings().reducedMotion;
+    const lanternOut = () => {
+      this.flame.classList.add('out');
+      const lr = this.lantern.getBoundingClientRect();
+      const br = b.canvas.getBoundingClientRect();
+      b.emit('smoke', lr.left - br.left + lr.width / 2, lr.top - br.top + lr.height * 0.35, reduced ? 2 : 6, { col: 'rgba(200,200,200,0.5)', spread: 12, up: 30, size: 8, life: 1.2 });
+    };
+    s.at(0, lanternOut);
+    s.tween(0, 0.4, (k) => (b.night = ease.out(k) * 0.62));
+    let t = 0.4;
+    const harvests = ev.filter((e): e is Extract<Ev, { t: 'harvest' }> => e.t === 'harvest').map((e) => e.h);
+    const big = this.run.quota > 0 ? this.run.quota / 4 : Infinity;
+    const n = harvests.length;
+    let hi = 0;
+    const plotsOf = (i: number) => this.shown[i];
+    const anim = (uid: number) => {
+      let a = b.anims.get(uid);
+      if (!a) {
+        a = { lift: 0, scale: 1, tilt: 0, alpha: 1, stage: null, glow: 0 };
+        b.anims.set(uid, a);
+      }
+      return a;
+    };
+    let seasonEnd: Extract<Ev, { t: 'seasonEnd' }> | null = null;
+    let dawnAt = -1;
+    for (const e of ev) {
+      switch (e.t) {
+        case 'rain': {
+          const at = t;
+          s.at(at, () => {
+            this.ctx.audio.cue('deck.water', { gain: 1 });
+            for (const p of this.shown) p.wet = true;
+          });
+          s.tween(at, 0.7, () => {
+            if (reduced) return;
+            for (let k = 0; k < 3; k++) b.emit('drop', b.bx + Math.random() * b.T * b.cols, b.by - b.T * 0.5, 1, { col: '#7aa8d8', spread: 10, up: -200, size: 5, life: 0.5 });
+          });
+          t += 0.6;
+          break;
+        }
+        case 'flatten': {
+          const at = t;
+          s.at(at, () => {
+            this.ctx.audio.cue('deck.crow', { pitch: 0.7 });
+            const c = b.centre(e.plot);
+            b.emit('leaf', c.x, c.y, 10, { col: '#5d8a3a', spread: 80, up: 50, size: 5 });
+          });
+          s.tween(at, 0.4, (k) => {
+            const a = anim(e.uid);
+            a.tilt = ease.out(k) * 1.3;
+            a.alpha = 1 - k;
+          });
+          s.at(at + 0.4, () => {
+            plotsOf(e.plot).crop = null;
+            b.anims.delete(e.uid);
+          });
+          t += 0.45;
+          break;
+        }
+        case 'grow': {
+          const at = t;
+          s.at(at, () => this.ctx.audio.cue('deck.grow'));
+          for (const g of e.growth) {
+            s.at(at, () => {
+              const crop = plotsOf(g.plot).crop;
+              if (crop) crop.age = g.to;
+              const c = b.centre(g.plot);
+              if (!reduced) b.emit('spark', c.x, c.y - b.T * 0.2, 2, { col: '#b8e08a', spread: 30, up: 40, size: 3 });
+            });
+            s.tween(at, 0.3, (k) => {
+              const a = anim(g.uid);
+              a.scale = 1 + ease.pop(k) * 0.14;
+            });
+          }
+          t += 0.38;
+          break;
+        }
+        case 'pest': {
+          const at = t;
+          s.at(at, () => {
+            const crop = plotsOf(e.plot).crop;
+            if (crop) crop.pest = 2;
+            this.ctx.audio.cue('deck.pest', { pan: this.pan(e.plot) });
+            const c = b.centre(e.plot);
+            b.emit('dust', c.x, c.y - b.T * 0.2, 6, { col: '#3e4a2a', spread: 30, up: 20, size: 3 });
+          });
+          t += 0.18;
+          break;
+        }
+        case 'pestGone':
+          s.at(t, () => {
+            for (const i of e.plots) {
+              const crop = plotsOf(i).crop;
+              if (crop) crop.pest = 0;
+            }
+          });
+          break;
+        case 'mint': {
+          s.at(t, () => {
+            plotsOf(e.to).crop = { uid: e.uid, kind: 'mint', age: 0, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: true };
+            this.bounce(e.uid);
+          });
+          t += 0.15;
+          break;
+        }
+        case 'crow': {
+          const at = t;
+          s.at(at, () => {
+            this.ctx.audio.cue('deck.crow', { pan: this.pan(e.plot) });
+            const c = b.centre(e.plot);
+            b.emit('feather', c.x, c.y - b.T * 0.4, 8, { col: '#2a2830', spread: 70, up: 40, size: 6, life: 1.2 });
+            this.say('A crow took one.', e.plot);
+          });
+          s.tween(at, 0.45, (k) => {
+            const a = anim(e.uid);
+            a.lift = ease.out(k) * 1.4;
+            a.alpha = 1 - k;
+          });
+          s.at(at + 0.46, () => {
+            b.anims.delete(e.uid);
+            const crop = plotsOf(e.plot).crop;
+            if (crop) {
+              crop.picks++;
+              if (crop.picks >= SEEDS[crop.kind].picks) plotsOf(e.plot).crop = null;
+            }
+          });
+          t += 0.55;
+          break;
+        }
+        case 'harvest': {
+          const h = e.h;
+          const d = this.harvestSpan(h, n, big);
+          this.scoreHarvest(s, t, h, hi, n);
+          hi++;
+          t += d;
+          break;
+        }
+        case 'quota':
+          break;
+        case 'dry':
+          s.at(t + 0.2, () => {
+            for (const i of e.plots) this.shown[i].wet = false;
+          });
+          break;
+        case 'seasonEnd':
+          seasonEnd = e;
+          break;
+        case 'dawn':
+          if (dawnAt < 0) dawnAt = t + 0.6;
+          break;
+        default:
+          break;
+      }
+    }
+    const end = Math.max(t + 0.65, dawnAt);
+    s.tween(end - 0.1, 0.5, (k) => (b.night = 0.62 * (1 - ease.inOut(k))));
+    s.at(end, () => {
+      this.flame.classList.remove('out');
+      this.ctx.audio.cue('deck.draw');
+    });
+    s.at(end + 0.4, () => {
+      // Dawn: the rules' state is the truth from here.
+      this.shown = clonePlots(this.run.plots);
+      this.shownEarned = this.run.earned;
+      this.shownCoins = this.run.coins;
+      this.shownDay = this.run.day;
+      this.pegBackK = this.run.quota ? this.run.earned / this.run.quota : 0;
+      this.handShown = [...this.run.hand];
+      b.anims.clear();
+      b.night = 0;
+      if (ev.some((x) => x.t === 'shuffle')) this.ctx.audio.cue('deck.shuffle');
+      this.renderAll();
+      this.updateHighlight();
+    });
+    s.then(() => {
+      // Make sure a skipped night lands in the same place.
+      this.shown = clonePlots(this.run.plots);
+      this.shownEarned = this.run.earned;
+      this.shownCoins = this.run.coins;
+      this.shownDay = this.run.day;
+      this.handShown = [...this.run.hand];
+      b.anims.clear();
+      b.night = 0;
+      this.flame.classList.remove('out');
+      this.fx.querySelectorAll('.sb-slip, .sb-fly').forEach((x) => x.remove());
+      this.seq = null;
+      if (seasonEnd) {
+        this.sheets.close();
+        if (seasonEnd.cleared) this.sheets.stall(seasonEnd);
+        else this.sheets.entry();
+      }
+      this.renderAll();
+      this.updateHighlight();
+    });
+    this.seq = s;
+    this.renderBench();
+    this.renderHint();
+  }
+
+  /** How long a harvest holds the stage, before speed. Big ones get a beat more. */
+  private harvestSpan(h: Harvest, n: number, big: number): number {
+    const steps = Math.min(4, h.chips.length + h.mult.length);
+    let d = 0.32 + steps * 0.09;
+    if (n > 6) d *= Math.max(0.45, 6 / n);
+    if (h.score >= big) d += 0.3;
+    return d;
+  }
+
+  /** Schedule one harvest's scoring at time t: the crop pops, yield counts up, bloom ticks in, the total flies to the pegboard. */
+  private scoreHarvest(s: Seq, t: number, h: Harvest, index: number, n: number): void {
+    const b = this.board;
+    const big = this.run.quota > 0 && h.score >= this.run.quota / 4;
+    const mid = this.run.quota > 0 && h.score >= this.run.quota / 10;
+    const reduced = this.ctx.settings().reducedMotion;
+    const d = this.harvestSpan(h, n, this.run.quota / 4);
+    const a = { lift: 0, scale: 1, tilt: 0, alpha: 1, stage: null as number | null, glow: 0 };
+    let slip: HTMLDivElement | null = null;
+    let yv: HTMLElement;
+    let bv: HTMLElement;
+    let why: HTMLElement;
+    const pos = () => {
+      const br = b.canvas.getBoundingClientRect();
+      const tr = this.tableEl.getBoundingClientRect();
+      const c = b.base(h.plot);
+      return { x: br.left - tr.left + c.x, y: br.top - tr.top + c.y - b.T * 0.95 };
+    };
+    s.at(t, () => {
+      b.anims.set(h.uid, a);
+      this.hot = 1.2;
+      this.ctx.audio.cue('deck.harvest', { pitch: ladder(index), pan: this.pan(h.plot) });
+      slip = el('div', `sb-slip${big ? ' big' : mid ? ' mid' : ''}${h.golden ? ' golden' : ''}`);
+      yv = el('b', 'y', String(h.base));
+      bv = el('b', 'm', '');
+      why = el('em', '', '');
+      slip.append(yv, el('span', 'x', ''), bv, why);
+      const p = pos();
+      slip.style.left = `${p.x}px`;
+      slip.style.top = `${p.y}px`;
+      this.fx.append(slip);
+    });
+    s.tween(t, d * 0.3, (k) => {
+      a.glow = k;
+      a.lift = ease.back(k) * 0.14;
+      a.scale = 1 + ease.out(k) * 0.12;
+    });
+    // Yield steps, then bloom steps.
+    const steps = [...h.chips.map((st) => ({ st, kind: 'y' as const })), ...h.mult.map((st) => ({ st, kind: 'm' as const }))];
+    let yval = h.base;
+    let mAdd = 1;
+    let mX = 1;
+    const span = d * 0.5;
+    steps.forEach(({ st, kind }, j) => {
+      const at = t + d * 0.15 + (span * j) / Math.max(1, steps.length);
+      s.at(at, () => {
+        if (kind === 'y') {
+          yval = st.op === '+' ? yval + st.v : yval * st.v;
+          yv.textContent = fmtNum(yval);
+          yv.classList.remove('tick');
+          void yv.offsetWidth;
+          yv.classList.add('tick');
+          this.ctx.audio.cue('deck.chip', { pitch: ladder(index + j + 1), gain: 0.6 });
+        } else {
+          if (st.op === '+') mAdd += st.v;
+          else mX *= st.v;
+          bv.textContent = fmtNum(mAdd * mX);
+          slip!.classList.add('has-m');
+          bv.classList.remove('tick');
+          void bv.offsetWidth;
+          bv.classList.add('tick');
+          this.ctx.audio.cue('deck.mult', { pitch: Math.min(2, 0.9 + (mAdd * mX) * 0.08), gain: Math.min(1, 0.5 + mAdd * mX * 0.08) });
+        }
+        why.textContent = `${st.op === '+' ? '+' : '×'}${fmtNum(st.v)} ${st.label}`;
+        if (st.from !== undefined) this.link(st.from, h.plot);
+      });
+    });
+    // The total.
+    const totalAt = t + d * 0.7;
+    s.at(totalAt, () => {
+      if (!slip) return;
+      slip.classList.add('total');
+      slip.innerHTML = '';
+      slip.append(el('b', 'sum', String(h.score)));
+      this.shownScores.push(h.score);
+      const c = b.base(h.plot);
+      if (big && !reduced) {
+        b.emit('spark', c.x, c.y - b.T * 0.5, 18, { col: '#f2c64a', spread: 120, up: 120, size: 5, life: 0.9 });
+        this.shakeT = 0.4;
+        this.shakeAmp = 5;
+        this.ctx.audio.cue('deck.big');
+      } else if (mid && !reduced) b.emit('spark', c.x, c.y - b.T * 0.5, 7, { col: '#f2d27a', spread: 70, up: 70, size: 4 });
+      if (h.golden) b.emit('spark', c.x, c.y - b.T * 0.5, 12, { col: '#ffe08a', spread: 90, up: 90, size: 5 });
+    });
+    s.tween(totalAt, d * 0.3, (k) => {
+      if (h.leaves) {
+        a.alpha = 1 - k;
+        a.lift = 0.14 + k * 0.5;
+      } else {
+        a.glow = 1 - k;
+        a.lift = 0.14 * (1 - k);
+        a.scale = 1 + 0.12 * (1 - k);
+      }
+    });
+    s.at(totalAt + d * 0.3, () => {
+      b.anims.delete(h.uid);
+      const p = this.shown[h.plot];
+      if (p.crop && p.crop.uid === h.uid) {
+        p.crop.picks++;
+        if (h.leaves) p.crop = null;
+      }
+    });
+    // Fly the total into the pegboard.
+    const flyAt = totalAt + Math.min(0.22, d * 0.25);
+    const flyDur = reduced ? 0.15 : 0.42;
+    let fromX = 0;
+    let fromY = 0;
+    let toX = 0;
+    let toY = 0;
+    s.at(flyAt, () => {
+      if (!slip) return;
+      const tr = this.tableEl.getBoundingClientRect();
+      const pr = this.peg.getBoundingClientRect();
+      const p = pos();
+      fromX = p.x;
+      fromY = p.y;
+      const k = Math.min(1, (this.shownEarned + h.score) / Math.max(1, this.run.quota));
+      toX = pr.left - tr.left + this.pegXs[Math.round(k * (this.pegXs.length - 1))];
+      toY = pr.top - tr.top + pr.height / 2;
+      slip.classList.add('fly');
+    });
+    s.tween(flyAt, flyDur, (k) => {
+      if (!slip) return;
+      const e = ease.inOut(k);
+      const x = fromX + (toX - fromX) * e;
+      const y = fromY + (toY - fromY) * e - Math.sin(Math.PI * e) * 50;
+      slip.style.left = `${x}px`;
+      slip.style.top = `${y}px`;
+      slip.style.transform = `translate(-50%, -50%) scale(${1 - e * 0.55})`;
+    });
+    s.at(flyAt + flyDur, () => {
+      slip?.remove();
+      const before = this.shownEarned;
+      this.shownEarned += h.score;
+      this.shownCoins += h.score;
+      this.renderLedger();
+      this.peg.classList.remove('tick');
+      void this.peg.offsetWidth;
+      this.peg.classList.add('tick');
+      if (before < this.run.quota && this.shownEarned >= this.run.quota && this.run.quota > 0) {
+        this.ctx.audio.cue('deck.quota');
+        this.peg.classList.add('met');
+      }
+    });
+  }
+
+  /** A short ink link from the crop that gave a bonus to the one being scored. */
+  private link(from: number, to: number): void {
+    const b = this.board;
+    const a = b.base(from);
+    const c = b.base(to);
+    const br = b.canvas.getBoundingClientRect();
+    const tr = this.tableEl.getBoundingClientRect();
+    const l = el('i', 'sb-link');
+    const dx = c.x - a.x;
+    const dy = c.y - a.y;
+    l.style.left = `${br.left - tr.left + a.x}px`;
+    l.style.top = `${br.top - tr.top + a.y - b.T * 0.45}px`;
+    l.style.width = `${Math.hypot(dx, dy)}px`;
+    l.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    this.fx.append(l);
+    setTimeout(() => l.remove(), 650);
+  }
+
+  skip(): void {
+    if (!this.seq) return;
+    this.seq.finish();
+    for (const s of this.small) s.finish();
+    this.small = [];
+  }
+
+  // ---------------------------------------------------------------- keyboard
+
+  private onKey = (e: KeyboardEvent) => {
+    if (!this.running || e.defaultPrevented) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.code === 'Backquote') return;
+    if (this.sheets.open) {
+      if (this.sheets.key(e)) e.preventDefault();
+      return;
+    }
+    if (this.busy) {
+      if (!e.repeat && !['ShiftLeft', 'ShiftRight', 'MetaLeft', 'AltLeft', 'ControlLeft'].includes(e.code)) {
+        e.preventDefault();
+        this.skip();
+      }
+      return;
+    }
+    const s = this.run;
+    const k = e.key;
+    if (/^[1-9]$/.test(k)) {
+      const i = Number(k) - 1;
+      const c = s.hand[i];
+      if (c) {
+        e.preventDefault();
+        if (this.held?.uid === c.uid) this.putDown();
+        else this.pickUp(c.uid);
+      }
+      return;
+    }
+    const move = (dc: number, dr: number) => {
+      e.preventDefault();
+      const c = Math.max(0, Math.min(s.cols - 1, (this.cursor % s.cols) + dc));
+      const r = Math.max(0, Math.min(s.rows - 1, Math.floor(this.cursor / s.cols) + dr));
+      this.cursor = r * s.cols + c;
+      this.hover = null;
+      this.updateHighlight();
+    };
+    switch (e.code) {
+      case 'ArrowLeft':
+        return move(-1, 0);
+      case 'ArrowRight':
+        return move(1, 0);
+      case 'ArrowUp':
+        return move(0, -1);
+      case 'ArrowDown':
+        return move(0, 1);
+      case 'Enter':
+      case 'Space':
+      case 'NumpadEnter':
+        e.preventDefault();
+        if (this.held) this.tryPlay(this.cursor);
+        else this.inspect(this.cursor);
+        return;
+      case 'KeyE':
+        e.preventDefault();
+        this.endDay();
+        return;
+      case 'KeyX':
+      case 'Delete':
+      case 'Backspace':
+        if (this.held) {
+          e.preventDefault();
+          this.tossHeld();
+        }
+        return;
+      case 'KeyD':
+        e.preventDefault();
+        this.sheets.deck('tin');
+        return;
+      case 'KeyI':
+        if (this.held) {
+          const c = this.cardOf(this.held.uid);
+          if (c) this.sheets.detail(c);
+        }
+        return;
+      case 'KeyF':
+        this.prefs.fast = !this.prefs.fast;
+        this.say(this.prefs.fast ? 'Fast harvests.' : 'Harvests at an easy pace.', null);
+        this.save();
+        return;
+      case 'Escape':
+        e.preventDefault();
+        if (this.held) this.putDown();
+        else this.sheets.menu();
+        return;
+    }
+  };
+
+  // ---------------------------------------------------------------- debug
+
+  /** Seconds of night left, for checks. */
+  remaining(): number {
+    return this.seq ? Math.max(0, this.seq.end - this.seq.t) : 0;
+  }
+
+  get handEls(): Map<number, CardEl> {
+    return this.cards;
+  }
+
+  get lanternEl(): HTMLElement {
+    return this.lantern;
+  }
+
+  get tallyText(): string {
+    return this.ledTally.textContent ?? '';
+  }
+}
+
+export function fmtNum(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1).replace(/\.0$/, '');
+}

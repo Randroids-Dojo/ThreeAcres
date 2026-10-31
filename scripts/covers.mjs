@@ -50,7 +50,27 @@ const setups = {
   },
   deck: async (p) => {
     await p.waitForFunction(() => window.deck, null, { timeout: 30000 });
-    await p.evaluate(() => window.deck.cover?.());
+    // A few days of honest play so the plot has something growing.
+    await p.evaluate(async () => {
+      const d = window.deck;
+      d.seed(20261031);
+      d.fast(true);
+      const wait = () => new Promise((r) => setTimeout(r, 60));
+      for (let day = 0; day < 4; day++) {
+        for (let tries = 0; tries < 12; tries++) {
+          const hand = d.state().hand;
+          let played = false;
+          for (let i = 0; i < hand.length && !played; i++) for (let plot = 0; plot < 16 && !played; plot++) played = d.play(i, plot);
+          if (!played) break;
+          await wait();
+        }
+        d.endDay();
+        for (let k = 0; k < 40 && d.busy(); k++) {
+          d.skip();
+          await wait();
+        }
+      }
+    });
   },
 };
 
