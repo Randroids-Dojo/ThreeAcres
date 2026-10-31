@@ -63,6 +63,15 @@ export class Shell {
   private known = false;
   private loading: GameId | null = null;
   private raf = 0;
+  /** A newer deploy is live. Shown as a dot on the corner button and a line on the title, never over a game. */
+  private updateReady = false;
+
+  newVersion(): void {
+    this.updateReady = true;
+    toggle(this.cornerBtn, 'fresh', true);
+    this.cornerBtn.title = 'Games (`). A new version is ready';
+    if (this.open) this.render();
+  }
 
   constructor(app: HTMLElement) {
     this.app = app;
@@ -239,6 +248,16 @@ export class Shell {
       head.append(back);
     }
     inner.append(head);
+    if (this.updateReady) {
+      const row = el('div', 'newver', '<span>A new version is ready.</span>');
+      const b = el('button', 'btn primary', 'Reload');
+      b.onclick = () => {
+        for (const g of this.games.values()) g.handle.save();
+        location.reload();
+      };
+      row.append(b);
+      inner.append(row);
+    }
     const cards = el('div', 'games');
     for (const g of GAMES) {
       const slot = readJson<Slot>(saveKey(g.id));
@@ -344,14 +363,5 @@ export function startShell(): void {
   else shell.show();
 
   registerServiceWorker();
-  watchForUpdates(() => {
-    const u = el('div', 'card update', '<span>A new version is ready.</span>');
-    const b = el('button', 'btn primary', 'Reload');
-    b.onclick = () => {
-      window.dispatchEvent(new Event('pagehide'));
-      location.reload();
-    };
-    u.append(b);
-    app.append(u);
-  });
+  watchForUpdates(() => shell.newVersion());
 }
