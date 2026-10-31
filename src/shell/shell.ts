@@ -65,8 +65,16 @@ export class Shell {
   private raf = 0;
   /** A newer deploy is live. Shown as a dot on the corner button and a line on the title, never over a game. */
   private updateReady = false;
+  /** When the tab last came back into view. */
+  private shownAt = performance.now();
 
   newVersion(): void {
+    // Coming back to the tab is a natural seam: save everything and take the new build at once.
+    if (performance.now() - this.shownAt < 4000) {
+      for (const g of this.games.values()) g.handle.save();
+      location.reload();
+      return;
+    }
     this.updateReady = true;
     toggle(this.cornerBtn, 'fresh', true);
     this.cornerBtn.title = 'Games (`). A new version is ready';
@@ -100,6 +108,7 @@ export class Shell {
     for (const ev of ['pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { passive: true });
     document.addEventListener('visibilitychange', () => {
       const hidden = document.visibilityState !== 'visible';
+      if (!hidden) this.shownAt = performance.now();
       this.audio.suspend(hidden);
       if (hidden) for (const g of this.games.values()) g.handle.save();
     });
@@ -358,6 +367,9 @@ export function startShell(): void {
     } catch {
       // Nothing to clear.
     }
+    // Used once: a later reload must not wipe the save again.
+    params.delete('fresh');
+    history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`);
   }
   if (want && GAMES.some((g) => g.id === want)) void shell.play(want);
   else shell.show();
