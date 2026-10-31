@@ -60,7 +60,12 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   tickCrows(s, dt, gameMinutes, ev);
 
   if (s.rules.growth === 'synergy') refreshQuality(s);
-  if (s.rules.goal === 'almanac') updateGoals(s, ev);
+  if (s.rules.goal === 'almanac') {
+    if (!s.almanac.goals.length) joinAlmanac(s);
+    updateGoals(s, ev);
+  }
+  if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
+  if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
   if ((s.rules.clock === 'day' || s.rules.clock === 'flow') && s.minute >= DAY_MINUTES) {

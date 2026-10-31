@@ -14,7 +14,7 @@ describe('switching any axis at any moment', () => {
       const fuzz = world('sunup', seed * 7919);
       let next = 0;
       const r = play(s, 40, {
-        each: (st, i): Command[] => {
+        each: (_st, i): Command[] => {
           if (i < next) return [];
           next = i + 20 + Math.floor(rand(fuzz) * 400);
           const axis = AXES[Math.floor(rand(fuzz) * AXES.length)];

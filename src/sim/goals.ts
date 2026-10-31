@@ -117,7 +117,7 @@ function goalFor(s: WorldState, kind: GoalKind, r: number): Goal {
   const id = `${kind}-${r}`;
   switch (kind) {
     case 'harvest': {
-      const n = 10 + 6 * r;
+      const n = 12 + 6 * r;
       return { id, kind, text: `Harvest ${n} crops`, target: n, progress: 0, done: false };
     }
     case 'variety': {
@@ -133,7 +133,7 @@ function goalFor(s: WorldState, kind: GoalKind, r: number): Goal {
       return { id, kind, text: `Earn ${n} coins`, target: n, progress: 0, done: false };
     }
     case 'growing': {
-      const n = 10 + 4 * r;
+      const n = 14 + 4 * r;
       return { id, kind, text: `Have ${n} crops growing at once`, target: n, progress: 0, done: false };
     }
     case 'nowither':
