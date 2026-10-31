@@ -117,6 +117,13 @@
    resting place, so the middle of the right half is free for looking. */
 .rt-draw { right: 16px; bottom: calc(22px + var(--safe-b)); width: 86px; height: 86px; }
 .rt-puff { right: 112px; bottom: calc(30px + var(--safe-b)); width: 64px; height: 64px; }
+/* Pull and Blow carry their names inside the circle, under the icon, so the
+   lessons can name them and nothing hangs off the screen edge. */
+.rt-draw, .rt-puff { align-content: center; row-gap: 2px; }
+.rt-draw .ic { width: 38px; height: 38px; }
+.rt-puff .ic { width: 28px; height: 28px; }
+.rt-draw .lb, .rt-puff .lb { position: static; transform: none; line-height: 1; letter-spacing: 0.02em; }
+.rt-puff .lb { font-size: 11px; }
 .rt-jump { right: 28px; bottom: calc(124px + var(--safe-b)); width: 56px; height: 56px; }
 .rt-act { right: 50%; margin-right: -32px; bottom: calc(50% - 150px); width: 64px; height: 64px; display: none; }
 .rt-act.show { display: grid; }

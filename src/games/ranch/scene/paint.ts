@@ -138,7 +138,7 @@ export function signAtlas(): { tex: CanvasTexture; uv: Record<string, [number, n
   drawGlyph(g, 200, 330, 190, '#f4ead0');
   g.font = `500 italic 40px ${SERIF}`;
   g.fillStyle = '#f4ead0';
-  g.fillText('draw them in', 200, 455);
+  g.fillText('pull them in', 200, 455);
   region('teach', 0, 200, 400, 300);
   // Signpost arrows.
   const arrows: [string, string][] = [
@@ -178,11 +178,12 @@ export function signAtlas(): { tex: CanvasTexture; uv: Record<string, [number, n
   });
   // Pad post plates: blank, pen, garden, silo.
   const plates: [string, string][] = [
-    ['plate-empty', 'Pad'],
+    ['plate-empty', 'Empty plot'],
     ['plate-pen', 'Pen'],
     ['plate-garden', 'Garden'],
     ['plate-silo', 'Silo'],
     ['plate-bench', 'Workbench'],
+    ['plate-sell', 'Sell fluff'],
   ];
   plates.forEach(([k, label], i) => {
     const x = 640;
@@ -232,7 +233,7 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
   g.globalAlpha = 1;
   g.fillStyle = '#f2eee2';
   g.strokeStyle = '#f2eee2';
-  chalkText(g, 'Down today', w / 2, 46, 46, 1, 'center');
+  chalkText(g, 'Fluff prices', w / 2, 46, 46, 1, 'center');
   chalkText(g, `day ${day}`, w - 24, 46, 24, 2, 'right');
   g.globalAlpha = 0.5;
   g.lineWidth = 2;
@@ -275,7 +276,7 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
     g.stroke();
     g.globalAlpha = 1;
   });
-  chalkText(g, 'puff down in the crate', w / 2, h - 30, 24, 40, 'center');
+  chalkText(g, 'blow fluff into the crate', w / 2, h - 30, 24, 40, 'center');
 }
 
 // ---------------------------------------------------------------- hanging tags

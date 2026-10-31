@@ -57,7 +57,7 @@ export function isTuft(t: Thing): t is Tuft {
 export function thingName(t: Thing, n = 1): string {
   if (isDowny(t)) return n === 1 ? KIND[t].name : KIND[t].plural;
   if (isFood(t)) return n === 1 ? FOOD_INFO[t].name : FOOD_INFO[t].plural;
-  return `${TUFT_KIND[t]} down`;
+  return `${TUFT_KIND[t]} fluff`;
 }
 
 export function thingColor(t: Thing): number {
@@ -96,7 +96,7 @@ export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] 
   { id: 'feeder', name: 'Feeder', cost: 300, line: 'Drops food when they are hungry' },
   { id: 'trough', name: 'Trough', cost: 150, line: 'Brook downies shed more' },
   { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps nettlebacks out' },
-  { id: 'chute', name: 'Down chute', cost: 400, line: 'Catches shed down in a box' },
+  { id: 'chute', name: 'Fluff chute', cost: 400, line: 'Catches shed fluff in a box' },
 ];
 export const GARDEN_UPS: { id: GardenUp; name: string; cost: number; line: string }[] = [
   { id: 'sprinkler', name: 'Sprinkler', cost: 250, line: 'Grows half again as fast' },
@@ -109,9 +109,9 @@ export const FEEDER_CAP = 40;
 
 export type BenchUp = 'slots' | 'cap' | 'range' | 'glide';
 export const BENCH_UPS: { id: BenchUp; name: string; costs: number[]; line: string }[] = [
-  { id: 'slots', name: 'Fifth slot', costs: [800], line: 'One more kind in the canister' },
-  { id: 'cap', name: 'Bigger canister', costs: [400, 1200], line: 'Holds more of each kind' },
-  { id: 'range', name: 'Longer draw', costs: [600], line: 'Reaches ten metres' },
+  { id: 'slots', name: 'Fifth window', costs: [800], line: 'Room for one more kind' },
+  { id: 'cap', name: 'Bigger jar', costs: [400, 1200], line: 'Holds more of each kind' },
+  { id: 'range', name: 'Longer pull', costs: [600], line: 'Reaches ten metres' },
   { id: 'glide', name: 'Glide vanes', costs: [1000], line: 'Hold jump in the air to drift' },
 ];
 export const CAPS = [12, 20, 30];
@@ -122,10 +122,10 @@ export const RANGES = [7, 10];
 export type GoalId = 'catch' | 'pen' | 'feed' | 'sell' | 'plant' | 'ridge' | 'ember' | 'feeder' | 'hollow' | 'thistle' | 'rich';
 
 export const GOALS: { id: GoalId; text: string; reward: number }[] = [
-  { id: 'catch', text: 'Draw up a clover downy.', reward: 20 },
-  { id: 'pen', text: 'Build a pen and puff a downy in.', reward: 40 },
+  { id: 'catch', text: 'Catch a clover downy.', reward: 20 },
+  { id: 'pen', text: 'Build a pen and blow a downy in.', reward: 40 },
   { id: 'feed', text: 'Feed a downy its favourite.', reward: 40 },
-  { id: 'sell', text: 'Sell 20 down at the Exchange.', reward: 60 },
+  { id: 'sell', text: 'Sell 20 fluff at the sell crate.', reward: 60 },
   { id: 'plant', text: 'Plant something in a garden.', reward: 40 },
   { id: 'ridge', text: 'Open the gate to Ember Ridge.', reward: 100 },
   { id: 'ember', text: 'Catch an ember downy.', reward: 80 },

@@ -254,25 +254,36 @@ function only(ui, allowed) {
   check('phone: draw lesson comes next', await k.lessonOn('draw'));
   await page.waitForTimeout(700);
   u = await k.ui();
-  check('phone: the Draw button, the bellows and the crosshair arrive together', u.draw && u.bellows && u.cross, JSON.stringify(u));
-  check('phone: no Puff, Jump, pause, coins, clock or slot windows yet', only(u, ['draw', 'bellows', 'cross']).length === 0, only(u, ['draw', 'bellows', 'cross']).join(','));
-  check('phone: draw line', u.page === 'Hold Draw to pull the downy in.', u.page);
+  check('phone: the Pull button, the bellows and the crosshair arrive together', u.draw && u.bellows && u.cross, JSON.stringify(u));
+  check('phone: no Blow, Jump, pause, coins, clock or slot windows yet', only(u, ['draw', 'bellows', 'cross']).length === 0, only(u, ['draw', 'bellows', 'cross']).join(','));
+  check('phone: draw line', u.page === 'Aim at the downy and hold Pull.', u.page);
+  // The line names the button, so the button wears that name, inside its circle and on screen.
+  const named = (sel) => page.evaluate((sel) => {
+    const b = document.querySelector(sel);
+    const r = b.getBoundingClientRect();
+    const l = b.querySelector('.lb')?.getBoundingClientRect();
+    return { name: b.querySelector('.lb')?.textContent, inside: !!l && l.width > 0 && l.left >= r.left && l.right <= r.right && l.top >= r.top && l.bottom <= r.bottom, onScreen: !!l && l.bottom <= innerHeight };
+  }, sel);
+  let nm = await named('.rt-draw');
+  check('phone: the Pull button wears its name inside the circle', nm.name === 'Pull' && nm.inside && nm.onScreen, JSON.stringify(nm));
   await k.shot('phone-03-draw');
   d = await k.downy('porch');
   await k.place(d.x - 2.4, d.z + 1.6, d.x, d.y + 0.25, d.z);
   await press('.rt-draw', 1400, 4, async () => { const q = await k.downy('porch'); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
-  check('phone: holding Draw pulls the downy in and ends the lesson', await k.finished('draw'));
+  check('phone: holding Pull brings the downy in and ends the lesson', await k.finished('draw'));
 
   // ---- 4. puff
   check('phone: puff lesson comes next', await k.lessonOn('puff'));
   u = await k.ui();
-  check('phone: the Puff button arrives', u.puff && !u.jump && !u.pause && !u.coins, JSON.stringify(u));
-  check('phone: puff line', u.page === 'Tap Puff to send it back out.', u.page);
+  check('phone: the Blow button arrives', u.puff && !u.jump && !u.pause && !u.coins, JSON.stringify(u));
+  check('phone: puff line', u.page === 'Tap Blow to send it back out.', u.page);
+  nm = await named('.rt-puff');
+  check('phone: the Blow button wears its name inside the circle', nm.name === 'Blow' && nm.inside && nm.onScreen, JSON.stringify(nm));
   await k.shot('phone-04-puff');
   let s = await k.st();
   await k.aim(s.x + 6, 4, s.z - 4);
   await press('.rt-puff', 90, 5);
-  check('phone: tapping Puff ends the lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:puff'), null, 2000));
+  check('phone: tapping Blow ends the lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:puff'), null, 2000));
 
   // ---- 5. feed
   check('phone: feed lesson comes next', await k.lessonOn('feed'));
@@ -312,7 +323,7 @@ function only(ui, allowed) {
   check('phone: sell lesson comes next', await k.lessonOn('sell'));
   u = await k.ui();
   check('phone: coins still hidden before the first sale', !u.coins);
-  check('phone: sell line', u.page === 'Puff the down into the Exchange crate.', u.page);
+  check('phone: sell line', u.page === 'Blow the fluff into the sell crate.', u.page);
   await k.shot('phone-06-sell');
   await page.waitForTimeout(1500);
   let tufts = await k.items('tuft');
@@ -329,7 +340,7 @@ function only(ui, allowed) {
   u = await k.ui();
   check('phone: the slot windows and their tap targets arrive', u.windows && u.slotTaps, JSON.stringify(u));
   check('phone: the shell corner is clear mid-lessons, with every early piece up', await cornerClear(page));
-  check('phone: slots line', u.page === 'Tap a window on the bellows to switch.', u.page);
+  check('phone: slots line', u.page === 'Tap a window to switch what you blow.', u.page);
   await k.shot('phone-07-slots');
   const tuftSlot = await k.slotOf('tuft');
   if ((await k.st()).sel === tuftSlot) await tapWindow((await k.slotOf('cloverhead')));
@@ -348,7 +359,7 @@ function only(ui, allowed) {
   // ---- 7. pen
   check('phone: pen lesson comes next', await k.lessonOn('pen'));
   u = await k.ui();
-  check('phone: pen line, arrow at an empty pad post with a ring', u.page === 'Build a pen on an empty pad.' && u.marker === 'arrow' && (await k.seen()).ring, `${u.page} ${u.marker}`);
+  check('phone: pen line, arrow at an empty pad post with a ring', u.page === 'Build a pen on an empty plot.' && u.marker === 'arrow' && (await k.seen()).ring, `${u.page} ${u.marker}`);
   await k.shot('phone-08-pen');
   await k.place(14.8 + 1.2, 31.8 + 2.2, 14.8 + 0.4, 5.6, 31.8);
   await frames(page, 6);
@@ -364,7 +375,7 @@ function only(ui, allowed) {
 
   // ---- 8. puff the downy into the pen
   check('phone: penin lesson comes next', await k.lessonOn('penin'));
-  check('phone: penin line', (await k.ui()).page === 'Puff the downy into the pen.');
+  check('phone: penin line', (await k.ui()).page === 'Blow the downy into the pen.');
   d = await k.downy('mine');
   if (d) {
     await k.place(d.x + 2.4, d.z + 1.4, d.x, d.y + 0.25, d.z);
@@ -426,7 +437,7 @@ function only(ui, allowed) {
   await page.waitForTimeout(1500);
   await page.evaluate(() => (window.ranch.sim.s.hour = 20.55));
   check('phone: nightfall brings the nettleback lesson', await k.lessonOn('night', 6000));
-  check('phone: night line', (await k.ui()).page === 'Puff something at a nettleback to shoo it.');
+  check('phone: night line', (await k.ui()).page === 'Blow anything at the pest to shoo it.');
   check('phone: nettlebacks come only now', await k.waitFor(() => window.ranch.sim.s.nettles.some((n) => !n.gone), null, 6000));
   await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 4; i++) sim.stow('cloverhead'); });
   s = await k.st();
@@ -443,7 +454,7 @@ function only(ui, allowed) {
   // ---- 12. garden, plant, upgrades, bench, gates: each when the coins allow
   await page.evaluate(() => { const s = window.ranch.sim.s; s.hour = 10; s.coins = 260; });
   check('phone: 200 coins bring the garden lesson', await k.lessonOn('garden', 4000));
-  check('phone: garden line', (await k.ui()).page === 'Build a garden on an empty pad.');
+  check('phone: garden line', (await k.ui()).page === 'Build a garden on an empty plot.');
   await k.place(25.8 + 1.2, 31.8 + 2.2, 25.8 + 0.4, 5.6, 31.8);
   await frames(page, 6);
   const act3 = await centre('.rt-act');
@@ -454,7 +465,7 @@ function only(ui, allowed) {
   await tapTag('build:garden');
   check('phone: building a garden ends the lesson', await k.finished('garden'));
   check('phone: plant lesson comes next', await k.lessonOn('plant'));
-  check('phone: plant line', (await k.ui()).page === 'Puff some food onto the bare soil.');
+  check('phone: plant line', (await k.ui()).page === 'Blow some food onto the bare soil.');
   const ch2 = await k.slotOf('cloverhead');
   if (ch2 >= 0 && (await k.st()).sel !== ch2) await tapWindow(ch2);
   await k.place(28, 32.6, 28, 4.2, 26.8);
@@ -557,7 +568,7 @@ function only(ui, allowed) {
   }
   await page.keyboard.up('KeyW');
   check('desk: W to the downy ends the walk lesson', walked);
-  check('desk: draw lesson, in mouse words', (await k.lessonOn('draw')) && (await k.ui()).page === 'Hold right click to pull the downy in.');
+  check('desk: draw lesson, in mouse words', (await k.lessonOn('draw')) && (await k.ui()).page === 'Aim at the downy and hold right click.');
   await page.waitForTimeout(600);
   u = await k.ui();
   check('desk: the bellows and crosshair arrive, nothing else', u.bellows && u.cross && only(u, ['bellows', 'cross']).length === 0, only(u, ['bellows', 'cross']).join(','));
@@ -567,7 +578,7 @@ function only(ui, allowed) {
   await k.place(d.x - 2.4, d.z + 1.6, d.x, d.y + 0.25, d.z);
   await hold('right', 1400, async () => { const q = await k.downy('porch'); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
   check('desk: holding right click draws the downy in', await k.finished('draw'));
-  check('desk: puff lesson in mouse words', (await k.lessonOn('puff')) && (await k.ui()).page === 'Click to send it back out.');
+  check('desk: puff lesson in mouse words', (await k.lessonOn('puff')) && (await k.ui()).page === 'Click to blow it back out.');
   const s = await k.st();
   await k.aim(s.x + 6, 4, s.z - 4);
   await page.mouse.click(W / 2, H / 2);

@@ -70,7 +70,7 @@ await p.waitForTimeout(150);
 const s1 = await S();
 check('tapping the bellows changes slot', s1.slot !== s0.slot, `${s0.slot} to ${s1.slot}`);
 // With the journal up, the stick still answers.
-await p.evaluate(() => window.ranch.hud.showPage('Day 1', [{ text: 'Draw up a clover downy.', done: false }, { text: 'Build a pen and puff a downy in.', done: false }], 30));
+await p.evaluate(() => window.ranch.hud.showPage('Day 1', [{ text: 'Catch a clover downy.', done: false }, { text: 'Build a pen and blow a downy in.', done: false }], 30));
 await p.waitForTimeout(700);
 const pg = await box('.rh-page');
 check('the journal sits clear of the stick', pg.b < 838 * 0.3, `page bottom ${Math.round(pg.b)}`);

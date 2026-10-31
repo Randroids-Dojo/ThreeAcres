@@ -176,27 +176,42 @@ Recorded while building, where the design left a choice open or play showed a be
 
 **Menus are tags.** A pad post's arm, the workbench pegboard, the porch beam and each closed gate hang wooden tags with the options and prices. Look at a tag and press E (or click, or X on a pad), tap it on touch, or press its number key. Tags hang in a zigzag so a set stays narrow on a phone. Walking more than about 3 m away folds them up. The view turns gently to face them when they drop.
 
+**Words on screen are plain.** The code keeps its own names; the player only ever reads everyday words, because the first playtest found "Puff the down into the Exchange crate." unreadable. A test in `tests/ranch-lessons.test.ts` keeps the code names out of every lesson line, goal and pause note.
+
+| In the code | On screen |
+| --- | --- |
+| draw | Pull (the big button wears the word) |
+| puff | Blow (its button wears the word) |
+| down, tuft | fluff |
+| the Exchange | the sell crate (a "Sell fluff" plate on it; the board reads "Fluff prices") |
+| pad | plot ("Empty plot" on the post) |
+| canister | jar |
+| slot | window |
+| nettleback | pest |
+
+Downies keep their name: whenever a line says "downy", an arrow is over one.
+
 **Teaching: one thing at a time** (`src/games/ranch/lessons.ts`). A new ranch starts with only the view, the move stick and the look area. Each lesson brings in one control or system, shows one line on the journal page (top left on a tall phone, bottom left on a wide screen) and waits until you have done it; the line ticks, then the next one comes. Anything not yet brought in is not on screen (Draw, Puff, Jump and pause buttons, coins, the hour arc, the crosshair and count, the bellows and its slot windows) and not in the world (pad posts, the front door, the workbench, gate prices, nettlebacks, nightfall). Lines are eight words or fewer, one action, imperative, worded for the device (never key names on touch, never touch words on keys or a pad). Rules are shown in the world instead of in words: a cream chevron bobs over the spot (a downy, a post, the crate, the door, a nettleback), a soft apricot ring lies on the ground around it (a pad, the garden, the crate), and in the feeding lesson the favourite food bobs over the downy's head. The chevron shrinks away once you are within about 3 m, so it never hangs overhead. When the spot is out of view, a small chevron on the screen's edge points the way (to the side you would turn towards, if it is behind you). The pause page keeps the whole journal (done goals struck), the three most recent notes and the controls learned so far.
 
 | # | Lesson | Brings in | Ends when | Touch | Mouse and keys | Pad |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | look | (the view, the stick) | looked about 0.6 rad | Drag on the right to look around. | Click the view to look around. (Move the mouse to look around. once captured; Right-drag to look around. with no pointer lock) | Use the right stick to look around. |
 | 2 | walk | arrow on the porch downy | walked, and within 3.4 m of it | Walk to the downy with your left thumb. | Walk to the downy with WASD. | Walk to the downy with the left stick. |
-| 3 | draw | the bellows, crosshair and count, Draw | a downy is drawn in | Hold Draw to pull the downy in. | Hold right click to pull the downy in. | Hold LT to pull the downy in. |
-| 4 | puff | Puff | something is puffed out | Tap Puff to send it back out. | Click to send it back out. | Press RT to send it back out. |
+| 3 | draw | the bellows, crosshair and count, Draw | a downy is drawn in | Aim at the downy and hold Pull. | Aim at the downy and hold right click. | Aim at the downy and hold LT. |
+| 4 | puff | Puff | something is puffed out | Tap Blow to send it back out. | Click to blow it back out. | Press RT to blow it back out. |
 | 5 | feed | the pause button; a clover head over the downy, the garden's ring | one of your downies eats its favourite | Feed the downy a clover head. | same | same |
-| 6 | sell | arrow on the down, then the crate; coins after the sale | down sold at the Exchange | Puff the down into the Exchange crate. | same | same |
-| 7 | pen | pad posts (Pen only), arrow and ring on the nearest empty pad | a pen is built | Build a pen on an empty pad. | same | same |
-| 8 | penin | ring on the pen | a downy is in a pen | Puff the downy into the pen. | same | same |
+| 6 | sell | arrow on the down, then the crate; coins after the sale | down sold at the Exchange | Blow the fluff into the sell crate. | same | same |
+| 7 | pen | pad posts (Pen only), arrow and ring on the nearest empty pad | a pen is built | Build a pen on an empty plot. | same | same |
+| 8 | penin | ring on the pen | a downy is in a pen | Blow the downy into the pen. | same | same |
 | 9 | meadow | arrow at the ranch gate, then a wild downy | a wild downy is caught; then the day may run on | Catch a downy out in Clover Meadow. | same | same |
 | 10 | dusk | the hour arc, the front door | morning (sleep, or the night passes) | Sleep at the front door till morning. | same | same |
-| 11 | night | nettlebacks, the hedge tag | a nettleback is sent rolling (or dawn) | Puff something at a nettleback to shoo it. | same | same |
-| 12 | garden | the Garden tag | a garden is built | Build a garden on an empty pad. | same | same |
-| 13 | plant | ring on the bare bed | food is planted | Puff some food onto the bare soil. | same | same |
-| 14 | ups | the Feeder tag on pen posts | any upgrade is bought | Fit a feeder at a pen post. | same | same |
-| 15 | bench | the workbench (Bigger canister, Longer draw) | a bench upgrade is fitted | Fit a bigger canister at the workbench. | same | same |
+| 11 | night | nettlebacks, the hedge tag | a nettleback is sent rolling (or dawn) | Blow anything at the pest to shoo it. | same | same |
+| 12 | garden | the Garden tag | a garden is built | Build a garden on an empty plot. | same | same |
+| 13 | plant | ring on the bare bed | food is planted | Blow some food onto the bare soil. | same | same |
+| 14 | ups | the Feeder tag on pen posts | any upgrade is bought | Buy a feeder at the pen post. | same | same |
+| 15 | bench | the workbench (Bigger canister, Longer draw) | a bench upgrade is fitted | Buy a bigger jar at the workbench. | same | same |
 | 16 | gates | gate prices, the gates | the ridge gate is open | Open the gate to Ember Ridge. | same | same |
-| any time after 4 | slots | the slot windows and their tap targets | a slot is picked | Tap a window on the bellows to switch. | Roll the wheel or press Q to switch. | Press LB or RB to switch kinds. |
+| any time after 4 | slots | the slot windows and their tap targets | a slot is picked | Tap a window to switch what you blow. | Roll the wheel or press Q to switch. | Press LB or RB to switch kinds. |
 | any time after 8 | jump | Jump | a jump | Tap Jump to hop over bumps. | Press Space to jump. | Press A to jump. |
 
 Order and timing:

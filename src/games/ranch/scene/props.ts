@@ -294,6 +294,8 @@ export function buildProps(boardMat: Material): Props {
       [1, 1],
     ]) S.push(box(0.14, h + 0.12, 0.14, WOOD_D, x + (cx * w) / 2, y0 + h / 2, z + (cz * w) / 2));
     S.push(box(w - 0.1, 0.05, w - 0.1, 0x3a2e24, x, y0 + 0.35, z));
+    // A plate on the side facing the lane says what the crate is for.
+    SIGN.push(quadUV(1.0, 0.25, atlas.uv['plate-sell'], x, y0 + 0.62, z - w / 2 - 0.075, Math.PI));
     // The board on its easel, facing the lane.
     const bx = BOARD.x;
     const bz = BOARD.z;

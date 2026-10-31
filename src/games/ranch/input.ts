@@ -177,8 +177,8 @@ export class Input {
       return b;
     };
     this.btn = {
-      draw: mk('rt-draw', ICONS.draw, '', 'Draw. Hold to pull things in'),
-      puff: mk('rt-puff', ICONS.puff, '', 'Puff. Tap or hold to send things out'),
+      draw: mk('rt-draw', ICONS.draw, 'Pull', 'Pull. Hold to bring things in'),
+      puff: mk('rt-puff', ICONS.puff, 'Blow', 'Blow. Tap or hold to send things out'),
       jump: mk('rt-jump', ICONS.jump, '', 'Jump'),
       act: mk('rt-act', ICONS.hand, '', 'Use'),
       pause: mk('rt-pause', ICONS.pause, '', 'Pause'),

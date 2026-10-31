@@ -168,19 +168,19 @@ const LESSONS: Lesson[] = [
     after: ['walk'],
     unlocks: ['bellows', 'draw'],
     ready: () => true,
-    text: (q) => (q.dev === 'touch' ? 'Hold Draw to pull the downy in.' : q.dev === 'pad' ? 'Hold LT to pull the downy in.' : 'Hold right click to pull the downy in.'),
+    text: (q) => (q.dev === 'touch' ? 'Aim at the downy and hold Pull.' : q.dev === 'pad' ? 'Aim at the downy and hold LT.' : 'Aim at the downy and hold right click.'),
     done: (_s, n) => n('catch') >= 1,
     mark: (s, m) => onDowny(m, porch(s)),
-    note: 'Draw pulls in downies, food and down.',
+    note: 'Pull brings in downies, food and fluff.',
   },
   {
     id: 'puff',
     after: ['draw'],
     unlocks: ['puff'],
     ready: () => true,
-    text: (q) => (q.dev === 'touch' ? 'Tap Puff to send it back out.' : q.dev === 'pad' ? 'Press RT to send it back out.' : 'Click to send it back out.'),
+    text: (q) => (q.dev === 'touch' ? 'Tap Blow to send it back out.' : q.dev === 'pad' ? 'Press RT to blow it back out.' : 'Click to blow it back out.'),
     done: (_s, n) => n('puff') >= 1,
-    note: 'Puff sends out one of whatever is chosen.',
+    note: 'Blow sends out one of whatever is chosen.',
   },
   {
     id: 'feed',
@@ -205,7 +205,7 @@ const LESSONS: Lesson[] = [
       else ring(m, PADS[0].x, PADS[0].z, 3.1);
       return true;
     },
-    note: 'Each kind loves one food. A favourite gives two down.',
+    note: 'Each kind loves one food. Its favourite makes double fluff.',
   },
   {
     id: 'sell',
@@ -213,7 +213,7 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     then: ['coins'],
     ready: () => true,
-    text: () => 'Puff the down into the Exchange crate.',
+    text: () => 'Blow the fluff into the sell crate.',
     done: (_s, n) => n('sell') >= 1,
     mark: (s, m, floor) => {
       if (carrying(s, isTuft)) {
@@ -236,14 +236,14 @@ const LESSONS: Lesson[] = [
       arrow(m, it.x, it.y + 0.9, it.z);
       return true;
     },
-    note: 'The Exchange buys down. Prices drift each day.',
+    note: 'The sell crate buys fluff. Prices change each day.',
   },
   {
     id: 'pen',
     after: ['sell'],
     unlocks: ['pads'],
     ready: () => true,
-    text: () => 'Build a pen on an empty pad.',
+    text: () => 'Build a pen on an empty plot.',
     done: (s, n) => n('build:pen') >= 1 || s.pads.some((p) => p.kind === 'pen'),
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
   },
@@ -252,7 +252,7 @@ const LESSONS: Lesson[] = [
     after: ['pen'],
     unlocks: [],
     ready: () => true,
-    text: () => 'Puff the downy into the pen.',
+    text: () => 'Blow the downy into the pen.',
     done: (s) => s.downies.some((d) => !d.gone && d.pen >= 0),
     mark: (s, m, floor) => {
       const i = nearestPad(s, (k) => s.pads[k].kind === 'pen');
@@ -271,9 +271,9 @@ const LESSONS: Lesson[] = [
     unlocks: ['slots'],
     urgent: true,
     ready: (s) => kinds(s) >= 2,
-    text: (q) => (q.dev === 'touch' ? 'Tap a window on the bellows to switch.' : q.dev === 'pad' ? 'Press LB or RB to switch kinds.' : 'Roll the wheel or press Q to switch.'),
+    text: (q) => (q.dev === 'touch' ? 'Tap a window to switch what you blow.' : q.dev === 'pad' ? 'Press LB or RB to switch kinds.' : 'Roll the wheel or press Q to switch.'),
     done: (_s, n) => n('slot') >= 1,
-    note: 'Each slot holds one kind. The chosen one puffs.',
+    note: 'Each window holds one kind. The chosen one blows.',
   },
   {
     id: 'meadow',
@@ -316,7 +316,7 @@ const LESSONS: Lesson[] = [
     unlocks: ['nettles', 'up:hedge'],
     urgent: true,
     ready: (s) => s.hour >= 20.5 || s.hour < 4.5,
-    text: () => 'Puff something at a nettleback to shoo it.',
+    text: () => 'Blow anything at the pest to shoo it.',
     done: (_s, n) => n('nettlehit') >= 1,
     lapse: (s) => s.hour >= 5.5 && s.hour < 20,
     mark: (s, m) => {
@@ -335,14 +335,14 @@ const LESSONS: Lesson[] = [
       arrow(m, q.x, q.y + 1.3, q.z);
       return true;
     },
-    note: 'Nettlebacks roam at night and eat loose down. A hedge keeps them out.',
+    note: 'Spiky pests roam at night and eat loose fluff. A hedge keeps them out.',
   },
   {
     id: 'garden',
     after: ['meadow'],
     unlocks: ['garden'],
     ready: (s) => s.coins >= 200,
-    text: () => 'Build a garden on an empty pad.',
+    text: () => 'Build a garden on an empty plot.',
     done: (s, n) => n('build:garden') >= 1 || s.pads.filter((p) => p.kind === 'garden').length >= 2,
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
   },
@@ -351,7 +351,7 @@ const LESSONS: Lesson[] = [
     after: ['garden'],
     unlocks: [],
     ready: () => true,
-    text: () => 'Puff some food onto the bare soil.',
+    text: () => 'Blow some food onto the bare soil.',
     done: (_s, n) => n('plant') >= 1,
     mark: (s, m, floor) => {
       const i = nearestPad(s, (k) => s.pads[k].kind === 'garden' && !s.pads[k].crop);
@@ -361,14 +361,14 @@ const LESSONS: Lesson[] = [
       ring(m, p.x, p.z, 3.1);
       return true;
     },
-    note: 'Puff food onto a bare garden bed to plant it.',
+    note: 'Blow food onto a bare garden bed to plant it.',
   },
   {
     id: 'ups',
     after: ['penin', 'meadow'],
     unlocks: ['up:feeder'],
     ready: (s) => s.coins >= 300 && s.pads.some((p) => p.kind === 'pen'),
-    text: () => 'Fit a feeder at a pen post.',
+    text: () => 'Buy a feeder at the pen post.',
     done: (_s, n) => n('upgrade') >= 1,
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'pen'), floor, false),
     note: 'Pen posts sell upgrades as you need them.',
@@ -378,10 +378,10 @@ const LESSONS: Lesson[] = [
     after: ['ups'],
     unlocks: ['bench', 'up:cap', 'up:range'],
     ready: (s) => s.coins >= 400,
-    text: () => 'Fit a bigger canister at the workbench.',
+    text: () => 'Buy a bigger jar at the workbench.',
     done: (_s, n) => n('bench') >= 1,
     mark: (_s, m, floor) => arrow(m, WORKBENCH.x, floor(WORKBENCH.x, WORKBENCH.z) + 2.7, WORKBENCH.z),
-    note: 'The workbench fits upgrades to the bellows.',
+    note: 'The workbench upgrades your bellows.',
   },
   {
     id: 'gates',

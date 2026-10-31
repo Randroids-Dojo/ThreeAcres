@@ -51,7 +51,7 @@ const FIRST: Record<DownyKind, [string, string]> = {
   clover: ['First clover downy', 'Loves clover heads.'],
   ember: ['First ember downy', 'Loves sweetroot.'],
   brook: ['First brook downy', 'Loves dewberries.'],
-  thistle: ['A thistle downy', 'Eats anything. Best down in the valley.'],
+  thistle: ['A thistle downy', 'Eats anything. Best fluff in the valley.'],
 };
 
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
@@ -692,7 +692,7 @@ export class Ranch {
         break;
       case 'reject':
         this.cue('ranch.deny', e.x, e.y, e.z);
-        this.hud.note('The Exchange only takes down.');
+        this.hud.note('The crate only takes fluff.');
         break;
       case 'build': {
         this.cue('ranch.build', e.x, heightAt(e.x, e.z), e.z);
@@ -995,19 +995,19 @@ export class Ranch {
     const out: string[] = [];
     if (dev === 'touch') {
       out.push('Left thumb walks, the right side looks.');
-      if (k('draw')) out.push(k('puff') ? 'Hold Draw to pull in, tap Puff to send out.' : 'Hold Draw to pull in.');
-      if (k('slots')) out.push('Tap the bellows to switch kinds.');
+      if (k('draw')) out.push(k('puff') ? 'Hold Pull to bring things in, tap Blow to send them out.' : 'Hold Pull to bring things in.');
+      if (k('slots')) out.push('Tap a window to switch what you blow.');
       if (k('jump')) out.push('Jump hops.');
       if (k('pads')) out.push('The hand uses what is in front of you.');
     } else if (dev === 'pad') {
       out.push('Left stick walks, right stick looks.');
-      if (k('draw')) out.push(k('puff') ? 'LT draws, RT puffs.' : 'LT draws.');
+      if (k('draw')) out.push(k('puff') ? 'LT pulls, RT blows.' : 'LT pulls.');
       if (k('slots')) out.push('LB and RB switch kinds.');
       out.push('A jumps.');
       if (k('pads')) out.push('X uses what is in front of you.');
     } else {
       out.push('WASD walks, the mouse looks, Shift runs.');
-      if (k('draw')) out.push(k('puff') ? 'Hold right click to draw, click to puff.' : 'Hold right click to draw.');
+      if (k('draw')) out.push(k('puff') ? 'Hold right click to pull, click to blow.' : 'Hold right click to pull.');
       if (k('slots')) out.push('Q or the wheel switch kinds.');
       out.push('Space jumps.');
       if (k('pads')) out.push('E uses what is in front of you.');
@@ -1057,7 +1057,7 @@ export class Ranch {
     if (this.menu) {
       const hot = this.tags.hot;
       const o = hot >= 0 ? this.tags.opts[hot] : null;
-      const verb = !o ? (touch ? 'Tap a tag' : 'Look at a tag') : o.id === 'sleep' ? 'Sleep' : o.id.startsWith('silo:') ? 'Draw these' : o.price !== null ? 'Buy' : o.id === 'garden:clear' ? 'Pull it' : '';
+      const verb = !o ? (touch ? 'Tap a tag' : 'Look at a tag') : o.id === 'sleep' ? 'Sleep' : o.id.startsWith('silo:') ? 'Pull these' : o.price !== null ? 'Buy' : o.id === 'garden:clear' ? 'Pull it' : '';
       hud.setPrompt(verb || null, o && !touch ? (this.device() === 'pad' ? 'X' : 'E') : null);
       this.input.setAct(o ? verb || 'Use' : 'Close');
     } else if (near) {

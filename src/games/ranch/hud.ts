@@ -105,7 +105,7 @@ export class Hud {
       });
       this.slotBtns.push(b);
     }
-    this.bellowsBtn.setAttribute('aria-label', 'Next slot');
+    this.bellowsBtn.setAttribute('aria-label', 'Next window');
     this.bellowsBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();

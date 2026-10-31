@@ -1502,14 +1502,14 @@ export class Sim {
       if (!this.padUsable(i)) return;
       const sp = padSpots(i);
       const fl = this.phys.floor(sp.post.x, sp.post.z);
-      const label = pad.kind === 'empty' ? 'Pad post' : pad.kind === 'pen' ? 'Pen post' : pad.kind === 'garden' ? 'Garden post' : 'Silo post';
+      const label = pad.kind === 'empty' ? 'Empty plot' : pad.kind === 'pen' ? 'Pen post' : pad.kind === 'garden' ? 'Garden post' : 'Silo post';
       // The post's arm is where the tags hang: aim anywhere along it.
       consider({ kind: pad.kind === 'silo' ? 'silo' : 'pad', id: i, label, x: sp.post.x, y: fl + 1.2, z: sp.post.z }, 2.8);
       consider({ kind: pad.kind === 'silo' ? 'silo' : 'pad', id: i, label, x: sp.post.x + 1.7, y: fl + 1.8, z: sp.post.z }, 3.2);
       if (pad.kind === 'pen' && pad.ups.includes('chute')) {
         const n = pad.chute.reduce((a, b) => a + b, 0);
         const cfl = this.phys.floor(sp.chute.x, sp.chute.z);
-        consider({ kind: 'chute', id: i, label: n ? `Down box, ${n}` : 'Down box, empty', x: sp.chute.x, y: cfl + 0.6, z: sp.chute.z }, 2.4);
+        consider({ kind: 'chute', id: i, label: n ? `Fluff box, ${n}` : 'Fluff box, empty', x: sp.chute.x, y: cfl + 0.6, z: sp.chute.z }, 2.4);
       }
     });
     if (this.knows('bench')) consider({ kind: 'bench', id: 0, label: 'Workbench', x: WORKBENCH.x, y: this.phys.floor(WORKBENCH.x, WORKBENCH.z) + 1.4, z: WORKBENCH.z }, 2.8);
@@ -1549,16 +1549,16 @@ export class Sim {
       const i = it.id as number;
       const pad = s.pads[i];
       if (pad.kind === 'empty') {
-        for (const k of ['pen', 'garden', 'silo'] as const) if (this.buildKnown(k)) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Puff food in to plant' : 'Stores four kinds' });
+        for (const k of ['pen', 'garden', 'silo'] as const) if (this.buildKnown(k)) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Blow food in to plant' : 'Stores four kinds' });
       } else if (pad.kind === 'pen') {
         for (const u of PEN_UPS) if (!pad.ups.includes(u.id) && this.upKnown(u.id)) out.push({ id: `pen:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
-        if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Hopper: ${pad.feeder.n}` : 'Hopper empty', price: null, ok: false, note: 'Puff food in at the top' });
+        if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Hopper: ${pad.feeder.n}` : 'Hopper empty', price: null, ok: false, note: 'Blow food in at the top' });
       } else if (pad.kind === 'garden') {
         if (this.upKnown('garden')) for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id)) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
-        out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then puff in something new' : 'Puff a food in to plant it' });
+        out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then blow in something new' : 'Blow food in to plant it' });
       } else if (pad.kind === 'silo') {
-        if (!pad.silo.length) out.push({ id: 'info', title: 'Silo is empty', price: null, ok: false, note: 'Puff food or down at it' });
-        pad.silo.forEach((b, k) => out.push({ id: `silo:${k}`, title: `${thingName(b.t, 2)}`, price: null, ok: true, note: `${b.n} stored${k === pad.siloSel ? ', drawing these' : ''}` }));
+        if (!pad.silo.length) out.push({ id: 'info', title: 'Silo is empty', price: null, ok: false, note: 'Blow food or fluff at it' });
+        pad.silo.forEach((b, k) => out.push({ id: `silo:${k}`, title: `${thingName(b.t, 2)}`, price: null, ok: true, note: `${b.n} stored${k === pad.siloSel ? ', pulling these' : ''}` }));
       }
     } else if (it.kind === 'bench') {
       for (const u of BENCH_UPS) {

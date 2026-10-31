@@ -292,6 +292,17 @@ describe('the words', () => {
     }
   });
 
+  it('uses plain words: no invented terms in lines, goals or pause notes', () => {
+    // The code says tuft, pad, draw, puff, canister, Exchange and nettleback;
+    // the player reads fluff, plot, pull, blow, jar, sell crate and pest.
+    const sim = new Sim(null);
+    teachAll(sim.s);
+    const notes = new Tutor().notes(sim.s, 99);
+    expect(notes.length).toBeGreaterThan(8);
+    const words = [...allLines().map((l) => l.line), ...GOALS.map((g) => g.text), ...notes];
+    for (const l of words) expect(l, l).not.toMatch(/\b(down|puffs?|draws?|Exchange|pads?|canister|nettlebacks?|tufts?)\b/i);
+  });
+
   it('never names keys on touch, or touch on keys', () => {
     for (const { line } of allLines()) {
       if (/\b(WASD|Space|click|mouse|LT|RT|LB|RB|Q)\b/.test(line)) expect(/thumb|Tap |Drag /.test(line), line).toBe(false);

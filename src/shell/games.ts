@@ -8,7 +8,7 @@ export const GAMES: readonly GameInfo[] = [
     id: 'ranch',
     name: 'Thistledown',
     line: 'A ranch for drifting puffs',
-    pitch: 'Roam the valley with your bellows, catch downies, pen them and feed them. Sell the down they shed and build the ranch out into the far meadows.',
+    pitch: 'Roam the valley with your bellows, catch downies, pen them and feed them. Sell the fluff they shed and build the ranch out into the far meadows.',
     tags: ['first person', 'creatures', 'explore', 'build'],
     accent: '#5f9a6b',
   },
