@@ -61,6 +61,14 @@ let s = await screen();
 check('starts with hands only', s.tools.join() === 'hands' && !s.sleep && !s.coins && !s.board && !s.forecast && !s.stamina && s.notes === 0, JSON.stringify(s));
 check('one line: pull the radishes', /radish/i.test(s.line), s.line);
 await shot('1-pull');
+// The line names the button, so at a radish the button wears that word.
+await p.evaluate(() => {
+  const f = window.sunup.state.actors[0];
+  Object.assign(f, { x: 2.5, y: 4.5, facing: 's', angle: Math.PI / 2, task: null, path: [] });
+});
+await frames(10);
+const actWord = await p.evaluate(() => document.querySelector('.tb-act .tb-t')?.textContent ?? '');
+check('at a radish the button says the word the line names', actWord !== '' && s.line.includes(`Hold ${actWord}`), `button "${actWord}", line "${s.line}"`);
 for (let x = 2; x < 6; x++) await actAt(x, 4, 's');
 await frames(10);
 s = await screen();
@@ -85,17 +93,17 @@ await p.waitForTimeout(3500);
 await frames(10);
 s = await screen();
 check('morning: coins, seeds and stamina appear', s.coins && s.tools.includes('seeds') && s.stamina, JSON.stringify(s));
-check('one line: sow seeds', /sow|seed/i.test(s.line), s.line);
+check('one line: plant seeds', /sow|seed/i.test(s.line), s.line);
 check('no board or requests yet', !s.board && s.notes === 0);
 await shot('4-plant');
 
-// 4. Sow three radishes in the bare row (y=7).
+// 4. Plant three radishes in the bare row (y=7).
 await send({ type: 'seed', crop: 'radish' });
 await send({ type: 'tool', tool: 'seeds' });
 for (let x = 2; x < 5; x++) await actAt(x, 6, 's');
 await frames(10);
 s = await screen();
-check('after sowing, nothing new until day 3', !s.board, `line "${s.line}"`);
+check('after planting, nothing new until day 3', !s.board, `line "${s.line}"`);
 await shot('5-after-plant');
 
 // 5. A dry can brings the well lesson.

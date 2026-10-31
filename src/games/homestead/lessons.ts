@@ -30,7 +30,7 @@ const LESSONS: Lesson[] = [
     after: [],
     unlocks: [],
     ready: () => true,
-    text: (_s, touch) => (touch ? 'Walk to a radish. Hold the hand.' : 'Walk to a radish. Space pulls it.'),
+    text: (_s, touch) => (touch ? 'Walk to a radish. Hold Harvest.' : 'Walk to a radish. Space harvests it.'),
     done: (s, n) => n('harvest') >= 4 || !anyRipe(s),
   },
   {
@@ -71,7 +71,7 @@ const LESSONS: Lesson[] = [
     after: ['sleep'],
     unlocks: ['coins', 'seeds', 'stamina'],
     ready: (s) => s.coins >= 10,
-    text: () => 'Sow seeds in the bare soil.',
+    text: () => 'Plant seeds in the bare soil.',
     done: (_s, n) => n('plant') >= 3,
   },
   {
@@ -123,6 +123,11 @@ const LESSONS: Lesson[] = [
     passive: 9,
   },
 ];
+
+/** Every line any lesson can show, on touch and on keys: for checks of length and wording. */
+export function allLines(s: WorldState): string[] {
+  return [...new Set(LESSONS.flatMap((l) => [l.text(s, true), l.text(s, false)]))];
+}
 
 export class Tutor {
   private active: Lesson | null = null;

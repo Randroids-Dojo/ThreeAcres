@@ -465,7 +465,7 @@ export class Hud {
         this.morning(s);
         break;
       case 'buy':
-        if (e.item.startsWith('field:')) this.toast('The field is yours. Till it to plant.', '');
+        if (e.item.startsWith('field:')) this.toast('The field is yours. Hoe it to plant.', '');
         break;
       case 'sell':
         break;

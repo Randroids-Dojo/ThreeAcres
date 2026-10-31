@@ -20,7 +20,7 @@ export const PRESETS: Record<PresetId, Preset> = {
     id: 'sunup',
     name: 'Sunup',
     line: 'A day on the homestead',
-    pitch: 'Walk your own rows from dawn to dusk. Water, pull, ship, sleep. Mind the crows and the weather.',
+    pitch: 'Walk your own rows from dawn to dusk. Water, harvest, ship, sleep. Mind the crows and the weather.',
     rules: { view: '3d', camera: 'close', control: 'walk', clock: 'day', growth: 'classic', goal: 'market', weather: 'wild', crew: 'solo', tools: 'kit' },
   },
   patchwork: {

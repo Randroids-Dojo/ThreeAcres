@@ -73,16 +73,16 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
       if (build) return { verb: 'clear', ok: true, reason: '', build: build.kind };
       if (crop?.dead) return { verb: 'clear', ok: true, reason: '' };
       if (!plot.tilled) return { verb: 'till', ok: true, reason: '' };
-      return NO('till', crop ? 'Something is growing here' : 'Already tilled');
+      return NO('till', crop ? 'Something is growing here' : 'Already hoed');
     case 'can':
       if (build) return NO('water', 'Nothing to water');
-      if (!plot.tilled) return NO('water', 'Till it first');
+      if (!plot.tilled) return NO('water', 'Hoe it first');
       if (s.rules.growth === 'classic' ? plot.wet : plot.moisture >= 3) return NO('water', 'Already watered');
       if (homestead(s) && s.water <= 0) return NO('water', 'The can is empty. Fill it at the well or the pond');
       return { verb: 'water', ok: true, reason: '' };
     case 'seeds':
       if (build) return NO('plant', 'Something is built here');
-      if (!plot.tilled) return NO('plant', 'Till it first');
+      if (!plot.tilled) return NO('plant', 'Hoe it first');
       if (crop) return NO('plant', 'Already planted');
       return plantCheck(s, s.seed);
     case 'hands':

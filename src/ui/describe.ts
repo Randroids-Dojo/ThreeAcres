@@ -11,7 +11,7 @@ import type { Verb, WorldState } from '../sim/types';
 import { esc } from './dom';
 
 export const VERB_NAMES: Record<Verb, string> = {
-  till: 'Till',
+  till: 'Hoe',
   water: 'Water',
   plant: 'Plant',
   harvest: 'Harvest',
@@ -75,7 +75,7 @@ export function describe(s: WorldState, x: number, y: number, r: Resolved): stri
       parts.push(`<span class="q">${QUALITY_NAME[q.quality]}</span>${why.length ? ` <span class="why">${why.join(', ')}</span>` : ''}`);
     }
   } else if (!b) {
-    if (!plot.tilled) parts.push('<b>Meadow</b> <span class="why">till it to plant</span>');
+    if (!plot.tilled) parts.push('<b>Meadow</b> <span class="why">hoe it to plant</span>');
     else {
       let line = '<b>Bare soil</b>';
       if (synergy) line += ` <span class="why">moisture ${plot.moisture}, nutrients ${Math.floor(plot.nutrient)} of 3</span>`;
