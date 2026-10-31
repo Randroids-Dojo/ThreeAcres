@@ -40,6 +40,8 @@ export class Input {
   aim: { x: number; y: number } | null = null;
   /** Last input kind, so the HUD can show touch controls only when touch is used. */
   lastKind: 'mouse' | 'touch' | 'key' | 'pad' = 'mouse';
+  /** False until the player has pressed, clicked or touched anything. */
+  deviceKnown = false;
 
   private keys = new Set<string>();
   private queue: Command[] = [];
@@ -49,10 +51,20 @@ export class Input {
   private pinch: { d: number; mx: number; my: number } | null = null;
   private mouseDrag: { x: number; y: number; button: number } | null = null;
   private actHeld = 0;
+  private touchActHeld = false;
   private padPrev: boolean[] = [];
   private padCursorT = 0;
 
   constructor(private stage: HTMLElement, private host: InputHost) {
+    // Any press anywhere (HUD included) says which device is in use.
+    window.addEventListener(
+      'pointerdown',
+      (e) => this.saw(e.pointerType === 'touch' || e.pointerType === 'pen' ? 'touch' : 'mouse'),
+      { capture: true, passive: true },
+    );
+    // No page zoom or callouts from stray gestures on iOS.
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('dblclick', (e) => e.preventDefault());
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -80,6 +92,17 @@ export class Input {
     this.queue.push({ type: 'act' });
   }
 
+  /** The touch act button is held: repeat like a held Space bar. */
+  setActHeld(on: boolean): void {
+    this.touchActHeld = on;
+    if (!on) this.actHeld = 0;
+  }
+
+  private saw(kind: Input['lastKind']): void {
+    this.lastKind = kind;
+    this.deviceKnown = true;
+  }
+
   /** Called once per frame: everything the farm should hear this step. */
   collect(dt: number): Command[] {
     this.pollPad(dt);
@@ -101,8 +124,8 @@ export class Input {
       my /= len;
     }
     out.unshift({ type: 'move', x: mx, y: my });
-    // Holding the act key repeats, so a row can be watered by walking along it.
-    if (this.keys.has('Space') || this.keys.has('KeyE')) {
+    // Holding the act key repeats, so walking down a row works each plot ahead in turn.
+    if (this.keys.has('Space') || this.keys.has('KeyE') || this.touchActHeld) {
       this.actHeld += dt;
       if (this.actHeld > 0.22) {
         this.actHeld = 0.1;
@@ -115,7 +138,7 @@ export class Input {
   private onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
-    this.lastKind = 'key';
+    this.saw('key');
     if (this.host.hotkey(e.code, e.shiftKey)) {
       e.preventDefault();
       return;
@@ -135,7 +158,6 @@ export class Input {
   private onDown = (e: PointerEvent) => {
     if (this.host.blocked()) return;
     const p = this.local(e);
-    this.lastKind = e.pointerType === 'touch' ? 'touch' : 'mouse';
     try {
       this.stage.setPointerCapture(e.pointerId);
     } catch {
@@ -285,7 +307,7 @@ export class Input {
     const ay = Math.abs(pad.axes[1]) > 0.2 ? pad.axes[1] : 0;
     const pressed = pad.buttons.map((b) => b.pressed);
     const edge = (i: number) => pressed[i] && !this.padPrev[i];
-    if (ax || ay || pressed.some(Boolean)) this.lastKind = 'pad';
+    if (ax || ay || pressed.some(Boolean)) this.saw('pad');
     const rules = this.host.rules();
     if (rules.control === 'walk') {
       if (this.lastKind === 'pad') this.stick = { x: ax, y: ay };

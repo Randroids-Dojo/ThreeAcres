@@ -19,7 +19,7 @@
 }
 
 html, body { margin: 0; height: 100%; background: #1d2a1b; overscroll-behavior: none; }
-body { font-family: var(--sans); color: var(--ink); -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; font-size: 15px; }
+body { font-family: var(--sans); color: var(--ink); -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; font-size: 15px; }
 #app { position: fixed; inset: 0; overflow: hidden; overflow: clip; }
 button { font: inherit; color: inherit; }
 svg { width: 100%; height: 100%; display: block; }
@@ -164,17 +164,32 @@ svg { width: 100%; height: 100%; display: block; }
 .seed.locked { opacity: 0.35; }
 .buildbar { position: absolute; left: 50%; bottom: calc(92px + var(--safe-b)); transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; }
 
-/* touch controls */
-.touchpad { position: absolute; inset: 0; pointer-events: none; }
-.touchpad.off { display: none; }
-.joy { position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; background: rgba(246, 237, 214, 0.22); border: 2px solid rgba(246, 237, 214, 0.55); pointer-events: none; opacity: 0; transition: opacity 0.15s; }
-.joy.on { opacity: 1; }
-.joy i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(246, 237, 214, 0.85); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3); }
-.actbtn { position: absolute; right: 18px; bottom: calc(100px + var(--safe-b)); width: 84px; height: 84px; border-radius: 50%; pointer-events: auto; display: grid; place-items: center; background: var(--paper); border: 2px solid var(--line); box-shadow: var(--shadow); color: var(--ink); }
-.actbtn .ic { width: 36px; height: 36px; }
-.actbtn.no { opacity: 0.6; }
-.actbtn:active { transform: scale(0.95); }
-.joyzone { position: absolute; left: 0; bottom: 0; width: 50%; height: 48%; pointer-events: auto; touch-action: none; }
+/* touch controls: shown while the last input was a touch */
+.touch { position: absolute; inset: 0; pointer-events: none; display: none; }
+.touch.show { display: block; }
+.touch .ts-zone { position: absolute; left: 0; top: 34%; width: 50%; bottom: calc(92px + var(--safe-b)); pointer-events: auto; touch-action: none; display: none; }
+.touch.walk .ts-zone { display: block; }
+.ts-base { position: absolute; left: 76px; top: calc(100% - 76px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; pointer-events: none; opacity: 0.45; transition: opacity 0.15s; }
+.ts-base.active { opacity: 1; transition: none; }
+.ts-ring { position: absolute; inset: 0; border-radius: 50%; background: rgba(246, 237, 214, 0.18); border: 2px solid rgba(246, 237, 214, 0.6); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25); }
+.ts-knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fffaf0, var(--paper) 60%, var(--paper2)); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
+.tb { position: absolute; pointer-events: auto; touch-action: none; display: none; place-items: center; align-content: center; gap: 1px; border-radius: 50%; padding: 0; border: 2px solid var(--line); background: radial-gradient(circle at 40% 30%, var(--paper3), var(--paper) 60%, var(--paper2)); box-shadow: var(--shadow); color: var(--ink); -webkit-touch-callout: none; transition: transform 0.06s ease, opacity 0.15s; }
+.touch.walk .tb-act, .touch.walk .tb-tool { display: grid; }
+.tb.down { transform: scale(0.93); }
+.tb .ic { width: 34px; height: 34px; }
+.tb .tb-t { font-size: 11px; font-weight: 700; line-height: 1; }
+.tb-act { right: 16px; bottom: calc(102px + var(--safe-b)); width: 88px; height: 88px; }
+.tb-act.no { opacity: 0.62; }
+.tb-act.no .ic { opacity: 0.7; }
+.tb-tool { right: 114px; bottom: calc(112px + var(--safe-b)); width: 58px; height: 58px; }
+.tb-tool .ic { width: 24px; height: 24px; }
+.tb-tool .tb-t { font-size: 10px; }
+.tb-clear { right: 12px; bottom: calc(100px + var(--safe-b)); border-radius: 999px; padding: 0 14px; height: 38px; }
+.tb-clear.on { display: grid; }
+.tb-clear .tb-t { font-size: 13px; }
+/* Keyboard hints only when a keyboard is in use. */
+#app[data-device='touch'] .tool .key, #app[data-device='touch'] .kbd-only { display: none; }
+#app:not([data-device='touch']) .touch-only { display: none; }
 
 /* toasts and floaters */
 .toasts { position: absolute; left: 50%; top: calc(112px + var(--safe-t)); transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; pointer-events: none; width: min(440px, calc(100% - 24px)); }
@@ -315,7 +330,9 @@ svg { width: 100%; height: 100%; display: block; }
   .title .game { padding: 11px 13px; gap: 3px; }
   .title .game b { font-size: 19px; }
   .title .game p { font-size: 12.5px; }
-  .actbtn { width: 76px; height: 76px; bottom: calc(92px + var(--safe-b)); }
+  #app.touch-on .info { bottom: calc(200px + var(--safe-b)); }
+  .tb-act { width: 80px; height: 80px; bottom: calc(94px + var(--safe-b)); }
+  .tb-tool { right: 104px; bottom: calc(104px + var(--safe-b)); }
 }
 @media (max-height: 520px) {
   .goals { display: none; }

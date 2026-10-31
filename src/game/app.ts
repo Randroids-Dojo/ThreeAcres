@@ -36,6 +36,7 @@ export function startApp(): void {
 
   const director = new Director(state, root, {
     autoplay: params.has('autoplay'),
+    forceTouch: params.has('touch'),
     onNewFarm: () => {
       clearFarm();
       showTitle(true);

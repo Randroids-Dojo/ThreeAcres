@@ -24,6 +24,8 @@ import { loadNotes, loadSettings, saveFarm, saveNotes, saveSettings, type Settin
 
 export interface DirectorOptions {
   autoplay?: boolean;
+  /** Show the touch controls on any device (?touch), for testing. */
+  forceTouch?: boolean;
   onNewFarm(): void;
 }
 
@@ -61,8 +63,11 @@ export class Director {
   frames = 0;
   events: SimEvent[] = [];
 
+  private appRoot: HTMLElement;
+
   constructor(state: WorldState, root: HTMLElement, private opts: DirectorOptions) {
     this.state = state;
+    this.appRoot = root;
     this.audio = createAudio();
     this.r2d = createRenderer2D();
     this.r2d.canvas.classList.add('hidden');
@@ -125,6 +130,7 @@ export class Director {
     root.append(this.stage, this.hud.root, this.mixer.scrim, this.mixer.root, this.dialogs.scrim, this.dialogs.root);
     this.applyVolumes();
     if (opts.autoplay) this.bot = newBot();
+    if (opts.forceTouch) this.hud.touch.forced = true;
 
     const unlock = () => this.audio.unlock();
     for (const e of ['pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(e, unlock, { passive: true });
@@ -283,6 +289,10 @@ export class Director {
         if (s.speed) this.lastSpeed = s.speed;
         this.input.push({ type: 'speed', speed: s.speed ? 0 : this.lastSpeed });
         return true;
+      case 'Backspace':
+      case 'KeyX':
+        this.input.push({ type: 'cancelJobs' });
+        return true;
       case 'BracketLeft':
       case 'BracketRight': {
         if (s.rules.clock !== 'flow') return false;
@@ -379,6 +389,10 @@ export class Director {
       tired: (s.rules.clock === 'day' && s.stamina < 15) || (s.rules.clock === 'turns' && s.ap <= 1),
     });
     this.hud.root.style.visibility = this.title ? 'hidden' : '';
+    const device = this.input.deviceKnown ? this.input.lastKind : matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
+    if (this.appRoot.dataset.device !== device) this.appRoot.dataset.device = device;
+    const touchOn = this.hud.touch.shown && s.rules.control === 'walk';
+    if (this.appRoot.classList.contains('touch-on') !== touchOn) this.appRoot.classList.toggle('touch-on', touchOn);
     if (!this.title) {
       this.hud.update(this.aim());
       this.mixer.update();

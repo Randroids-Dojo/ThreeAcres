@@ -13,10 +13,11 @@ import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
 import { AXIS_INFO, matchPreset, PRESETS, type PresetId } from '../sim/presets';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import type { Axis, BuildKind, CropId, Rules, SimEvent, ToolId, Weather, WorldState } from '../sim/types';
+import type { Axis, BuildKind, CropId, Rules, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
 import { describe, denyText } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
+import { buzz, TouchControls } from './touch';
 
 export interface HudHost {
   state(): WorldState;
@@ -33,7 +34,6 @@ export interface HudHost {
 const WEATHER_ICON: Record<Weather, IconId> = { sun: 'sun', cloud: 'cloud', rain: 'rain', storm: 'storm', heat: 'heat' };
 const TOOL_ICON: Record<ToolId, IconId> = { hands: 'hands', hoe: 'hoe', can: 'can', seeds: 'seeds', build: 'build', smart: 'smart' };
 const TOOL_NAME: Record<ToolId, string> = { hands: 'Hands', hoe: 'Hoe', can: 'Can', seeds: 'Seeds', build: 'Build', smart: 'Smart' };
-const VERB_ICON: Record<string, IconId> = { till: 'hoe', water: 'can', plant: 'seeds', harvest: 'hands', tend: 'hands', clear: 'hoe', build: 'build', scare: 'hands' };
 
 export class Hud {
   readonly root = el('div', 'hud');
@@ -50,10 +50,8 @@ export class Hud {
   private toolbar = el('div', 'card toolbar');
   private seedbar = el('div', 'card seedbar hidden');
   private buildbar = el('div', 'card buildbar hidden');
-  private touchpad = el('div', 'touchpad off');
-  private joy = el('div', 'joy', '<i></i>');
-  private actBtn = el('button', 'actbtn');
   private toasts = el('div', 'toasts');
+  readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
   private toolsKey = '';
   private goalsKey = '';
@@ -63,8 +61,21 @@ export class Hud {
   private buildOpen = false;
   private lastDeny = { text: '', t: 0 };
   private foldedGoals = window.innerWidth < 640;
+  private aimVerb: { verb: Verb | null; ok: boolean } | null = null;
 
   constructor(private host: HudHost) {
+    this.touch = new TouchControls({
+      input: host.input,
+      state: host.state,
+      aimVerb: () => this.aimVerb,
+      cycleTool: () => this.cycleTool(false),
+      toolIcon: () => TOOL_ICON[host.state().tool],
+      toolName: () => TOOL_NAME[host.state().tool],
+      clearJobs: () => {
+        host.send({ type: 'cancelJobs' });
+        host.cue('close');
+      },
+    });
     const top = el('div', 'topbar');
     const when = el('div', 'when');
     when.append(this.date, this.clockEl);
@@ -107,16 +118,8 @@ export class Hud {
     });
     toggle(this.goals, 'folded', this.foldedGoals);
 
-    this.touchpad.append(this.joy, this.actBtn);
-    const zone = el('div', 'joyzone');
-    this.touchpad.append(zone);
-    this.bindJoystick(zone);
-    this.actBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      host.input.act();
-    });
 
-    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.touchpad, this.toasts, this.floaters);
+    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.touch.el, this.toasts, this.floaters);
   }
 
   // ------------------------------------------------------------ per frame
@@ -130,7 +133,7 @@ export class Hud {
     this.updateGoals(s);
     this.updateTools(s);
     this.updateInfo(s, aim);
-    this.updateTouch(s);
+    this.touch.update();
   }
 
   private updateDay(s: WorldState): void {
@@ -363,61 +366,14 @@ export class Hud {
   private updateInfo(s: WorldState, aim: { x: number; y: number } | null): void {
     if (!aim) {
       toggle(this.info, 'empty', true);
+      this.aimVerb = null;
       return;
     }
     const r = resolve(s, s.tool, aim.x, aim.y);
     const html = describe(s, aim.x, aim.y, r);
     toggle(this.info, 'empty', !html || this.seedOpen || this.buildOpen);
     if (html) setHtml(this.info, html);
-    const ic = r.verb ? VERB_ICON[r.verb] : 'hands';
-    setHtml(this.actBtn, `<span class="ic">${icon(ic)}</span>`);
-    toggle(this.actBtn, 'no', !(r.verb && r.ok));
-  }
-
-  private updateTouch(s: WorldState): void {
-    const touch = this.host.input.lastKind === 'touch' || (this.host.input.lastKind !== 'key' && matchMedia('(pointer: coarse)').matches);
-    toggle(this.touchpad, 'off', !(s.rules.control === 'walk' && touch));
-  }
-
-  private bindJoystick(zone: HTMLElement): void {
-    let id = -1;
-    let ox = 0;
-    let oy = 0;
-    const R = 46;
-    zone.addEventListener('pointerdown', (e) => {
-      if (id !== -1) return;
-      id = e.pointerId;
-      zone.setPointerCapture(e.pointerId);
-      const r = this.touchpad.getBoundingClientRect();
-      ox = e.clientX - r.left;
-      oy = e.clientY - r.top;
-      this.joy.style.left = `${ox}px`;
-      this.joy.style.top = `${oy}px`;
-      (this.joy.firstElementChild as HTMLElement).style.transform = '';
-      toggle(this.joy, 'on', true);
-      this.host.input.lastKind = 'touch';
-    });
-    zone.addEventListener('pointermove', (e) => {
-      if (e.pointerId !== id) return;
-      const r = this.touchpad.getBoundingClientRect();
-      let dx = e.clientX - r.left - ox;
-      let dy = e.clientY - r.top - oy;
-      const d = Math.hypot(dx, dy);
-      if (d > R) {
-        dx = (dx / d) * R;
-        dy = (dy / d) * R;
-      }
-      (this.joy.firstElementChild as HTMLElement).style.transform = `translate(${dx}px, ${dy}px)`;
-      this.host.input.setStick(dx / R, dy / R);
-    });
-    const end = (e: PointerEvent) => {
-      if (e.pointerId !== id) return;
-      id = -1;
-      toggle(this.joy, 'on', false);
-      this.host.input.setStick(0, 0);
-    };
-    zone.addEventListener('pointerup', end);
-    zone.addEventListener('pointercancel', end);
+    this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };
   }
 
   // ------------------------------------------------------------ events
@@ -441,6 +397,7 @@ export class Hud {
         if (e.x !== undefined && e.y !== undefined) this.float(e.x + 0.5, e.y + 0.5, `+${fmt(e.amount)}`);
         break;
       case 'harvest':
+        if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
         break;
       case 'milestone': {

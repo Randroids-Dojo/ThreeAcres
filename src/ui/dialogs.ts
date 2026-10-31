@@ -316,7 +316,8 @@ export class Dialogs {
       quality,
       check('Show soil moisture and nutrients (O)', 'soilOverlay'),
       check('Reduce motion', 'reducedMotion'),
-      el('p', 'legend', 'Keys: WASD or arrows walk, Space acts, 1 to 5 tools, Q next tool, Enter sleeps or ends the day, M the mix, B the board, V swaps 2D and 3D, C the camera, Shift 1 to 3 the three games, P pause and [ ] speed under flow. Wheel or pinch zooms; right drag or two fingers pan.'),
+      el('p', 'legend touch-only', 'Touch: under walk, drag on the left to walk and hold the round button to keep working; tap a plot next to you to work it, or further away to walk there. Under point, tap or drag across plots to queue jobs, and use two fingers to pan and pinch.'),
+      el('p', 'legend kbd-only', 'Keys: WASD or arrows walk, Space acts, 1 to 5 tools, Q next tool, Enter sleeps or ends the day, M the mix, B the board, V swaps 2D and 3D, C the camera, Shift 1 to 3 the three games, P pause and [ ] speed under flow, X clears queued jobs. Wheel zooms; right drag pans.'),
       fresh,
     );
   }
