@@ -1,19 +1,22 @@
 // The audio engine proper, on any BaseAudioContext: a realtime AudioContext in
 // the game, an OfflineAudioContext in tests and renders. It owns the mix and
 // the master chain, turns moods into music and ambience settings, and routes
-// events to the effects.
+// Sunup's events to the effects and the other games' named cues and loops to
+// the cues.
 //
 //   music ─ duck ─ tone ─ vol ─┐
 //   sfx ───────────────── vol ─┼─ mix ─ master ─ fade ─ compressor ─ trim ─ soft clipper ─ out
 //   ambience ──────────── vol ─┤
 //   (sends) ─ reverb ──────────┘
 
-import type { AudioMood, UiCue } from '../contract';
+import type { AudioMood, CueOpts, UiCue } from '../contract';
 import type { SimEvent, WorldState } from '../sim/types';
-import { Ambience } from './ambience';
+import { Ambience, darkness } from './ambience';
 import type { Bank } from './bank';
+import { Cues } from './cues';
 import { clamp, rand, smoothstep } from './dsp';
 import { Music } from './music';
+import type { GameId } from './music';
 import { Sfx } from './sfx';
 import { Voices } from './voices';
 
@@ -32,18 +35,21 @@ export interface CoreOptions {
 }
 
 interface Seen {
+  game: GameId;
   clock: string;
-  camera: string;
   scene: string;
   season: number;
   weather: string;
   hourQ: number;
   nightQ: number;
-  speed: number;
+  intQ: number;
   tired: boolean;
   lateQ: number;
   lullQ: number;
+  darkQ: number;
 }
+
+const GAMES: GameId[] = ['title', 'homestead', 'ranch', 'deck'];
 
 function softClipCurve(n = 4097): Float32Array<ArrayBuffer> {
   // The shaper sees half the signal, so the curve spans -2 to 2 in real level.
@@ -89,9 +95,12 @@ export class Core {
   readonly music: Music;
   readonly amb: Ambience;
   readonly sfx: Sfx;
+  readonly cues: Cues;
   readonly musicVoices: Voices;
   readonly sfxVoices: Voices;
   readonly ambVoices: Voices;
+  /** The games' own ambience loops (water, vents): with the ambience level, apart from the weather and wildlife. */
+  readonly ambLoops: GainNode;
   readonly analyser: AnalyserNode | null = null;
   errors = 0;
   lastError = '';
@@ -196,10 +205,13 @@ export class Core {
     farSend.connect(reverb);
     this.sfx = new Sfx(ctx, bank, this.sfxVoices, this.music, sfxNear, sfxFar);
 
-    // Ambience.
+    // Ambience. The ranch's water and vents loops join it after the weather and wildlife, at the same level.
     this.amb = new Ambience(ctx, bank, this.ambVoices);
     const ambVol = g();
     this.amb.out.connect(ambVol);
+    this.ambLoops = g();
+    this.ambLoops.connect(ambVol);
+    this.cues = new Cues(ctx, bank, this.sfxVoices, this.music, sfxNear, sfxFar, this.ambLoops);
     ambVol.connect(mix);
     const ambSend = g(0.15);
     ambVol.connect(ambSend);
@@ -232,6 +244,7 @@ export class Core {
       this.lastTick = now;
       this.music.schedule(now + LOOKAHEAD);
       this.amb.tick(now + LOOKAHEAD);
+      this.cues.tick(now);
     } catch (err) {
       this.fail(err);
     }
@@ -249,27 +262,29 @@ export class Core {
 
   private applyMood(m: AudioMood): void {
     const clock = m.rules.clock;
+    const game: GameId = m.scene === 'title' ? 'title' : GAMES.includes(m.game) ? m.game : 'homestead';
     const hourQ = Math.round(m.hour * 12);
     const nightQ = Math.round(m.night * 20);
+    const intQ = Math.round(clamp(Number.isFinite(m.intensity) ? m.intensity : 0, 0, 1) * 20);
     const s = this.seen;
     if (
-      s && s.clock === clock && s.camera === m.rules.camera && s.scene === m.scene && s.season === m.season &&
-      s.weather === m.weather && s.hourQ === hourQ && s.nightQ === nightQ && s.speed === m.speed && s.tired === m.tired
+      s && s.game === game && s.clock === clock && s.scene === m.scene && s.season === m.season && s.weather === m.weather &&
+      s.hourQ === hourQ && s.nightQ === nightQ && s.intQ === intQ && s.tired === m.tired
     ) return;
     this.moodChanges++;
-    const fast = clock === 'flow' && m.speed >= 2;
-    const lateness = smoothstep(17.5, 22.5, m.hour) * (fast ? 0.4 : 1);
-    const lull = smoothstep(21, 23.6, m.hour) * (fast ? 0.3 : 1);
-    const lateQ = Math.round(lateness * 32);
-    const lullQ = Math.round(lull * 32);
+    // Sunup thins late in the evening and hands over to the lullaby; the ranch crossfades to its night band.
+    const home = game === 'homestead';
+    const lateQ = home ? Math.round(smoothstep(17.5, 22.5, m.hour) * 32) : 0;
+    const lullQ = home ? Math.round(smoothstep(21, 23.6, m.hour) * 32) : 0;
+    const darkQ = game === 'ranch' ? Math.round(darkness(m.hour) * 32) : 0;
     const now = this.ctx.currentTime;
-    const musicChanged = !s || s.clock !== clock || s.scene !== m.scene || s.season !== m.season || s.speed !== m.speed ||
-      s.tired !== m.tired || s.lateQ !== lateQ || s.lullQ !== lullQ;
+    const musicChanged = !s || s.game !== game || s.scene !== m.scene || s.season !== m.season || s.tired !== m.tired ||
+      s.lateQ !== lateQ || s.lullQ !== lullQ || s.darkQ !== darkQ || s.intQ !== intQ;
     if (musicChanged) {
-      this.music.set({ scene: m.scene, clock, season: m.season, speed: m.speed, lateness: lateQ / 32, lull: lullQ / 32, tired: m.tired });
+      this.music.set({ scene: m.scene, game, season: m.season, lateness: lateQ / 32, lull: lullQ / 32, tired: m.tired, intensity: intQ / 20, dark: darkQ / 32 });
     }
-    if (!s || s.scene !== m.scene || s.season !== m.season || s.weather !== m.weather || s.hourQ !== hourQ) {
-      this.amb.set({ hour: m.hour, season: m.season, weather: m.weather, scene: m.scene });
+    if (!s || s.game !== game || s.scene !== m.scene || s.season !== m.season || s.weather !== m.weather || s.hourQ !== hourQ) {
+      this.amb.set({ hour: m.hour, season: m.season, weather: m.weather, scene: m.scene, game });
     }
     if (!s || s.scene !== m.scene || s.nightQ !== nightQ) {
       const menu = m.scene === 'menu';
@@ -277,10 +292,8 @@ export class Core {
       this.tone.frequency.setTargetAtTime(menu ? 1700 : 18000, now, 0.15);
     }
     this.sfx.clock = clock;
-    this.seen = {
-      clock, camera: m.rules.camera, scene: m.scene, season: m.season, weather: m.weather, hourQ, nightQ,
-      speed: m.speed, tired: m.tired, lateQ, lullQ,
-    };
+    this.cues.setGame(game);
+    this.seen = { game, clock, scene: m.scene, season: m.season, weather: m.weather, hourQ, nightQ, intQ, tired: m.tired, lateQ, lullQ, darkQ };
   }
 
   event(e: SimEvent, state: Readonly<WorldState> | null): void {
@@ -295,6 +308,22 @@ export class Core {
   ui(cue: UiCue): void {
     try {
       this.sfx.ui(cue);
+    } catch (err) {
+      this.fail(err);
+    }
+  }
+
+  cue(name: string, opts?: CueOpts): void {
+    try {
+      this.cues.cue(name, opts);
+    } catch (err) {
+      this.fail(err);
+    }
+  }
+
+  loop(name: string, on: boolean, opts?: CueOpts): void {
+    try {
+      this.cues.loop(name, on, opts);
     } catch (err) {
       this.fail(err);
     }
@@ -346,8 +375,11 @@ export class Core {
       arrangements: this.music.levels(),
       loops: this.amb.loops(),
       ambienceShots: this.amb.shotsPlayed,
-      started: { ...this.sfx.started },
-      dropped: { ...this.sfx.dropped },
+      started: { ...this.sfx.started, ...this.cues.started },
+      dropped: { ...this.sfx.dropped, ...this.cues.dropped },
+      unknownCues: this.cues.unknown,
+      cueNotes: this.cues.log.slice(-200),
+      heldLoops: this.cues.loops(),
       errors: this.errors,
       lastError: this.lastError,
       moodChanges: this.moodChanges,

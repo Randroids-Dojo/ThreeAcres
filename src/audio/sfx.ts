@@ -368,6 +368,38 @@ export class Sfx {
         this.tone('piano', this.key - 12, now, 0.18, { dur: 1.4 });
         return this.play('tired');
       }
+      case 'refill': {
+        // The can dipped and filled: a splash and a rising gurgle.
+        if (this.busy(e.by === 1 ? 'key' : 'hands')) return this.drop('refill');
+        if (!this.gate(`refill:${e.by}`, 0.4, 0, now)) return this.drop('refill');
+        const p = this.place(s, e.x, e.y, e.by);
+        this.fx('splash', now, 0.22 * p.gain, { pan: p.pan, rate: 1.2 });
+        this.fx('water', now + 0.12, 0.26 * p.gain, { pan: p.pan, rate: 1.3, dur: 0.4 });
+        return this.play('refill');
+      }
+      case 'upgrade': {
+        // A tool comes back better: three knocks at the bench and a bell climbing with the level.
+        if (!this.gate('upgrade', 0.5, 0, now)) return this.drop('upgrade');
+        const k = this.key;
+        [0, 0.16, 0.3].forEach((at, j) => this.fx('knock', now + at, 0.36 - j * 0.04, { rate: 1.1 + j * 0.06 }));
+        const lv = clamp(Math.round(e.level), 1, 4);
+        [0, 4, 7, 12].slice(0, lv + 1).forEach((iv, j) => this.tone('bell', k + 19 + iv, now + 0.45 + j * 0.08, 0.1, { dur: 1.4 }));
+        return this.play('upgrade');
+      }
+      case 'request': {
+        // A neighbour's request: filled is a warm three-note rise, missed is a soft fall.
+        if (!this.gate('request', 0.25, 0.5, now) || this.busy('key')) return this.drop('request');
+        const k = this.key;
+        if (e.done) {
+          [0, 4, 7].forEach((iv, j) => this.tone('guitar', k + iv, now + j * 0.08, 0.3, { dur: 1.2 }));
+          this.tone('musicbox', k + 24, now + 0.26, 0.14, { dur: 1.2 });
+          this.fx('paper', now, 0.12);
+        } else {
+          this.tone('piano', k + 7, now, 0.24, { dur: 0.6 });
+          this.tone('piano', k + 2, now + 0.2, 0.2, { dur: 1 });
+        }
+        return this.play('request');
+      }
       case 'hire': {
         if (!this.gate('hire', 0.5, 0, now)) return this.drop('hire');
         this.fx('whistle', now, 0.24, { pan: 0.25 });

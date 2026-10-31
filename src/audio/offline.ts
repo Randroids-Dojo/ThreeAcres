@@ -2,7 +2,7 @@
 // checks in scripts/audio-check.mjs. The scheduler is driven exactly as the
 // game drives it: mood every frame, tick on a short timer, events as they come.
 
-import type { AudioMood, UiCue } from '../contract';
+import type { AudioMood, CueOpts, UiCue } from '../contract';
 import type { Rules, SimEvent, WorldState } from '../sim/types';
 import type { Bank } from './bank';
 import { Core } from './core';
@@ -11,6 +11,8 @@ export type Action =
   | { t: number; mood: Partial<Omit<AudioMood, 'rules'>> & { rules?: Partial<Rules> } }
   | { t: number; event: SimEvent }
   | { t: number; ui: UiCue }
+  | { t: number; cue: string; opts?: CueOpts }
+  | { t: number; loop: string; on: boolean; opts?: CueOpts }
   | { t: number; volumes: { master: number; music: number; sfx: number } };
 
 export interface Scenario {
@@ -24,11 +26,17 @@ export interface Scenario {
   mood: AudioMood;
   volumes?: { master: number; music: number; sfx: number };
   actions?: Action[];
+  /** Loops play a constant 1, so the render is their gain envelope (for click checks). */
+  loopEnvelopes?: boolean;
+  /** Times at which to read every music bus's level, for measuring crossfades. */
+  probe?: number[];
 }
 
 export interface Rendered {
   buffer: AudioBuffer;
   stats: Record<string, unknown>;
+  /** Bus levels at the probe times. */
+  probes: { t: number; levels: Record<string, number> }[];
   /** Wall-clock milliseconds the render took. */
   ms: number;
 }
@@ -45,6 +53,8 @@ export async function render(sc: Scenario, bank: Bank, state: WorldState): Promi
   if (sc.mute?.includes('music')) core.music.out.gain.value = 0;
   if (sc.mute?.includes('ambience')) core.amb.out.gain.value = 0;
   if (sc.solo) core.music.solo = sc.solo;
+  if (sc.probe?.length) core.music.enableMeters();
+  if (sc.loopEnvelopes) core.cues.probeEnvelopes();
   let mood: AudioMood = { ...sc.mood, rules: { ...sc.mood.rules } };
   core.mood(mood);
   core.tick();
@@ -53,6 +63,15 @@ export async function render(sc: Scenario, bank: Bank, state: WorldState): Promi
   const frames = new Set<number>();
   for (let t = TICK; t < sc.dur - q; t += TICK) frames.add(Math.round(t / q));
   for (const a of acts) if (a.t > 0 && a.t < sc.dur - q) frames.add(Math.round(a.t / q));
+  const probeAt = new Set<number>();
+  for (const t of sc.probe ?? []) {
+    const f = Math.round(t / q);
+    if (f > 0 && t < sc.dur - q) {
+      frames.add(f);
+      probeAt.add(f);
+    }
+  }
+  const probes: Rendered['probes'] = [];
   let ai = 0;
   const apply = (now: number) => {
     while (ai < acts.length && acts[ai].t <= now + q / 2) {
@@ -62,6 +81,8 @@ export async function render(sc: Scenario, bank: Bank, state: WorldState): Promi
         mood = { ...mood, ...rest, rules: { ...mood.rules, ...(rules ?? {}) } };
       } else if ('event' in a) core.event(a.event, state);
       else if ('ui' in a) core.ui(a.ui);
+      else if ('cue' in a) core.cue(a.cue, a.opts);
+      else if ('loop' in a) core.loop(a.loop, a.on, a.opts);
       else core.setVolumes(a.volumes);
     }
   };
@@ -72,12 +93,13 @@ export async function render(sc: Scenario, bank: Bank, state: WorldState): Promi
       apply(ctx.currentTime);
       core.mood(mood);
       core.tick();
+      if (probeAt.has(f)) probes.push({ t: ctx.currentTime, levels: core.music.busLevels() });
       void ctx.resume();
     });
   }
   const t0 = performance.now();
   const buffer = await ctx.startRendering();
-  return { buffer, stats: core.stats(), ms: performance.now() - t0 };
+  return { buffer, stats: core.stats(), probes, ms: performance.now() - t0 };
 }
 
 // ---------------------------------------------------------------- analysis
@@ -128,6 +150,37 @@ export function windows(b: AudioBuffer, win = 0.005, from = 0, to = b.duration):
     out.push(db(Math.sqrt(s / (w * chans.length))));
   }
   return out;
+}
+
+/**
+ * The largest jump between two neighbouring samples between two times, on
+ * either channel: a click shows as a step far bigger than the sound's own.
+ */
+export function maxStep(b: AudioBuffer, from = 0, to = b.duration): number {
+  let p = 0;
+  const a = Math.max(1, Math.floor(from * b.sampleRate));
+  const z = Math.min(b.length, Math.floor(to * b.sampleRate));
+  for (let c = 0; c < b.numberOfChannels; c++) {
+    const d = b.getChannelData(c);
+    for (let i = a; i < z; i++) {
+      const v = Math.abs(d[i] - d[i - 1]);
+      if (v > p) p = v;
+    }
+  }
+  return p;
+}
+
+/** Energy of the left and right channels between two times, in dB, for checking pan. */
+export function sidesDb(b: AudioBuffer, from = 0, to = b.duration): { left: number; right: number } {
+  const a = Math.max(0, Math.floor(from * b.sampleRate));
+  const z = Math.min(b.length, Math.floor(to * b.sampleRate));
+  const e = (c: number) => {
+    const d = b.getChannelData(c);
+    let s = 0;
+    for (let i = a; i < z; i++) s += d[i] * d[i];
+    return 10 * Math.log10(s / Math.max(1, z - a) + 1e-20);
+  };
+  return { left: e(0), right: e(b.numberOfChannels - 1) };
 }
 
 /** Seconds from `t` until a 5 ms window first rises above `thresh` dBFS, or Infinity. */

@@ -7,14 +7,19 @@ import {
   normalize, onePole, peak, pink, pluck, rand, white,
 } from './dsp';
 
-export type InstName = 'guitar' | 'banjo' | 'bass' | 'fiddle' | 'marimba' | 'celesta' | 'musicbox' | 'piano' | 'bell' | 'pad';
+export type InstName =
+  | 'guitar' | 'banjo' | 'bass' | 'fiddle' | 'marimba' | 'celesta' | 'musicbox' | 'piano' | 'bell' | 'pad'
+  | 'kalimba' | 'harp' | 'flute' | 'chip';
 
 export type FxName =
   | 'kick' | 'brush' | 'tap' | 'shaker' | 'block' | 'tamb' | 'sleigh'
   | 'till' | 'water' | 'plant' | 'tend' | 'clear' | 'knock' | 'creak' | 'wither' | 'bugs' | 'sprinkle'
   | 'caw' | 'peck' | 'flap' | 'deny' | 'rooster' | 'thunder' | 'sigh' | 'whistle' | 'paper' | 'tick' | 'pop'
   | 'stepGrass' | 'stepSoil' | 'stepGravel' | 'stepDirt' | 'stepWood' | 'stepWater'
-  | 'drop' | 'bird' | 'frog' | 'rain' | 'wind' | 'crickets' | 'cicadas' | 'whoosh';
+  | 'drop' | 'bird' | 'frog' | 'rain' | 'wind' | 'crickets' | 'cicadas' | 'whoosh'
+  | 'frame' | 'pod' | 'card' | 'shuffle' | 'thump' | 'swish' | 'crumple'
+  | 'suck' | 'puff' | 'clunk' | 'stepStone' | 'chirp' | 'squeak' | 'boing' | 'munch' | 'fluff' | 'trill' | 'snuffle' | 'splash' | 'owl'
+  | 'bellows' | 'gust' | 'brook' | 'vents' | 'grass' | 'insects';
 
 
 // ---------------------------------------------------------------- instruments
@@ -924,6 +929,535 @@ function cicadaLoop(seed: number): Float32Array<ArrayBuffer>[] {
   return out;
 }
 
+// ---------------------------------------------------------------- Thistledown and Seedbound
+
+type Note = { data: Float32Array<ArrayBuffer>; f0: number };
+
+/** Kalimba: a steel tine over a small box. The fundamental rings; the bar's high overtones die fast. */
+function kalimbaNote(m: number): Note {
+  const f = mtof(m);
+  const tau = clamp(1.5 - (m - 60) * 0.03, 0.45, 1.5);
+  const d = modal(f, [[1, 1, tau], [1.0012, 0.18, tau * 0.7], [2.01, 0.05, tau * 0.25], [5.95, 0.2, 0.045], [16.7, 0.05, 0.01]], 1.9, 0.0005);
+  const r = rand(m * 17);
+  const tick = highpass(white(Math.round(0.003 * SR), r), 2500);
+  env(tick, 0.0002, 0.0007);
+  mix(d, tick, 0, 0.18);
+  new Biquad('peak', 320, 1.1, 3).apply(d);
+  return { data: edges(normalize(d), 0.0005, 0.05), f0: f };
+}
+
+/** Plucked harp: a round string plucked near the middle, longer and darker than the guitar. */
+function harpNote(m: number, seed: number): Note {
+  const t60 = clamp(3.4 - (m - 43) * 0.05, 1.1, 3.4);
+  const p = pluck(mtof(m), { dur: 2.6, t60, w: 0.5, bright: 0.3, pos: 0.42, seed });
+  new Biquad('peak', 240, 1, 3).apply(p.data);
+  lowpass(p.data, 5000);
+  return { data: edges(normalize(p.data), 0.001, 0.05), f0: p.f0 };
+}
+
+/** A breathy wooden flute or ocarina: nearly a sine, a little second harmonic, breath noise and a chiff. */
+function fluteNote(m: number, seed: number): Note {
+  const f = mtof(m);
+  const r = rand(seed);
+  const d = buf(2.6);
+  const breath = new Biquad('bp', f * 2, 1.5);
+  const hiss = new Biquad('hp', 3200, 0.7);
+  let ph = 0;
+  let vph = r();
+  for (let i = 0; i < d.length; i++) {
+    const t = i / SR;
+    const vib = clamp((t - 0.3) / 0.6, 0, 1) * 0.006;
+    vph += 4.8 / SR;
+    ph += (f * (1 + vib * Math.sin(2 * Math.PI * vph))) / SR;
+    if (ph >= 1) ph -= 1;
+    const w = 2 * Math.PI * ph;
+    const tone = Math.sin(w) + 0.2 * Math.sin(2 * w) + 0.06 * Math.sin(3 * w);
+    const n = r() * 2 - 1;
+    const chiff = Math.exp(-t / 0.035);
+    const air = breath.run(n) * (0.45 + 1.4 * chiff) + hiss.run(n) * 0.05;
+    const a = Math.min(1, t / 0.08) * (0.9 + 0.1 * Math.min(1, t / 0.5)) * (1 + 0.04 * Math.sin(2 * Math.PI * 0.7 * t));
+    d[i] = (tone * (1 - 0.4 * chiff) + air) * a;
+  }
+  lowpass(d, 6500);
+  return { data: edges(normalize(d), 0.001, 0.05), f0: f };
+}
+
+/** A tiny bright tone for chip counts: short enough to fire twenty times a second. */
+function chipNote(m: number): Note {
+  const f = mtof(m);
+  const d = modal(f, [[1, 1, 0.03], [2, 0.22, 0.014], [3, 0.07, 0.008]], 0.12, 0.0004);
+  const r = rand(m);
+  mix(d, highpass(white(Math.round(0.0015 * SR), r), 4000), 0, 0.12);
+  return { data: edges(normalize(d), 0.0003, 0.01), f0: f };
+}
+
+/** A frame drum played with the hand: a low skin thump and the frame's ring. */
+function frame(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = thud(78 + r() * 8, 0.16, 0.5);
+  const skin = lowpass(white(Math.round(0.06 * SR), r), 900);
+  env(skin, 0.001, 0.012);
+  mix(d, skin, 0, 0.35);
+  mix(d, modal(190 + r() * 20, [[1, 1, 0.05], [1.58, 0.4, 0.03]], 0.2, 0.001), 0, 0.25);
+  return edges(normalize(d), 0.0008, 0.03);
+}
+
+/** A dry seed pod shaken once: softer and grainier than the shaker. */
+function pod(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = grains(0.13, 55, 3000, 8500, r, 1.2);
+  env(d, 0.008, 0.035);
+  return edges(normalize(d), 0.001, 0.01);
+}
+
+/** A card slid off the deck: an air flick that rises, and the edge snapping free of the thumb. */
+function card(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const n = Math.round(0.08 * SR);
+  const src = white(n, r);
+  const bp = new Biquad('bp', 2500, 0.9);
+  const d = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    if (i % 32 === 0) bp.set(2200 + 3600 * (i / n), 0.9);
+    d[i] = bp.run(src[i]) * Math.min(1, t / 0.004) * Math.exp(-t / 0.022);
+  }
+  mix(d, modal(2400 + r() * 500, [[1, 1, 0.004]], 0.02, 0.0002), Math.round(0.005 * SR), 0.25);
+  return edges(normalize(d), 0.0005, 0.01);
+}
+
+/** A riffle shuffle: flicks closer and closer together, the bridge settling, a tap to square the deck. */
+function shuffle(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.95);
+  let t = 0.02;
+  for (let k = 0; k < 26; k++) {
+    mix(d, card(seed * 31 + k), Math.round(t * SR), 0.35 + r() * 0.25);
+    t += 0.028 - k * 0.0006;
+  }
+  const brr = lowpass(white(Math.round(0.18 * SR), r), 1500);
+  for (let i = 0; i < brr.length; i++) brr[i] *= Math.sin((Math.PI * i) / brr.length) * (0.7 + 0.3 * Math.sin(i / (0.003 * SR)));
+  mix(d, brr, Math.round((t + 0.04) * SR), 0.5);
+  mix(d, thud(140, 0.02, 0.08), Math.round((t + 0.26) * SR), 0.4);
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** A card set down on felt. */
+function thump(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = thud(95 + r() * 15, 0.035, 0.18);
+  const felt = lowpass(white(Math.round(0.03 * SR), r), 600);
+  env(felt, 0.001, 0.008);
+  mix(d, felt, 0, 0.5);
+  return edges(normalize(d), 0.0005, 0.02);
+}
+
+/** A paper swish through the air, falling in pitch. */
+function swish(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const n = Math.round(0.22 * SR);
+  const d = white(n, r);
+  const bp = new Biquad('bp', 4000, 0.8);
+  for (let i = 0; i < n; i++) {
+    const u = i / n;
+    if (i % 32 === 0) bp.set(4800 - 3000 * u, 0.8);
+    d[i] = bp.run(d[i]) * Math.pow(Math.sin(Math.PI * u), 2);
+  }
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** A card crumpled and set aside. */
+function crumple(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.42);
+  for (let k = 0; k < 5; k++) mix(d, grains(0.08, 30, 1500, 6000, r, 1), Math.round((k * 0.06 + r() * 0.02) * SR), 1 - k * 0.12);
+  const bed = lowpass(white(d.length, r), 3000);
+  for (let i = 0; i < bed.length; i++) bed[i] *= Math.sin((Math.PI * i) / bed.length) * 0.2;
+  mix(d, bed);
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** Into the canister: a rush of air up a tube and a hollow pop. Repitched by size. */
+function suck(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.16);
+  const bp = new Biquad('bp', 300, 2.5);
+  let ph = 0;
+  for (let i = 0; i < d.length; i++) {
+    const t = i / SR;
+    const u = Math.min(1, t / 0.07);
+    if (i % 16 === 0) bp.set(300 + 1700 * u * u, 2.5);
+    const rush = bp.run(r() * 2 - 1) * Math.min(1, t / 0.01) * (t < 0.07 ? 1 : Math.exp(-(t - 0.07) / 0.012));
+    let pop = 0;
+    if (t >= 0.06) {
+      const tt = t - 0.06;
+      ph += (2 * Math.PI * (380 + 900 * (1 - Math.exp(-tt / 0.015)))) / SR;
+      pop = Math.sin(ph) * Math.exp(-tt / 0.025) * Math.min(1, tt / 0.002);
+    }
+    d[i] = rush * 1.2 + pop * 0.6;
+  }
+  return edges(normalize(d), 0.001, 0.01);
+}
+
+/** A shot from the bellows: a burst of air, a low thump and a cork-like pop at the muzzle. */
+function puff(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.35);
+  const air = lowpass(lowpass(white(d.length, r), 1600), 2200);
+  for (let i = 0; i < air.length; i++) {
+    const t = i / SR;
+    air[i] *= Math.min(1, t / 0.006) * Math.exp(-t / 0.07);
+  }
+  mix(d, air);
+  mix(d, thud(70 + r() * 10, 0.04, 0.2), 0, 0.6);
+  mix(d, modal(520 + r() * 80, [[1, 1, 0.012], [2.2, 0.3, 0.006]], 0.06, 0.0005), 0, 0.3);
+  return edges(normalize(d), 0.0008, 0.02);
+}
+
+/** A full canister: a hollow metal clunk. */
+function clunk(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = modal(240, [[1, 1, 0.06], [2.32, 0.55, 0.04], [3.91, 0.3, 0.02], [5.3, 0.12, 0.01]], 0.3, 0.0004);
+  mix(d, thud(90, 0.04, 0.15), 0, 0.6);
+  mix(d, highpass(white(Math.round(0.004 * SR), r), 1500), 0, 0.3);
+  return edges(normalize(d), 0.0004, 0.02);
+}
+
+/** A footstep on stone or a path: a hard heel, a click and a little grit. */
+function stepStone(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.14);
+  mix(d, thud(110 + r() * 20, 0.018, 0.08), 0, 0.7);
+  mix(d, modal(1300 + r() * 500, [[1, 1, 0.006], [2.4, 0.4, 0.003]], 0.03, 0.0002), 0, 0.35);
+  mix(d, grains(0.1, 14, 1800, 5000, r, 1.6), Math.round(0.004 * SR), 0.3);
+  return edges(normalize(d), 0.0005, 0.02);
+}
+
+/** A downy's happy chirp, four kinds: pip-wee, three pips, wee-oo and a rolling brrip. */
+function downyChirp(kind: number, seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const b = 1900 + r() * 300;
+  let d: Float32Array<ArrayBuffer>;
+  if (kind === 0) {
+    d = chirps([{ at: 0, len: 0.05, f: (u) => b * (1 + 0.25 * u) }, { at: 0.08, len: 0.12, f: (u) => b * 1.2 * (1 + 0.35 * Math.sin(u * Math.PI * 0.5)) }], r);
+  } else if (kind === 1) {
+    d = chirps([0, 0.07, 0.14].map((at, k) => ({ at, len: 0.045, f: (u: number) => b * (1 + k * 0.12) * (1 + 0.2 * u) })), r);
+  } else if (kind === 2) {
+    d = chirps([{ at: 0, len: 0.22, f: (u) => b * (1 + 0.45 * Math.sin(u * Math.PI)) }], r);
+  } else {
+    d = chirps(Array.from({ length: 7 }, (_, k) => ({ at: k * 0.025, len: 0.022, f: (u: number) => b * 1.1 * (1 + 0.15 * u + k * 0.02) })), r);
+  }
+  return edges(normalize(d), 0.001, 0.01);
+}
+
+/** A downy drawn up off the ground: a rising squeak with a wobble. */
+function squeak(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const b = 1250 + r() * 150;
+  const d = chirps([{ at: 0, len: 0.28, f: (u) => b + 1500 * u * u + 120 * Math.sin(u * 2 * Math.PI * 7) }], r);
+  return edges(normalize(d), 0.001, 0.01);
+}
+
+/** A soft round body landing: a springy tone that settles, over a thud. */
+function boing(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.45);
+  let ph = 0;
+  const f0 = 150 + r() * 30;
+  for (let i = 0; i < d.length; i++) {
+    const t = i / SR;
+    const f = f0 * (1 + 0.9 * (1 - Math.exp(-t / 0.03))) * (1 + 0.06 * Math.sin(2 * Math.PI * 11 * t) * Math.exp(-t / 0.2));
+    ph += (2 * Math.PI * f) / SR;
+    d[i] = (Math.sin(ph) + 0.3 * Math.sin(2 * ph)) * Math.min(1, t / 0.002) * Math.exp(-t / 0.12);
+  }
+  mix(d, thud(80, 0.03, 0.12), 0, 0.5);
+  return edges(normalize(d), 0.0008, 0.02);
+}
+
+/** Three small crunchy bites. */
+function munch(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.5);
+  for (let k = 0; k < 3; k++) {
+    const at = Math.round((k * 0.14 + r() * 0.02) * SR);
+    mix(d, grains(0.07, 40, 1200, 4500, r, 1.4), at, 0.8);
+    mix(d, thud(120 + r() * 30, 0.015, 0.05), at, 0.4);
+  }
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** Down tufts popping free: soft breathy puffs, each with a tiny high pip. */
+function fluff(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.3);
+  for (let k = 0; k < 3; k++) {
+    const at = Math.round((k * 0.07 + r() * 0.015) * SR);
+    const p = lowpass(white(Math.round(0.05 * SR), r), 2500);
+    env(p, 0.004, 0.015);
+    mix(d, p, at, 0.8 - k * 0.15);
+    mix(d, chirps([{ at: 0, len: 0.02, f: () => 1800 + r() * 600 }], r), at + Math.round(0.004 * SR), 0.25);
+  }
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** A frazzled downy: an anxious trill between two notes a semitone apart. */
+function trill(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.55);
+  const fa = 1500 + r() * 100;
+  const fb = fa * 1.0595;
+  const k = onePole(120);
+  let f = fa;
+  let ph = 0;
+  for (let i = 0; i < d.length; i++) {
+    const t = i / SR;
+    f += k * ((Math.floor(t * 22) % 2 ? fb : fa) - f);
+    ph += (2 * Math.PI * f) / SR;
+    d[i] = Math.sin(ph) * Math.pow(Math.sin((Math.PI * t) / 0.55), 0.5) * (0.7 + 0.3 * Math.sin(2 * Math.PI * 7 * t));
+  }
+  return edges(normalize(d), 0.001, 0.02);
+}
+
+/** A nettleback nosing about: wet sniffs and a small grunt. */
+function snuffle(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.75);
+  for (let k = 0; k < 4; k++) {
+    const len = Math.round((0.06 + r() * 0.03) * SR);
+    const s = white(len, r);
+    new Biquad('bp', 800 + r() * 500, 3).apply(s);
+    for (let i = 0; i < len; i++) s[i] *= Math.min(1, i / (0.01 * SR)) * Math.exp(-i / (0.03 * SR));
+    mix(d, s, Math.round((k * 0.13 + r() * 0.02) * SR), k % 2 ? 0.7 : 1);
+  }
+  const grunt = voice(0.16, (t) => 110 - 30 * t, (t) => Math.min(1, t / 0.01) * Math.max(0, 1 - t / 0.15), [[480, 3, 1], [1100, 4, 0.4]], 0.5, r);
+  mix(d, grunt, Math.round(0.55 * SR), 0.6);
+  return edges(normalize(d), 0.002, 0.03);
+}
+
+/** Something dropping into water: a plop, a burst of spray and bubbles rising. */
+function splash(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const d = buf(0.6);
+  const burst = lowpass(highpass(white(Math.round(0.3 * SR), r), 400), 4000);
+  env(burst, 0.003, 0.08);
+  mix(d, burst);
+  mix(d, thud(140, 0.03, 0.1), 0, 0.5);
+  for (let k = 0; k < 8; k++) {
+    const f = 500 + r() * 1100;
+    const at = Math.round((0.05 + r() * 0.4) * SR);
+    const len = Math.round(0.05 * SR);
+    let ph = 0;
+    for (let i = 0; i < len && at + i < d.length; i++) {
+      ph += (2 * Math.PI * f * (1 + 0.6 * (i / len))) / SR;
+      d[at + i] += Math.sin(ph) * Math.exp(-i / (0.012 * SR)) * (0.2 + r() * 0.3);
+    }
+  }
+  return edges(normalize(d), 0.001, 0.03);
+}
+
+/** A tawny owl far off: hoo, hoo-hoo. */
+function owl(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const f = 360 + r() * 40;
+  const d = buf(1.3);
+  const hoots: [number, number][] = [[0, 0.32], [0.55, 0.12], [0.74, 0.38]];
+  const lp = new Biquad('lp', 800, 0.7);
+  for (const [at, len] of hoots) {
+    const a0 = Math.round(at * SR);
+    const n = Math.round(len * SR);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const u = i / n;
+      ph += (2 * Math.PI * f * (1.04 - 0.06 * u)) / SR;
+      const a = Math.pow(Math.sin(Math.PI * u), 0.6);
+      d[a0 + i] += (Math.sin(ph) + lp.run(r() * 2 - 1) * 0.15) * a;
+    }
+  }
+  lowpass(d, 1200);
+  return edges(normalize(d), 0.002, 0.03);
+}
+
+/** The bellows drawing: a rushing inhale that pumps twice a second, and the leather creaking with it. */
+function bellowsLoop(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const L = 2;
+  const xf = 0.25;
+  const n = Math.round((L + xf) * SR);
+  const air = white(n, r);
+  const bp = new Biquad('bp', 900, 0.8);
+  const hp = new Biquad('hp', 250, 0.7);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const pump = 0.75 + 0.25 * Math.sin(2 * Math.PI * 2 * t);
+    if (i % 64 === 0) bp.set(800 + 500 * pump, 0.8);
+    air[i] = hp.run(bp.run(air[i])) * pump;
+  }
+  normalize(air, 0.7);
+  const creak = new Float32Array(n);
+  for (const at of [0.35, 0.85, 1.35, 1.85]) {
+    const a0 = Math.round(at * SR);
+    const len = Math.round(0.11 * SR);
+    const cb = new Biquad('bp', 1000 + r() * 300, 4);
+    let cph = 0;
+    for (let j = 0; j < len; j++) {
+      const u = j / len;
+      cph += (70 + 40 * u + (r() - 0.5) * 20) / SR;
+      if (cph >= 1) cph -= 1;
+      creak[a0 + j] += cb.run(cph < 0.1 ? 1 : 0) * Math.sin(Math.PI * u);
+    }
+  }
+  normalize(creak, 0.3);
+  mix(air, creak);
+  return normalize(foldLoop(air, Math.round(xf * SR)), 0.8);
+}
+
+/** A gust over open ground: airy, swelling twice in four seconds. */
+function gustLoop(seed: number): Float32Array<ArrayBuffer>[] {
+  const r = rand(seed);
+  const L = 4;
+  const xf = 0.6;
+  const n = Math.round((L + xf) * SR);
+  const out: Float32Array<ArrayBuffer>[] = [];
+  for (let c = 0; c < 2; c++) {
+    const src = white(n, r);
+    lowpass(src, 3000);
+    const bp = new Biquad('bp', 900, 0.9);
+    const d = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const s = Math.sin((Math.PI * t) / 2 + c * 0.4);
+      const g = 0.35 + 0.65 * s * s;
+      if (i % 64 === 0) bp.set(500 + 1600 * g, 0.9);
+      d[i] = bp.run(src[i]) * g;
+    }
+    out.push(normalize(foldLoop(d, Math.round(xf * SR)), 0.8));
+  }
+  return out;
+}
+
+/** A brook: a bed of moving water and many small bubbles. */
+function brookLoop(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const L = 4;
+  const xf = 0.5;
+  const n = Math.round((L + xf) * SR);
+  const d = pink(n, r);
+  highpass(d, 250);
+  lowpass(d, 2200);
+  const gur = new Biquad('bp', 600, 2);
+  const src = white(n, r);
+  let walk = 0;
+  for (let i = 0; i < n; i++) {
+    if (i % 64 === 0) {
+      walk = walk * 0.9 + (r() - 0.5) * 0.4;
+      gur.set(550 + walk * 400, 2);
+    }
+    d[i] = d[i] * 0.5 + gur.run(src[i]) * 0.25;
+  }
+  const bubbles = Math.round((L + xf) * 55);
+  for (let k = 0; k < bubbles; k++) {
+    const f = 350 + r() * 1100;
+    const at = Math.floor(r() * (n - 1600));
+    const len = Math.round((0.015 + r() * 0.025) * SR);
+    const amp = Math.pow(r(), 2) * 0.5;
+    let ph = 0;
+    for (let i = 0; i < len; i++) {
+      ph += (2 * Math.PI * f * (1 + 0.5 * (i / len))) / SR;
+      d[at + i] += Math.sin(ph) * amp * Math.sin((Math.PI * i) / len);
+    }
+  }
+  return normalize(foldLoop(d, Math.round(xf * SR)), 0.8);
+}
+
+/** Steam vents: a hiss that surges, a low rumble and the odd bloop of mud. */
+function ventsLoop(seed: number): Float32Array<ArrayBuffer> {
+  const r = rand(seed);
+  const L = 4;
+  const xf = 0.5;
+  const n = Math.round((L + xf) * SR);
+  const hiss = highpass(highpass(white(n, r), 1800), 1800);
+  lowpass(hiss, 9000);
+  const rumble = lowpass(lowpass(brown(n, r), 160), 160);
+  const d = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const s = Math.sin((Math.PI * t) / 2);
+    d[i] = hiss[i] * (0.45 + 0.55 * Math.pow(s * s, 2)) + rumble[i] * 0.8;
+  }
+  for (let k = 0; k < 3; k++) {
+    const at = Math.round((0.4 + k * 1.3 + r() * 0.3) * SR);
+    const len = Math.round(0.12 * SR);
+    let ph = 0;
+    const f = 120 + r() * 140;
+    for (let i = 0; i < len; i++) {
+      ph += (2 * Math.PI * f * (1 + 0.8 * (i / len))) / SR;
+      d[at + i] += Math.sin(ph) * Math.sin((Math.PI * i) / len) * 0.25;
+    }
+  }
+  return normalize(foldLoop(d, Math.round(xf * SR)), 0.8);
+}
+
+/** Wind in long grass: a rustle that flutters and swells, over a low wind. */
+function grassLoop(seed: number): Float32Array<ArrayBuffer>[] {
+  const r = rand(seed);
+  const L = 6;
+  const xf = 0.8;
+  const n = Math.round((L + xf) * SR);
+  const out: Float32Array<ArrayBuffer>[] = [];
+  for (let c = 0; c < 2; c++) {
+    const src = white(n, r);
+    const low = pink(n, r);
+    const bp = new Biquad('bp', 3200, 0.7);
+    const lbp = new Biquad('bp', 420, 0.8);
+    const kf = onePole(25);
+    let flutter = 0;
+    const p1 = r() * 6;
+    const p2 = r() * 6;
+    const d = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      flutter += kf * (r() - flutter);
+      const g = 0.45 + 0.35 * Math.sin((2 * Math.PI * t) / 3 + p1) + 0.2 * Math.sin((2 * Math.PI * t) / 2 + p2);
+      d[i] = bp.run(src[i]) * g * (0.5 + flutter) + lbp.run(low[i]) * g * 0.5;
+    }
+    out.push(normalize(foldLoop(d, Math.round(xf * SR)), 0.8));
+  }
+  return out;
+}
+
+/** Meadow insects by day: grasshoppers chirring in phrases, near and far. */
+function insectLoop(seed: number): Float32Array<ArrayBuffer>[] {
+  const r = rand(seed);
+  const L = 4;
+  const xf = 0.3;
+  const n = Math.round((L + xf) * SR);
+  const chans = [new Float32Array(n), new Float32Array(n)];
+  const bugs = [
+    { f: 6800, rate: 38, pan: 0.2, amp: 1 },
+    { f: 7600, rate: 46, pan: 0.75, amp: 0.7 },
+    { f: 6200, rate: 31, pan: 0.5, amp: 0.5 },
+  ];
+  for (const b of bugs) {
+    let t = r() * 0.8;
+    const w = (2 * Math.PI * b.f) / SR;
+    while (t < L + xf - 0.3) {
+      const phrase = 0.4 + r() * 0.8;
+      for (let p = 0; p < phrase * b.rate; p++) {
+        const at = Math.round((t + p / b.rate) * SR);
+        const len = Math.round(0.004 * SR);
+        const swell = Math.sin((Math.PI * p) / (phrase * b.rate));
+        for (let i = 0; i < len && at + i < n; i++) {
+          const s = Math.sin(w * i) * Math.sin((Math.PI * i) / len) * swell * b.amp;
+          chans[0][at + i] += s * (1 - b.pan);
+          chans[1][at + i] += s * b.pan;
+        }
+      }
+      t += phrase + 0.5 + r() * 1;
+    }
+  }
+  return chans.map((c) => normalize(foldLoop(c, Math.round(xf * SR)), 0.7));
+}
+
 // ---------------------------------------------------------------- jobs
 
 export const CENTRES: Record<InstName, number[]> = {
@@ -937,6 +1471,10 @@ export const CENTRES: Record<InstName, number[]> = {
   piano: [36, 43, 50, 57, 64, 71, 78, 85],
   bell: [62, 69, 76, 83, 90],
   pad: [45, 52, 59, 66, 73],
+  kalimba: [60, 67, 74, 81, 88],
+  harp: [43, 50, 57, 64, 71, 78],
+  flute: [60, 67, 74, 81, 88],
+  chip: [79, 91],
 };
 
 const MAKERS: Record<InstName, (m: number, seed: number) => { data: Float32Array<ArrayBuffer>; f0: number }> = {
@@ -950,6 +1488,10 @@ const MAKERS: Record<InstName, (m: number, seed: number) => { data: Float32Array
   piano: (m) => pianoNote(m),
   bell: (m) => bellNote(m),
   pad: (m) => padNote(m),
+  kalimba: (m) => kalimbaNote(m),
+  harp: harpNote,
+  flute: fluteNote,
+  chip: (m) => chipNote(m),
 };
 
 export type Job = { type: 'inst'; name: InstName; centre: number } | { type: 'fx'; name: FxName; k: number };
@@ -963,6 +1505,13 @@ const PLAN: (InstName | [FxName, number, FxMaker])[] = [
   ['paper', 2, (s) => paper(s)],
   ['deny', 1, (s) => deny(s)],
   'pad', 'musicbox', 'marimba', 'guitar', 'bass', 'celesta', 'piano', 'fiddle', 'banjo', 'bell',
+  // The ranch's band and the deck's chip tone, then the cards in hand.
+  'kalimba', 'harp', 'flute', 'chip',
+  ['card', 4, (s) => card(s)],
+  ['thump', 2, (s) => thump(s)],
+  ['swish', 2, (s) => swish(s)],
+  ['frame', 2, (s) => frame(s)],
+  ['pod', 3, (s) => pod(s)],
   ['kick', 1, () => kick()],
   ['brush', 3, (s) => brush(s, true)],
   ['tap', 2, (s) => brush(s, false)],
@@ -1002,6 +1551,28 @@ const PLAN: (InstName | [FxName, number, FxMaker])[] = [
   ['bird', 6, (s, k) => bird(k, s)],
   ['frog', 4, (s, k) => frog(k, s)],
   ['thunder', 2, (s) => thunder(s)],
+  // Thistledown's tool, creatures and valley, and the rest of Seedbound's table.
+  ['bellows', 1, (s) => bellowsLoop(s)],
+  ['suck', 3, (s) => suck(s)],
+  ['puff', 3, (s) => puff(s)],
+  ['stepStone', 4, (s) => stepStone(s)],
+  ['chirp', 4, (s, k) => downyChirp(k, s)],
+  ['squeak', 2, (s) => squeak(s)],
+  ['boing', 2, (s) => boing(s)],
+  ['clunk', 1, (s) => clunk(s)],
+  ['munch', 2, (s) => munch(s)],
+  ['fluff', 3, (s) => fluff(s)],
+  ['trill', 2, (s) => trill(s)],
+  ['snuffle', 2, (s) => snuffle(s)],
+  ['splash', 2, (s) => splash(s)],
+  ['shuffle', 2, (s) => shuffle(s)],
+  ['crumple', 2, (s) => crumple(s)],
+  ['grass', 1, (s) => grassLoop(s)],
+  ['insects', 1, (s) => insectLoop(s)],
+  ['gust', 1, (s) => gustLoop(s)],
+  ['brook', 1, (s) => brookLoop(s)],
+  ['vents', 1, (s) => ventsLoop(s)],
+  ['owl', 2, (s) => owl(s)],
 ];
 
 /** Every buffer to build, in the order they are wanted. */

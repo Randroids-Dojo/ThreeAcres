@@ -93,3 +93,57 @@ Ambience for the ranch comes from `mood`:
 - **Night:** crickets and soft owls.
 - **Near the Hollow:** water, as a game can request with `loop('ranch.water', on, { gain })`.
 - **On the Ridge:** steam vents, with `loop('ranch.vents', on, { gain })`.
+
+## What the engine does
+
+This records how `src/audio` meets the spec above, so a game knows what to pass.
+
+### Music
+
+- **Picked by `mood.game`**, not by `rules.clock`. `scene: 'title'` always plays the title. Homestead plays the folk band, the deck the felt piano, the ranch its own band. The old Bushel & Co. marimba groove is gone; `rules.clock` now only picks Sunup's dawn sound.
+- **Switching games** fades the old bus out (time constant 0.26 s) and the new one in (0.2 s): about 95% of the way by 0.8 s, and the sum of the two never sags under 0.8. The new arrangement sounds its chord the moment it enters.
+- **Homestead:** as before, with seasons, the late-hours thinning from 17:30 and the lullaby from 21:00. Only Sunup thins and hands over to the lullaby.
+- **Deck:** felt piano, celesta and pad, a touch slower than the shared tempo. `intensity` brings in a lift layer at 0.9 times its value: a soft piano pulse in eighths, celesta a register up, a seed pod and a frame drum. It comes in most of the way within a second and settles over about 2.5 s once intensity drops.
+- **Ranch by day:** kalimba ostinato, harp bass and rolls, a breathy flute lead (lower in autumn and winter), open pads (root, fifth, ninth, third), and hand percussion (frame drum, finger taps, seed pod), all through a dotted-eighth echo for the valley. Winter rests the percussion and gives the lead to bells.
+- **Ranch by night:** slow harp, a few kalimba (or winter bell) stars, a far ocarina in the B sections, longer echo, about 10% slower. Day and night crossfade by `mood.hour` (any hour 0 to 24): dusk from 18:30 to 20:30, dawn from 4:30 to 6:30.
+- **Ranch tension:** `intensity` brings in a frame-drum heartbeat, a low harp ostinato leaning on the flat sixth, and a held suspension, at 0.85 times its value, by day or night.
+- **Seasons** colour every arrangement through the shared progressions, keys and tempos.
+
+### Ambience
+
+Weather (rain, storm, thunder, wind) sounds in every game. The deck hears it a little further off (0.7). Night brings crickets everywhere. The ranch adds wind in long grass, meadow insects by day, far birds through a soft lowpass, and owls at night. `ranch.water` and `ranch.vents` sit with the ambience and follow its level.
+
+### Cues and loops
+
+- **Before the first tap**, one-shots are dropped. Loops are remembered and start once there is sound.
+- **Unknown names** do nothing, for both `cue` and `loop`.
+- **`pan`** is -1 to 1 for every cue and loop. **`gain`** scales every cue and loop. Cues whose gain carries an amount keep a floor so a small amount is still heard: `deck.water` (0.35), `ranch.land` (0.3), `ranch.coins` (0.6, and one to four notes by gain).
+- **`pitch` on sound effects** (steps, sucks, chirps, puffs and the like) is the playback rate.
+- **`pitch` on the stepped cues** picks a note:
+  - `deck.harvest` uses the key's pentatonic from a fifth above the tonic, about two and a half octaves.
+  - `deck.mult` uses the pentatonic an octave up. It adds an octave bell from the fifth rung and a music box from the eighth.
+  - `deck.chip` uses the tones of the chord sounding right now.
+  - The note is the rung nearest `pitch` semitones above the bottom. Within a chain (calls less than 0.9 s apart), a rising pitch always takes a higher rung and never repeats or falls, so pass any rising pitch, for example `2 ** (n / 12)` or `1 + n * 0.05`. Leave `pitch` out and each call in a chain takes the next rung by itself (chips wrap; harvests and mults hold at the top).
+- **`pitch` on the tunes** (`deck.big`, `deck.quota`, `deck.fail`, `ranch.goal`, `ranch.sleep`) snaps to the nearest in-key transposition: an octave, a fifth or a fourth either way. `ranch.slot` picks a pentatonic note by pitch.
+- **Rate limits:**
+
+  | Cue | At most |
+  |---|---|
+  | `deck.chip` | about 29 a second, four sounding at once (may slip up to 12 ms) |
+  | `deck.hover` | 20 a second |
+  | `ranch.step` and `ranch.stepstone` | 12 a second between them |
+  | `ranch.suck` | 36 a second, eight sounding at once |
+  | `deck.draw` | queues up to 0.5 s, one every 65 ms (a riffle) |
+
+  Past 30 live effect voices the busy cues (hovers, steps, sucks) drop first, past 38 the ordinary ones, and fanfares, refusals and chips keep going up to 48.
+- **Loops** fade in and out on their own gain (`ranch.draw` in about 60 ms and out in about 150 ms). Calling `loop(name, true, opts)` every frame is cheap; a changed gain, pitch or pan glides there. A game's loops are silent while another game is playing (they fade with the music) and come back when it returns, so a paused ranch never leaves the bellows running.
+
+### Sunup events added since
+
+`refill` (a splash and a gurgle), `upgrade` (three knocks and a bell climbing with the level) and `request` (a warm rise when filled, a soft fall when missed).
+
+### Checking it
+
+- `/?dev=audio` has a game selector, an intensity slider, a button for every cue (with pan, gain and pitch sliders), loop toggles, and scenario buttons: a cascade, a chip flood, a draw with 30 sucks a second, a walk, and a nettleback.
+- `node scripts/audio-check.mjs` measures everything here and writes WAVs, a cue sheet (`cue-sheet.txt`) and `report.json` to `/tmp/acres-audio-2`.
+- `node scripts/audio-shots.mjs` presses every workbench button in a real page and takes screenshots.

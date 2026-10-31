@@ -7,14 +7,16 @@
 import { openPage, startServer } from './audio-lib.mjs';
 
 const ARR = {
-  'day spring': { mood: { rules: { clock: 'day' }, season: 0 }, parts: { lead: ['fiddle', 'banjo'], guitar: ['guitar'], bass: ['bass'], drums: ['kick', 'brush', 'tap', 'shaker'] } },
-  'day autumn': { mood: { rules: { clock: 'day' }, season: 2 }, parts: { lead: ['fiddle', 'banjo'], guitar: ['guitar'], bass: ['bass'], pad: ['pad'], drums: ['kick', 'brush'] } },
-  'day winter': { mood: { rules: { clock: 'day' }, season: 3 }, parts: { lead: ['fiddle', 'bell'], guitar: ['guitar'], bass: ['bass'], drums: ['sleigh'] } },
-  'turns spring': { mood: { rules: { clock: 'turns' }, season: 0 }, parts: { lead: ['celesta'], piano: ['piano'], pad: ['pad'], sprinkle: ['musicbox'] } },
-  'flow x1': { mood: { rules: { clock: 'flow' }, speed: 1 }, parts: { lead: ['marimba'], bass: ['bass'], drums: ['kick', 'block', 'shaker'] } },
-  'flow x4': { mood: { rules: { clock: 'flow' }, speed: 4 }, parts: { 'marimba (lead and ostinato)': ['marimba'], counter: ['musicbox'], banjo: ['banjo'], bass: ['bass'], drums: ['kick', 'block', 'shaker', 'tamb'] } },
-  title: { mood: { scene: 'title' }, parts: { lead: ['piano', 'celesta'], guitar: ['guitar'], bass: ['bass'], pad: ['pad'] } },
-  lullaby: { mood: { hour: 23.6, rules: { clock: 'day' } }, parts: { lead: ['musicbox'], arpeggio: ['guitar'], piano: ['piano'], pad: ['pad'] } },
+  'homestead spring': { mood: { game: 'homestead', season: 0 }, parts: { lead: ['fiddle', 'banjo'], guitar: ['guitar'], bass: ['bass'], drums: ['kick', 'brush', 'tap', 'shaker'] } },
+  'homestead autumn': { mood: { game: 'homestead', season: 2 }, parts: { lead: ['fiddle', 'banjo'], guitar: ['guitar'], bass: ['bass'], pad: ['pad'], drums: ['kick', 'brush'] } },
+  'homestead winter': { mood: { game: 'homestead', season: 3 }, parts: { lead: ['fiddle', 'bell'], guitar: ['guitar'], bass: ['bass'], drums: ['sleigh'] } },
+  'deck spring': { mood: { game: 'deck', season: 0 }, parts: { lead: ['celesta'], piano: ['piano'], pad: ['pad'], sprinkle: ['musicbox'] } },
+  'deck scoring (intensity 1)': { mood: { game: 'deck', season: 0, intensity: 1 }, parts: { 'lead and lift': ['celesta'], piano: ['piano'], pad: ['pad'], 'pod and frame': ['pod', 'frame'] } },
+  'ranch spring': { mood: { game: 'ranch', season: 0, hour: 11 }, parts: { 'flute lead': ['flute'], kalimba: ['kalimba'], harp: ['harp'], pad: ['pad'], drums: ['frame', 'tap', 'pod'] } },
+  'ranch night': { mood: { game: 'ranch', season: 0, hour: 23 }, parts: { ocarina: ['flute'], harp: ['harp'], 'kalimba stars': ['kalimba'], pad: ['pad'] } },
+  'ranch tension (intensity 1)': { mood: { game: 'ranch', season: 0, hour: 11, intensity: 1 }, parts: { 'flute lead': ['flute'], kalimba: ['kalimba'], harp: ['harp'], pad: ['pad'], drums: ['frame', 'tap', 'pod'] } },
+  title: { mood: { game: 'title', scene: 'title' }, parts: { lead: ['piano', 'celesta'], guitar: ['guitar'], bass: ['bass'], pad: ['pad'] } },
+  lullaby: { mood: { game: 'homestead', hour: 23.6 }, parts: { lead: ['musicbox'], arpeggio: ['guitar'], piano: ['piano'], pad: ['pad'] } },
 };
 
 const server = await startServer();

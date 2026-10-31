@@ -1,14 +1,16 @@
-// Audio workbench at /?dev=audio. A button for every simulation event and
-// interface cue, a control for every mood field, volume sliders, a meter and
-// offline renders. window.audioDev drives the same engine from Playwright.
+// Audio workbench at /?dev=audio. A game selector, a control for every mood
+// field, a button for every simulation event, interface cue and named cue, a
+// toggle for every loop, volume sliders, a meter and offline renders.
+// window.audioDev drives the same engine from Playwright.
 
-import type { AudioMood, UiCue } from '../contract';
+import type { AudioMood, CueOpts, UiCue } from '../contract';
 import { AXIS_INFO, PRESETS } from '../sim/presets';
 import type { BuildKind, Rules, Season, SimEvent, TileKind, Weather, WorldState } from '../sim/types';
 import { createWorld } from '../sim/world';
 import type { Core } from './core';
+import { DECK_CUES, LOOPS, RANCH_CUES } from './cues';
 import { createAudio, getBank } from './index';
-import { character, longestQuiet, onsetAfter, onsetRate, peakDb, pitchNear, render, rmsDb, wavBase64, windows } from './offline';
+import { character, longestQuiet, maxStep, onsetAfter, onsetRate, peakDb, pitchNear, render, rmsDb, sidesDb, wavBase64, windows } from './offline';
 import type { Scenario } from './offline';
 
 export const UI_CUES: UiCue[] = ['tap', 'open', 'close', 'toggle', 'preset', 'buy', 'deny', 'tool', 'page', 'star', 'order'];
@@ -64,6 +66,9 @@ export function sampleEvents(o: Partial<EventOpts> = {}): Record<SimEvent['type'
     rules: { type: 'rules', rules, changed: ['clock'] },
     tired: { type: 'tired' },
     hire: { type: 'hire', id: 3 },
+    refill: { type: 'refill', x, y, by: p.by },
+    upgrade: { type: 'upgrade', tool: 'can', level: 2 },
+    request: { type: 'request', id: 4, who: 'Mabel', done: p.done, reward: 120 },
   };
 }
 
@@ -100,7 +105,8 @@ const CSS = `
 .aw .meter i { position: absolute; left: 0; top: 0; bottom: 0; background: #8cc152; }
 .aw .meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: #f3ead6; }
 .aw pre { margin: 0; font: 12px/1.35 ui-monospace, monospace; white-space: pre-wrap; color: #cfe3c0; max-height: 260px; overflow: auto; }
-.aw .hint { color: #b5c4a6; font-size: 13px; }
+/* Not .hint: Sunup's HUD styles that class globally (absolute, transparent). */
+.aw .aw-note { color: #b5c4a6; font-size: 13px; }
 `;
 
 export function runAudioDev(): void {
@@ -122,6 +128,7 @@ export function runAudioDev(): void {
   const mood = defaultMood();
   let state = devState(mood.rules);
   const opts: EventOpts = { ...DEFAULTS };
+  const cueOpts: Required<CueOpts> = { pan: 0, gain: 1, pitch: 1 };
   const volumes = { master: 1, music: 1, sfx: 1 };
   let suspended = false;
 
@@ -183,20 +190,26 @@ export function runAudioDev(): void {
   // ---------------------------------------------------------------- header
   const head = card('Three Acres audio workbench', true);
   const status = el('div', 'Tap anywhere to start the sound.', head);
-  status.className = 'hint';
+  status.className = 'aw-note';
   const meterBox = el('div', '', head);
   meterBox.className = 'meter';
   const meterFill = el('i', '', meterBox);
   const meterPeak = el('b', '', meterBox);
   const meterText = el('div', '', head);
-  meterText.className = 'hint';
+  meterText.className = 'aw-note';
 
   // ---------------------------------------------------------------- mood
   const mc = card('Mood');
   const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+  const GAMES: AudioMood['game'][] = ['title', 'homestead', 'ranch', 'deck'];
   let r = row(mc);
-  select(r, 'Clock', ['day', 'turns', 'flow'] as Rules['clock'][], () => mood.rules.clock, (v) => (mood.rules = { ...mood.rules, clock: v }));
-  select(r, 'Speed', [0, 1, 2, 4], () => mood.speed, (v) => (mood.speed = v));
+  const gameSel = select(r, 'Game', GAMES, () => mood.game, (v) => (mood.game = v), ['Title', 'Sunup', 'Thistledown', 'Seedbound']);
+  const setGame = (g: AudioMood['game']) => {
+    mood.game = g;
+    gameSel.value = g;
+  };
+  r = row(mc);
+  slider(r, 'Intensity', 0, 1, 0.05, () => mood.intensity, (v) => (mood.intensity = v));
   r = row(mc);
   select(r, 'Scene', ['title', 'farm', 'menu'] as AudioMood['scene'][], () => mood.scene, (v) => (mood.scene = v));
   select(r, 'Season', [0, 1, 2, 3] as Season[], () => mood.season, (v) => (mood.season = v), SEASONS);
@@ -210,10 +223,10 @@ export function runAudioDev(): void {
   tired.type = 'checkbox';
   tired.addEventListener('change', () => (mood.tired = tired.checked));
   const ax = card('Other rules');
-  el('div', 'Camera changes how effects are panned: close follows the farmer, wide pans across the farm.', ax).className = 'hint';
+  el('div', 'Camera changes how effects are panned: close follows the farmer, wide pans across the farm.', ax).className = 'aw-note';
   r = row(ax);
-  const AXES: Record<Exclude<keyof Rules, 'clock'>, string[]> = {
-    view: ['2d', '3d'], camera: ['close', 'wide'], control: ['walk', 'point'], growth: ['classic', 'synergy'],
+  const AXES: Record<keyof Rules, string[]> = {
+    clock: ['day', 'turns', 'flow'], view: ['2d', '3d'], camera: ['close', 'wide'], control: ['walk', 'point'], growth: ['classic', 'synergy'],
     goal: ['market', 'almanac', 'orders'], weather: ['calm', 'wild'], crew: ['solo', 'crew'], tools: ['kit', 'smart'],
   };
   for (const k of Object.keys(AXES) as (keyof typeof AXES)[]) {
@@ -261,9 +274,8 @@ export function runAudioDev(): void {
   for (const type of Object.keys(sampleEvents()) as SimEvent['type'][]) {
     button(r, type, () => engine.event(sampleEvents(opts)[type], state));
   }
-  el('div', 'Bursts, the way the farm produces them.', ec).className = 'hint';
+  el('div', 'Bursts, the way the farm produces them.', ec).className = 'aw-note';
   r = row(ec);
-  const later = (ms: number, fn: () => void) => window.setTimeout(fn, ms);
   const dawnBurst = () => {
     engine.event(sampleEvents(opts).dawn, state);
     for (let k = 0; k < 60; k++) engine.event({ type: 'grow', x: 2 + (k % 14), y: 5 + (k % 8), crop: 'carrot', stage: 2 }, state);
@@ -299,9 +311,91 @@ export function runAudioDev(): void {
   r = row(uc);
   for (const c of UI_CUES) button(r, c, () => engine.ui(c));
 
+  // ---------------------------------------------------------------- named cues
+  const later = (ms: number, fn: () => void) => window.setTimeout(fn, ms);
+  const oc = card('Cue options', true);
+  el('div', 'Pan, gain and pitch for the cue buttons below. Thistledown cues and loops switch the game to Thistledown; Seedbound cues to Seedbound.', oc).className = 'aw-note';
+  r = row(oc);
+  slider(r, 'Pan', -1, 1, 0.05, () => cueOpts.pan, (v) => (cueOpts.pan = v));
+  slider(r, 'Gain', 0, 1, 0.05, () => cueOpts.gain, (v) => (cueOpts.gain = v));
+  slider(r, 'Pitch', 0.5, 2, 0.01, () => cueOpts.pitch, (v) => (cueOpts.pitch = v));
+  const dc = card('Seedbound cues', true);
+  r = row(dc);
+  for (const c of DECK_CUES) {
+    button(r, c.slice(5), () => {
+      setGame('deck');
+      engine.cue(c, { ...cueOpts });
+    });
+  }
+  el('div', 'Scoring, the way a cascade produces it.', dc).className = 'aw-note';
+  r = row(dc);
+  const cascade = () => {
+    setGame('deck');
+    mood.intensity = 0.2;
+    for (let h = 0; h < 8; h++) {
+      const t0 = h * 420;
+      later(t0, () => {
+        engine.cue('deck.harvest', { pitch: Math.pow(2, h / 12) });
+        mood.intensity = Math.min(1, 0.2 + h * 0.1);
+      });
+      for (let c = 0; c < 10; c++) later(t0 + 60 + c * 25, () => engine.cue('deck.chip', { pitch: 1 + c * 0.06 }));
+      later(t0 + 330, () => engine.cue('deck.mult', { pitch: 1 + h * 0.12 }));
+    }
+    later(8 * 420, () => engine.cue('deck.big'));
+    later(8 * 420 + 800, () => (mood.intensity = 0));
+  };
+  button(r, 'Cascade: 8 harvests, 40 chips a second', cascade);
+  button(r, 'Draw 5', () => {
+    setGame('deck');
+    for (let k = 0; k < 5; k++) engine.cue('deck.draw');
+  });
+  button(r, 'Chips flood: 100 a second for 2 s', () => {
+    setGame('deck');
+    for (let k = 0; k < 200; k++) later(k * 10, () => engine.cue('deck.chip'));
+  });
+
+  const rch = card('Thistledown cues', true);
+  r = row(rch);
+  for (const c of RANCH_CUES) {
+    button(r, c.slice(6), () => {
+      setGame('ranch');
+      engine.cue(c, { ...cueOpts });
+    });
+  }
+  el('div', 'Loops: start and stop with these.', rch).className = 'aw-note';
+  r = row(rch);
+  const loopOn = new Map<string, boolean>();
+  for (const l of LOOPS) {
+    const b = button(r, l.slice(6), () => {
+      const on = !loopOn.get(l);
+      loopOn.set(l, on);
+      b.classList.toggle('on', on);
+      if (on) setGame('ranch');
+      engine.loop(l, on, { ...cueOpts });
+    });
+  }
+  el('div', 'Play, the way the ranch produces it.', rch).className = 'aw-note';
+  r = row(rch);
+  button(r, 'Walk 3 s on grass', () => {
+    setGame('ranch');
+    for (let k = 0; k < 7 * 3; k++) later(k * 143, () => engine.cue('ranch.step', { pitch: 0.95 + Math.random() * 0.1 }));
+  });
+  button(r, 'Draw 3 s, 30 sucks a second', () => {
+    setGame('ranch');
+    engine.loop('ranch.draw', true);
+    for (let k = 0; k < 90; k++) later(100 + k * 33, () => engine.cue('ranch.suck', { pitch: k % 5 === 0 ? 0.7 : 1.2 + Math.random() * 0.3, pan: Math.random() * 0.4 - 0.2 }));
+    later(3200, () => engine.loop('ranch.draw', false));
+  });
+  button(r, 'Nettleback near', () => {
+    setGame('ranch');
+    mood.intensity = 0.8;
+    engine.cue('ranch.nettle', { pan: -0.5 });
+    later(6000, () => (mood.intensity = 0));
+  });
+
   // ---------------------------------------------------------------- render
   const rc = card('Render');
-  el('div', 'Renders 12 seconds of the current mood offline and offers it as a WAV.', rc).className = 'hint';
+  el('div', 'Renders 12 seconds of the current mood offline and offers it as a WAV.', rc).className = 'aw-note';
   r = row(rc);
   const renderOut = el('div', '', rc);
   button(r, 'Render', () => {
@@ -311,7 +405,7 @@ export function runAudioDev(): void {
       renderOut.innerHTML = '';
       const a = el('a', 'Download WAV', renderOut);
       a.href = URL.createObjectURL(blob);
-      a.download = `acres-${mood.rules.clock}-${SEASONS[mood.season].toLowerCase()}.wav`;
+      a.download = `acres-${mood.game}-${SEASONS[mood.season].toLowerCase()}.wav`;
       a.style.color = '#e9c46a';
       el('div', `Peak ${peakDb(res.buffer).toFixed(1)} dBFS, RMS ${rmsDb(res.buffer, 2).toFixed(1)} dBFS, ${Math.round(res.ms)} ms to render.`, renderOut);
     });
@@ -367,7 +461,10 @@ export function runAudioDev(): void {
     defaultMood,
     sampleEvents,
     cues: UI_CUES,
+    deckCues: DECK_CUES,
+    ranchCues: RANCH_CUES,
+    loops: LOOPS,
     render: (sc: Scenario) => render(sc, bank, devState(sc.mood.rules)),
-    analyse: { peakDb, rmsDb, onsetAfter, onsetRate, longestQuiet, character, pitchNear, wavBase64, windows },
+    analyse: { peakDb, rmsDb, onsetAfter, onsetRate, longestQuiet, character, pitchNear, wavBase64, windows, maxStep, sidesDb },
   };
 }

@@ -3,7 +3,7 @@
 // on the first tap release (Android Chrome grants audio only there), and the
 // instrument bank starts building in small slices before that.
 
-import type { AudioEngine, AudioMood } from '../contract';
+import type { AudioEngine, AudioMood, CueOpts } from '../contract';
 import { Bank } from './bank';
 import { Core } from './core';
 
@@ -31,6 +31,8 @@ export function createAudio(debug: AudioDebug = {}): AudioEngine {
   let volumes = { master: 1, music: 1, sfx: 1 };
   let suspended = false;
   let broken = false;
+  // Loops asked for before the first tap start once there is a context. One-shots before then are dropped.
+  const held = new Map<string, { on: boolean; opts?: CueOpts }>();
 
   return {
     unlock() {
@@ -46,6 +48,8 @@ export function createAudio(debug: AudioDebug = {}): AudioEngine {
           core = new Core(ctx, bank, { realtime: true, meter: debug.meter });
           core.setVolumes(volumes);
           if (mood) core.mood(mood);
+          for (const [name, h] of held) if (h.on) core.loop(name, true, h.opts);
+          held.clear();
           if (suspended) core.suspend(true);
           // Older WebKit only unlocks once something plays inside the gesture.
           const silent = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -79,8 +83,12 @@ export function createAudio(debug: AudioDebug = {}): AudioEngine {
       suspended = on;
       core?.suspend(on);
     },
-    // Named cues for the ranch and the deck arrive with their sound sets.
-    cue() {},
-    loop() {},
+    cue(name, opts) {
+      core?.cue(name, opts);
+    },
+    loop(name, on, opts) {
+      if (core) core.loop(name, on, opts);
+      else if (!broken) held.set(name, { on, opts: opts && { ...opts } });
+    },
   };
 }

@@ -245,4 +245,31 @@ export const STYLES: Record<string, MelodyStyle> = {
     rhythms: [[[0, 8], [8, 8]], [[0, 12]], [[0, 4], [8, 8]], []],
     cadence: [[[0, 16]]],
   },
+  // Thistledown: a breathy flute that wanders and rests, a lower one for autumn and winter.
+  flute: {
+    lo: 69, hi: 88, centre: 78,
+    rhythms: [[[0, 6], [6, 2], [8, 8]], [[0, 12], [12, 4]], [[0, 4], [4, 4], [8, 8]], [[0, 8], [10, 2], [12, 4]], [], [[4, 4], [8, 8]]],
+    cadence: [[[0, 16]]],
+  },
+  fluteLow: {
+    lo: 62, hi: 81, centre: 71,
+    rhythms: [[[0, 8], [8, 8]], [[0, 12], [12, 4]], [[0, 6], [6, 2], [8, 8]], [], [[2, 6], [8, 8]]],
+    cadence: [[[0, 16]]],
+  },
+  kalimbaLead: {
+    lo: 69, hi: 88, centre: 79,
+    rhythms: [
+      [[0, 2], [2, 2], [4, 4], [8, 2], [10, 2], [12, 4]],
+      [[0, 3], [3, 3], [6, 2], [8, 8]],
+      [[0, 4], [6, 2], [8, 4], [12, 4]],
+      [[2, 2], [4, 2], [6, 2], [8, 8]],
+    ],
+    cadence: [[[0, 4], [4, 12]]],
+  },
+  // Thistledown at night: an ocarina far off, mostly resting.
+  ocarina: {
+    lo: 64, hi: 79, centre: 71,
+    rhythms: [[[0, 16]], [], [[0, 8], [8, 8]], [], [[4, 12]]],
+    cadence: [[[0, 16]]],
+  },
 };

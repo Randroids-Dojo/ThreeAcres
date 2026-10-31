@@ -7,7 +7,15 @@ export const PORT = 5250;
 export const URL = `http://localhost:${PORT}/?dev=audio`;
 
 export async function startServer() {
-  const vite = spawn('npx', ['vite', '--config', 'scripts/audio-vite.config.ts'], { stdio: ['ignore', 'pipe', 'pipe'], detached: false });
+  // Its own process group, so stopping it takes down npx and the Vite under it together.
+  const vite = spawn('npx', ['vite', '--config', 'scripts/audio-vite.config.ts'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  const stop = () => {
+    try {
+      process.kill(-vite.pid, 'SIGTERM');
+    } catch {
+      vite.kill('SIGTERM');
+    }
+  };
   let log = '';
   vite.stdout.on('data', (d) => (log += d));
   vite.stderr.on('data', (d) => (log += d));
@@ -18,12 +26,12 @@ export async function startServer() {
       if (r.ok) break;
     } catch {}
     if (Date.now() - t0 > 30000) {
-      vite.kill();
+      stop();
       throw new Error(`vite did not start:\n${log}`);
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  return { stop: () => vite.kill('SIGTERM'), log: () => log };
+  return { stop, log: () => log };
 }
 
 export async function openPage() {
