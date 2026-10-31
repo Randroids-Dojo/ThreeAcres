@@ -10,10 +10,10 @@ import type { Command } from '../sim/commands';
 import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES } from '../sim/constants';
 import { CROP_IDS, CROPS, QUALITY_NAME } from '../sim/crops';
 import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
-import { matchPreset, PRESETS } from '../sim/presets';
+import { AXIS_INFO, matchPreset, PRESETS, type PresetId } from '../sim/presets';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import type { BuildKind, CropId, Rules, SimEvent, ToolId, Weather, WorldState } from '../sim/types';
+import type { Axis, BuildKind, CropId, Rules, SimEvent, ToolId, Weather, WorldState } from '../sim/types';
 import { describe, denyText } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
@@ -81,7 +81,9 @@ export class Hud {
     gear.onclick = () => host.openSettings();
     const btns = el('div', 'topbtns');
     btns.append(board, this.mixBtn, gear);
-    top.append(this.day, el('div', 'spacer'), this.coins, btns);
+    const right = el('div', 'topright');
+    right.append(this.coins, btns);
+    top.append(this.day, el('div', 'spacer'), right);
 
     this.goals.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
@@ -463,8 +465,51 @@ export class Hud {
       case 'sell':
         break;
       case 'rules':
+        this.announce(e.rules, e.changed);
         break;
     }
+  }
+
+  /** Say what a switch changed, briefly, so hotkey switches are never a mystery. */
+  private announce(r: Rules, changed: Axis[]): void {
+    const p = matchPreset(r);
+    if (changed.length > 2 && p) {
+      this.toast(`<b>${esc(PRESETS[p].name)}</b><br>${esc(PRESETS[p].line)}`, 'big');
+      this.intro(p);
+      return;
+    }
+    for (const a of changed.slice(0, 2)) {
+      const info = AXIS_INFO[a];
+      const o = info.options.find((x) => x.value === r[a]);
+      if (o) this.toast(`<b>${info.name}: ${esc(o.label)}</b><br>${esc(o.hint)}`, '', 2000);
+    }
+  }
+
+  /** First time in each game: how to play it, in two lines. */
+  intro(p: PresetId): void {
+    const key = 'threeacres:v1:intro';
+    let seen: string[] = [];
+    try {
+      seen = JSON.parse(localStorage.getItem(key) ?? '[]');
+    } catch {
+      seen = [];
+    }
+    if (seen.includes(p)) return;
+    seen.push(p);
+    try {
+      localStorage.setItem(key, JSON.stringify(seen));
+    } catch {
+      // No storage: the intro just shows again next time.
+    }
+    const touch = matchMedia('(pointer: coarse)').matches;
+    const text: Record<PresetId, string> = {
+      sunup: touch
+        ? 'Drag on the left of the screen to walk and tap the round button to use your tool. Pull the radishes, water the carrots, then sleep.'
+        : 'Walk with WASD, face a plot and press Space. Number keys change tools. Pull the radishes, water the carrots, then press Enter to sleep.',
+      patchwork: 'Tap plots to plant, water and harvest. Each costs a move. The line above the tools shows what neighbours do for quality. End the day when your moves are spent.',
+      bushel: `${touch ? 'Drag' : 'Click and drag'} across plots to queue jobs. Your hand harvests, waters and replants on their own. Fill orders from the panel, then speed time up.`,
+    };
+    setTimeout(() => this.toast(`<b>How to play ${esc(PRESETS[p].name)}</b><br>${text[p]}`, 'big', 9000), 900);
   }
 
   private morning(s: WorldState): void {

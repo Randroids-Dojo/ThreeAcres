@@ -56,6 +56,7 @@ export function startApp(): void {
     title.classList.add('out');
     director.title = false;
     director.audio.ui('preset');
+    director.hud.intro(p);
     saveFarm(director.state);
   };
 
