@@ -20,6 +20,7 @@ async function run(throttle) {
   await p.waitForFunction(() => window.deck && window.deck.frames() > 5);
   await p.evaluate(() => {
     const d = window.deck;
+    d.learnAll();
     d.seed(31337);
     const s = d.state();
     s.pages = ['bees', 'market', 'clover'];
@@ -29,7 +30,6 @@ async function run(throttle) {
     const days = { radish: 1, carrot: 2, lettuce: 2, beans: 3, corn: 4, sunflower: 3, pumpkin: 5, strawberry: 3, mint: 2, garlic: 2, wheat: 3, chili: 2 };
     kinds.forEach((kind, i) => {
       s.plots[i].crop = { uid: 5000 + i, kind, age: days[kind] - 1, days: days[kind], up: i % 3 === 0, compost: i % 4 === 0 ? 1 : 0, rot: false, picks: 0, pest: 0, sprout: false };
-      s.plots[i].wet = true;
     });
     s.tonight = ['sun'];
     d.table.syncAll();

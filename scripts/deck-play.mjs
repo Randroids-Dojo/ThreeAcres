@@ -91,7 +91,7 @@ await p.goto(`${base}/?game=deck&fresh`);
 await ready();
 await hookAudio();
 await wait(300);
-check('the first day deals the teaching hand', (await p.evaluate(() => window.deck.state().hand.map((c) => c.id).join())) === 'carrot,radish,radish,can,lettuce');
+check('the first day deals the guided season\'s two radishes', (await p.evaluate(() => window.deck.state().hand.map((c) => c.id).join())) === 'radish,radish');
 check('a lesson shows on the first day', await p.evaluate(() => document.querySelector('.sb-hint')?.classList.contains('on')));
 
 // Long-press a card: it comes up close; a tap puts it back.

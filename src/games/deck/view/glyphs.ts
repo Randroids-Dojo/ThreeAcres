@@ -80,34 +80,6 @@ function can(ctx: Ctx, px: number, inkc: string): void {
   drops(ctx, [[0.42, -0.08], [0.47, 0.04], [0.38, 0.1]], px, inkc);
 }
 
-function hose(ctx: Ctx, px: number, inkc: string): void {
-  const r = new Rng(31);
-  groundShadow(ctx, 0.04, 0.24, 0.36, 0.1, inkc, px, r, 0.8);
-  for (let k = 0; k < 4; k++) {
-    const rx = 0.32 - k * 0.07;
-    const ry = 0.16 - k * 0.03;
-    ctx.beginPath();
-    ctx.ellipse(-0.04, 0.08 - k * 0.07, rx, ry, 0, 0, Math.PI * 2);
-    ink(ctx, inkc, Math.max(px * 5.5, 0.085), 0.95);
-    ctx.beginPath();
-    ctx.ellipse(-0.04, 0.08 - k * 0.07, rx, ry, 0, 0, Math.PI * 2);
-    ink(ctx, k % 2 ? '#4f8f4a' : '#5fa058', Math.max(px * 3.5, 0.06), 1);
-  }
-  // The tail and a brass nozzle.
-  ctx.beginPath();
-  ctx.moveTo(0.26, 0.05);
-  ctx.quadraticCurveTo(0.42, 0.0, 0.36, -0.22);
-  ink(ctx, inkc, Math.max(px * 5.5, 0.085), 0.95);
-  ctx.beginPath();
-  ctx.moveTo(0.26, 0.05);
-  ctx.quadraticCurveTo(0.42, 0.0, 0.36, -0.22);
-  ink(ctx, '#5fa058', Math.max(px * 3.5, 0.06), 1);
-  taper(ctx, 0.36, -0.22, 0.34, -0.3, 0.33, -0.38, 0.07, 0.05);
-  fill(ctx, '#d4a83a');
-  ink(ctx, inkc, inkW(px, 0.8), 0.9);
-  drops(ctx, [[0.3, -0.44], [0.4, -0.46], [0.22, -0.4]], px, inkc);
-}
-
 function heap(ctx: Ctx, col: string, dark: string, px: number, inkc: string, r: Rng, w = 0.4, h = 0.24): void {
   ctx.beginPath();
   ctx.moveTo(-w, 0.2);
@@ -126,23 +98,6 @@ function heap(ctx: Ctx, col: string, dark: string, px: number, inkc: string, r: 
   ctx.moveTo(-w, 0.2);
   ctx.bezierCurveTo(-w * 0.7, 0.2 - h * 1.2, w * 0.6, 0.2 - h * 1.3, w, 0.2);
   ink(ctx, inkc, inkW(px), 0.9);
-}
-
-function mulch(ctx: Ctx, px: number, inkc: string): void {
-  const r = new Rng(12);
-  heap(ctx, '#8a6440', '#5a3e26', px, inkc, r, 0.42, 0.14);
-  ctx.beginPath();
-  for (let i = 0; i < 46; i++) {
-    const x = r.range(-0.38, 0.38);
-    const y = r.range(-0.04, 0.16) - (0.38 - Math.abs(x)) * 0.35;
-    const a = r.range(-0.6, 0.6);
-    const l = r.range(0.08, 0.18);
-    ctx.moveTo(x - Math.cos(a) * l * 0.5, y - Math.sin(a) * l * 0.5);
-    ctx.lineTo(x + Math.cos(a) * l * 0.5, y + Math.sin(a) * l * 0.5);
-  }
-  ink(ctx, '#e3c068', Math.max(px * 2, 0.026), 1);
-  ink(ctx, inkc, inkW(px, 0.35), 0.35);
-  drops(ctx, [[-0.2, -0.22], [0.15, -0.26]], px, inkc);
 }
 
 function compost(ctx: Ctx, px: number, inkc: string): void {
@@ -507,10 +462,6 @@ export function paintGlyph(ctx: Ctx, id: CardId, px: number, inkc: string, pal: 
   switch (id) {
     case 'can':
       return can(ctx, px, inkc);
-    case 'hose':
-      return hose(ctx, px, inkc);
-    case 'mulch':
-      return mulch(ctx, px, inkc);
     case 'compost':
       return compost(ctx, px, inkc);
     case 'fertiliser':

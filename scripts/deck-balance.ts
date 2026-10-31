@@ -1,5 +1,6 @@
 // Seedbound balance: the bot plays whole runs and reports how far it gets.
-// npx tsx scripts/deck-balance.ts [runs] [noise] [--meta] [--free] [--quotas=a,b,c,d] [--year=2.4]
+// npx tsx scripts/deck-balance.ts [runs] [noise] [--meta] [--free] [--guided] [--quotas=a,b,c,d] [--year=2.4]
+// --guided deals the guided first season's set hands, as a new player gets.
 // --meta plays the runs in sequence with unlocks carrying over, like a player would.
 // --free sets every quota to 1, to measure what the bot earns season by season.
 import { playRun } from '../src/games/deck/bot';
@@ -26,7 +27,8 @@ const meta = withMeta ? newMeta() : null;
 const t0 = performance.now();
 const results = [];
 const shopNoise = flag('shop') ? Number(flag('shop')) : undefined;
-for (let i = 0; i < runs; i++) results.push(playRun(1000 + i * 7919, meta, { noise, seed: 77 + i, shopNoise }));
+const guided = process.argv.includes('--guided');
+for (let i = 0; i < runs; i++) results.push(playRun(1000 + i * 7919, meta, { noise, seed: 77 + i, shopNoise, guided }));
 const ms = performance.now() - t0;
 
 const reach = new Map<number, number>();

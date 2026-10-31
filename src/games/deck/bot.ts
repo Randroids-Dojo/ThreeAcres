@@ -11,6 +11,7 @@ import {
   canRemove,
   canUpgrade,
   CARDS,
+  cloneRun,
   endDay,
   leaveShop,
   MAX_PAGES,
@@ -44,25 +45,11 @@ export interface BotOpts {
   depth?: number;
   /** Noise in the shop only, if different from play. */
   shopNoise?: number;
+  /** Play the guided first season's set hands. */
+  guided?: boolean;
 }
 
-/** A fast deep copy: cards are shared (the bot never upgrades a copy's cards). */
-export function cloneRun(s: RunState): RunState {
-  return {
-    ...s,
-    plots: s.plots.map((p) => ({ ...p, crop: p.crop ? { ...p.crop } : null })),
-    draw: [...s.draw],
-    hand: [...s.hand],
-    discard: [...s.discard],
-    placed: [...s.placed],
-    pages: [...s.pages],
-    tonight: [...s.tonight],
-    pool: [...s.pool],
-    stats: { ...s.stats, log: s.stats.log },
-    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })) } : null,
-    end: s.end ? { ...s.end } : null,
-  };
-}
+export { cloneRun };
 
 export class Dice {
   constructor(public rng: number) {}
@@ -76,7 +63,7 @@ export class Dice {
 
 const NONE: Ev[] = [];
 
-/** Tonight for real (sampled dice), then up to three calm, watered nights, discounted. */
+/** Tonight for real (sampled dice), then up to three calm nights, discounted. */
 function evaluate(s: RunState, sample: number): number {
   const c = cloneRun(s);
   c.rng = sample;
@@ -86,15 +73,12 @@ function evaluate(s: RunState, sample: number): number {
   let v = c.earned - start;
   const daysLeft = Math.min(3, TUNING.days - s.day);
   if (daysLeft <= 0) return v;
-  // Roll forward as if every plot is kept wet and nothing goes wrong.
+  // Roll forward as if nothing goes wrong.
   c.year = 1;
   c.season = 0;
   let k = 0.72;
   for (let d = 0; d < daysLeft; d++) {
-    for (const p of c.plots) p.wet = true;
     c.dayHarvests = 0;
-    c.radishesToday = 0;
-    c.chiliNext = false;
     const before = c.earned;
     NONE.length = 0;
     night(c, NONE);
@@ -148,7 +132,7 @@ function search(s: RunState, sample: number, depth: number, o: BotOpts, dice: Di
   }
   first.sort((a, b) => b.v - a.v);
   if (depth > 1) {
-    // The top few, plus the best play of each card, so a sow that needs water next still gets looked at.
+    // The top few, plus the best play of each card, so a sow that pays off with the next card still gets looked at.
     const look = first.slice(0, 6);
     const cards = new Set(look.map((f) => s.hand[f.p.h].id));
     for (const f of first) {
@@ -197,7 +181,7 @@ export function botDay(s: RunState, o: BotOpts, dice: Dice): Ev[] {
 }
 
 const CARD_VALUE: Record<CardId, number> = {
-  corn: 7, beans: 8, strawberry: 8, sunflower: 7, chili: 6, hose: 6, rain: 5, compost: 5, fertiliser: 4, mulch: 5, beehive: 9, pumpkin: 6, wheat: 4,
+  corn: 7, beans: 8, strawberry: 8, sunflower: 7, chili: 6, rain: 5, compost: 5, fertiliser: 4, beehive: 9, pumpkin: 6, wheat: 4,
   garlic: 4, ladybirds: 3, scarecrow: 3, sun: 5, shears: 3, trowel: 2, storm: 5, mint: 3, radish: 0, carrot: 4, lettuce: 2, can: 4,
 };
 
@@ -267,7 +251,7 @@ export interface RunResult {
 }
 
 export function playRun(seed: number, meta: Meta | null, o: BotOpts, maxSeasons = 16): RunResult {
-  const { s } = newRun(seed, meta);
+  const { s } = newRun(seed, meta, o.guided);
   const dice = new Dice(o.seed ^ seed);
   const seasons: RunResult['seasons'] = [];
   while (s.phase !== 'over' && seasons.length < maxSeasons) {

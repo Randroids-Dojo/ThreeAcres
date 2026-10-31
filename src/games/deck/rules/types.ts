@@ -2,7 +2,7 @@
 // random choice comes from `rng` in the state, never from Math.random or the clock.
 
 export type SeedId = 'radish' | 'carrot' | 'lettuce' | 'beans' | 'corn' | 'sunflower' | 'pumpkin' | 'strawberry' | 'mint' | 'garlic' | 'wheat' | 'chili';
-export type ToolId = 'can' | 'hose' | 'mulch' | 'compost' | 'fertiliser' | 'trowel' | 'shears' | 'ladybirds';
+export type ToolId = 'can' | 'compost' | 'fertiliser' | 'trowel' | 'shears' | 'ladybirds';
 export type ObjectId = 'scarecrow' | 'beehive';
 export type WeatherId = 'rain' | 'sun' | 'storm';
 export type CardId = SeedId | ToolId | ObjectId | WeatherId;
@@ -49,19 +49,20 @@ export interface Crop {
 export interface Plot {
   crop: Crop | null;
   obj: ObjectId | null;
-  wet: boolean;
-  /** Nights of water left from mulch. */
-  mulch: number;
+  /** Extra nights of growth tonight (the watering can, the Rain Barrel). Cleared each night. */
+  boost: number;
   /** The crop harvested here today, for Crop Rotation. */
   last: SeedId | null;
 }
 
 export interface Step {
-  /** Short label, e.g. "next to carrot". */
+  /** Short label for the almanac, e.g. "next to a carrot". The table shows the icon, not this. */
   label: string;
+  /** What the bonus came from, as an icon key: a seed or card id, a page id, or 'alone'. */
+  icon: string;
   op: '+' | 'x';
   v: number;
-  /** Plot the bonus came from, for drawing a link. */
+  /** Plot the bonus came from, for drawing its arc. */
   from?: number;
 }
 
@@ -157,10 +158,10 @@ export interface RunState {
   tonight: WeatherId[];
   shop: Shop | null;
   nextUid: number;
-  /** Harvests so far today (Market Day, carrots, chili). */
+  /** Harvests so far today (Market Day). */
   dayHarvests: number;
-  radishesToday: number;
-  chiliNext: boolean;
+  /** The guided first season: the hands still to deal, one list per day. Empty once dealt. */
+  script: CardId[][];
   /** The card pool for this run's shop. */
   pool: CardId[];
   stats: RunStats;
@@ -188,8 +189,8 @@ export type Ev =
   | { t: 'shuffle'; n: number }
   | { t: 'play'; card: Card; plot: number | null; to?: number }
   | { t: 'plant'; plot: number; kind: SeedId; uid: number }
+  /** The watering can: these plots grow an extra night tonight. */
   | { t: 'water'; plots: number[] }
-  | { t: 'mulch'; plot: number }
   | { t: 'compost'; plot: number }
   | { t: 'grow'; growth: NightGrowth[] }
   | { t: 'move'; from: number; to: number }
@@ -205,7 +206,6 @@ export type Ev =
   | { t: 'mint'; from: number; to: number; uid: number }
   | { t: 'crow'; plot: number; kind: SeedId; uid: number }
   | { t: 'harvest'; h: Harvest }
-  | { t: 'dry'; plots: number[] }
   | { t: 'quota'; earned: number; quota: number }
   | { t: 'seasonEnd'; cleared: boolean; earned: number; quota: number; year: number; season: Season }
   | { t: 'discardExcess'; cards: Card[] }

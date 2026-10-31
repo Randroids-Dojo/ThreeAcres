@@ -1,4 +1,4 @@
-// The things on the table, painted once: oak planks, seed scoops (energy), the
+// The things on the table, painted once: oak planks, seed scoops (what cards cost), the
 // lantern (End day), the seed tin (draw pile) and the cribbage-style pegboard
 // that tallies the quota. Each returns a data URL for an <img> or a CSS background.
 
@@ -68,67 +68,72 @@ export function woodUrl(): string {
   });
 }
 
-/** A wooden seed scoop, full of seed or empty. Drawn 120 by 90. */
+/**
+ * A wooden seed scoop, full of seed or empty, drawn in a 120 by 90 box. The
+ * table's scoops and the cost printed on every card are this same drawing, so
+ * a card's scoops and the bench's scoops read as one thing.
+ */
+export function paintScoop(g: CanvasRenderingContext2D, full: boolean, lw = 1): void {
+  const r = new Rng(full ? 5 : 6);
+  g.save();
+  g.translate(60, 52);
+  // Handle.
+  g.beginPath();
+  g.moveTo(26, -6);
+  g.lineTo(56, -14);
+  g.lineTo(58, -6);
+  g.lineTo(28, 4);
+  g.closePath();
+  fill(g, '#a8784a');
+  ink(g, '#3a2614', 1.4 * lw, 0.9);
+  // Bowl: a half-round seen from above at an angle.
+  g.beginPath();
+  g.ellipse(-4, 0, 40, 24, 0, 0, Math.PI * 2);
+  fill(g, '#9a6a3e');
+  ink(g, '#3a2614', 1.8 * lw, 0.95);
+  g.beginPath();
+  g.ellipse(-4, -2, 34, 19, 0, 0, Math.PI * 2);
+  fill(g, full ? '#6a4a2a' : '#c49a68');
+  if (full) {
+    g.save();
+    g.clip();
+    for (let i = 0; i < 160; i++) {
+      const a = r.next() * Math.PI * 2;
+      const d = Math.sqrt(r.next());
+      const x = -4 + Math.cos(a) * d * 34;
+      const y = -2 + Math.sin(a) * d * 19 - (1 - d) * 6;
+      g.beginPath();
+      g.ellipse(x, y, 2.6, 1.8, r.next() * 3, 0, Math.PI * 2);
+      g.fillStyle = ['#e8d8a8', '#d8b878', '#c9a060', '#f0e2b8'][i % 4];
+      g.fill();
+      g.strokeStyle = 'rgba(60, 40, 20, 0.5)';
+      g.lineWidth = 0.6;
+      g.stroke();
+    }
+    g.restore();
+  } else {
+    g.save();
+    g.clip();
+    g.strokeStyle = 'rgba(90, 60, 30, 0.35)';
+    g.lineWidth = 1;
+    for (let k = -3; k < 4; k++) {
+      g.beginPath();
+      g.ellipse(-4, -2 + k * 4, 30, 6, 0, 0.2, Math.PI - 0.2);
+      g.stroke();
+    }
+    g.restore();
+  }
+  g.beginPath();
+  g.ellipse(-4, -2, 34, 19, 0, 0, Math.PI * 2);
+  ink(g, '#3a2614', 1.2 * lw, 0.8);
+  g.restore();
+}
+
+/** A seed scoop as an image, full or empty. 120 by 90. */
 export function scoopUrl(full: boolean): string {
   return once(`scoop${full}`, () => {
     const [c, g] = canvas(120, 90);
-    const r = new Rng(full ? 5 : 6);
-    g.translate(60, 52);
-    // Handle.
-    g.beginPath();
-    g.moveTo(26, -6);
-    g.lineTo(56, -14);
-    g.lineTo(58, -6);
-    g.lineTo(28, 4);
-    g.closePath();
-    fill(g, '#a8784a');
-    ink(g, '#3a2614', 1.4, 0.9);
-    // Bowl: a half-round seen from above at an angle.
-    g.beginPath();
-    g.ellipse(-4, 0, 40, 24, 0, 0, Math.PI * 2);
-    fill(g, '#9a6a3e');
-    ink(g, '#3a2614', 1.8, 0.95);
-    g.beginPath();
-    g.ellipse(-4, -2, 34, 19, 0, 0, Math.PI * 2);
-    fill(g, full ? '#6a4a2a' : '#c49a68');
-    if (full) {
-      g.save();
-      g.clip();
-      for (let i = 0; i < 160; i++) {
-        const a = r.next() * Math.PI * 2;
-        const d = Math.sqrt(r.next());
-        const x = -4 + Math.cos(a) * d * 34;
-        const y = -2 + Math.sin(a) * d * 19 - (1 - d) * 6;
-        g.beginPath();
-        g.ellipse(x, y, 2.6, 1.8, r.next() * 3, 0, Math.PI * 2);
-        g.fillStyle = ['#e8d8a8', '#d8b878', '#c9a060', '#f0e2b8'][i % 4];
-        g.fill();
-        g.strokeStyle = 'rgba(60, 40, 20, 0.5)';
-        g.lineWidth = 0.6;
-        g.stroke();
-      }
-      g.restore();
-    } else {
-      g.save();
-      g.clip();
-      g.strokeStyle = 'rgba(90, 60, 30, 0.35)';
-      g.lineWidth = 1;
-      for (let k = -3; k < 4; k++) {
-        g.beginPath();
-        g.ellipse(-4, -2 + k * 4, 30, 6, 0, 0.2, Math.PI - 0.2);
-        g.stroke();
-      }
-      for (let i = 0; i < 3; i++) {
-        g.beginPath();
-        g.ellipse(-10 + i * 9, 8 - i * 3, 2.4, 1.6, 0.4, 0, Math.PI * 2);
-        g.fillStyle = '#e8d8a8';
-        g.fill();
-      }
-      g.restore();
-    }
-    g.beginPath();
-    g.ellipse(-4, -2, 34, 19, 0, 0, Math.PI * 2);
-    ink(g, '#3a2614', 1.2, 0.8);
+    paintScoop(g, full);
     return c.toDataURL();
   });
 }

@@ -45,6 +45,11 @@ async function cursorTo(i) {
 
 await p.goto(`${base}/?game=deck&fresh`);
 await ready();
+// A returning player's table: every piece in, no guided deals (scripts/deck-lessons.mjs plays the guided season).
+await p.evaluate(() => {
+  window.deck.learnAll();
+  window.deck.seed(4242);
+});
 await wait(300);
 
 // Hover lifts a card and, after a moment, holds it up to read.

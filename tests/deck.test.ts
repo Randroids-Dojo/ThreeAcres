@@ -10,8 +10,10 @@ import {
   endDay,
   leaveShop,
   newMeta,
+  GUIDED_DEALS,
   newRun,
   playCard,
+  previewPlay,
   quotaFor,
   recordRun,
   removeCard,
@@ -49,10 +51,6 @@ function play(s: RunState, id: CardId, plot: number | null, to?: number): Ev[] {
 
 function harvests(ev: Ev[]): Harvest[] {
   return ev.filter((e): e is Extract<Ev, { t: 'harvest' }> => e.t === 'harvest').map((e) => e.h);
-}
-
-function wetAll(s: RunState): void {
-  for (const p of s.plots) p.wet = true;
 }
 
 describe('a new run', () => {
@@ -96,14 +94,15 @@ describe('playing cards', () => {
     expect(playCard(s, 0, 0)).toBeNull();
   });
 
-  it('the watering can waters a row; upgraded, a row and a column', () => {
+  it('the watering can boosts a row for tonight; upgraded, a row and a column', () => {
     const s = table(['can', 'can']);
     play(s, 'can', 5);
-    expect(s.plots.map((p) => p.wet)).toEqual([false, false, false, false, true, true, true, true, false, false, false, false, false, false, false, false]);
+    expect(s.plots.map((p) => p.boost)).toEqual([0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
     s.hand[0].up = true;
     play(s, 'can', 2);
-    expect([2, 6, 10, 14, 0, 1, 3].every((i) => s.plots[i].wet)).toBe(true);
-    expect(s.plots[8].wet).toBe(false);
+    expect([2, 6, 10, 14, 0, 1, 3].every((i) => s.plots[i].boost >= 1)).toBe(true);
+    expect(s.plots[6].boost).toBe(2);
+    expect(s.plots[8].boost).toBe(0);
   });
 
   it('objects stay on the board and come back at the season end', () => {
@@ -125,29 +124,32 @@ describe('playing cards', () => {
 
   it('a toss swaps one card a day', () => {
     const s = table(['radish', 'carrot']);
-    s.draw.push({ uid: 999, id: 'hose', up: false });
+    s.draw.push({ uid: 999, id: 'sun', up: false });
     expect(toss(s, 0)).not.toBeNull();
-    expect(s.hand.map((c) => c.id)).toEqual(['carrot', 'hose']);
+    expect(s.hand.map((c) => c.id)).toEqual(['carrot', 'sun']);
     expect(toss(s, 0)).toBeNull();
   });
 });
 
 describe('the night', () => {
-  it('watered crops grow, dry ones do not, then plots dry', () => {
-    const s = table(['carrot', 'carrot']);
+  it('every crop grows a night on its own; the can adds a night to its row, once', () => {
+    const s = table(['carrot', 'pumpkin', 'pumpkin', 'can']);
     play(s, 'carrot', 0);
-    play(s, 'carrot', 15);
-    s.plots[0].wet = true;
+    play(s, 'pumpkin', 1);
+    play(s, 'pumpkin', 15);
+    play(s, 'can', 3);
+    const h = harvests(endDay(s));
+    expect(h.map((x) => x.kind)).toEqual(['carrot']);
+    expect(s.plots[1].crop?.age).toBe(2);
+    expect(s.plots[15].crop?.age).toBe(1);
+    expect(s.plots.every((p) => p.boost === 0)).toBe(true);
     endDay(s);
-    expect(s.plots[0].crop?.age).toBe(1);
-    expect(s.plots[15].crop?.age).toBe(0);
-    expect(s.plots[0].wet).toBe(false);
+    expect(s.plots[1].crop?.age).toBe(3);
   });
 
   it('a lone radish ripens in a night and scores its base', () => {
     const s = table(['radish']);
     play(s, 'radish', 0);
-    s.plots[0].wet = true;
     const h = harvests(endDay(s));
     expect(h.length).toBe(1);
     expect(h[0].score).toBe(2);
@@ -156,33 +158,36 @@ describe('the night', () => {
     expect(s.coins).toBe(2);
   });
 
-  it('carrot blooms for each radish pulled before it, in reading order', () => {
-    const s = table(['carrot', 'radish', 'radish', 'radish']);
+  it('carrot blooms +1 for each radish next to it, wherever it stands', () => {
+    const s = table(['carrot', 'radish', 'radish', 'radish', 'radish']);
     play(s, 'carrot', 5);
     s.plots[5].crop!.age = 1;
-    play(s, 'radish', 1); // above: pulled first, next to the carrot
-    play(s, 'radish', 4); // left: pulled first, next to the carrot
-    play(s, 'radish', 6); // right: pulled after the carrot
-    wetAll(s);
+    play(s, 'radish', 1); // above
+    play(s, 'radish', 4); // left
+    play(s, 'radish', 6); // right: pulled after the carrot, still counts
+    play(s, 'radish', 15); // not a neighbour
     const h = harvests(endDay(s));
-    expect(h.map((x) => x.kind)).toEqual(['radish', 'radish', 'carrot', 'radish']);
+    expect(h.map((x) => x.kind)).toEqual(['radish', 'radish', 'carrot', 'radish', 'radish']);
     expect(h[0].score).toBe(4);
     const carrot = h[2];
     expect(carrot.chipsTotal).toBe(5);
-    expect(carrot.multTotal).toBe(3);
-    expect(carrot.score).toBe(15);
-    expect(s.earned).toBe(4 + 4 + 15 + 4);
+    expect(carrot.multTotal).toBe(4);
+    expect(carrot.mult.map((m) => m.from).sort()).toEqual([1, 4, 6]);
+    expect(carrot.mult.every((m) => m.icon === 'radish')).toBe(true);
+    expect(carrot.score).toBe(20);
+    expect(h[4].score).toBe(2);
+    expect(s.earned).toBe(4 + 4 + 20 + 4 + 2);
   });
 
-  it('mulch keeps a plot wet for three nights', () => {
-    const s = table(['mulch', 'pumpkin']);
-    play(s, 'pumpkin', 0);
-    play(s, 'mulch', 0);
-    for (let n = 0; n < 4; n++) endDay(s);
-    expect(s.plots[0].crop?.age).toBe(3);
+  it('wheat gets +2 for each wheat next to it', () => {
+    const s = table(['wheat', 'wheat', 'wheat', 'wheat']);
+    for (const i of [0, 1, 2, 15]) play(s, 'wheat', i);
+    for (const i of [0, 1, 2, 15]) s.plots[i].crop!.age = 3;
+    const h = harvests(endDay(s));
+    expect(h.map((x) => x.score)).toEqual([6, 8, 6, 4]);
   });
 
-  it('rain waters everything and adds a day; storm adds two and flattens one', () => {
+  it('rain adds a night to every crop; storm adds two and flattens one', () => {
     const s = table(['corn', 'corn', 'rain']);
     play(s, 'corn', 0);
     play(s, 'corn', 3);
@@ -200,13 +205,13 @@ describe('the night', () => {
     expect(left[0].crop!.age).toBe(3);
   });
 
-  it('strawberries pick four nights, one more each pick, then leave', () => {
+  it('strawberries pick four nights, then leave', () => {
     const s = table(['strawberry']);
     play(s, 'strawberry', 0);
     s.plots[0].crop!.age = 3;
     const scores: number[] = [];
     for (let n = 0; n < 4; n++) scores.push(...harvests(endDay(s)).map((h) => h.score));
-    expect(scores).toEqual([3, 4, 5, 6]);
+    expect(scores).toEqual([4, 4, 4, 4]);
     expect(s.plots[0].crop).toBeNull();
   });
 
@@ -245,23 +250,37 @@ describe('the night', () => {
     expect(harvests(endDay(t))[0].multTotal).toBe(3);
   });
 
-  it('a chili lifts the next harvest by half', () => {
-    const s = table(['chili', 'lettuce']);
+  it('a chili gives its neighbours x1.5 bloom, not the crop pulled after it', () => {
+    const s = table(['chili', 'lettuce', 'lettuce']);
     play(s, 'chili', 0);
     play(s, 'lettuce', 3);
-    s.plots[0].crop!.age = 2;
-    s.plots[3].crop!.age = 2;
+    play(s, 'lettuce', 4);
+    for (const i of [0, 3, 4]) s.plots[i].crop!.age = 2;
     const h = harvests(endDay(s));
-    expect(h[1].multTotal).toBe(1.5);
-    expect(h[1].score).toBe(6);
+    expect(h.map((x) => x.kind)).toEqual(['chili', 'lettuce', 'lettuce']);
+    expect(h[1].multTotal).toBe(1);
+    expect(h[2].multTotal).toBe(1.5);
+    expect(h[2].score).toBe(6);
   });
 
   it('Market Day doubles every fifth harvest', () => {
     const s = table(['radish', 'radish', 'radish', 'radish', 'radish']);
     s.pages.push('market');
     for (const i of [0, 3, 8, 11, 15]) play(s, 'radish', i);
-    wetAll(s);
     expect(harvests(endDay(s)).map((h) => h.score)).toEqual([2, 2, 2, 2, 4]);
+  });
+
+  it('the Rain Barrel adds a night to column A from each morning', () => {
+    const s = table(['pumpkin', 'pumpkin']);
+    s.pages.push('barrel');
+    play(s, 'pumpkin', 4);
+    play(s, 'pumpkin', 5);
+    endDay(s);
+    expect([0, 4, 8, 12].every((i) => s.plots[i].boost === 1)).toBe(true);
+    expect(s.plots[5].boost).toBe(0);
+    endDay(s);
+    expect(s.plots[4].crop?.age).toBe(3);
+    expect(s.plots[5].crop?.age).toBe(2);
   });
 
   it('shears pull a ripe crop now at double yield', () => {
@@ -269,7 +288,7 @@ describe('the night', () => {
     play(s, 'strawberry', 0);
     s.plots[0].crop!.age = 3;
     const h = harvests(play(s, 'shears', 0));
-    expect(h[0].score).toBe(6);
+    expect(h[0].score).toBe(8);
     expect(s.plots[0].crop?.picks).toBe(1);
   });
 });
@@ -279,7 +298,6 @@ describe('hazards', () => {
     const s = table(['carrot']);
     play(s, 'carrot', 0);
     for (let n = 0; n < 5; n++) {
-      s.plots[0].wet = true;
       const ev = endDay(s);
       expect(ev.some((e) => e.t === 'pest' || e.t === 'crow')).toBe(false);
     }
@@ -291,7 +309,6 @@ describe('hazards', () => {
     play(s, 'garlic', 5);
     play(s, 'carrot', 6);
     s.plots[0].crop!.pest = 2;
-    wetAll(s);
     TUNING.pestSpread = 1;
     endDay(s);
     TUNING.pestSpread = 0.4;
@@ -451,10 +468,57 @@ describe('the balance bot', () => {
   });
 });
 
-describe('the first day', () => {
-  it('deals the teaching hand from the start deck', () => {
-    const { s } = newRun(1, null, ['carrot', 'radish', 'radish', 'can', 'lettuce']);
-    expect(s.hand.map((c) => c.id)).toEqual(['carrot', 'radish', 'radish', 'can', 'lettuce']);
+describe('the guided first season', () => {
+  it('deals its set hands from the start deck, one idea a day, then draws as usual', () => {
+    const { s } = newRun(1, null, true);
+    expect(s.hand.map((c) => c.id)).toEqual(GUIDED_DEALS[0]);
     expect(allCards(s).length).toBe(START_DECK.length);
+    for (const i of [5, 6]) playCard(s, 0, i);
+    endDay(s);
+    expect(s.hand.map((c) => c.id)).toEqual(GUIDED_DEALS[1]);
+    // Carrot first, a radish beside it, the other radish apart.
+    playCard(s, 0, 5);
+    playCard(s, 0, 6);
+    playCard(s, 0, 15);
+    endDay(s);
+    expect(s.hand.map((c) => c.id)).toEqual(GUIDED_DEALS[2]);
+    expect(s.energy).toBe(3);
+    // Ring the carrot (ripe tonight) with two radishes: 5 yield x 3 bloom.
+    playCard(s, 0, 4);
+    playCard(s, 0, 1);
+    const h = harvests(endDay(s));
+    expect(h.find((x) => x.kind === 'carrot')!.score).toBe(15);
+    expect(s.hand.length).toBe(5);
+    expect(allCards(s).length).toBe(START_DECK.length);
+    expect(s.script.length).toBe(0);
+  });
+
+  it('is deterministic, and a normal run is untouched by it', () => {
+    expect(JSON.stringify(newRun(5, null, true).s)).toBe(JSON.stringify(newRun(5, null, true).s));
+    expect(newRun(5, null).s.script).toEqual([]);
+  });
+});
+
+describe('previews', () => {
+  it('a radish held next to a carrot shows its +2 and the carrot +1 bloom, and touches nothing', () => {
+    const s = table(['carrot', 'radish']);
+    play(s, 'carrot', 5);
+    const before = JSON.stringify(s);
+    const p = previewPlay(s, 0, 6)!;
+    expect(p.harvest).toEqual({ yield: 4, bloom: 1, score: 4 });
+    expect(p.marks).toContainEqual({ plot: 6, yield: 2, bloom: 0, times: 1, nights: 0 });
+    expect(p.marks).toContainEqual({ plot: 5, yield: 0, bloom: 1, times: 1, nights: 0 });
+    expect(previewPlay(s, 0, 15)!.marks).toEqual([]);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it('the can and rain show extra nights, the sun shows yield on crops pulled tonight', () => {
+    const s = table(['pumpkin', 'radish', 'can', 'rain', 'sun']);
+    play(s, 'pumpkin', 0);
+    play(s, 'radish', 15);
+    expect(previewPlay(s, 0, 1)!.marks).toEqual([{ plot: 0, yield: 0, bloom: 0, times: 1, nights: 1 }]);
+    expect(previewPlay(s, 1, null)!.marks.map((m) => m.plot)).toEqual([0]);
+    const sun = previewPlay(s, 2, null)!.marks;
+    expect(sun).toEqual([{ plot: 15, yield: 3, bloom: 0, times: 1, nights: 0 }]);
   });
 });

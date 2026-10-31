@@ -1,4 +1,4 @@
-// Seedbound contact sheet: the start of a run, a full plot mid-day, a scoring
+// Seedbound contact sheet: the guided first screen, a full plot mid-day, a scoring
 // cascade, the market stall, the run's almanac entry, a card up close and the
 // almanac menu, at phone (412 by 900) and desktop (1280 by 800) sizes, plus
 // every card face. Writes /tmp/deck/shots/*.png and /tmp/deck/contact-*.png.
@@ -13,7 +13,7 @@ const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--u
 const errs = [];
 
 const STAGE = `(() => {
-  const d = window.deck; d.seed(4242);
+  const d = window.deck; d.learnAll(); d.seed(4242);
   const s = d.state();
   s.season = 1; s.day = 3; s.earned = 38; s.coins = 71; s.quota = 55; s.pages = ['bees', 'market'];
   const days = { radish: 1, carrot: 2, lettuce: 2, beans: 3, corn: 4, sunflower: 3, pumpkin: 5, strawberry: 3, mint: 2, garlic: 2, wheat: 3, chili: 2 };
@@ -23,30 +23,31 @@ const STAGE = `(() => {
   put(8, 'garlic', 1); put(9, 'radish', 0); put(10, 'mint', 1); put(11, 'pumpkin', 3);
   put(13, 'wheat', 1, { pest: 2 }); put(14, 'carrot', 0);
   s.plots[12].obj = 'beehive'; s.plots[15].obj = 'scarecrow';
-  for (const i of [1, 4, 5, 6, 7, 9, 10]) s.plots[i].wet = true; s.plots[11].mulch = 2; s.plots[11].wet = true;
+  for (const i of [4, 5, 6, 7]) s.plots[i].boost = 1;
   s.hand = [{ uid: 801, id: 'radish', up: false }, { uid: 802, id: 'compost', up: true }, { uid: 803, id: 'rain', up: false }, { uid: 804, id: 'beehive', up: false }, { uid: 805, id: 'pumpkin', up: false }];
   s.energy = 2; s.tonight = ['sun'];
   d.table.syncAll();
 })()`;
 const HOLD = `(() => { const t = window.deck.table; t.pickUp(t.run.hand[0].uid); t.board.hl.hover = null; })()`;
 const BIG = `(() => {
-  const d = window.deck; d.seed(31337);
+  const d = window.deck; d.learnAll(); d.seed(31337);
   const s = d.state();
   s.pages = ['bees', 'market']; s.season = 2; s.quota = 65; s.earned = 30; s.coins = 160;
   const kinds = ['radish', 'sunflower', 'carrot', 'beans', 'radish', 'carrot', 'beans', 'corn', 'strawberry', 'lettuce', 'sunflower', 'chili', 'wheat', 'wheat', 'pumpkin', 'garlic'];
   const days = { radish: 1, carrot: 2, lettuce: 2, beans: 3, corn: 4, sunflower: 3, pumpkin: 5, strawberry: 3, mint: 2, garlic: 2, wheat: 3, chili: 2 };
-  kinds.forEach((kind, i) => { s.plots[i].crop = { uid: 5000 + i, kind, age: days[kind] - 1, days: days[kind], up: i % 3 === 0, compost: i % 4 === 0 ? 1 : 0, rot: false, picks: 0, pest: 0, sprout: false }; s.plots[i].wet = true; });
+  kinds.forEach((kind, i) => { s.plots[i].crop = { uid: 5000 + i, kind, age: days[kind] - 1, days: days[kind], up: i % 3 === 0, compost: i % 4 === 0 ? 1 : 0, rot: false, picks: 0, pest: 0, sprout: false }; });
   s.tonight = ['sun'];
   d.table.syncAll();
 })()`;
 const SEASON_OUT = (earned) => `(async () => {
   const d = window.deck; const w = (ms) => new Promise((r) => setTimeout(r, ms));
+  d.learnAll(); d.seed(4243);
   d.state().earned = ${earned}; d.state().coins = Math.max(d.state().coins, 130);
   while (d.state().phase === 'day') { d.endDay(); d.skip(); await w(30); }
 })()`;
 const ENTRY = `(async () => {
   const d = window.deck; const w = (ms) => new Promise((r) => setTimeout(r, ms));
-  d.seed(778);
+  d.learnAll(); d.seed(778);
   for (const e of [52, 61, 70]) { d.state().earned = e; while (d.state().phase === 'day') { d.endDay(); d.skip(); await w(30); } if (d.state().phase === 'shop') d.shop.leave(); }
   d.state().earned = 31; d.state().stats.bestHarvest = 34; d.state().stats.bestKind = 'carrot'; d.state().stats.totalEarned = 214; d.state().stats.harvests = 61;
   while (d.state().phase === 'day') { d.endDay(); d.skip(); await w(30); }

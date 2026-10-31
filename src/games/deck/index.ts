@@ -7,13 +7,24 @@ import './deck.css';
 import { buyCard, buyPage, CARD_IDS, CARDS, leaveShop, reroll, type RunState } from './rules';
 import { bestPlay, type Play } from './bot';
 import { Table, type SaveData } from './table';
-import { faceUrl, fontsReady } from './view/faces';
+import { newLearn, Tutor, type Piece } from './lessons';
+import { faceText, faceUrl, fontsReady } from './view/faces';
 
 export interface DeckDebug {
   table: Table;
   state(): RunState;
-  /** Start a fresh run from a seed (no teaching hand unless asked). */
-  seed(n: number, teach?: boolean): void;
+  /** Start a fresh run from a seed (the guided first season's set hands only if asked). */
+  seed(n: number, guided?: boolean): void;
+  /** Bring every piece of the table in and mark every lesson done, as for a returning player. */
+  learnAll(): void;
+  /** The lesson on screen: its id, line and where it is pinned. */
+  lesson(): { id: string; text: string; where: string; point: string } | null;
+  /** Pieces of the table brought in so far. */
+  pieces(): Piece[];
+  /** Every string painted on a card face. */
+  faceText(id: string, up?: boolean): string[];
+  /** What the board previews for the held card. */
+  preview(): unknown;
   /** Take up hand card i and play it on a plot (and a second plot for the trowel). */
   play(i: number, plot: number | null, to?: number): boolean;
   endDay(): void;
@@ -66,7 +77,12 @@ export const game: GameModule = {
     window.deck = {
       table: t,
       state: () => t.run,
-      seed: (n, teach = false) => t.fresh(n, teach),
+      seed: (n, guided = false) => t.fresh(n, guided),
+      learnAll: () => t.learnAll(),
+      lesson: () => (t.line ? { ...t.line } : null),
+      pieces: () => [...t.tutor.learn.seen],
+      faceText: (id, up = false) => faceText(id as never, up),
+      preview: () => (t.board.preview ? JSON.parse(JSON.stringify(t.board.preview)) : null),
       play: (i, plot, to) => {
         const c = t.run.hand[i];
         if (!c || t.busy) return false;
@@ -143,7 +159,7 @@ export const game: GameModule = {
       save: () => t.save(),
       reset: () => {
         t.meta = { v: 1, unlocked: [], runs: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 } };
-        t.taught = 0;
+        t.tutor = new Tutor(newLearn());
         t.fresh(null, true);
       },
     };

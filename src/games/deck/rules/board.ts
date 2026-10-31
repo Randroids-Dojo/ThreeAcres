@@ -6,8 +6,8 @@ import type { Crop, PageId, Plot, RunState, Season } from './types';
 
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
 export const TUNING = {
-  quotas: [40, 55, 65, 80] as number[],
-  yearMult: 1.75,
+  quotas: [55, 70, 75, 95] as number[],
+  yearMult: 2,
   days: 6,
   handSize: 5,
   energy: 3,
@@ -62,7 +62,7 @@ export function crowsOn(s: RunState): boolean {
 }
 
 export function emptyPlot(): Plot {
-  return { crop: null, obj: null, wet: false, mulch: 0, last: null };
+  return { crop: null, obj: null, boost: 0, last: null };
 }
 
 export function rowOf(s: RunState, i: number): number {
@@ -139,12 +139,19 @@ export function extraGrowth(s: RunState): number {
   return n;
 }
 
-/** Will this crop be harvested tonight, as things stand (before hazards)? */
-export function ripeTonight(s: RunState, i: number): boolean {
+/** Nights a crop still needs after tonight's growth, as things stand (0: pulled tonight). */
+export function nightsLeft(s: RunState, i: number): number {
   const p = s.plots[i];
   const c = p.crop;
+  if (!c) return 0;
+  if (isRipe(c)) return 0;
+  const grow = c.pest ? 0 : 1 + extraGrowth(s) + p.boost;
+  return Math.max(0, c.days - c.age - grow) + (c.pest ? 1 : 0);
+}
+
+/** Will this crop be harvested tonight, as things stand (before hazards)? */
+export function ripeTonight(s: RunState, i: number): boolean {
+  const c = s.plots[i].crop;
   if (!c || c.pest) return false;
-  if (isRipe(c)) return true;
-  const watered = p.wet || s.tonight.some((w) => w === 'rain' || w === 'storm');
-  return watered && c.age + 1 + extraGrowth(s) >= c.days;
+  return isRipe(c) || c.age + 1 + extraGrowth(s) + s.plots[i].boost >= c.days;
 }

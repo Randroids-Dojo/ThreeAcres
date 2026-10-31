@@ -1,8 +1,12 @@
 // The card table: the plate in the middle, the hand along the bottom, the
-// ledger and pegboard on top, seed scoops for energy and the lantern for End
-// day. It reads the run, sends plays to the rules, and animates what the rules
-// report. The rules never wait for an animation: a skipped or reloaded night
-// shows exactly what a watched one would.
+// ledger and pegboard on top, seed scoops for what cards cost and the lantern
+// for End day. It reads the run, sends plays to the rules, and animates what
+// the rules report. The rules never wait for an animation: a skipped or
+// reloaded night shows exactly what a watched one would.
+//
+// Pieces of the table arrive one lesson at a time (see lessons.ts); until a
+// lesson brings one in, it is not on the table. While a card is held the
+// plot previews what it would do, and the night draws each bonus as it lands.
 
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
@@ -11,12 +15,13 @@ import {
   costOf,
   endDay,
   energyMax,
-  FIRST_HAND,
   moveTargets,
   newMeta,
   newRun,
   playCard,
+  previewPlay,
   recordRun,
+  RETIRED,
   ripeTonight,
   SEASON_NAMES,
   SEEDS,
@@ -26,16 +31,20 @@ import {
   UNLOCK_ORDER,
   whyNot,
   type Card,
+  type CardId,
   type Ev,
   type Harvest,
   type Meta,
   type Plot,
   type RunState,
+  type Step,
 } from './rules';
+import { learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, type Piece } from './lessons';
 import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
-import { Board } from './view/board';
-import { faceUrl } from './view/faces';
+import { Board, type PreviewMark } from './view/board';
+import { costBoxes, faceUrl } from './view/faces';
+import { iconUrl } from './view/icons';
 import { Sheets } from './sheets';
 
 export interface Prefs {
@@ -47,8 +56,10 @@ export interface SaveData {
   run: RunState;
   meta: Meta;
   prefs: Prefs;
-  /** First-run lessons done, in order. */
-  taught: number;
+  /** The lessons done and the table's pieces brought in, kept with the meta unlocks. */
+  learn?: Learn;
+  /** Older saves: how many of the old first-day lessons were done. */
+  taught?: number;
 }
 
 interface Held {
@@ -72,6 +83,7 @@ interface Press {
 interface CardEl {
   el: HTMLDivElement;
   img: HTMLImageElement;
+  cost: HTMLDivElement;
   key: string;
 }
 
@@ -89,7 +101,24 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 
 const clonePlots = (p: readonly Plot[]): Plot[] => p.map((x) => ({ ...x, crop: x.crop ? { ...x.crop } : null }));
 
-export const LESSONS = ['carrot', 'radish', 'water', 'lantern', 'bloom', 'peg'] as const;
+/** Bring a run saved before the rules changed up to date: no wet soil, no hose or mulch. */
+function migrateRun(r: RunState): void {
+  const old = r as RunState & { radishesToday?: number; chiliNext?: boolean };
+  delete old.radishesToday;
+  delete old.chiliNext;
+  r.script ??= [];
+  for (const p of r.plots as (Plot & { wet?: boolean; mulch?: number })[]) {
+    delete p.wet;
+    delete p.mulch;
+    p.boost ??= 0;
+  }
+  const fix = (c: Card) => {
+    if (c.id in RETIRED) c.id = RETIRED[c.id];
+  };
+  [...r.draw, ...r.hand, ...r.discard, ...r.placed].forEach(fix);
+  r.pool = [...new Set(r.pool.map((c) => (RETIRED[c] ?? c) as CardId))];
+  if (r.shop) for (const o of r.shop.cards) o.card = (RETIRED[o.card] ?? o.card) as CardId;
+}
 
 export class Table {
   readonly el = el('div', 'sb');
@@ -127,12 +156,16 @@ export class Table {
   run!: RunState;
   meta: Meta = newMeta();
   prefs: Prefs = { fast: false };
-  taught = 0;
+  tutor = new Tutor(newLearn());
+  /** The lesson line on screen (table or stall). */
+  line: Line | null = null;
   /** What the board shows: the plots as of the last thing animated. */
   shown: Plot[] = [];
   shownEarned = 0;
   shownCoins = 0;
   shownDay = 1;
+  /** Scoops shown full: the night keeps the old day's count until dawn refills them. */
+  shownEnergy = 0;
   /** The hand as shown (the old hand stays up through the night). */
   handShown: Card[] = [];
   held: Held | null = null;
@@ -153,6 +186,7 @@ export class Table {
   private cardW = 110;
   private cardH = 154;
   private handRect = { x: 0, y: 0, w: 0, h: 0 };
+  private hintBox = { x: 0, y: 0, w: 0, h: 0 };
   private hoverCard: number | null = null;
   private hoverTimer = 0;
   frames = 0;
@@ -164,6 +198,8 @@ export class Table {
   private shakeT = 0;
   private shakeAmp = 0;
   private ro: ResizeObserver;
+  private doneCount = 0;
+  private lastPhase = 'day';
 
   constructor(private ctx: GameContext) {
     this.sheets = new Sheets(this, ctx);
@@ -184,9 +220,12 @@ export class Table {
     tinImg.src = tinUrl();
     tinImg.alt = '';
     this.tin.append(tinImg, this.tinCount);
-    this.tin.setAttribute('aria-label', 'Seed tin: your deck');
-    this.heap.append(el('span', 'sb-heap-pile'), this.heapCount, el('span', 'sb-label', 'Spent'));
+    this.tin.setAttribute('aria-label', 'Seed tin: your deck (D)');
+    this.heap.append(el('span', 'sb-heap-pile'), el('i', 'sb-heap-done'), this.heapCount, el('span', 'sb-label', 'Spent'));
     this.heap.setAttribute('aria-label', 'Spent cards. Drop a card here to toss it, once a day.');
+    this.scoops.setAttribute('role', 'img');
+    this.hint.setAttribute('role', 'status');
+    this.hint.setAttribute('aria-live', 'polite');
     this.bench.append(this.scoops, this.tonightEl, this.tin, this.heap, this.lantern);
     t.append(this.ledger, this.purse, this.book, this.peg, this.boardWrap, this.pages, this.bench, this.handEl, this.dark, this.fx, this.hint, this.note);
     this.el.append(t, this.sheets.el);
@@ -213,31 +252,50 @@ export class Table {
   load(data: SaveData | null): void {
     if (data && data.v === 1 && data.run && data.meta) {
       this.run = data.run;
+      migrateRun(this.run);
       this.meta = data.meta;
       this.prefs = { ...{ fast: false }, ...data.prefs };
-      this.taught = data.taught ?? LESSONS.length;
+      // A save from before the lessons: everything is already on the table; the can and the weather get a refresher.
+      this.tutor = new Tutor(data.learn ?? learnedAll(REFRESH));
     } else {
       this.meta = data?.meta ?? newMeta();
-      this.taught = 0;
+      this.tutor = new Tutor(data?.learn ?? (this.meta.runs > 0 ? learnedAll() : newLearn()));
       this.fresh(null);
       return;
     }
+    this.doneCount = this.tutor.learn.done.length;
     this.syncAll();
     this.afterSync();
   }
 
-  /** Start a new run. The very first run deals the teaching hand. */
-  fresh(seed: number | null, teach = this.meta.runs === 0 && this.taught < LESSONS.length): void {
+  /** A new player's first run is the guided first season: set hands, one idea a day. */
+  get guidedNext(): boolean {
+    return this.meta.runs === 0 && !this.tutor.learn.done.includes('scoops');
+  }
+
+  /** Start a new run. */
+  fresh(seed: number | null, guided = this.guidedNext): void {
     const s = seed ?? ((Date.now() ^ (Math.random() * 0x7fffffff)) | 0);
-    this.run = newRun(s, this.meta, teach ? FIRST_HAND : undefined).s;
-    if (!teach) this.taught = Math.max(this.taught, LESSONS.length);
+    this.run = newRun(s, this.meta, guided).s;
+    this.tutor.drop();
     this.held = null;
     this.seq?.finish();
     this.seq = null;
     this.sheets.close();
+    this.setLine(null);
     this.syncAll();
     this.save();
     this.afterSync();
+  }
+
+  /** Bring every piece in and mark every lesson done: a returning player's table. */
+  learnAll(): void {
+    this.tutor = new Tutor(learnedAll());
+    this.doneCount = this.tutor.learn.done.length;
+    this.setLine(null);
+    this.applyPieces();
+    this.renderAll();
+    this.save();
   }
 
   private afterSync(): void {
@@ -246,7 +304,7 @@ export class Table {
   }
 
   saveData(): SaveData {
-    return { v: 1, run: this.run, meta: this.meta, prefs: this.prefs, taught: this.taught };
+    return { v: 1, run: this.run, meta: this.meta, prefs: this.prefs, learn: this.tutor.learn };
   }
 
   save(): void {
@@ -261,10 +319,12 @@ export class Table {
     this.shownEarned = this.run.earned;
     this.shownCoins = this.run.coins;
     this.shownDay = this.run.day;
+    this.shownEnergy = this.run.energy;
     this.handShown = [...this.run.hand];
     this.board.anims.clear();
     this.board.night = 0;
     this.flame.classList.remove('out');
+    this.applyPieces();
     this.relayout();
   }
 
@@ -299,6 +359,147 @@ export class Table {
     return this.prefs.fast ? 2.2 : 1;
   }
 
+  seen(p: Piece): boolean {
+    return this.tutor.seen(p);
+  }
+
+  // ---------------------------------------------------------------- pieces and lessons
+
+  private pieceEls(p: Piece): HTMLElement[] {
+    switch (p) {
+      case 'lantern':
+        return [this.lantern];
+      case 'peg':
+        return [this.ledger, this.peg];
+      case 'scoops':
+        return [this.scoops];
+      case 'coins':
+        return [this.purse];
+      case 'tin':
+        return [this.tin];
+      case 'spent':
+        return [this.heap];
+      case 'tonight':
+        return [this.tonightEl];
+      case 'pages':
+        return [this.pages];
+      default:
+        return [];
+    }
+  }
+
+  /** Show the pieces brought in so far, and only those. New ones arrive with a small settle. */
+  applyPieces(arrive: Piece[] = []): void {
+    for (const p of PIECES) {
+      let on = this.seen(p);
+      if (p === 'tonight') on = on || this.run.tonight.length > 0;
+      // Kept pages have a panel on the desktop only; on a phone they live in the almanac.
+      if (p === 'pages') on = on && this.run.pages.length > 0 && this.layout === 'wide';
+      for (const e of this.pieceEls(p)) {
+        e.classList.toggle('sb-off', !on);
+        if (arrive.includes(p)) {
+          e.classList.remove('sb-arrive');
+          void e.offsetWidth;
+          e.classList.add('sb-arrive');
+        }
+      }
+    }
+    this.el.toggleAttribute('data-bloom', this.seen('bloom'));
+  }
+
+  private device(): 'touch' | 'mouse' | 'key' {
+    const d = this.ctx.device();
+    return d === 'touch' ? 'touch' : d === 'mouse' ? 'mouse' : 'key';
+  }
+
+  /** Once a frame: the tutor finishes and starts lessons; the line goes up by what it means. */
+  private teach(dt: number): void {
+    // Leaving the stall, however it happens, finishes the stall's lesson.
+    if (this.lastPhase === 'shop' && this.run.phase !== 'shop') this.tutor.count('leave');
+    this.lastPhase = this.run.phase;
+    const sheet = this.sheets.open && this.sheets.kind !== 'stall';
+    const quiet = this.busy || sheet || this.sheets.detailOpen || (this.sheets.open && this.sheets.kind === 'stall');
+    const held = this.held ? (this.cardOf(this.held.uid) ?? null) : null;
+    const { line, unlocked } = this.tutor.update(this.run, this.device(), held, dt, quiet);
+    if (unlocked.length) {
+      this.applyPieces(unlocked);
+      this.renderAll();
+      this.updateHighlight();
+      if (this.sheets.kind === 'stall' && unlocked.some((p) => p === 'pages' || p === 'services')) this.sheets.stall();
+      this.ctx.audio.cue('deck.page', { gain: 0.5 });
+    }
+    if (this.tutor.learn.done.length !== this.doneCount) {
+      this.doneCount = this.tutor.learn.done.length;
+      this.save();
+    }
+    this.setLine(sheet && line?.where !== 'stall' ? null : line);
+  }
+
+  /** Put a lesson line up (or take it down). Table lines sit in their strip; stall lines go on the stall. */
+  setLine(line: Line | null): void {
+    const was = this.line;
+    if (was?.id === line?.id && was?.text === line?.text && was?.point === line?.point) return;
+    this.line = line;
+    const h = this.hint;
+    const table = line && line.where === 'table' ? line : null;
+    if (table) {
+      h.textContent = table.text;
+      h.dataset.lesson = table.id;
+      h.classList.add('on');
+    } else {
+      h.classList.remove('on');
+      delete h.dataset.lesson;
+    }
+    this.sheets.lesson(line && line.where === 'stall' ? line : null);
+    this.placeHint();
+    this.cue();
+  }
+
+  /** The thing a lesson is about glows softly. */
+  private cue(): void {
+    const l = this.line && this.line.where === 'table' ? this.line : null;
+    for (const e of [this.lantern, this.peg, this.scoops, this.tin, this.heap]) e.classList.remove('sb-cue');
+    const target = l ? { lantern: this.lantern, peg: this.peg, scoops: this.scoops, tin: this.tin, heap: this.heap }[l.point as string] : null;
+    target?.classList.add('sb-cue');
+    const want = new Set(l?.point === 'hand' ? this.cueCards(l.id) : []);
+    for (const [uid, c] of this.cards) c.el.classList.toggle('sb-cue', want.has(uid));
+  }
+
+  private cueCards(lesson: string): number[] {
+    const s = this.run;
+    const pick = (f: (c: Card) => boolean) => s.hand.filter(f).map((c) => c.uid);
+    switch (lesson) {
+      case 'sow':
+        return pick((c) => CARDS[c.id].type === 'seed' && costOf(c.id, c.up) <= s.energy);
+      case 'companion':
+        return s.plots.some((p) => p.crop?.kind === 'carrot') ? pick((c) => c.id === 'radish') : pick((c) => c.id === 'carrot');
+      case 'bloom':
+        return pick((c) => c.id === 'radish');
+      case 'can':
+        return pick((c) => c.id === 'can');
+      case 'weather':
+        return pick((c) => CARDS[c.id].type === 'weather');
+      case 'newcard':
+        return pick((c) => !this.tutor.learn.cards.includes(c.id));
+      default:
+        return [];
+    }
+  }
+
+  private placeHint(): void {
+    const b = this.hintBox;
+    const h = this.hint;
+    h.style.left = `${b.x}px`;
+    h.style.top = `${b.y}px`;
+    h.style.width = `${b.w}px`;
+    h.style.minHeight = `${b.h}px`;
+  }
+
+  /** The stall's lesson line, for the sheets. */
+  get stallLine(): Line | null {
+    return this.line && this.line.where === 'stall' ? this.line : null;
+  }
+
   // ---------------------------------------------------------------- layout
 
   relayout(): void {
@@ -326,16 +527,18 @@ export class Table {
       this.cardW = Math.round(Math.min(112, Math.max(84, Math.min(W * 0.255, H * 0.118))));
       this.cardH = Math.round(this.cardW * 1.4);
       const handH = this.cardH + 26;
-      place(this.ledger, 64, top, W - 64 - 116, 50);
-      place(this.purse, W - 112, top, 56, 50);
+      place(this.ledger, 64, top, W - 64 - 112, 50);
+      place(this.purse, W - 106, top + 2, 46, 46);
       place(this.book, W - 52, top, 44, 50);
-      place(this.peg, 10, top + 56, W - 20, 26);
-      const benchH = 80;
+      place(this.peg, 10, top + 58, W - 20, 26);
+      const benchH = 78;
       const handY = H - safeB - handH;
       const benchY = handY - benchH;
-      boardBox = { x: 0, y: top + 84, w: W, h: benchY - (top + 84) };
+      // A strip between the plot and the bench for the lesson line, so it never covers either.
+      const strip = 40;
+      boardBox = { x: 0, y: top + 86, w: W, h: benchY - strip - (top + 86) };
+      this.hintBox = { x: 14, y: benchY - strip + 3, w: W - 28, h: strip - 8 };
       place(this.bench, 6, benchY, W - 12, benchH);
-      this.pages.style.display = 'none';
       this.handRect = { x: 0, y: handY, w: W, h: handH + safeB };
     } else {
       const P = Math.round(Math.max(300, Math.min(380, W * 0.28)));
@@ -344,26 +547,31 @@ export class Table {
       this.cardH = Math.round(this.cardW * 1.4);
       const handH = Math.round(Math.max(this.cardH + 30, Math.min(250, H * 0.28)));
       place(this.ledger, sx, 16, P - 64, 64);
-      place(this.purse, sx + P - 58, 16, 58, 64);
+      place(this.purse, sx + P - 56, 18, 56, 56);
       place(this.book, sx + P - 58, 86, 58, 44);
       place(this.peg, sx, 90, P - 66, 32);
-      this.pages.style.display = '';
-      place(this.pages, sx, 140, P, Math.max(80, H - 140 - 230 - handH * 0.0));
-      place(this.bench, sx, H - 214, P, 200);
+      const benchY = H - 214;
+      this.hintBox = { x: sx, y: benchY - 66, w: P, h: 52 };
+      place(this.pages, sx, 140, P, Math.max(60, benchY - 76 - 140));
+      place(this.bench, sx, benchY, P, 200);
       boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
       this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
     }
     place(this.boardWrap, boardBox.x, boardBox.y, boardBox.w, boardBox.h);
     place(this.handEl, this.handRect.x, this.handRect.y, this.handRect.w, this.handRect.h);
+    this.placeHint();
     this.board.layout(boardBox.w, boardBox.h, dpr, this.run?.cols ?? 4, this.run?.rows ?? 4, !wide || H < 600);
     if (this.run) this.board.setSeason(this.run.season, (this.run.year - 1) * 4 + this.run.season + 1);
     const pr = this.peg.getBoundingClientRect();
     const pw = Math.round(pr.width || W - 20);
     const ph = Math.round(pr.height || 26);
-    const pegArt = pegboardUrl(pw, ph, wide ? 31 : 31);
+    const pegArt = pegboardUrl(pw, ph, 31);
     this.pegImg.src = pegArt.url;
     this.pegXs = pegArt.xs;
-    if (this.run) this.renderAll();
+    if (this.run) {
+      this.applyPieces();
+      this.renderAll();
+    }
   }
 
   // ---------------------------------------------------------------- rendering the table
@@ -373,14 +581,13 @@ export class Table {
     this.renderBench();
     this.renderPages();
     this.renderHand();
-    this.renderHint();
   }
 
   private renderLedger(): void {
     const s = this.run;
     const season = SEASON_NAMES[s.season];
     this.ledSeason.textContent = `${season[0].toUpperCase()}${season.slice(1)}, year ${s.year}`;
-    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'Market day' : 'The run is over';
+    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'Market day' : 'Run over';
     this.ledTally.innerHTML = `<b>${Math.round(this.shownEarned)}</b> of ${s.quota}`;
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
@@ -399,6 +606,7 @@ export class Table {
   }
   private pegBackK = 0;
 
+  /** The scoops: full or empty at a glance; the ones a held card would use lift; the ones it lacks show red. */
   private renderBench(): void {
     const s = this.run;
     const max = energyMax(s);
@@ -408,14 +616,19 @@ export class Table {
       this.scoops.append(i);
     }
     while (this.scoops.children.length > max) this.scoops.lastElementChild!.remove();
+    const energy = this.busy ? this.shownEnergy : s.energy;
+    const card = this.held ? this.cardOf(this.held.uid) : undefined;
+    const cost = card ? costOf(card.id, card.up) : 0;
     [...this.scoops.children].forEach((c, i) => {
-      const full = i < s.energy || this.busy;
+      const full = i < energy;
       const img = c as HTMLImageElement;
       const src = scoopUrl(full);
       if (img.getAttribute('src') !== src) img.src = src;
       img.classList.toggle('empty', !full);
+      img.classList.toggle('use', !!card && full && i >= energy - cost && cost <= energy);
+      img.classList.toggle('short', !!card && !full && cost > energy && i < cost);
     });
-    this.scoops.setAttribute('aria-label', `${s.energy} of ${max} energy`);
+    this.scoops.setAttribute('aria-label', `${energy} of ${max} scoops full`);
     this.tinCount.textContent = String(s.draw.length);
     this.heapCount.textContent = String(s.discard.length);
     this.heap.classList.toggle('can-toss', !!this.held && !s.tossed && s.phase === 'day');
@@ -424,8 +637,21 @@ export class Table {
     if (this.tonightEl.dataset.w !== s.tonight.join()) {
       this.tonightEl.innerHTML = wx;
       this.tonightEl.dataset.w = s.tonight.join();
+      this.applyPieces();
     }
     this.lantern.disabled = s.phase !== 'day';
+  }
+
+  /** Dawn: the scoops refill one after another. */
+  private refill(from: number): void {
+    const imgs = [...this.scoops.children] as HTMLElement[];
+    imgs.forEach((img, i) => {
+      if (i < from) return;
+      img.classList.remove('refill');
+      img.style.animationDelay = `${(i - from) * 90}ms`;
+      void img.offsetWidth;
+      img.classList.add('refill');
+    });
   }
 
   private renderPages(): void {
@@ -433,8 +659,9 @@ export class Table {
     if (this.pages.dataset.k === key) return;
     this.pages.dataset.k = key;
     this.pages.innerHTML = '';
-    this.pages.append(el('h4', '', this.run.pages.length ? 'Almanac pages kept' : 'No almanac pages yet'));
+    this.pages.append(el('h4', '', 'Almanac pages kept'));
     for (const p of this.run.pages) this.pages.append(this.sheets.pageEl(p, null));
+    this.applyPieces();
   }
 
   /** Fan the hand. */
@@ -454,15 +681,18 @@ export class Table {
     const gap = n > 1 ? Math.min(cw * 0.92, (avail - cw) / (n - 1)) : 0;
     const total = cw + gap * (n - 1);
     const x0 = (R.w - total) / 2;
+    const showCost = this.seen('scoops');
+    const day = this.run.phase === 'day';
     hand.forEach((card, i) => {
       let c = this.cards.get(card.uid);
-      const key = `${card.id}${card.up ? '+' : ''}`;
+      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}`;
       if (!c) {
         const d = el('div', 'sb-card');
         const img = el('img');
         img.draggable = false;
         img.alt = '';
-        d.append(img);
+        const cost = el('div', 'sb-cost');
+        d.append(img, cost);
         d.dataset.uid = String(card.uid);
         d.dataset.type = CARDS[card.id].type;
         d.addEventListener('pointerdown', (e) => this.onCardDown(e, card.uid));
@@ -476,32 +706,48 @@ export class Table {
         d.style.transform = `translate(${tr.left - hr.left}px, ${tr.top - hr.top}px) scale(0.3) rotate(-20deg)`;
         d.style.opacity = '0';
         this.handEl.append(d);
-        c = { el: d, img, key: '' };
+        c = { el: d, img, cost, key: '' };
         this.cards.set(card.uid, c);
         void d.offsetWidth;
         d.style.transition = '';
         d.style.opacity = '';
       }
       if (c.key !== key) {
-        c.img.src = faceUrl(card.id, card.up);
+        c.img.src = faceUrl(card.id, card.up, showCost);
         c.key = key;
-        c.el.setAttribute('aria-label', `${CARDS[card.id].name}${card.up ? ', select' : ''}, costs ${costOf(card.id, card.up)}`);
+        const n = costOf(card.id, card.up);
+        c.el.setAttribute('aria-label', `${CARDS[card.id].name}${card.up ? ', select' : ''}, ${n === 0 ? 'free' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`}`);
+        // One mark over each printed scoop, to show the ones the scoops on the bench cannot pay for.
+        c.cost.innerHTML = '';
+        if (showCost) {
+          for (const b of costBoxes(card.id, card.up)) {
+            const m = el('i');
+            m.style.left = `${b.x}%`;
+            m.style.top = `${(b.y / 140) * 100}%`;
+            m.style.width = `${b.w}%`;
+            m.style.height = `${(b.h / 140) * 100}%`;
+            c.cost.append(m);
+          }
+        }
       }
+      const cost = costOf(card.id, card.up);
+      const afford = !day || cost <= this.run.energy;
+      [...c.cost.children].forEach((m, k) => m.classList.toggle('lack', day && k >= this.run.energy));
       c.el.style.width = `${cw}px`;
       c.el.style.height = `${ch}px`;
       const mid = (n - 1) / 2;
       const off = i - mid;
       const held = this.held?.uid === card.uid;
       const hov = this.hoverCard === card.uid && !this.held;
-      const afford = this.run.phase === 'day' && costOf(card.id, card.up) <= this.run.energy;
       let x = x0 + i * gap;
-      let y = R.h - ch - (this.layout === 'phone' ? 14 : 18) + off * off * 2.2;
+      let y = R.h - ch - (this.layout === 'phone' ? 12 : 18) + off * off * 2.2;
       let rot = off * 3.2;
       let sc = 1;
       if (held) {
-        y -= ch * 0.3;
+        // On a phone the bench sits right above the hand: lift a little, so the scoops stay in sight.
+        y -= this.layout === 'phone' ? ch * 0.06 : ch * 0.3;
         rot = 0;
-        sc = 1.1;
+        sc = this.layout === 'phone' ? 1.04 : 1.1;
       } else if (hov) {
         y -= ch * 0.14;
         rot *= 0.4;
@@ -509,9 +755,10 @@ export class Table {
       if (!c.el.classList.contains('dragging')) c.el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${sc})`;
       c.el.style.zIndex = String(held ? 50 : hov ? 40 : 10 + i);
       c.el.classList.toggle('held', held);
-      c.el.classList.toggle('dear', !afford && this.run.phase === 'day');
+      c.el.classList.toggle('dear', !afford && showCost);
       c.el.dataset.key = String(i + 1);
     });
+    this.cue();
   }
 
   // ---------------------------------------------------------------- frame
@@ -525,6 +772,7 @@ export class Table {
     if (this.seq && !this.seq.done) this.seq.update(dt * this.speed);
     for (const s of this.small) s.update(dt * this.speed);
     this.small = this.small.filter((s) => !s.done);
+    this.teach(dt);
     // Music lifts during a harvest run, then settles.
     const target = this.hot > 0 ? 1 : 0;
     this.hot = Math.max(0, this.hot - dt);
@@ -549,6 +797,7 @@ export class Table {
       if (this.shakeT === 0) this.tableEl.style.transform = '';
     }
     this.board.tonight = this.busy ? [] : this.shown.map((_, i) => ripeTonight(this.run, i));
+    this.board.boost = this.busy ? [] : this.run.plots.map((p) => p.boost);
     const nk = this.board.night.toFixed(3);
     if (this.dark.dataset.k !== nk) {
       this.dark.dataset.k = nk;
@@ -626,7 +875,7 @@ export class Table {
       const card = this.run.hand[idx];
       const def = CARDS[card.id];
       const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
-      h.water = card.id === 'can' || card.id === 'hose' || card.id === 'mulch' || card.id === 'rain' || card.id === 'storm';
+      h.water = card.id === 'can' || card.id === 'rain' || card.id === 'storm';
       if (def.target === 'board') {
         h.all = true;
       } else if (def.target === 'move' && this.held!.from !== null) {
@@ -641,6 +890,45 @@ export class Table {
         if (aim !== null && !h.deny) h.area = this.areaOf(card, aim);
       }
     }
+    this.previewNow();
+  }
+
+  /**
+   * While a card is held, the plot shows what it would do. A seed marks every
+   * plot where a neighbour would give it a bonus; the plot under the finger,
+   * pointer or cursor also shows what the seed would score there and what its
+   * neighbours would gain. Tools and weather mark the crops they would touch.
+   */
+  private previewNow(): void {
+    const b = this.board;
+    b.preview = null;
+    const idx = this.heldIndex();
+    if (idx < 0 || this.busy || this.run.phase !== 'day') return;
+    const s = this.run;
+    const card = s.hand[idx];
+    const def = CARDS[card.id];
+    const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
+    const marks: PreviewMark[] = [];
+    let total: { plot: number; yield: number; bloom: number; score: number } | null = null;
+    if (def.target === 'board') {
+      marks.push(...(previewPlay(s, idx, null)?.marks ?? []));
+    } else if (def.target === 'move') {
+      const from = this.held!.from;
+      if (from !== null && aim !== null && moveTargets(s, idx, from).includes(aim)) marks.push(...(previewPlay(s, idx, from, aim)?.marks ?? []));
+    } else {
+      const valid = targetsFor(s, idx);
+      if (aim !== null && valid.includes(aim)) {
+        const p = previewPlay(s, idx, aim);
+        if (p) {
+          marks.push(...p.marks);
+          if (p.harvest && def.type === 'seed') total = { plot: aim, ...p.harvest };
+          else if (p.harvest) total = { plot: aim, ...p.harvest };
+        }
+      } else if (def.type === 'seed') {
+        for (const i of valid) for (const m of previewPlay(s, idx, i)?.marks ?? []) if (m.plot === i) marks.push(m);
+      }
+    }
+    b.preview = { marks, total, bloom: this.seen('bloom') };
   }
 
   private areaOf(card: Card, i: number): number[] {
@@ -661,6 +949,32 @@ export class Table {
   }
 
   // ---------------------------------------------------------------- cards: touch and mouse
+
+  private affordable(uid: number): boolean {
+    const c = this.cardOf(uid);
+    return !!c && costOf(c.id, c.up) <= this.run.energy;
+  }
+
+  /** A card the scoops cannot pay for shakes, and the scoops it lacks flash red. No note. */
+  nope(uid: number): void {
+    const c = this.cards.get(uid);
+    this.ctx.audio.cue('deck.deny');
+    if (c) {
+      c.el.classList.remove('nope');
+      void c.el.offsetWidth;
+      c.el.classList.add('nope');
+    }
+    const card = this.cardOf(uid);
+    if (!card || !this.seen('scoops')) return;
+    const need = costOf(card.id, card.up);
+    [...this.scoops.children].forEach((img, i) => {
+      if (i < this.run.energy || i >= need) return;
+      img.classList.remove('flash');
+      void (img as HTMLElement).offsetWidth;
+      img.classList.add('flash');
+      img.addEventListener('animationend', () => img.classList.remove('flash'), { once: true });
+    });
+  }
 
   private onCardDown(e: PointerEvent, uid: number): void {
     if (e.button > 0) return;
@@ -694,7 +1008,9 @@ export class Table {
       p.dragging = true;
       if (this.held?.uid !== p.uid) {
         this.held = { uid: p.uid, from: null };
+        this.tutor.count('pick');
         this.ctx.audio.cue('deck.pick');
+        this.renderBench();
       }
       const c = this.cards.get(p.uid)!;
       c.el.classList.add('dragging');
@@ -704,8 +1020,14 @@ export class Table {
       e.preventDefault();
       const c = this.cards.get(p.uid);
       const hr = this.handEl.getBoundingClientRect();
-      if (c) c.el.style.transform = `translate(${p.x - hr.left - this.cardW / 2}px, ${p.y - hr.top - this.cardH * 0.75}px) rotate(-2deg) scale(0.86)`;
       const br = this.board.canvas.getBoundingClientRect();
+      // Over the plot the card shrinks above the finger and goes see-through, so the preview under it shows.
+      const aiming = this.board.onPlate(p.x - br.left, p.y - br.top);
+      if (c) {
+        c.el.classList.toggle('aiming', aiming);
+        const lift = aiming ? this.cardH + 14 : this.cardH * 0.75;
+        c.el.style.transform = `translate(${p.x - hr.left - this.cardW / 2}px, ${p.y - hr.top - lift}px) rotate(-2deg) scale(${aiming ? 0.6 : 0.86})`;
+      }
       const i = this.board.pick(p.x - br.left, p.y - br.top);
       if (i !== this.hover) {
         this.hover = i;
@@ -723,7 +1045,7 @@ export class Table {
     this.press = null;
     const c = this.cards.get(p.uid);
     if (p.dragging) {
-      c?.el.classList.remove('dragging');
+      c?.el.classList.remove('dragging', 'aiming');
       this.heap.classList.remove('over');
       const br = this.board.canvas.getBoundingClientRect();
       const bx = p.x - br.left;
@@ -732,11 +1054,11 @@ export class Table {
       if (card && this.heapHit(p.x, p.y)) {
         this.tossHeld();
       } else if (card && CARDS[card.id].target === 'board' && this.board.onPlate(bx, by)) {
-        this.tryPlay(null);
+        if (!this.tryPlay(null)) this.putDown(true);
       } else if (card) {
         const i = this.board.pick(bx, by);
         if (i !== null) {
-          if (!this.tryPlay(i) && CARDS[card.id].target !== 'move') this.putDown();
+          if (!this.tryPlay(i) && CARDS[card.id].target !== 'move') this.putDown(true);
         } else this.putDown();
       }
       this.hover = null;
@@ -746,8 +1068,9 @@ export class Table {
     }
     // A long press leaves the card up close until the next tap.
     if (p.long) return;
-    // A tap: pick up, or put down.
+    // A tap: pick up, or put down. A card the scoops cannot pay for only shakes.
     if (this.held?.uid === p.uid) this.putDown();
+    else if (!this.affordable(p.uid)) this.nope(p.uid);
     else this.pickUp(p.uid);
   };
 
@@ -759,6 +1082,7 @@ export class Table {
   }
 
   private heapHit(x: number, y: number): boolean {
+    if (!this.seen('spent')) return false;
     const r = this.heap.getBoundingClientRect();
     return x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 8 && y <= r.bottom + 8;
   }
@@ -789,12 +1113,11 @@ export class Table {
     if (!card) return;
     this.sheets.closeDetail();
     this.held = { uid, from: null };
+    this.tutor.count('pick');
     this.ctx.audio.cue('deck.pick');
-    if (costOf(card.id, card.up) > this.run.energy) this.say('Not enough seed in the scoops for that one.', null);
     this.updateHighlight();
     this.renderHand();
     this.renderBench();
-    this.renderHint();
   }
 
   putDown(quiet = false): void {
@@ -804,7 +1127,6 @@ export class Table {
     this.updateHighlight();
     this.renderHand();
     this.renderBench();
-    this.renderHint();
   }
 
   // ---------------------------------------------------------------- playing
@@ -816,6 +1138,11 @@ export class Table {
     if (idx < 0) return false;
     const card = this.run.hand[idx];
     const def = CARDS[card.id];
+    if (costOf(card.id, card.up) > this.run.energy) {
+      this.nope(card.uid);
+      if (plot !== null) this.board.shake(plot);
+      return false;
+    }
     if (def.target === 'move') {
       if (plot === null) return false;
       if (this.held.from === null) {
@@ -850,8 +1177,12 @@ export class Table {
     this.held = null;
     this.handShown = [...this.run.hand];
     this.ctx.audio.cue('deck.play');
+    this.tutor.count('play');
+    if (ev.some((e) => e.t === 'plant')) this.tutor.count('plant');
+    if (card.id === 'can') this.tutor.count('can');
+    if (CARDS[card.id].type === 'weather') this.tutor.count('weather');
+    this.shownEnergy = this.run.energy;
     this.flyCard(card, cEl, from, plot ?? null, () => this.landPlay(ev, before));
-    this.learn(ev);
     this.save();
     this.updateHighlight();
     this.renderHand();
@@ -869,7 +1200,7 @@ export class Table {
     this.cards.delete(card.uid);
     const d = c.el;
     d.classList.add('flying');
-    d.classList.remove('held', 'dragging');
+    d.classList.remove('held', 'dragging', 'sb-cue');
     const hr = this.handEl.getBoundingClientRect();
     const br = this.board.canvas.getBoundingClientRect();
     const target = plot !== null ? this.board.centre(plot) : { x: this.board.bx + (this.board.T * this.board.cols) / 2, y: this.board.by + (this.board.T * this.board.rows) / 2 };
@@ -914,6 +1245,8 @@ export class Table {
             b.splash[i] = 1;
             const c = b.centre(i);
             b.emit('drop', c.x, c.y - b.T * 0.25, reduced ? 1 : 4, { col: '#6aa0d0', spread: 30, up: 50, size: 5, life: 0.5 });
+            const crop = this.run.plots[i].crop;
+            if (crop) this.bounce(crop.uid);
           }
           this.ctx.audio.cue('deck.water', { gain: Math.min(1, 0.4 + e.plots.length * 0.05) });
           break;
@@ -921,10 +1254,9 @@ export class Table {
           for (const g of e.growth) this.bounce(g.uid);
           this.ctx.audio.cue('deck.grow');
           break;
-        case 'compost':
-        case 'mulch': {
+        case 'compost': {
           const c = b.centre(e.plot);
-          b.emit('dust', c.x, c.y, 8, { col: e.t === 'mulch' ? '#e2bf68' : '#4a3424', spread: 40, up: 30 });
+          b.emit('dust', c.x, c.y, 8, { col: '#4a3424', spread: 40, up: 30 });
           break;
         }
         case 'move':
@@ -1004,9 +1336,9 @@ export class Table {
 
   tossHeld(): void {
     const idx = this.heldIndex();
-    if (idx < 0 || this.busy) return;
+    if (idx < 0 || this.busy || !this.seen('spent')) return;
     if (this.run.tossed) {
-      this.say('One toss a day. The heap is full for today.', null);
+      this.say('One toss a day.', null);
       this.ctx.audio.cue('deck.deny');
       return;
     }
@@ -1014,6 +1346,7 @@ export class Table {
     const ev = toss(this.run, idx);
     if (!ev) return;
     this.held = null;
+    this.tutor.count('toss');
     const c = this.cards.get(card.uid);
     if (c) {
       this.cards.delete(card.uid);
@@ -1032,7 +1365,7 @@ export class Table {
     this.renderAll();
   }
 
-  // ---------------------------------------------------------------- notes, hints and inspecting
+  // ---------------------------------------------------------------- notes and inspecting
 
   /** A short ink note on the table near a plot, gone after a moment. Not a stack: one at a time. */
   say(text: string, plot: number | null): void {
@@ -1063,100 +1396,10 @@ export class Table {
     if (p.crop) {
       const c = p.crop;
       const left = c.days - c.age;
-      const state = left <= 0 ? (c.pest ? 'ripe, but pests are on it' : 'ripe') : `${left} more ${left === 1 ? 'night' : 'nights'} to ripen`;
-      this.say(`${at}: ${CARDS[c.kind].name}, ${state}. ${p.wet ? 'Wet.' : 'Dry.'}`, i);
-    } else if (p.obj) this.say(`${at}: ${CARDS[p.obj].name}. ${CARDS[p.obj].text}`, i);
-    else this.say(`${at}: bare soil, ${p.wet ? 'wet' : 'dry'}.`, i);
-  }
-
-  /** First-run lessons: one short line at a time, near the thing it means, until it's done. */
-  renderHint(): void {
-    const h = this.hint;
-    const s = this.run;
-    const lesson = LESSONS[this.taught];
-    const dayOk = lesson === 'bloom' || lesson === 'peg' ? s.day === 2 : s.day === 1;
-    const show = !!lesson && dayOk && s.year === 1 && s.season === 0 && s.phase === 'day' && !this.busy && !this.sheets.open && !this.sheets.detailOpen;
-    if (!show) {
-      h.classList.remove('on');
-      return;
-    }
-    const dev = this.ctx.device();
-    const tap = dev === 'touch' ? 'Tap' : 'Click';
-    const keys = dev === 'key';
-    let text = '';
-    let anchor: DOMRect | null = null;
-    const tr = this.tableEl.getBoundingClientRect();
-    switch (lesson) {
-      case 'carrot': {
-        const held = this.held && this.cardOf(this.held.uid)?.id === 'carrot';
-        text = held ? (keys ? 'Pick a plot with the arrows, then Enter.' : `Now ${tap.toLowerCase()} a plot to sow it.`) : keys ? 'Press 1 to take up the carrot.' : `${tap} the carrot packet to take it up.`;
-        anchor = held ? this.boardWrap.getBoundingClientRect() : this.handEl.getBoundingClientRect();
-        break;
-      }
-      case 'radish':
-        text = 'Sow a radish beside the carrot. Next to a carrot it yields 2 more.';
-        anchor = this.boardWrap.getBoundingClientRect();
-        break;
-      case 'bloom':
-        text = 'The carrot ripens tonight. Each radish pulled before it, to its left or above, adds 1 bloom.';
-        anchor = this.boardWrap.getBoundingClientRect();
-        break;
-      case 'peg':
-        text = 'Each harvest pays yield × bloom onto the pegboard. Reach the brass hole by day 6.';
-        anchor = this.peg.getBoundingClientRect();
-        break;
-      case 'water':
-        text = 'Seeds grow only in wet soil. Water their row with the can.';
-        anchor = this.boardWrap.getBoundingClientRect();
-        break;
-      case 'lantern':
-        text = keys ? 'Press E, or blow out the lantern, to end the day.' : 'Blow out the lantern to end the day.';
-        anchor = this.lantern.getBoundingClientRect();
-        break;
-    }
-    h.textContent = text;
-    h.dataset.lesson = lesson;
-    h.classList.add('on');
-    const hw = Math.min(lesson === 'carrot' || lesson === 'lantern' ? 210 : 260, this.W - 24);
-    h.style.width = `${hw}px`;
-    let x = anchor.left - tr.left + anchor.width / 2 - hw / 2;
-    let y: number;
-    if (lesson === 'lantern') {
-      x = anchor.left - tr.left - hw + 20;
-      y = anchor.top - tr.top - 64;
-    } else if (lesson === 'peg') {
-      y = anchor.bottom - tr.top + 8;
-    } else if (lesson === 'carrot' && !(this.held && this.cardOf(this.held.uid)?.id === 'carrot')) {
-      y = anchor.top - tr.top - (this.layout === 'phone' ? 70 : 60);
-    } else {
-      y = this.layout === 'phone' ? anchor.top - tr.top + 4 : anchor.top - tr.top + 8;
-    }
-    h.style.left = `${Math.round(Math.max(10, Math.min(this.W - hw - 10, x)))}px`;
-    h.style.top = `${Math.round(Math.max(8, y))}px`;
-  }
-
-  /** Mark lessons done by what just happened. */
-  private learn(ev: Ev[]): void {
-    const lesson = LESSONS[this.taught];
-    if (!lesson) return;
-    const did = (pred: (e: Ev) => boolean) => ev.some(pred);
-    let done = false;
-    if (lesson === 'carrot') done = did((e) => e.t === 'plant' && e.kind === 'carrot');
-    else if (lesson === 'radish') done = did((e) => e.t === 'plant' && e.kind === 'radish');
-    else if (lesson === 'water') done = did((e) => e.t === 'water');
-    else if (lesson === 'lantern') done = did((e) => e.t === 'dusk');
-    else if (lesson === 'bloom') done = did((e) => e.t === 'plant' && e.kind === 'radish');
-    else if (lesson === 'peg') done = did((e) => e.t === 'dusk');
-    if (done) {
-      this.taught++;
-      // Skip lessons the player has already done on their own.
-      while (LESSONS[this.taught] === 'radish' && this.run.plots.some((p) => p.crop?.kind === 'radish')) this.taught++;
-      while (LESSONS[this.taught] === 'water' && this.run.plots.some((p) => p.wet)) this.taught++;
-      if (this.run.day > 1) while (['carrot', 'radish', 'water', 'lantern'].includes(LESSONS[this.taught] ?? '')) this.taught++;
-      if (this.run.day > 2 || this.run.season > 0) this.taught = LESSONS.length;
-      this.save();
-    }
-    this.renderHint();
+      const state = c.pest ? 'pests on it' : left <= 0 ? 'ripe' : ripeTonight(this.run, i) ? 'ripe tonight' : `${left} ${left === 1 ? 'night' : 'nights'} to go`;
+      this.say(`${at}: ${CARDS[c.kind].name.toLowerCase()}, ${state}.`, i);
+    } else if (p.obj) this.say(`${at}: ${CARDS[p.obj].name.toLowerCase()}.`, i);
+    else this.say(`${at}: bare soil.`, i);
   }
 
   // ---------------------------------------------------------------- end of day, the night, the cascade
@@ -1167,15 +1410,45 @@ export class Table {
     this.sheets.closeDetail();
     const before = clonePlots(this.run.plots);
     const handBefore = [...this.run.hand];
+    const energyBefore = this.run.energy;
     const ev = endDay(this.run);
     for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
     if ((this.run.phase as string) === 'over') recordRun(this.meta, this.run, UNLOCK_ORDER);
-    this.learn(ev);
+    // What the night teaches by showing: the pegboard comes for the first harvest, bloom for the first bloom.
+    const harvests = ev.filter((e): e is Extract<Ev, { t: 'harvest' }> => e.t === 'harvest');
+    const arrive: Piece[] = [];
+    if (harvests.length && this.tutor.unlock('peg')) arrive.push('peg');
+    if (harvests.some((e) => e.h.mult.length > 0) && this.tutor.unlock('bloom')) arrive.push('bloom');
+    if (ev.some((e) => e.t === 'seasonEnd') && this.tutor.unlock('coins')) arrive.push('coins');
+    if (arrive.length) this.applyPieces(arrive);
+    this.tutor.count('night');
+    this.tutor.count('harvest', harvests.length);
+    this.tutor.count('crow', ev.filter((e) => e.t === 'crow').length);
+    if (ev.some((e) => e.t === 'seasonEnd' && e.cleared)) this.tutor.count('stall');
     this.save();
     this.ctx.audio.cue('deck.endday');
     this.shown = before;
+    this.shownEnergy = energyBefore;
     this.handShown = handBefore.filter((c) => !ev.some((e) => e.t === 'discardExcess' && e.cards.some((x) => x.uid === c.uid)));
+    this.setLine(null);
     this.night(ev);
+  }
+
+  /** Dawn: the rules' state is the truth from here. */
+  private dawn(): void {
+    const from = this.shownEnergy;
+    this.shown = clonePlots(this.run.plots);
+    this.shownEarned = this.run.earned;
+    this.shownCoins = this.run.coins;
+    this.shownDay = this.run.day;
+    this.handShown = [...this.run.hand];
+    this.board.anims.clear();
+    this.board.night = 0;
+    this.shownEnergy = this.run.energy;
+    if (this.run.phase === 'day' && this.run.energy > from) {
+      this.renderBench();
+      this.refill(from);
+    }
   }
 
   /** Build and run the night from the rules' report. */
@@ -1193,7 +1466,6 @@ export class Table {
     s.tween(0, 0.4, (k) => (b.night = ease.out(k) * 0.62));
     let t = 0.4;
     const harvests = ev.filter((e): e is Extract<Ev, { t: 'harvest' }> => e.t === 'harvest').map((e) => e.h);
-    const big = this.run.quota > 0 ? this.run.quota / 4 : Infinity;
     const n = harvests.length;
     let hi = 0;
     const plotsOf = (i: number) => this.shown[i];
@@ -1211,10 +1483,7 @@ export class Table {
       switch (e.t) {
         case 'rain': {
           const at = t;
-          s.at(at, () => {
-            this.ctx.audio.cue('deck.water', { gain: 1 });
-            for (const p of this.shown) p.wet = true;
-          });
+          s.at(at, () => this.ctx.audio.cue('deck.water', { gain: 1 }));
           s.tween(at, 0.7, () => {
             if (reduced) return;
             for (let k = 0; k < 3; k++) b.emit('drop', b.bx + Math.random() * b.T * b.cols, b.by - b.T * 0.5, 1, { col: '#7aa8d8', spread: 10, up: -200, size: 5, life: 0.5 });
@@ -1248,6 +1517,7 @@ export class Table {
             s.at(at, () => {
               const crop = plotsOf(g.plot).crop;
               if (crop) crop.age = g.to;
+              plotsOf(g.plot).boost = 0;
               const c = b.centre(g.plot);
               if (!reduced) b.emit('spark', c.x, c.y - b.T * 0.2, 2, { col: '#b8e08a', spread: 30, up: 40, size: 3 });
             });
@@ -1313,19 +1583,12 @@ export class Table {
         }
         case 'harvest': {
           const h = e.h;
-          const d = this.harvestSpan(h, n, big);
+          const d = this.harvestSpan(h, n);
           this.scoreHarvest(s, t, h, hi, n);
           hi++;
           t += d;
           break;
         }
-        case 'quota':
-          break;
-        case 'dry':
-          s.at(t + 0.2, () => {
-            for (const i of e.plots) this.shown[i].wet = false;
-          });
-          break;
         case 'seasonEnd':
           seasonEnd = e;
           break;
@@ -1343,30 +1606,23 @@ export class Table {
       this.ctx.audio.cue('deck.draw');
     });
     s.at(end + 0.4, () => {
-      // Dawn: the rules' state is the truth from here.
-      this.shown = clonePlots(this.run.plots);
-      this.shownEarned = this.run.earned;
-      this.shownCoins = this.run.coins;
-      this.shownDay = this.run.day;
+      this.dawn();
       this.pegBackK = this.run.quota ? this.run.earned / this.run.quota : 0;
-      this.handShown = [...this.run.hand];
-      b.anims.clear();
-      b.night = 0;
       if (ev.some((x) => x.t === 'shuffle')) this.ctx.audio.cue('deck.shuffle');
       this.renderAll();
       this.updateHighlight();
     });
     s.then(() => {
       // Make sure a skipped night lands in the same place.
+      if (this.shownDay !== this.run.day || this.shownEnergy !== this.run.energy) this.dawn();
       this.shown = clonePlots(this.run.plots);
       this.shownEarned = this.run.earned;
       this.shownCoins = this.run.coins;
-      this.shownDay = this.run.day;
       this.handShown = [...this.run.hand];
       b.anims.clear();
       b.night = 0;
       this.flame.classList.remove('out');
-      this.fx.querySelectorAll('.sb-slip, .sb-fly').forEach((x) => x.remove());
+      this.fx.querySelectorAll('.sb-slip, .sb-arc').forEach((x) => x.remove());
       this.seq = null;
       if (seasonEnd) {
         this.sheets.close();
@@ -1378,34 +1634,55 @@ export class Table {
     });
     this.seq = s;
     this.renderBench();
-    this.renderHint();
+  }
+
+  /** How a harvest's steps are paced: each bonus travels from where it came from, one after another. */
+  /** A night with many harvests runs quicker, so a full plot stays brisk; a first night with two radishes takes its time. */
+  private squeeze(n: number): number {
+    return n > 5 ? Math.max(0.3, 5 / n) : 1;
+  }
+
+  private stepTimes(h: Harvest, n: number): { gap: number; fly: number; lead: number } {
+    const k = this.squeeze(n);
+    const steps = h.chips.length + h.mult.length;
+    const many = steps > 4 ? 4 / steps : 1;
+    return { gap: 0.17 * k * many, fly: 0.24 * Math.max(0.6, k), lead: 0.14 * k };
   }
 
   /** How long a harvest holds the stage, before speed. Big ones get a beat more. */
-  private harvestSpan(h: Harvest, n: number, big: number): number {
-    const steps = Math.min(4, h.chips.length + h.mult.length);
-    let d = 0.32 + steps * 0.09;
-    if (n > 6) d *= Math.max(0.45, 6 / n);
-    if (h.score >= big) d += 0.3;
-    return d;
+  private harvestSpan(h: Harvest, n: number): number {
+    const { gap, fly, lead } = this.stepTimes(h, n);
+    const k = this.squeeze(n);
+    const steps = h.chips.length + h.mult.length;
+    let d = lead + (steps ? (steps - 1) * gap + fly : 0) + 0.3 * k;
+    if (this.run.quota > 0 && h.score >= this.run.quota / 4) d += 0.3 * Math.max(0.5, k);
+    return Math.max(0.3, d);
   }
 
-  /** Schedule one harvest's scoring at time t: the crop pops, yield counts up, bloom ticks in, the total flies to the pegboard. */
+  /**
+   * Schedule one harvest's scoring at time t. The crop lifts and a slip shows
+   * its yield by a basket (and, once bloom has been met, × its bloom by a red
+   * flower). Each bonus flies in from the crop that gave it, a small "+2" or
+   * "+1" that lands on the slip and leaves its picture there. Then the slip
+   * becomes the total and flies onto the pegboard.
+   */
   private scoreHarvest(s: Seq, t: number, h: Harvest, index: number, n: number): void {
     const b = this.board;
     const big = this.run.quota > 0 && h.score >= this.run.quota / 4;
     const mid = this.run.quota > 0 && h.score >= this.run.quota / 10;
     const reduced = this.ctx.settings().reducedMotion;
-    const d = this.harvestSpan(h, n, this.run.quota / 4);
+    const d = this.harvestSpan(h, n);
+    const { gap, fly, lead } = this.stepTimes(h, n);
+    const showBloom = this.seen('bloom') || h.mult.length > 0;
     const a = { lift: 0, scale: 1, tilt: 0, alpha: 1, stage: null as number | null, glow: 0 };
     let slip: HTMLDivElement | null = null;
     let yv: HTMLElement;
     let bv: HTMLElement;
-    let why: HTMLElement;
-    const pos = () => {
+    let row: HTMLElement;
+    const at = (plot: number) => {
       const br = b.canvas.getBoundingClientRect();
       const tr = this.tableEl.getBoundingClientRect();
-      const c = b.base(h.plot);
+      const c = b.base(plot);
       return { x: br.left - tr.left + c.x, y: br.top - tr.top + c.y - b.T * 0.95 };
     };
     s.at(t, () => {
@@ -1413,29 +1690,33 @@ export class Table {
       this.hot = 1.2;
       this.ctx.audio.cue('deck.harvest', { pitch: ladder(index), pan: this.pan(h.plot) });
       slip = el('div', `sb-slip${big ? ' big' : mid ? ' mid' : ''}${h.golden ? ' golden' : ''}`);
+      const sum = el('span', 'sb-sum');
       yv = el('b', 'y', String(h.base));
-      bv = el('b', 'm', '');
-      why = el('em', '', '');
-      slip.append(yv, el('span', 'x', ''), bv, why);
-      const p = pos();
+      sum.append(yv, iconImg('basket', 'sb-ic'));
+      bv = el('b', 'm', '1');
+      if (showBloom) sum.append(el('span', 'x', '×'), bv, iconImg('bloom', 'sb-ic'));
+      row = el('span', 'sb-steps');
+      slip.append(sum, row);
+      const p = at(h.plot);
       slip.style.left = `${p.x}px`;
       slip.style.top = `${p.y}px`;
       this.fx.append(slip);
     });
-    s.tween(t, d * 0.3, (k) => {
+    s.tween(t, Math.min(0.3, d * 0.3), (k) => {
       a.glow = k;
       a.lift = ease.back(k) * 0.14;
       a.scale = 1 + ease.out(k) * 0.12;
     });
-    // Yield steps, then bloom steps.
+    // Yield steps, then bloom steps, each arriving from where it came from.
     const steps = [...h.chips.map((st) => ({ st, kind: 'y' as const })), ...h.mult.map((st) => ({ st, kind: 'm' as const }))];
     let yval = h.base;
     let mAdd = 1;
     let mX = 1;
-    const span = d * 0.5;
     steps.forEach(({ st, kind }, j) => {
-      const at = t + d * 0.15 + (span * j) / Math.max(1, steps.length);
-      s.at(at, () => {
+      const go = t + lead + j * gap;
+      const lands = go + (st.from !== undefined ? fly : 0);
+      if (st.from !== undefined) this.arc(s, go, fly, st, kind, h.plot);
+      s.at(lands, () => {
         if (kind === 'y') {
           yval = st.op === '+' ? yval + st.v : yval * st.v;
           yv.textContent = fmtNum(yval);
@@ -1447,18 +1728,19 @@ export class Table {
           if (st.op === '+') mAdd += st.v;
           else mX *= st.v;
           bv.textContent = fmtNum(mAdd * mX);
-          slip!.classList.add('has-m');
           bv.classList.remove('tick');
           void bv.offsetWidth;
           bv.classList.add('tick');
-          this.ctx.audio.cue('deck.mult', { pitch: Math.min(2, 0.9 + (mAdd * mX) * 0.08), gain: Math.min(1, 0.5 + mAdd * mX * 0.08) });
+          this.ctx.audio.cue('deck.mult', { pitch: Math.min(2, 0.9 + mAdd * mX * 0.08), gain: Math.min(1, 0.5 + mAdd * mX * 0.08) });
         }
-        why.textContent = `${st.op === '+' ? '+' : '×'}${fmtNum(st.v)} ${st.label}`;
-        if (st.from !== undefined) this.link(st.from, h.plot);
+        // The bonus leaves its picture on the slip: a carrot and +2, a radish and +1.
+        const chip = el('span', `sb-chip ${kind}`);
+        chip.append(iconImg(st.icon, ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
+        row.append(chip);
       });
     });
     // The total.
-    const totalAt = t + d * 0.7;
+    const totalAt = t + d - Math.min(0.3, d * 0.3);
     s.at(totalAt, () => {
       if (!slip) return;
       slip.classList.add('total');
@@ -1474,7 +1756,8 @@ export class Table {
       } else if (mid && !reduced) b.emit('spark', c.x, c.y - b.T * 0.5, 7, { col: '#f2d27a', spread: 70, up: 70, size: 4 });
       if (h.golden) b.emit('spark', c.x, c.y - b.T * 0.5, 12, { col: '#ffe08a', spread: 90, up: 90, size: 5 });
     });
-    s.tween(totalAt, d * 0.3, (k) => {
+    const tail = Math.min(0.3, d * 0.3);
+    s.tween(totalAt, tail, (k) => {
       if (h.leaves) {
         a.alpha = 1 - k;
         a.lift = 0.14 + k * 0.5;
@@ -1484,7 +1767,7 @@ export class Table {
         a.scale = 1 + 0.12 * (1 - k);
       }
     });
-    s.at(totalAt + d * 0.3, () => {
+    s.at(totalAt + tail, () => {
       b.anims.delete(h.uid);
       const p = this.shown[h.plot];
       if (p.crop && p.crop.uid === h.uid) {
@@ -1503,7 +1786,7 @@ export class Table {
       if (!slip) return;
       const tr = this.tableEl.getBoundingClientRect();
       const pr = this.peg.getBoundingClientRect();
-      const p = pos();
+      const p = at(h.plot);
       fromX = p.x;
       fromY = p.y;
       const k = Math.min(1, (this.shownEarned + h.score) / Math.max(1, this.run.quota));
@@ -1536,22 +1819,44 @@ export class Table {
     });
   }
 
-  /** A short ink link from the crop that gave a bonus to the one being scored. */
-  private link(from: number, to: number): void {
+  /** A bonus travelling from the crop that gave it to the one being scored: its picture and "+1", on an arc. */
+  private arc(s: Seq, go: number, dur: number, st: Step, kind: 'y' | 'm', to: number): void {
     const b = this.board;
-    const a = b.base(from);
-    const c = b.base(to);
-    const br = b.canvas.getBoundingClientRect();
-    const tr = this.tableEl.getBoundingClientRect();
-    const l = el('i', 'sb-link');
-    const dx = c.x - a.x;
-    const dy = c.y - a.y;
-    l.style.left = `${br.left - tr.left + a.x}px`;
-    l.style.top = `${br.top - tr.top + a.y - b.T * 0.45}px`;
-    l.style.width = `${Math.hypot(dx, dy)}px`;
-    l.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-    this.fx.append(l);
-    setTimeout(() => l.remove(), 650);
+    let badge: HTMLElement | null = null;
+    let p0 = { x: 0, y: 0 };
+    let p1 = { x: 0, y: 0 };
+    s.at(go, () => {
+      const br = b.canvas.getBoundingClientRect();
+      const tr = this.tableEl.getBoundingClientRect();
+      const ox = br.left - tr.left;
+      const oy = br.top - tr.top;
+      const a = b.base(st.from!);
+      const c = b.base(to);
+      p0 = { x: ox + a.x, y: oy + a.y - b.T * 0.45 };
+      p1 = { x: ox + c.x, y: oy + c.y - b.T * 1.0 };
+      badge = el('span', `sb-arc ${kind}`);
+      badge.append(iconImg(kind === 'y' ? 'basket' : 'bloom', ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
+      badge.style.left = `${p0.x}px`;
+      badge.style.top = `${p0.y}px`;
+      this.fx.append(badge);
+      // The giver nods as it sends the bonus.
+      const giver = this.shown[st.from!]?.crop;
+      if (giver && !b.anims.has(giver.uid)) this.bounce(giver.uid);
+    });
+    s.tween(go, dur, (k) => {
+      if (!badge) return;
+      const e = ease.inOut(k);
+      const lift = Math.max(30, Math.hypot(p1.x - p0.x, p1.y - p0.y) * 0.5);
+      const x = p0.x + (p1.x - p0.x) * e;
+      const y = p0.y + (p1.y - p0.y) * e - Math.sin(Math.PI * e) * lift;
+      badge.style.left = `${x}px`;
+      badge.style.top = `${y}px`;
+      badge.style.opacity = String(k > 0.85 ? (1 - k) / 0.15 : 1);
+    });
+    s.at(go + dur, () => {
+      badge?.remove();
+      badge = null;
+    });
   }
 
   skip(): void {
@@ -1579,13 +1884,15 @@ export class Table {
       return;
     }
     const s = this.run;
-    const k = e.key;
-    if (/^[1-9]$/.test(k)) {
-      const i = Number(k) - 1;
+    const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+    if (digit) {
+      const i = Number(digit[1]) - 1;
       const c = s.hand[i];
       if (c) {
         e.preventDefault();
+        // Shift takes up a card the scoops cannot pay for, so it can still be tossed.
         if (this.held?.uid === c.uid) this.putDown();
+        else if (!this.affordable(c.uid) && !e.shiftKey) this.nope(c.uid);
         else this.pickUp(c.uid);
       }
       return;
@@ -1615,18 +1922,20 @@ export class Table {
         else this.inspect(this.cursor);
         return;
       case 'KeyE':
+        if (!this.seen('lantern')) return;
         e.preventDefault();
         this.endDay();
         return;
       case 'KeyX':
       case 'Delete':
       case 'Backspace':
-        if (this.held) {
+        if (this.held && this.seen('spent')) {
           e.preventDefault();
           this.tossHeld();
         }
         return;
       case 'KeyD':
+        if (!this.seen('tin')) return;
         e.preventDefault();
         this.sheets.deck('tin');
         return;
@@ -1638,7 +1947,7 @@ export class Table {
         return;
       case 'KeyF':
         this.prefs.fast = !this.prefs.fast;
-        this.say(this.prefs.fast ? 'Fast harvests.' : 'Harvests at an easy pace.', null);
+        this.say(this.prefs.fast ? 'Fast harvests.' : 'Easy harvests.', null);
         this.save();
         return;
       case 'Escape':
@@ -1667,6 +1976,13 @@ export class Table {
   get tallyText(): string {
     return this.ledTally.textContent ?? '';
   }
+}
+
+function iconImg(key: string, cls: string): HTMLImageElement {
+  const i = el('img', cls);
+  i.src = iconUrl(key);
+  i.alt = '';
+  return i;
 }
 
 export function fmtNum(v: number): string {

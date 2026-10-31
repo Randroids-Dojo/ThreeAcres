@@ -1,6 +1,7 @@
 // The night and the scoring cascade. Each harvest is chips times mult: chips
 // start at the crop's base value plus flat bonuses, mult starts at 1, gains
-// additive bonuses, then any times multipliers.
+// additive bonuses, then any times multipliers. Every bonus a crop gets from
+// another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, SEEDS } from './cards';
 import { around, byYear, crowsOn, guarded, immune, isEmpty, isRipe, isTall, neighbours, pestsOn, TUNING } from './board';
@@ -34,44 +35,38 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   const nb = neighbours(s, i);
   const bee = s.pages.includes('bees') ? 2 : 1;
 
+  const near = (k: string) => nb.filter((j) => snap.crops[j]?.kind === k);
   if (kind === 'radish') {
-    const c = nb.find((j) => snap.crops[j]?.kind === 'carrot');
-    if (c !== undefined) chips.push({ label: 'next to a carrot', op: '+', v: 2, from: c });
+    const c = near('carrot')[0];
+    if (c !== undefined) chips.push({ label: 'next to a carrot', icon: 'carrot', op: '+', v: 2, from: c });
   }
   if (kind === 'lettuce') {
     const t = nb.find((j) => !!snap.crops[j] && isTall(snap.crops[j]!.kind));
-    if (t !== undefined) chips.push({ label: 'next to a tall crop', op: '+', v: 4, from: t });
+    if (t !== undefined) chips.push({ label: 'next to a tall crop', icon: snap.crops[t]!.kind, op: '+', v: 4, from: t });
   }
-  if (kind === 'strawberry' && crop.picks > 0) chips.push({ label: `pick ${crop.picks + 1}`, op: '+', v: crop.picks });
-  if (kind === 'wheat') {
-    let n = 0;
-    snap.crops.forEach((c, j) => {
-      if (j !== i && c?.kind === 'wheat') n++;
-    });
-    if (n > 0) chips.push({ label: n === 1 ? 'another wheat' : `${n} other wheat`, op: '+', v: n });
-  }
-  for (const j of nb) if (snap.crops[j]?.kind === 'beans') chips.push({ label: 'beans next door', op: '+', v: 2, from: j });
-  if (crop.compost > 0) chips.push({ label: crop.compost > 1 ? `compost x${crop.compost}` : 'compost', op: '+', v: 6 * crop.compost });
-  if (crop.rot) chips.push({ label: 'crop rotation', op: '+', v: 4 });
-  if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) chips.push({ label: 'root cellar', op: '+', v: 3 });
-  if (o.suns > 0) chips.push({ label: o.suns > 1 ? `sun x${o.suns}` : 'sun', op: '+', v: 3 * o.suns });
-  if (o.shears) chips.push({ label: 'shears', op: 'x', v: 2 });
+  if (kind === 'wheat') for (const j of near('wheat')) chips.push({ label: 'wheat next to it', icon: 'wheat', op: '+', v: 2, from: j });
+  for (const j of near('beans')) chips.push({ label: 'beans next to it', icon: 'beans', op: '+', v: 2, from: j });
+  if (crop.compost > 0) chips.push({ label: crop.compost > 1 ? `compost x${crop.compost}` : 'compost', icon: 'compost', op: '+', v: 6 * crop.compost });
+  if (crop.rot) chips.push({ label: 'crop rotation', icon: 'rotation', op: '+', v: 4 });
+  if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) chips.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 3 });
+  if (o.suns > 0) chips.push({ label: o.suns > 1 ? `sun x${o.suns}` : 'sun', icon: 'sun', op: '+', v: 3 * o.suns });
+  if (o.shears) chips.push({ label: 'shears', icon: 'shears', op: 'x', v: 2 });
 
-  if (kind === 'carrot' && s.radishesToday > 0) mult.push({ label: s.radishesToday === 1 ? 'a radish before it' : `${s.radishesToday} radishes before it`, op: '+', v: s.radishesToday });
-  for (const j of nb) if (snap.crops[j]?.kind === 'sunflower') mult.push({ label: 'sunflower bees', op: '+', v: bee, from: j });
-  for (const j of around(s, i)) if (snap.objs[j] === 'beehive') mult.push({ label: 'beehive', op: '+', v: bee, from: j });
+  if (kind === 'carrot') for (const j of near('radish')) mult.push({ label: 'a radish next to it', icon: 'radish', op: '+', v: 1, from: j });
+  for (const j of near('sunflower')) mult.push({ label: 'sunflower next to it', icon: 'sunflower', op: '+', v: bee, from: j });
+  for (const j of around(s, i)) if (snap.objs[j] === 'beehive') mult.push({ label: 'beehive', icon: 'beehive', op: '+', v: bee, from: j });
   if (kind === 'corn') {
-    const b = nb.find((j) => snap.crops[j]?.kind === 'beans');
-    if (b !== undefined) mult.push({ label: 'next to beans', op: 'x', v: 1.5, from: b });
+    const b = near('beans')[0];
+    if (b !== undefined) mult.push({ label: 'next to beans', icon: 'beans', op: 'x', v: 1.5, from: b });
   }
-  if (kind === 'pumpkin' && nb.every((j) => !snap.crops[j] && !snap.objs[j])) mult.push({ label: 'room to sprawl', op: 'x', v: 2 });
-  if (s.chiliNext) mult.push({ label: 'after a chili', op: 'x', v: 1.5 });
+  if (kind === 'pumpkin' && nb.every((j) => !snap.crops[j] && !snap.objs[j])) mult.push({ label: 'room to sprawl', icon: 'alone', op: 'x', v: 2 });
+  for (const j of near('chili')) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: 1.5, from: j });
   const n = s.dayHarvests + 1;
-  if (s.pages.includes('market') && n % 5 === 0) mult.push({ label: 'market day', op: 'x', v: 2 });
+  if (s.pages.includes('market') && n % 5 === 0) mult.push({ label: 'market day', icon: 'market', op: 'x', v: 2 });
   let golden = false;
   if (o.roll && s.pages.includes('clover') && rand(s) < 1 / 8) {
     golden = true;
-    mult.push({ label: 'four-leaf clover', op: 'x', v: 3 });
+    mult.push({ label: 'four-leaf clover', icon: 'clover', op: 'x', v: 3 });
   }
 
   let ch = base;
@@ -103,8 +98,6 @@ export function applyHarvest(s: RunState, h: Harvest, ev: Ev[]): void {
   const crop = p.crop!;
   const before = s.earned;
   s.dayHarvests++;
-  if (h.kind === 'radish') s.radishesToday++;
-  s.chiliNext = h.kind === 'chili';
   s.coins += h.score;
   s.earned += h.score;
   s.stats.totalEarned += h.score;
@@ -122,7 +115,7 @@ export function applyHarvest(s: RunState, h: Harvest, ev: Ev[]): void {
   if (before < s.quota && s.earned >= s.quota) ev.push({ t: 'quota', earned: s.earned, quota: s.quota });
 }
 
-/** Resolve the night: weather, growth, pests and mint, crows, the harvest cascade, then the soil dries. */
+/** Resolve the night: weather, growth, pests and mint, crows, then the harvest cascade. */
 export function night(s: RunState, ev: Ev[]): void {
   const weather = s.tonight;
   s.tonight = [];
@@ -134,14 +127,7 @@ export function night(s: RunState, ev: Ev[]): void {
   const rains = weather.filter((w) => w === 'rain').length;
   const storms = weather.filter((w) => w === 'storm').length;
   const suns = weather.filter((w) => w === 'sun').length;
-  if (rains + storms > 0) {
-    const all: number[] = [];
-    s.plots.forEach((p, i) => {
-      if (!p.wet) all.push(i);
-      p.wet = true;
-    });
-    ev.push({ t: 'rain', plots: all });
-  }
+  if (rains + storms > 0) ev.push({ t: 'rain', plots: s.plots.map((_, i) => i) });
   for (let k = 0; k < storms; k++) {
     const crops = s.plots.map((p, i) => (p.crop ? i : -1)).filter((i) => i >= 0);
     if (!crops.length) break;
@@ -151,14 +137,16 @@ export function night(s: RunState, ev: Ev[]): void {
     ev.push({ t: 'flatten', plot: i, kind: c.kind, uid: c.uid });
   }
 
-  // 2. Watered crops grow.
+  // 2. Every crop grows a night, plus any boost from the can or the weather. Pests stop it.
   const extra = rains + storms * 2;
   const growth: NightGrowth[] = [];
   s.plots.forEach((p, i) => {
     const c = p.crop;
-    if (!c || c.pest || isRipe(c) || !p.wet) return;
+    const boost = p.boost;
+    p.boost = 0;
+    if (!c || c.pest || isRipe(c)) return;
     const from = c.age;
-    c.age = Math.min(c.days, c.age + 1 + extra);
+    c.age = Math.min(c.days, c.age + 1 + extra + boost);
     growth.push({ plot: i, uid: c.uid, from, to: c.age });
   });
   if (growth.length) ev.push({ t: 'grow', growth });
@@ -218,18 +206,4 @@ export function night(s: RunState, ev: Ev[]): void {
     applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev);
   }
   s.stats.bestDay = Math.max(s.stats.bestDay, s.earned - startEarned);
-
-  // 6. Plots dry out unless mulched.
-  const dried: number[] = [];
-  s.plots.forEach((p, i) => {
-    if (p.mulch > 1) {
-      p.mulch--;
-      p.wet = true;
-      return;
-    }
-    p.mulch = 0;
-    if (p.wet) dried.push(i);
-    p.wet = false;
-  });
-  if (dried.length) ev.push({ t: 'dry', plots: dried });
 }

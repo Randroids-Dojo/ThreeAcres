@@ -1,16 +1,29 @@
 // The plot, painted as a plate in an old almanac: a deckled page laid on the
 // table, a ruled frame, a timber bed of soil squares and the crops drawn with
-// the almanac's own botanical paintings. The page and soil are cached and
-// repainted only when a plot's soil changes; crops come from a sprite cache.
+// the almanac's own botanical paintings. The page and soil are cached once per
+// size and season; crops come from a sprite cache. While a card is held the
+// board draws its preview: small yield, bloom and night marks on the crops it
+// would touch, and what a seed would score on the plot under the finger.
 
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES, type Palette } from '../../../render2d/palette';
 import { makePaper } from '../../../render2d/paper';
 import { paintScarecrow } from '../../../render2d/props';
 import { hash3, Rng } from '../../../render2d/rng';
-import { stageOf, type Crop, type Plot, type Season, type SeedId } from '../rules';
+import { stageOf, type Crop, type Mark, type Plot, type Season, type SeedId } from '../rules';
 import { paintSeedCrop } from './crops';
 import { paintHiveOnPlot, paintPests } from './glyphs';
+import { basket, bloom, BLOOM, moon, num, numWidth } from './icons';
+
+export type PreviewMark = Mark;
+
+export interface Preview {
+  marks: PreviewMark[];
+  /** A seed on the plot under the finger: what it would score there. */
+  total: { plot: number; yield: number; bloom: number; score: number } | null;
+  /** Bloom has been introduced: show bloom with the total. */
+  bloom: boolean;
+}
 
 export interface CropAnim {
   /** Upward lift in tiles. */
@@ -79,6 +92,8 @@ export class Board {
   dpr = 1;
   /** Tile size and the bed's top-left corner, CSS px. */
   T = 80;
+  /** The plate's margin under the bed (caption and frame). */
+  botM = 34;
   bx = 0;
   by = 0;
   cols = 4;
@@ -101,6 +116,12 @@ export class Board {
   hl: Highlight = { valid: [], hover: null, area: [], water: false, deny: false, cursor: null, all: false };
   /** Plots whose crop will be pulled tonight. */
   tonight: boolean[] = [];
+  /** Extra nights each plot grows tonight (the watering can). */
+  boost: number[] = [];
+  /** What the held card would do, or null. */
+  preview: Preview | null = null;
+  /** Checks only: paint the printed frame's rules in this colour, to find them in the pixels. */
+  ruleInk: string | null = null;
   frames = 0;
 
   constructor() {
@@ -118,9 +139,17 @@ export class Board {
     // The plate has a margin for the frame, a band on top for tall crops, and the caption under the bed.
     const sideM = compact ? 22 : 34;
     const topM = compact ? 44 : 64;
-    const botM = compact ? 34 : 46;
-    const T = Math.floor(Math.min((w - 2 * sideM - 12) / cols, (h - topM - botM - 12) / rows));
-    this.T = Math.max(30, T);
+    let botM = compact ? 34 : 46;
+    const fit = () => Math.max(30, Math.floor(Math.min((w - 2 * sideM - 12) / cols, (h - topM - botM - 12) / rows)));
+    this.T = fit();
+    // The caption sits under the bed and above the printed frame: size the margin from what is in it.
+    for (let k = 0; k < 3; k++) {
+      const need = Math.ceil(captionBand(this.T));
+      if (need <= botM) break;
+      botM = need;
+      this.T = fit();
+    }
+    this.botM = botM;
     const bw = this.T * cols;
     const bh = this.T * rows;
     this.pw = bw + 2 * sideM;
@@ -228,9 +257,9 @@ export class Board {
     g.restore();
 
     // Printed frame: a heavy rule and a hairline inside it.
-    const m = 9;
-    g.strokeStyle = pal.ink;
-    g.globalAlpha = 0.75;
+    const m = FRAME_M;
+    g.strokeStyle = this.ruleInk ?? pal.ink;
+    g.globalAlpha = this.ruleInk ? 1 : 0.75;
     g.lineWidth = 1.6;
     g.strokeRect(this.px0 + m, this.py0 + m, this.pw - 2 * m, this.ph - 2 * m);
     g.lineWidth = 0.6;
@@ -275,15 +304,36 @@ export class Board {
       for (let rr = 0; rr < this.rows; rr++) g.fillText(String(rr + 1), this.bx - fw - 5, this.by + (rr + 0.55) * T);
     }
 
-    // Caption.
+    // Caption, between the bed and the printed frame's hairline.
     g.fillStyle = pal.ink;
     g.textAlign = 'center';
-    const cap = Math.round(Math.max(11, T * 0.16));
+    const cap = captionSize(T);
     g.font = `italic 500 ${cap}px 'Fraunces Variable', Georgia, serif`;
-    g.fillText(`Plate ${ROMAN[(this.plate - 1) % ROMAN.length]}. The kitchen plot in ${SEASON_WORD[this.season]}.`, this.px0 + this.pw / 2, this.by + bh + fw + cap + 7);
+    g.fillText(this.caption, this.px0 + this.pw / 2, this.captionBaseline);
   }
 
-  private paintSoil(g: Ctx, c: number, rr: number, p: Plot, px: number, pal: Palette): void {
+  /** Repaint the page and soil on the next frame. */
+  repaint(): void {
+    this.layerKey = '';
+  }
+
+  /** The plate's caption text. */
+  get caption(): string {
+    return `Plate ${ROMAN[(this.plate - 1) % ROMAN.length]}. The kitchen plot in ${SEASON_WORD[this.season]}.`;
+  }
+
+  /** Where the caption's baseline sits, CSS px from the canvas top. */
+  get captionBaseline(): number {
+    return this.by + this.T * this.rows + frameW(this.T) + captionSize(this.T) + 7;
+  }
+
+  /** The printed frame's rules under the bed, CSS px from the canvas top: the heavy rule and the hairline inside it. */
+  get frameRules(): { heavy: number; hair: number } {
+    const bottom = this.py0 + this.ph - FRAME_M;
+    return { heavy: bottom, hair: bottom - 3.5 };
+  }
+
+  private paintSoil(g: Ctx, c: number, rr: number, _p: Plot, px: number, pal: Palette): void {
     const r = new Rng(hash3(c, rr, 303));
     const x = c;
     const y = rr;
@@ -291,14 +341,14 @@ export class Board {
     // The soil square.
     g.beginPath();
     g.rect(x + gap, y + gap, 1 - gap * 2, 1 - gap * 2);
-    fill(g, p.wet ? pal.soilWet : pal.soilDry);
+    fill(g, pal.soilDry);
     g.save();
     g.clip();
     // Mottle.
     for (let k = 0; k < 10; k++) {
       g.beginPath();
       g.ellipse(x + r.next(), y + r.next(), 0.12 + r.next() * 0.16, 0.06 + r.next() * 0.08, r.next() * 3, 0, Math.PI * 2);
-      fill(g, p.wet ? pal.soilMoist : pal.soilDamp, 0.22);
+      fill(g, pal.soilDamp, 0.22);
     }
     // Three furrows, engraved in broken strokes.
     for (let f = 0; f < 3; f++) {
@@ -311,33 +361,11 @@ export class Board {
         g.lineTo(Math.min(x + 0.93, fx + l), fy + r.jit(0.012));
         fx += l + 0.03 + r.next() * 0.05;
       }
-      ink(g, pal.soilShadow, Math.max(px * 1.6, 0.026), p.wet ? 0.5 : 0.75);
+      ink(g, pal.soilShadow, Math.max(px * 1.6, 0.026), 0.75);
       g.beginPath();
       g.moveTo(x + 0.1, fy - 0.035);
       g.lineTo(x + 0.9, fy - 0.035);
-      ink(g, p.wet ? pal.sheen : pal.soilRidge, Math.max(px * 1.2, 0.018), p.wet ? 0.35 : 0.65);
-    }
-    if (p.wet) {
-      // A sheen and a few beads of water.
-      for (let k = 0; k < 4; k++) {
-        g.beginPath();
-        g.ellipse(x + 0.2 + r.next() * 0.6, y + 0.2 + r.next() * 0.6, 0.04 + r.next() * 0.04, 0.012, -0.2, 0, Math.PI * 2);
-        fill(g, pal.sheen, 0.55);
-      }
-    }
-    if (p.mulch > 0) {
-      // Straw laid over the soil.
-      g.beginPath();
-      for (let k = 0; k < 34; k++) {
-        const sx = x + 0.1 + r.next() * 0.8;
-        const sy = y + 0.1 + r.next() * 0.8;
-        const a = r.jit(0.9);
-        const l = 0.08 + r.next() * 0.12;
-        g.moveTo(sx, sy);
-        g.lineTo(sx + Math.cos(a) * l, sy + Math.sin(a) * l);
-      }
-      ink(g, '#e2bf68', Math.max(px * 2, 0.022), 0.95);
-      ink(g, pal.ink, Math.max(px * 0.6, 0.006), 0.4);
+      ink(g, pal.soilRidge, Math.max(px * 1.2, 0.018), 0.65);
     }
     g.restore();
     g.beginPath();
@@ -392,7 +420,7 @@ export class Board {
     this.frames++;
     this.warm(plots);
     const { ctx, dpr, T } = this;
-    const key = `${this.season}|${this.plate}|${this.cols}|${this.T}|${plots.map((p) => `${p.wet ? 1 : 0}${p.mulch > 0 ? 1 : 0}`).join('')}`;
+    const key = `${this.season}|${this.plate}|${this.cols}|${this.rows}|${this.T}|${this.botM}|${this.ruleInk}`;
     if (key !== this.layerKey) {
       this.paintLayer(plots);
       this.layerKey = key;
@@ -430,6 +458,13 @@ export class Board {
       if (p.crop) this.drawCrop(p.crop, i, b.x + shake, b.y);
     }
 
+    // Watered plots: a drop in the corner while they wait for tonight's extra night.
+    for (let i = 0; i < plots.length; i++) {
+      if (!this.boost[i] || this.night > 0.05) continue;
+      const ctr = this.centre(i);
+      this.drop(ctr.x - T * 0.36, ctr.y + T * 0.34, T * 0.07);
+    }
+
     // Ripe-tonight moons and pests on top.
     for (let i = 0; i < plots.length; i++) {
       const c = plots[i].crop;
@@ -446,8 +481,86 @@ export class Board {
       }
     }
 
+    this.drawPreview();
     this.drawParticles(dt);
+  }
 
+  /** A blue drop: this plot grows an extra night tonight. */
+  private drop(x: number, y: number, r: number): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r * 1.8);
+    ctx.quadraticCurveTo(x + r * 1.1, y - r * 0.2, x, y + r);
+    ctx.quadraticCurveTo(x - r * 1.1, y - r * 0.2, x, y - r * 1.8);
+    ctx.fillStyle = '#5d93c4';
+    ctx.fill();
+    ctx.strokeStyle = this.pal.ink;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  /**
+   * The held card's preview: chips in a plot's top corner for what its crop
+   * would gain (a basket and +2, a red flower and +1, a moon and +1), and a
+   * dark slip under the aimed plot with what the seed would score there.
+   */
+  private drawPreview(): void {
+    const pv = this.preview;
+    if (!pv || this.night > 0.05) return;
+    const { ctx, T } = this;
+    const size = Math.max(11, Math.round(T * 0.15));
+    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void): number => {
+      const tw = numWidth(ctx, text, size);
+      const w = tw + size * 1.25 + 6;
+      const h = size + 6;
+      ctx.beginPath();
+      ctx.roundRect(x - w, y, w, h, 4);
+      ctx.fillStyle = 'rgba(251, 244, 222, 0.96)';
+      ctx.fill();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      num(ctx, text, x - w + 3, y + h / 2, size, col);
+      icon(x - size * 0.62 - 2, y + h / 2);
+      return h + 2;
+    };
+    const sign = (v: number) => (v > 0 ? `+${fmt(v)}` : fmt(v));
+    for (const m of pv.marks) {
+      const c = this.centre(m.plot);
+      const x = c.x + T / 2 - 3;
+      let y = c.y - T / 2 + 3;
+      if (m.yield) y += chip(x, y, sign(m.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05));
+      if (m.bloom) y += chip(x, y, sign(m.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
+      if (Math.abs(m.times - 1) > 1e-6) y += chip(x, y, `×${fmt(m.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
+      if (m.nights) y += chip(x, y, `+${m.nights}`, '#3a4a78', (cx, cy) => moon(ctx, cx, cy, size * 0.42));
+    }
+    const t = pv.total;
+    if (t) {
+      const c = this.centre(t.plot);
+      // The arithmetic only when bloom changes the total; otherwise just what it pays.
+      const showBloom = t.bloom !== 1;
+      const big = Math.max(12, Math.round(T * 0.17));
+      const parts = showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
+      const widths = parts.map((s) => numWidth(ctx, s, big));
+      const icon = big * 1.1;
+      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12;
+      const h = big + 8;
+      // Straddling the plot's bottom edge, clear of a thumb on the plot.
+      const x0 = c.x - w / 2;
+      const y0 = c.y + T / 2 - h * 0.45;
+      ctx.beginPath();
+      ctx.roundRect(x0, y0, w, h, 5);
+      ctx.fillStyle = 'rgba(42, 30, 18, 0.92)';
+      ctx.fill();
+      let x = x0 + 6;
+      basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, '#f6ecd0');
+      x += icon + 2;
+      parts.forEach((s, k) => {
+        const col = showBloom && k === 2 ? '#f39aa8' : '#f6ecd0';
+        num(ctx, s, x, y0 + h / 2, big, col);
+        x += widths[k] + 3;
+      });
+    }
   }
 
   private drawCrop(c: Crop, i: number, x: number, y: number): void {
@@ -500,6 +613,7 @@ export class Board {
   }
 
   private drawHighlights(_plots: readonly Plot[]): void {
+    void _plots;
     const { ctx, T } = this;
     const h = this.hl;
     const rect = (i: number, inset: number) => {
@@ -617,3 +731,22 @@ export class Board {
   }
 }
 
+
+const FRAME_M = 9;
+
+function frameW(T: number): number {
+  return Math.max(5, T * 0.09);
+}
+
+function captionSize(T: number): number {
+  return Math.round(Math.max(11, T * 0.16));
+}
+
+/** The margin under the bed that keeps the caption clear of the printed frame: bed frame, caption with its descenders, the gap, the frame's two rules, and air. */
+function captionBand(T: number): number {
+  return frameW(T) + captionSize(T) * 1.35 + 7 + FRAME_M + 3.5 + 4;
+}
+
+function fmt(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1).replace(/\.0$/, '');
+}

@@ -29,9 +29,10 @@ import {
   type Ev,
   type PageId,
 } from './rules';
+import type { Line } from './lessons';
 import type { Table } from './table';
 import { pinUrl, thingUrl } from './view/art';
-import { faceUrl } from './view/faces';
+import { faceUrl, VARIETY } from './view/faces';
 import { paintBell, paintGlyph, paintStamp } from './view/glyphs';
 import { PALETTES } from '../../render2d/palette';
 
@@ -65,6 +66,8 @@ export class Sheets {
   /** Stall: the item lifted for a second tap. */
   private picked: string | null = null;
   private pickUid: number | null = null;
+  /** The stall's lesson line, pinned at its head. */
+  private lessonEl = el('div', 'sb-stall-lesson');
 
   constructor(
     private t: Table,
@@ -88,7 +91,6 @@ export class Sheets {
     this.open = true;
     this.kind = kind;
     this.t.putDown(true);
-    this.t.renderHint();
     if (this.ctx.device() === 'key') {
       const f = (this.el.querySelector(focus) ?? this.el.querySelector('button:not([disabled])')) as HTMLButtonElement | null;
       f?.focus({ preventScroll: true });
@@ -109,7 +111,6 @@ export class Sheets {
     this.open = false;
     this.kind = null;
     this.picked = null;
-    this.t.renderHint();
   }
 
   // ---------------------------------------------------------------- the almanac (pause)
@@ -130,7 +131,7 @@ export class Sheets {
       this.menu();
     });
     row('The rules in brief', '', () => this.rules());
-    row('Your seed tin', 'D', () => this.deck('tin'));
+    if (this.t.seen('tin')) row('Your seed tin', 'D', () => this.deck('tin'));
     row('Other games', '`', () => {
       this.close();
       this.ctx.openSwitcher();
@@ -157,7 +158,7 @@ export class Sheets {
         `${m.runs ? `Runs finished: ${m.runs}. Most seasons: ${best.seasons}. Best harvest: ${best.harvest}.` : 'No runs finished yet.'}${s.stats.bestHarvest ? ` This run's best: ${kinds} for ${s.stats.bestHarvest}.` : ''}`,
       ),
     );
-    page.append(el('p', 'sb-keys', 'Keys: 1 to 7 take up a card, arrows pick a plot, Enter sows, E ends the day, X tosses, Esc puts down.'));
+    page.append(el('p', 'sb-keys', 'Keys: 1 to 7 take up a card (Shift for one you cannot pay for), arrows pick a plot, Enter plays, I reads, E ends the day, X tosses, D opens the tin, Esc puts down.'));
     this.show('menu', page);
   }
   private giveUpArmed = false;
@@ -167,10 +168,10 @@ export class Sheets {
     page.append(el('i', 'sb-ribbon'));
     page.append(el('h2', '', 'The rules in brief'));
     const lines = [
-      'A season is six days. Each day you draw up to five cards and fill three seed scoops. Each card costs its seed dots.',
-      'Sow seeds on bare plots. A seed grows only in wet soil, so water it before you blow out the lantern.',
-      'At night the weather comes, watered crops grow a day, and every ripe crop is pulled in reading order, top left first.',
-      'Each harvest pays yield × bloom. Yield is what the crop is worth; bloom multiplies it. The neighbours a crop has when the harvest starts count.',
+      'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner.',
+      'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. The watering can and rain add a night.',
+      'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
+      'Bonuses come from what stands next to a crop: a carrot gives the radish beside it +2 yield, each radish beside a carrot gives it +1 bloom. Hold a card to see what it would do on each plot.',
       'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy seed at the market between seasons.',
       'From summer, pests stop crops growing. From autumn, crows take a ripe crop that no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
@@ -192,7 +193,8 @@ export class Sheets {
     d.append(img);
     const notes = el('div', 'sb-detail-notes');
     const cost = costOf(card.id, card.up);
-    notes.append(el('p', '', `<b>${esc(def.name)}${card.up ? ', select' : ''}.</b> ${cost === 0 ? 'Free to play.' : `Costs ${cost} seed ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
+    const variety = def.type === 'seed' ? `, <i>${esc(VARIETY[card.id as keyof typeof VARIETY])}</i>` : '';
+    notes.append(el('p', '', `<b>${esc(def.name)}</b>${variety}${card.up ? ', select' : ''}. ${cost === 0 ? 'Free to play.' : `Costs ${cost} ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
     notes.append(el('p', '', esc(cardText(card.id, card.up))));
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
     if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot until the season ends, then comes back to the tin.'));
@@ -202,7 +204,7 @@ export class Sheets {
     d.classList.toggle('hover', hover);
     d.classList.add('on');
     this.detailHover = hover;
-    this.t.renderHint();
+    this.t.tutor.count('detail');
     if (!d.parentElement) this.t.el.append(d);
   }
 
@@ -210,7 +212,6 @@ export class Sheets {
     if (hover && !this.detailHover) return;
     if (!this.detailEl.classList.contains('on')) return;
     this.detailEl.classList.remove('on');
-    this.t.renderHint();
   }
 
   get detailOpen(): boolean {
@@ -221,6 +222,7 @@ export class Sheets {
 
   deck(which: 'tin' | 'spent' | 'all', pick: 'remove' | 'upgrade' | null = null): void {
     const s = this.t.run;
+    if (which === 'tin' && !pick) this.t.tutor.count('tin');
     const wrap = el('div', 'sb-tinview');
     this.pickUid = null;
     let cards: Card[];
@@ -258,6 +260,7 @@ export class Sheets {
         }
         const ev = pick === 'remove' ? removeCard(s, c.uid) : upgradeCard(s, c.uid);
         if (ev) {
+          this.t.tutor.count('service');
           this.ctx.audio.cue(pick === 'remove' ? 'deck.remove' : 'deck.buy');
           this.t.save();
         } else this.ctx.audio.cue('deck.deny');
@@ -302,7 +305,8 @@ export class Sheets {
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
     wrap.append(head);
 
-    // Pages pinned on the back board.
+    if (this.t.stallLine) wrap.append(this.lessonEl);
+    // Pages pinned on the back board, once the almanac pages have been brought in.
     const cork = el('div', 'sb-cork');
     cork.append(el('h3', '', `Almanac pages. You keep up to ${MAX_PAGES}.`));
     const pins = el('div', 'sb-pins');
@@ -312,8 +316,8 @@ export class Sheets {
       const full = s.pages.length >= MAX_PAGES;
       const b = el('button', `sb-pagebtn${this.picked === key ? ' lifted' : ''}`);
       b.append(pageEl);
-      if (!o.sold) {
-        const tag = el('span', 'sb-ask', full ? 'Your almanac is full' : s.coins < o.price ? `${o.price} coins: you have ${s.coins}` : `Take it for ${o.price}`);
+      if (!o.sold && this.picked === key) {
+        const tag = el('span', 'sb-ask', full ? 'Almanac full' : s.coins < o.price ? `Short ${o.price - s.coins}` : 'Tap to buy');
         b.append(tag);
       }
       b.disabled = o.sold;
@@ -325,6 +329,7 @@ export class Sheets {
           return;
         }
         if (buyPage(s, i)) {
+          this.t.tutor.count('page');
           this.ctx.audio.cue('deck.page');
           this.picked = null;
           this.t.save();
@@ -340,7 +345,7 @@ export class Sheets {
       for (const p of s.pages) kept.append(el('i', '', esc(PAGES[p].name)));
       cork.append(pins, kept);
     } else cork.append(pins);
-    wrap.append(cork);
+    if (this.t.seen('pages')) wrap.append(cork);
 
     // The tray of seed and tools, rarer stock laid out larger.
     const tray = el('div', 'sb-tray');
@@ -356,7 +361,7 @@ export class Sheets {
         b.disabled = true;
       } else {
         b.innerHTML = `<img src="${faceUrl(o.card, false)}" alt="${esc(def.name)}"><span class="sb-pricetag">${o.price}</span>`;
-        if (this.picked === key) b.append(el('span', 'sb-ask', s.coins < o.price ? `${o.price} coins: you have ${s.coins}` : `Take it for ${o.price}`));
+        if (this.picked === key) b.append(el('span', 'sb-ask', s.coins < o.price ? `Short ${o.price - s.coins}` : 'Tap to buy'));
         b.setAttribute('aria-label', `${def.name}, ${o.price} coins. ${def.text}`);
       }
       b.onclick = () => {
@@ -367,6 +372,7 @@ export class Sheets {
           return;
         }
         if (buyCard(s, i)) {
+          this.t.tutor.count('buy');
           this.ctx.audio.cue('deck.buy');
           this.picked = null;
           this.t.save();
@@ -393,17 +399,18 @@ export class Sheets {
       b.disabled = !ok;
       lip.append(b);
     };
-    thing('compost', 'Compost a card', removePrice(s), canRemove(s), () => this.deck('all', 'remove'));
-    thing('stamp', 'Stamp one select', this.upgradeCost(), canUpgrade(s), () => this.deck('all', 'upgrade'));
+    thing('compost', 'Compost', removePrice(s), canRemove(s), () => this.deck('all', 'remove'));
+    thing('stamp', 'Stamp', this.upgradeCost(), canUpgrade(s), () => this.deck('all', 'upgrade'));
     thing('bell', 'Fresh stock', sh.reroll, s.coins >= sh.reroll, () => {
       if (reroll(s)) {
+        this.t.tutor.count('service');
         this.ctx.audio.cue('deck.reroll');
         this.picked = null;
         this.t.save();
       }
       this.stall();
     });
-    tray.append(lip);
+    if (this.t.seen('services')) tray.append(lip);
     wrap.append(tray);
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : `On to ${SEASON_NAMES[s.season + 1]}`;
     wrap.append(
@@ -417,13 +424,23 @@ export class Sheets {
         this.ctx.audio.cue('deck.shuffle');
       }),
     );
-    wrap.append(el('p', 'sb-sub sb-stall-note', 'Tap a thing to look, and again to buy. Hold a card to read it.'));
     const scroll = this.el.querySelector('.sb-stall')?.scrollTop ?? 0;
     // Keep the keyboard where it was: on the lifted thing, or on what was focused before.
     const was = document.activeElement?.closest('.sb-stall') ? [...this.el.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement) : -1;
     this.show('stall', wrap, this.picked ? '.lifted' : undefined);
     if (!this.picked && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
     wrap.scrollTop = scroll;
+  }
+
+  /** Pin the stall's lesson line at its head (or take it down). */
+  lesson(line: Line | null): void {
+    this.lessonEl.textContent = line?.text ?? '';
+    this.lessonEl.dataset.lesson = line?.id ?? '';
+    if (this.kind !== 'stall') return;
+    const wrap = this.el.querySelector('.sb-stall');
+    if (!wrap) return;
+    if (line && !wrap.contains(this.lessonEl)) wrap.insertBefore(this.lessonEl, wrap.children[1] ?? null);
+    else if (!line) this.lessonEl.remove();
   }
 
   // ---------------------------------------------------------------- the almanac entry at the end

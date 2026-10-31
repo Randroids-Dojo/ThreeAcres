@@ -12,10 +12,20 @@ export function newMeta(): Meta {
   return { v: 1, unlocked: [], runs: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 } };
 }
 
-/** The hand dealt on a player's very first day, to teach the carrot and radish. */
-export const FIRST_HAND: CardId[] = ['carrot', 'radish', 'radish', 'can', 'lettuce'];
+/**
+ * The guided first season deals these hands on its first days, from the same
+ * tin (the spent pile too, if the tin runs short), so each day brings one idea:
+ * day 1 two radishes; day 2 a carrot to plant them beside; day 3 more than three
+ * scoops' worth, with radishes to ring the ripening carrot. From day 4 the
+ * hand draws up to five as usual.
+ */
+export const GUIDED_DEALS: CardId[][] = [
+  ['radish', 'radish'],
+  ['carrot', 'radish', 'radish'],
+  ['radish', 'radish', 'carrot', 'lettuce'],
+];
 
-export function newRun(seed: number, meta: Meta | null, firstHand?: readonly CardId[]): { s: RunState; ev: Ev[] } {
+export function newRun(seed: number, meta: Meta | null, guided = false): { s: RunState; ev: Ev[] } {
   const s: RunState = {
     v: 1,
     seed,
@@ -41,8 +51,7 @@ export function newRun(seed: number, meta: Meta | null, firstHand?: readonly Car
     shop: null,
     nextUid: 1,
     dayHarvests: 0,
-    radishesToday: 0,
-    chiliNext: false,
+    script: guided ? GUIDED_DEALS.map((d) => [...d]) : [],
     pool: [...START_POOL, ...(meta?.unlocked ?? []).filter((c) => !START_POOL.includes(c))],
     stats: { bestHarvest: 0, bestKind: null, totalEarned: 0, harvests: 0, seasonsCleared: 0, bestDay: 0, log: [] },
     end: null,
@@ -50,21 +59,30 @@ export function newRun(seed: number, meta: Meta | null, firstHand?: readonly Car
   for (const id of START_DECK) s.draw.push(newCard(s, id));
   const ev: Ev[] = [];
   startSeason(s, ev);
-  if (firstHand) {
-    // Swap the dealt hand for the teaching hand, card for card, from the same tin.
-    s.draw.push(...s.hand.splice(0));
-    for (const id of firstHand) {
-      const i = s.draw.findIndex((c) => c.id === id);
-      if (i >= 0) s.hand.push(...s.draw.splice(i, 1));
-    }
-    for (let i = ev.length - 1; i >= 0; i--) if (ev[i].t === 'draw') ev.splice(i, 1);
-    for (const card of s.hand) ev.push({ t: 'draw', card });
-  }
   return { s, ev };
 }
 
 export function newCard(s: RunState, id: CardId, up = false): Card {
   return { uid: s.nextUid++, id, up };
+}
+
+/** A fast deep copy of a run for looking ahead (the bot, the board's previews). Cards are shared. */
+export function cloneRun(s: RunState): RunState {
+  return {
+    ...s,
+    plots: s.plots.map((p) => ({ ...p, crop: p.crop ? { ...p.crop } : null })),
+    draw: [...s.draw],
+    hand: [...s.hand],
+    discard: [...s.discard],
+    placed: [...s.placed],
+    pages: [...s.pages],
+    tonight: [...s.tonight],
+    pool: [...s.pool],
+    script: s.script.map((d) => [...d]),
+    stats: { ...s.stats, log: s.stats.log },
+    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })) } : null,
+    end: s.end ? { ...s.end } : null,
+  };
 }
 
 /** Every card the player owns, wherever it is. */
@@ -95,11 +113,27 @@ export function startDay(s: RunState, ev: Ev[]): void {
   s.energy = energyMax(s);
   s.tossed = false;
   s.dayHarvests = 0;
-  s.radishesToday = 0;
-  s.chiliNext = false;
-  if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].wet = true;
+  if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].boost += 1;
   ev.push({ t: 'dawn', day: s.day });
-  drawUp(s, ev);
+  const deal = s.script.shift();
+  if (deal) dealScripted(s, deal, ev);
+  else drawUp(s, ev);
+}
+
+/** The guided season's hand for today: these cards from the tin, or the spent pile if the tin has none left. */
+function dealScripted(s: RunState, ids: readonly CardId[], ev: Ev[]): void {
+  for (const id of ids) {
+    let i = s.draw.findIndex((c) => c.id === id);
+    let from = s.draw;
+    if (i < 0) {
+      i = s.discard.findIndex((c) => c.id === id);
+      from = s.discard;
+    }
+    if (i < 0) continue;
+    const [c] = from.splice(i, 1);
+    s.hand.push(c);
+    ev.push({ t: 'draw', card: c });
+  }
 }
 
 export function drawOne(s: RunState, ev: Ev[]): boolean {
@@ -154,7 +188,7 @@ export function whyNot(s: RunState, handIdx: number, plot: number | null, to?: n
   const card = s.hand[handIdx];
   if (!card) return 'No such card.';
   const def = CARDS[card.id];
-  if (costOf(card.id, card.up) > s.energy) return 'Not enough energy.';
+  if (costOf(card.id, card.up) > s.energy) return 'Not enough scoops.';
   if (def.target === 'board') return null;
   if (plot === null || plot < 0 || plot >= s.plots.length) return 'Pick a plot.';
   if (!targetsFor(s, handIdx).includes(plot)) {
@@ -196,24 +230,11 @@ export function playCard(s: RunState, handIdx: number, plot: number | null, to?:
   } else {
     switch (card.id) {
       case 'can': {
-        const r = Math.floor(i / s.cols);
-        const c = i % s.cols;
-        const plots = s.plots.map((_, j) => j).filter((j) => Math.floor(j / s.cols) === r || (card.up && j % s.cols === c));
-        for (const j of plots) s.plots[j].wet = true;
+        const plots = canArea(s, i, card.up);
+        for (const j of plots) s.plots[j].boost += 1;
         ev.push({ t: 'water', plots });
         break;
       }
-      case 'hose': {
-        const plots = s.plots.map((_, j) => j);
-        for (const p of s.plots) p.wet = true;
-        ev.push({ t: 'water', plots });
-        break;
-      }
-      case 'mulch':
-        s.plots[i].wet = true;
-        s.plots[i].mulch = 3;
-        ev.push({ t: 'mulch', plot: i }, { t: 'water', plots: [i] });
-        break;
       case 'compost':
         s.plots[i].crop!.compost++;
         ev.push({ t: 'compost', plot: i });
@@ -266,6 +287,13 @@ export function playCard(s: RunState, handIdx: number, plot: number | null, to?:
   }
   if (toDiscard) s.discard.push(card);
   return ev;
+}
+
+/** The plots a watering can on plot i reaches: its row, and its column too when upgraded. */
+export function canArea(s: Pick<RunState, 'cols' | 'plots'>, i: number, up: boolean): number[] {
+  const r = Math.floor(i / s.cols);
+  const c = i % s.cols;
+  return s.plots.map((_, j) => j).filter((j) => Math.floor(j / s.cols) === r || (up && j % s.cols === c));
 }
 
 /** Once a day, put a card from hand on the discard pile and draw another. */

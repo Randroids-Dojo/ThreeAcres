@@ -6,4 +6,5 @@ export * from './cards';
 export * from './board';
 export * from './night';
 export * from './run';
+export * from './preview';
 export { rand, mixSeed } from './rng';

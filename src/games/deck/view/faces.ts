@@ -3,14 +3,18 @@
 // tools are kraft luggage tags on twine, weather is a clipping from an almanac
 // page, and objects are painted wooden plaques on a stake. Rarity shows as
 // print quality (a finer double rule, or a gold-leaf corner), never a glow.
+// Faces carry no sentences: the cost is printed as seed scoops in the top
+// left corner, yield as a number by a basket, nights to ripen as moons, and
+// the rule as one line of pictures. The sentence lives in the close-up view.
 // Card units: 100 wide by 140 tall.
 
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
 import { Rng } from '../../../render2d/rng';
-import { baseChips, CARDS, cardText, costOf, SEEDS, type CardId, type SeedId } from '../rules';
+import { baseChips, CARDS, costOf, SEEDS, type CardId, type SeedId } from '../rules';
 import { CROP_COLOR, paintSeedCrop, paintSeedProduce, TOP } from './crops';
 import { paintGlyph } from './glyphs';
+import { basket, drawBits, loop, moon, num, pictogram, scoop, tall } from './icons';
 
 export const CARD_W = 100;
 export const CARD_H = 140;
@@ -63,50 +67,51 @@ function fit(ctx: Ctx, text: string, size: number, max: number, weight: number, 
   }
 }
 
-function wrap(ctx: Ctx, text: string, max: number): string[] {
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const t = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(t).width > max && cur) {
-      lines.push(cur);
-      cur = w;
-    } else cur = t;
-  }
-  if (cur) lines.push(cur);
-  return lines;
+/** Where each cost scoop sits on a face, in card units: the top left corner, so it shows in a fanned hand. */
+export interface CostBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
-function rules(ctx: Ctx, text: string, cx: number, top: number, max: number, size: number, col: string, lead = 1.18): void {
-  font(ctx, size, 480, false, SERIF);
-  let lines = wrap(ctx, text, max);
-  let s = size;
-  while (lines.length > 3 && s > 6.2) {
-    s -= 0.4;
-    font(ctx, s, 480, false, SERIF);
-    lines = wrap(ctx, text, max);
-  }
-  ctx.fillStyle = col;
-  ctx.textAlign = 'center';
-  lines.forEach((l, i) => ctx.fillText(l, cx, top + s + i * s * lead));
+const SCOOP_W = 17;
+const COST_AT: Record<string, { x: number; y: number }> = { seed: { x: 6, y: 15 }, tool: { x: 15, y: 37 }, weather: { x: 9, y: 30 }, object: { x: 12, y: 33 } };
+
+/** The cost scoops' boxes on a face. Free cards have none. */
+export function costBoxes(id: CardId, up: boolean): CostBox[] {
+  const n = costOf(id, up);
+  const at = COST_AT[CARDS[id].type];
+  return Array.from({ length: n }, (_, i) => ({ x: at.x + 2.5 + i * (SCOOP_W + 1), y: at.y + 2.5, w: SCOOP_W, h: SCOOP_W * 0.75 }));
 }
 
-/** Seed dots: what the card costs to sow, printed as dots. Free cards say so. */
-function costDots(ctx: Ctx, n: number, x: number, y: number, col: string, ring: string, free: string): void {
+/** The width the cost chip takes, so a name can start after it. */
+function costWidth(id: CardId, up: boolean, shown: boolean): number {
+  if (!shown) return 0;
+  const n = costOf(id, up);
+  return n === 0 ? 27 : 5 + n * (SCOOP_W + 1);
+}
+
+/** The cost, printed as seed scoops on a cream chip in the top left; "Free" for free cards. */
+function costChip(ctx: Ctx, id: CardId, up: boolean): void {
+  const at = COST_AT[CARDS[id].type];
+  const n = costOf(id, up);
+  const w = costWidth(id, up, true);
+  const h = SCOOP_W * 0.75 + 5;
+  ctx.beginPath();
+  ctx.roundRect(at.x, at.y, w, h, 3);
+  fill(ctx, '#f8f0da');
+  ink(ctx, '#3a2614', 0.8, 0.9);
   if (n === 0) {
-    font(ctx, 7.2, 600, true);
-    ctx.fillStyle = free;
-    ctx.textAlign = 'left';
-    ctx.fillText('free', x - 3, y + 2.5);
+    font(ctx, 9.6, 720, true);
+    ctx.fillStyle = '#3a2614';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Free', at.x + w / 2, at.y + h / 2 + 0.5);
+    ctx.textBaseline = 'alphabetic';
     return;
   }
-  for (let i = 0; i < n; i++) {
-    ctx.beginPath();
-    ctx.ellipse(x + i * 7.4, y, 2.9, 3.3, 0.5, 0, Math.PI * 2);
-    fill(ctx, col);
-    ink(ctx, ring, 0.7, 0.9);
-  }
+  for (const b of costBoxes(id, up)) scoop(ctx, b.x + b.w / 2, b.y + b.h / 2, b.w, true);
 }
 
 function grain(ctx: Ctx, r: Rng, x0: number, y0: number, w: number, h: number, dark: string, light: string, n: number, fibres = false): void {
@@ -180,7 +185,7 @@ function stamp(ctx: Ctx, text: string, x: number, y: number, rot: number, r: Rng
 
 // ---------------------------------------------------------------- the four materials
 
-function packet(ctx: Ctx, id: SeedId, up: boolean, S: number): void {
+function packet(ctx: Ctx, id: SeedId, up: boolean, S: number, showCost: boolean): void {
   const r = new Rng(1000 + Object.keys(SEEDS).indexOf(id));
   const col = CROP_COLOR[id];
   const rare = CARDS[id].rarity === 'rare';
@@ -227,70 +232,67 @@ function packet(ctx: Ctx, id: SeedId, up: boolean, S: number): void {
   body();
   ink(ctx, '#7a6446', 0.6, 0.6);
 
-  // Name in the band, seed dots at its right.
-  const cost = costOf(id, up);
+  // The cost in the top left, the name in the band after it.
+  if (showCost) costChip(ctx, id, up);
+  const nx = 10 + costWidth(id, up, showCost);
   ctx.fillStyle = '#fbf3df';
-  fit(ctx, CARDS[id].name, 14.5, 74 - cost * 7.6, 720);
+  fit(ctx, CARDS[id].name, 15, 91 - nx, 720);
   ctx.textAlign = 'left';
-  ctx.fillText(CARDS[id].name, 11, 31.5);
-  ctx.save();
-  ctx.translate(0, 0);
-  for (let i = 0; i < cost; i++) {
-    ctx.beginPath();
-    ctx.ellipse(86 - i * 7.6, 26, 2.8, 3.3, 0.5, 0, Math.PI * 2);
-    fill(ctx, '#fbf3df');
-    ink(ctx, '#4a3424', 0.5, 0.6);
-  }
-  ctx.restore();
-  // Variety in italic.
-  font(ctx, 7.6, 500, true);
-  ctx.fillStyle = '#6b5a40';
-  ctx.fillText(VARIETY[id], 10, 46);
+  ctx.fillText(CARDS[id].name, nx, 31.5);
   // Vignette: an oval plate with the crop and its produce.
+  const vy = 63;
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(50, 70, 40, 21, 0, 0, Math.PI * 2);
+  ctx.ellipse(50, vy, 40, 21, 0, 0, Math.PI * 2);
   fill(ctx, '#eef0dc');
   ctx.clip();
   ctx.fillStyle = 'rgba(160,140,100,0.16)';
-  ctx.fillRect(10, 79, 80, 20);
+  ctx.fillRect(10, vy + 9, 80, 20);
   // Soil line.
   ctx.beginPath();
-  ctx.ellipse(40, 84, 22, 4.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(40, vy + 14, 22, 4.5, 0, 0, Math.PI * 2);
   fill(ctx, '#b48a5a', 0.55);
   const tile = Math.min(34, 36 / TOP[id]);
   ctx.save();
-  ctx.translate(38, 84);
+  ctx.translate(38, vy + 14);
   ctx.scale(tile, tile);
   paintSeedCrop(ctx, id, 4, pal, 1 / (tile * S), 4242);
   ctx.restore();
   ctx.save();
-  ctx.translate(72, 71);
+  ctx.translate(72, vy + 1);
   ctx.scale(26, 26);
   paintSeedProduce(ctx, id, pal, 1 / (26 * S));
   ctx.restore();
   ctx.restore();
   ctx.beginPath();
-  ctx.ellipse(50, 70, 40, 21, 0, 0, Math.PI * 2);
+  ctx.ellipse(50, vy, 40, 21, 0, 0, Math.PI * 2);
   ink(ctx, INK, 0.9, 0.85);
   if (fine) {
     ctx.beginPath();
-    ctx.ellipse(50, 70, 42.4, 23.4, 0, 0, Math.PI * 2);
+    ctx.ellipse(50, vy, 42.4, 23.4, 0, 0, Math.PI * 2);
     ink(ctx, col, 0.6, 0.9);
   }
-  // Days and yield.
+  // Yield by its basket on the left, moons for the nights to ripen on the right.
+  const ry = 96;
+  let x = 9;
+  x += num(ctx, String(baseChips(id, up)), x, ry, 15, INK) + 1.5;
+  basket(ctx, x + 6.5, ry, 13);
+  x += 15;
+  const picks = SEEDS[id].picks;
+  if (picks > 1) {
+    loop(ctx, x + 6, ry, 12);
+    x += 12.5;
+    x += num(ctx, String(picks), x, ry, 10.5, INK) + 2;
+  }
+  if (SEEDS[id].tall) tall(ctx, x + 6, ry, 13);
   const days = SEEDS[id].days;
-  font(ctx, 7.2, 600, false, SANS);
-  ctx.fillStyle = '#5a4a34';
-  ctx.textAlign = 'left';
-  ctx.fillText(`Ripe in ${days} ${days === 1 ? 'night' : 'nights'}`, 10, 100);
-  ctx.textAlign = 'right';
-  ctx.fillText(`${baseChips(id, up)} yield`, 90, 100);
+  for (let i = 0; i < days; i++) moon(ctx, 87 - i * 8.6, ry, 3.6);
   ctx.beginPath();
-  ctx.moveTo(10, 103);
-  ctx.lineTo(90, 103);
+  ctx.moveTo(10, 106);
+  ctx.lineTo(90, 106);
   ink(ctx, '#8a7350', 0.4, 0.7);
-  rules(ctx, cardText(id, up), 50, 103.5, 80, 8.1, INK);
+  // The rule, as pictures.
+  drawBits(ctx, pictogram(id, up), 50, 120, 19, 1 / S);
   if (fine) {
     ctx.strokeStyle = col;
     ctx.globalAlpha = 0.55;
@@ -299,10 +301,10 @@ function packet(ctx: Ctx, id: SeedId, up: boolean, S: number): void {
     ctx.globalAlpha = 1;
   }
   if (rare) goldLeaf(ctx, 95, 136, 15);
-  if (up) stamp(ctx, 'Select', 76, 53, -0.18, r);
+  if (up) stamp(ctx, 'Select', 76, 47, -0.18, r);
 }
 
-function tag(ctx: Ctx, id: CardId, up: boolean, S: number): void {
+function tag(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean): void {
   const r = new Rng(2000 + Object.keys(CARDS).indexOf(id));
   const rare = CARDS[id].rarity === 'rare';
   const fine = CARDS[id].rarity !== 'common';
@@ -355,24 +357,24 @@ function tag(ctx: Ctx, id: CardId, up: boolean, S: number): void {
   ctx.moveTo(47, 29);
   ctx.bezierCurveTo(40, 14, 46, 6, 52, 0);
   ink(ctx, '#b8a47e', 0.35, 1);
-  // Name, stamped.
+  // The cost, then the name, stamped.
+  if (showCost) costChip(ctx, id, up);
   ctx.fillStyle = '#2a1e14';
   fit(ctx, CARDS[id].name.toUpperCase(), 9.6, 64, 760, 0.9);
   ctx.globalAlpha = 0.92;
-  spaced(ctx, CARDS[id].name.toUpperCase(), 50, 54, 0.9, 'center');
+  spaced(ctx, CARDS[id].name.toUpperCase(), 50, 66, 0.9, 'center');
   ctx.globalAlpha = 1;
   ctx.beginPath();
-  ctx.moveTo(22, 58);
-  ctx.lineTo(78, 58);
+  ctx.moveTo(22, 70);
+  ctx.lineTo(78, 70);
   ink(ctx, '#2a1e14', 0.5, 0.6);
-  costDots(ctx, costOf(id, up), 21, 42, '#2a1e14', '#2a1e14', '#2a1e14');
   // The tool.
   ctx.save();
-  ctx.translate(50, 81);
-  ctx.scale(40, 40);
-  paintGlyph(ctx, id, 1 / (40 * S), '#2a1e14', pal);
+  ctx.translate(50, 89);
+  ctx.scale(32, 32);
+  paintGlyph(ctx, id, 1 / (32 * S), '#2a1e14', pal);
   ctx.restore();
-  rules(ctx, cardText(id, up), 50, 102, 66, 8.1, '#24180e');
+  drawBits(ctx, pictogram(id, up), 50, 119, 19, 1 / S);
   if (fine) {
     ctx.save();
     ctx.setLineDash([1.6, 1.4]);
@@ -390,10 +392,10 @@ function tag(ctx: Ctx, id: CardId, up: boolean, S: number): void {
     ctx.restore();
   }
   if (rare) goldLeaf(ctx, 87, 135, 14);
-  if (up) stamp(ctx, 'Select', 70, 64, -0.2, r);
+  if (up) stamp(ctx, 'Select', 70, 46, -0.2, r);
 }
 
-function clipping(ctx: Ctx, id: CardId, up: boolean, S: number): void {
+function clipping(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean): void {
   const r = new Rng(3000 + Object.keys(CARDS).indexOf(id));
   const rare = CARDS[id].rarity === 'rare';
   const fine = CARDS[id].rarity !== 'common';
@@ -448,22 +450,22 @@ function clipping(ctx: Ctx, id: CardId, up: boolean, S: number): void {
   ctx.fillStyle = INK;
   font(ctx, 6.4, 650);
   spaced(ctx, 'THE FORECAST', 50, 24, 1.3, 'center');
-  costDots(ctx, costOf(id, up), 15, 35, INK, INK, INK);
+  if (showCost) costChip(ctx, id, up);
   // The woodcut.
   ctx.save();
-  ctx.translate(50, 60);
-  ctx.scale(42, 42);
-  paintGlyph(ctx, id, 1 / (42 * S), INK, pal);
+  ctx.translate(50, 67);
+  ctx.scale(38, 38);
+  paintGlyph(ctx, id, 1 / (38 * S), INK, pal);
   ctx.restore();
   ctx.fillStyle = INK;
   font(ctx, 14, 760);
   ctx.textAlign = 'center';
-  ctx.fillText(CARDS[id].name, 50, 95);
+  ctx.fillText(CARDS[id].name, 50, 99);
   ctx.beginPath();
-  ctx.moveTo(30, 99);
-  ctx.lineTo(70, 99);
+  ctx.moveTo(30, 104);
+  ctx.lineTo(70, 104);
   ink(ctx, INK, 0.4, 0.7);
-  rules(ctx, cardText(id, up), 50, 99.5, 76, 8.1, INK);
+  drawBits(ctx, pictogram(id, up), 50, 119, 19, 1 / S);
   if (fine) {
     ctx.strokeStyle = 'rgba(46,36,24,0.6)';
     ctx.lineWidth = 0.45;
@@ -471,10 +473,10 @@ function clipping(ctx: Ctx, id: CardId, up: boolean, S: number): void {
     ctx.strokeRect(11.3, 31.8, 77.4, 97.4);
   }
   if (rare) goldLeaf(ctx, 93, 133, 14);
-  if (up) stamp(ctx, 'Select', 72, 42, -0.22, r);
+  if (up) stamp(ctx, 'Select', 72, 40, -0.22, r);
 }
 
-function plaque(ctx: Ctx, id: CardId, up: boolean, S: number): void {
+function plaque(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean): void {
   const r = new Rng(4000 + Object.keys(CARDS).indexOf(id));
   const rare = CARDS[id].rarity === 'rare';
   const fine = CARDS[id].rarity !== 'common';
@@ -545,18 +547,21 @@ function plaque(ctx: Ctx, id: CardId, up: boolean, S: number): void {
     ctx.arc(x - 0.5, y - 0.5, 0.6, 0, Math.PI * 2);
     fill(ctx, '#d8d2c6', 0.8);
   }
-  // Painted name and burned seed dots.
+  // Painted name, the cost under it.
   ctx.fillStyle = '#f3e7c6';
   font(ctx, 12.5, 720);
   ctx.textAlign = 'center';
-  ctx.fillText(CARDS[id].name, 52, 30);
-  costDots(ctx, costOf(id, up), 15, 37, '#3a2010', '#2a1a0a', '#f3e7c6');
+  ctx.fillText(CARDS[id].name, 52, 29);
+  if (showCost) costChip(ctx, id, up);
   ctx.save();
-  ctx.translate(50, 53);
-  ctx.scale(32, 32);
-  paintGlyph(ctx, id, 1 / (32 * S), '#2a1a0a', pal);
+  ctx.translate(58, 60);
+  ctx.scale(28, 28);
+  paintGlyph(ctx, id, 1 / (28 * S), '#2a1a0a', pal);
   ctx.restore();
-  rules(ctx, cardText(id, up), 50, 70, 76, 7.8, '#f6ecd0');
+  ctx.beginPath();
+  ctx.roundRect(14, 76, 72, 22, 4);
+  fill(ctx, '#f3e7c6', 0.85);
+  drawBits(ctx, pictogram(id, up), 50, 87, 18, 1 / S);
   if (fine) {
     ctx.strokeStyle = 'rgba(243,231,198,0.55)';
     ctx.lineWidth = 0.6;
@@ -587,9 +592,18 @@ export function fontsReady(): Promise<void> {
 
 export const FACE_SCALE = 3;
 
-/** A data URL of a card face, painted once. */
-export function faceUrl(id: CardId, up: boolean): string {
-  const key = `${id}${up ? '+' : ''}`;
+/** Every string painted on each face, for checks: names, numbers, Free, the masthead. Never a sentence. */
+const painted = new Map<string, string[]>();
+
+/** The strings painted on a card's face. */
+export function faceText(id: CardId, up: boolean): string[] {
+  faceUrl(id, up);
+  return painted.get(`${id}${up ? '+' : ''}`) ?? [];
+}
+
+/** A data URL of a card face, painted once. `cost` false leaves the scoops off (before the scoops are introduced). */
+export function faceUrl(id: CardId, up: boolean, cost = true): string {
+  const key = `${id}${up ? '+' : ''}${cost ? '' : '-'}`;
   let url = cache.get(key);
   if (url) return url;
   const S = FACE_SCALE;
@@ -599,11 +613,26 @@ export function faceUrl(id: CardId, up: boolean): string {
   const ctx = c.getContext('2d')!;
   ctx.scale(S, S);
   ctx.textBaseline = 'alphabetic';
+  // Note each string as it is painted (letter-spaced capitals arrive a letter at a time).
+  const texts: string[] = [];
+  const fillText = ctx.fillText.bind(ctx);
+  let spacedRun = '';
+  ctx.fillText = (t: string, x: number, y: number, w?: number) => {
+    if (t.length === 1 && /[A-Z ]/.test(t)) spacedRun += t;
+    else {
+      if (spacedRun) texts.push(spacedRun);
+      spacedRun = '';
+      texts.push(t);
+    }
+    fillText(t, x, y, w);
+  };
   const type = CARDS[id].type;
-  if (type === 'seed') packet(ctx, id as SeedId, up, S);
-  else if (type === 'tool') tag(ctx, id, up, S);
-  else if (type === 'weather') clipping(ctx, id, up, S);
-  else plaque(ctx, id, up, S);
+  if (type === 'seed') packet(ctx, id as SeedId, up, S, cost);
+  else if (type === 'tool') tag(ctx, id, up, S, cost);
+  else if (type === 'weather') clipping(ctx, id, up, S, cost);
+  else plaque(ctx, id, up, S, cost);
+  if (spacedRun) texts.push(spacedRun);
+  if (cost) painted.set(`${id}${up ? '+' : ''}`, texts);
   url = c.toDataURL('image/png');
   cache.set(key, url);
   return url;

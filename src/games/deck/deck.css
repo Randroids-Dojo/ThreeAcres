@@ -24,6 +24,14 @@
 }
 .sb-table > * { position: absolute; z-index: 1; }
 
+/* Pieces of the table arrive one lesson at a time. Until then they are not there at all. */
+.sb .sb-off { opacity: 0 !important; visibility: hidden; pointer-events: none; transition: opacity 0.3s ease, visibility 0s linear 0.3s; }
+.sb-arrive { animation: sb-arrive 0.6s cubic-bezier(0.3, 1.4, 0.5, 1); }
+@keyframes sb-arrive { from { opacity: 0; translate: 0 -10px; scale: 0.88; } to { opacity: 1; translate: 0 0; scale: 1; } }
+/* What a lesson is about glows softly. */
+.sb-cue { animation: sb-cue 1.6s ease-in-out infinite; }
+@keyframes sb-cue { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 226, 140, 0)); } 50% { filter: drop-shadow(0 0 7px rgba(255, 226, 140, 0.95)) drop-shadow(0 0 2px rgba(255, 240, 200, 0.9)); } }
+
 /* ---------------------------------------------------------------- ledger, purse, almanac */
 .sb-ledger {
   box-sizing: border-box; padding: 5px 10px 0 22px; overflow: hidden;
@@ -57,11 +65,11 @@
   background: #8a6a3a; border: 2px solid #3a2410; box-shadow: inset 0 0 0 4px #b8904a, inset 0 0 0 5px #3a2410, 0 3px 4px rgba(0, 0, 0, 0.45);
   color: #fbf0d0;
 }
-.sb-purse b { font-size: 17px; font-weight: 760; font-variant-numeric: tabular-nums; }
-.sb-purse span { font-size: 9.5px; font-style: italic; opacity: 0.85; }
+.sb-purse b { font-size: 16px; font-weight: 760; font-variant-numeric: tabular-nums; }
+.sb-purse span { font-size: 9px; font-style: italic; opacity: 0.85; }
 
 .sb-book {
-  border: 0; padding: 0; border-radius: 2px 6px 6px 2px;
+  border: 0; padding: 0; border-radius: 2px 6px 6px 2px; opacity: 0.82;
   background: #2f4a3a; box-shadow: inset 6px 0 0 #253c2f, inset 0 0 0 2px #2f4a3a, inset 0 0 0 3px #c9a24a, 0 3px 5px rgba(0, 0, 0, 0.5);
   display: grid; place-items: center;
 }
@@ -88,9 +96,17 @@
 
 /* ---------------------------------------------------------------- bench */
 .sb-bench { display: flex; align-items: flex-end; justify-content: space-between; gap: 4px; }
-.sb-scoops { display: flex; gap: 0; align-items: flex-end; margin-bottom: 6px; }
-.sb-scoops img { width: 54px; height: 41px; margin-right: -6px; transition: transform 0.25s ease, filter 0.25s ease; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45)); }
-.sb-scoops img.empty { transform: rotate(-14deg) translateY(2px); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)) brightness(0.92); }
+.sb-scoops { display: flex; gap: 3px; align-items: flex-end; margin-bottom: 12px; }
+.sb-scoops img { width: 48px; height: 36px; transition: transform 0.28s cubic-bezier(0.3, 1.4, 0.5, 1), filter 0.25s ease, opacity 0.25s ease; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45)); }
+/* Spent scoops tip over, empty and pale: three full, one empty reads at a glance. */
+.sb-scoops img.empty { transform: rotate(-24deg) translateY(4px) scale(0.92); opacity: 0.55; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3)) saturate(0.4); }
+/* The scoops a held card would use lift and glow; the ones it lacks ring red. */
+.sb-scoops img.use { transform: translateY(-11px) scale(1.12); filter: drop-shadow(0 0 4px #ffe08a) drop-shadow(0 0 9px rgba(255, 210, 100, 0.95)) drop-shadow(0 5px 3px rgba(0, 0, 0, 0.45)); }
+.sb-scoops img.short { opacity: 0.9; filter: drop-shadow(0 0 0 #c8352a) drop-shadow(0 0 4px rgba(200, 53, 42, 0.95)); }
+.sb-scoops img.flash { animation: sb-flash 0.5s ease 2; }
+@keyframes sb-flash { 0%, 100% { opacity: 0.9; } 50% { opacity: 1; filter: drop-shadow(0 0 6px #e0402a) drop-shadow(0 0 2px #e0402a); } }
+.sb-scoops img.refill { animation: sb-refill 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
+@keyframes sb-refill { from { transform: rotate(-24deg) translateY(4px) scale(0.92); opacity: 0.55; } 55% { transform: translateY(-8px) scale(1.12); filter: drop-shadow(0 0 6px rgba(255, 226, 140, 0.95)); } to { transform: none; opacity: 1; } }
 .sb-tonight { flex: 1; display: flex; justify-content: center; align-items: flex-end; height: 60px; padding-bottom: 6px; }
 .sb-tonight img { width: 36px; height: 50px; margin: 0 -6px; transform: rotate(-6deg); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5)); }
 .sb-tonight img:nth-child(2n) { transform: rotate(5deg); }
@@ -109,13 +125,17 @@
 }
 .sb-heap-pile::after { background: #c49d6b; transform: rotate(9deg) translate(3px, -2px); }
 .sb-heap .sb-count { top: -2px; right: 0; }
+/* Tossed today: the heap takes a red tick, not a longer label. */
+.sb-heap-done { position: absolute; left: 4px; top: 4px; width: 18px; height: 18px; border-radius: 50%; display: none; border: 2px solid #b8352a; background: rgba(246, 238, 214, 0.9); box-sizing: border-box; }
+.sb-heap-done::after { content: ''; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid #b8352a; border-width: 0 2px 2px 0; transform: rotate(40deg); }
+.sb-heap.tossed .sb-heap-done { display: block; }
+.sb-heap.tossed .sb-heap-pile { opacity: 0.7; }
 .sb-label {
   position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); white-space: nowrap;
   font-size: 11.5px; font-style: italic; font-weight: 600; color: #f6e8c4; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .sb-heap.can-toss .sb-heap-pile::after { outline: 2px dashed #f3e2a8; outline-offset: 3px; }
 .sb-heap.over .sb-heap-pile { transform: scale(1.12); }
-.sb-heap.tossed .sb-label::after { content: ', tossed'; }
 .sb-lantern { width: 64px; height: 80px; }
 .sb-lantern img { width: 50px; height: 72px; position: absolute; left: 7px; top: -6px; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.55)); }
 .sb-lantern::before {
@@ -161,7 +181,16 @@
 .sb-card img { width: 100%; height: 100%; display: block; pointer-events: none; }
 .sb-card.held { filter: drop-shadow(0 14px 10px rgba(20, 8, 0, 0.55)); }
 .sb-card.dragging { transition: none; z-index: 60 !important; cursor: grabbing; }
-.sb-card.dear img { filter: saturate(0.45) brightness(0.92); }
+.sb-card.aiming { opacity: 0.55; }
+.sb-card.dear img { filter: saturate(0.35) brightness(0.62); }
+/* One mark over each scoop printed on a card; the ones the bench cannot pay for show empty and red. */
+.sb-cost { position: absolute; inset: 0; pointer-events: none; }
+.sb-cost i { position: absolute; box-sizing: border-box; border-radius: 40%; }
+.sb-cost i.lack { background: rgba(246, 238, 214, 0.86) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 15"><ellipse cx="10" cy="8" rx="7.5" ry="4.6" fill="none" stroke="%23b8352a" stroke-width="1.6"/></svg>') center / 90% no-repeat; box-shadow: 0 0 0 1.5px #b8352a; }
+.sb-card.nope { animation: sb-nope 0.36s ease; }
+@keyframes sb-nope { 20% { translate: -7px 0; } 40% { translate: 6px 0; } 60% { translate: -4px 0; } 80% { translate: 2px 0; } }
+.sb-card.sb-cue { animation: sb-cue 1.6s ease-in-out infinite; }
+.sb-card.held.sb-cue, .sb-card.dragging.sb-cue { animation: none; }
 .sb-card.flying { pointer-events: none; z-index: 70 !important; }
 #app[data-device='key'] .sb-card::before {
   content: attr(data-key); position: absolute; left: 50%; top: -18px; transform: translateX(-50%);
@@ -175,17 +204,24 @@
 .sb-fx { inset: 0; pointer-events: none; z-index: 5; }
 .sb-slip {
   position: absolute; transform: translate(-50%, -100%) rotate(-2deg); white-space: nowrap;
-  padding: 2px 8px 3px; background: #f8f0d8; border: 1px solid rgba(42, 30, 18, 0.7);
+  padding: 3px 7px 3px; background: #f8f0d8; border: 1px solid rgba(42, 30, 18, 0.7);
   box-shadow: 0 2px 0 rgba(42, 30, 18, 0.25);
-  display: grid; grid-template-columns: auto auto auto; align-items: baseline; column-gap: 3px; line-height: 1;
+  display: grid; justify-items: center; row-gap: 2px; line-height: 1;
   font-variant-numeric: tabular-nums;
 }
-.sb-slip b { font-size: 19px; font-weight: 760; }
+/* The arithmetic as pictures: yield by its basket, × bloom by its red flower. */
+.sb-sum { display: flex; align-items: center; gap: 2px; }
+.sb-slip b { font-size: 19px; font-weight: 760; display: inline-block; }
 .sb-slip .y { color: var(--ink); }
-.sb-slip .x { color: var(--ink-soft); font-size: 13px; }
+.sb-slip .x { color: var(--ink-soft); font-size: 14px; margin: 0 1px; }
 .sb-slip .m { color: var(--bloom); }
-.sb-slip.has-m .x::before { content: '×'; }
-.sb-slip em { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; text-align: center; min-height: 11px; }
+.sb-ic { width: 17px; height: 17px; }
+.sb-steps { display: flex; gap: 3px; min-height: 0; }
+.sb-steps:empty { display: none; }
+.sb-chip { display: inline-flex; align-items: center; gap: 1px; font-size: 12px; font-weight: 700; font-style: normal; }
+.sb-chip img { width: 15px; height: 15px; }
+.sb-chip.y { color: var(--ink); }
+.sb-chip.m { color: var(--bloom); }
 .sb-slip b.tick { animation: sb-tick 0.18s ease; }
 @keyframes sb-tick { 50% { transform: scale(1.25); } }
 .sb-slip.total { grid-template-columns: auto; padding: 2px 9px 3px; }
@@ -195,8 +231,15 @@
 .sb-slip.big.total b { font-size: 36px; color: #6a3a00; }
 .sb-slip.golden { background: #f6dc8a; }
 .sb-slip.fly { box-shadow: none; }
-.sb-link { position: absolute; height: 0; border-top: 2px dashed rgba(42, 30, 18, 0.75); transform-origin: 0 0; animation: sb-fade 0.65s ease forwards; }
-@keyframes sb-fade { from { opacity: 1; } to { opacity: 0; } }
+/* A bonus on its way from the crop that gave it. */
+.sb-arc {
+  position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 1px; padding: 1px 5px 1px 2px;
+  font-size: 14px; font-weight: 760; white-space: nowrap; background: #fbf4dc; border: 1.5px solid currentColor; border-radius: 10px;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35);
+}
+.sb-arc img { width: 16px; height: 16px; }
+.sb-arc.y { color: var(--ink); }
+.sb-arc.m { color: var(--bloom); }
 
 /* ---------------------------------------------------------------- notes and lessons */
 .sb-note {
@@ -206,16 +249,18 @@
 }
 .sb-note.on { opacity: 1; }
 .sb-hint {
-  z-index: 7; box-sizing: border-box; padding: 12px 12px 10px; font-size: 14px; font-style: italic; line-height: 1.3;
-  background: #fbf4dc; color: var(--ink); transform: rotate(-1.2deg);
+  z-index: 7; box-sizing: border-box; padding: 7px 14px 6px; font-size: 15px; font-style: italic; font-weight: 560; line-height: 1.25;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: #fbf4dc; color: var(--ink); transform: rotate(-0.6deg);
   box-shadow: 0 1px 0 rgba(42, 30, 18, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-  opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0s linear 0.25s;
 }
+.sb[data-layout='wide'] .sb-hint { font-size: 16px; }
 .sb-hint::before {
   content: ''; position: absolute; left: 50%; top: -5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
   background: #c9952e; box-shadow: inset -2px -2px 0 #7a5418, 0 2px 2px rgba(0, 0, 0, 0.4);
 }
-.sb-hint.on { opacity: 1; }
+.sb-hint.on { opacity: 1; visibility: visible; transition: opacity 0.25s ease; }
 
 /* ---------------------------------------------------------------- sheets */
 .sb-sheets {
@@ -285,7 +330,7 @@
 .sb[data-layout='wide'] .sb-tincard { width: 110px; height: 154px; }
 
 /* The seed merchant. */
-.sb-stall { width: min(760px, 100%); max-height: 100%; overflow-y: auto; touch-action: pan-y; display: grid; gap: 14px; justify-items: center; padding-bottom: 12px; overscroll-behavior: contain; }
+.sb-stall { width: min(760px, 100%); max-height: 100%; overflow-y: auto; touch-action: pan-y; display: grid; gap: 14px; justify-items: center; align-content: center; padding-bottom: 12px; overscroll-behavior: contain; }
 .sb-stall-head { display: grid; justify-items: center; gap: 4px; padding-right: 8px; }
 .sb-sign {
   background-color: #8a5a32; background-image: repeating-linear-gradient(0deg, rgba(60, 30, 10, 0.18) 0 2px, transparent 2px 7px);
@@ -359,7 +404,16 @@
   clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 0 100%); transform: rotate(-1deg);
   filter: drop-shadow(0 3px 0 #3a2410);
 }
-.sb-stall-note { color: #e8d8b0; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); font-size: 13px; }
+.sb-stall-lesson {
+  justify-self: center; padding: 7px 14px 6px; font-size: 15px; font-style: italic; font-weight: 560; color: var(--ink);
+  background: #fbf4dc; transform: rotate(-0.8deg); box-shadow: 0 1px 0 rgba(42, 30, 18, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+}
+.sb-stall-lesson:empty { display: none; }
+.sb[data-layout='phone'] .sb-good.s { width: 84px; height: 118px; }
+.sb[data-layout='phone'] .sb-good.m { width: 96px; height: 134px; }
+.sb[data-layout='phone'] .sb-good.l { width: 110px; height: 154px; }
+.sb[data-layout='phone'] .sb-good.sold { width: 84px; height: 118px; }
+.sb[data-layout='phone'] .sb-goods { gap: 14px 16px; flex-wrap: wrap; }
 
 /* The almanac's entry for the run. */
 .sb-entry {
