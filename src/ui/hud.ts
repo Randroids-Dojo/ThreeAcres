@@ -10,14 +10,24 @@ import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason, QUALITY_NAME } from '../sim/crops';
 import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
-import { PRESETS, type PresetId } from '../sim/presets';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
+import { propAt } from '../sim/map';
 import type { BuildKind, CropId, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
 import { describe, denyText } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
+
+const HINTS_KEY = 'threeacres:v2:sunup-hints';
+
+function readHints(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(HINTS_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
 
 export interface HudHost {
   state(): WorldState;
@@ -35,19 +45,20 @@ const TOOL_NAME: Record<ToolId, string> = { hands: 'Hands', hoe: 'Hoe', can: 'Ca
 
 export class Hud {
   readonly root = el('div', 'hud');
-  private day = el('div', 'card daycard');
+  private day = el('div', 'daycard');
   private date = el('span', 'date');
   private clockEl = el('span', 'clock');
   private sky = el('div', 'sky');
   private meterRow = el('div');
-  private coins = el('div', 'card coins');
+  private coins = el('div', 'coins');
   private coinsNum = el('span', 'num');
-  private goals = el('div', 'card goals');
-  private info = el('div', 'card info empty');
-  private toolbar = el('div', 'card toolbar');
-  private seedbar = el('div', 'card seedbar hidden');
-  private buildbar = el('div', 'card buildbar hidden');
+  private goals = el('div', 'goals');
+  private info = el('div', 'info empty');
+  private toolbar = el('div', 'toolbar');
+  private seedbar = el('div', 'seedbar hidden');
+  private buildbar = el('div', 'buildbar hidden');
   private toasts = el('div', 'toasts');
+  private hintEl = el('div', 'hint');
   readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
   private toolsKey = '';
@@ -57,7 +68,7 @@ export class Hud {
   private seedOpen = false;
   private buildOpen = false;
   private lastDeny = { text: '', t: 0 };
-  private foldedGoals = window.innerWidth < 640;
+  private foldedGoals = false;
   private aimVerb: { verb: Verb | null; ok: boolean } | null = null;
 
   constructor(private host: HudHost) {
@@ -110,7 +121,7 @@ export class Hud {
     toggle(this.goals, 'folded', this.foldedGoals);
 
 
-    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.touch.el, this.toasts, this.floaters);
+    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.touch.el, this.toasts, this.floaters);
   }
 
   // ------------------------------------------------------------ per frame
@@ -123,6 +134,9 @@ export class Hud {
     this.updateTools(s);
     this.updateInfo(s, aim);
     this.touch.update();
+    const h = this.currentHint(s);
+    setText(this.hintEl, h);
+    toggle(this.hintEl, 'on', !!h);
   }
 
   private updateDay(s: WorldState): void {
@@ -212,19 +226,18 @@ export class Hud {
         html += `<div class="order"><div class="foot"><span>${n} spare in stock</span><button class="btn" data-sellspare="1">Sell at market</button></div></div>`;
       }
     } else {
-      // Sunup: town requests, filled from the crate at nightfall or delivered now.
-      html += `<h3><span class="ic" style="width:16px;height:16px">${icon('board')}</span>Town requests<span class="sub">reputation ${s.rep} <span class="toggle">${this.foldedGoals ? '+' : ''}</span></span></h3>`;
+      // Sunup: town requests are paper notes, filled from the crate at nightfall or delivered now.
       for (const o of s.orders) {
         const it = o.items[0];
-        const have = stockCount(s, it.crop);
+        const have = Math.min(stockCount(s, it.crop), it.n);
         const days = o.due - s.day;
         const ready = canDeliver(s, o);
-        html += `<div class="order"><div class="who"><span>${esc(o.who)}</span><span class="due ${days <= 1 ? 'late' : ''}">${days <= 0 ? 'today' : days === 1 ? 'by tomorrow' : `${days} days`}</span></div><div class="items"><span><i style="background:${CROPS[it.crop].color}"></i>${it.n} ${it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural} <b class="${have >= it.n ? 'have' : ''}">${Math.min(have, it.n)}/${it.n}</b></span></div><div class="foot"><span class="num">${fmt(o.reward)} coins</span><button class="btn ${ready ? 'primary' : ''}" data-deliver="${o.id}" ${ready ? '' : 'disabled'}>Deliver</button></div></div>`;
+        const tilt = ((o.id * 37) % 7) - 3;
+        const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
+        html += `<button class="slip ${ready ? 'ready' : ''}" ${ready ? `data-deliver="${o.id}"` : 'disabled'} style="--tilt:${tilt * 0.7}deg"><span class="who">${esc(o.who)}</span><span class="want"><i style="background:${CROPS[it.crop].color}"></i>${it.n} ${name}</span><span class="small">${ready ? 'Ready, tap to deliver' : `${have} of ${it.n}, ${days <= 0 ? 'due today' : days === 1 ? 'due tomorrow' : `${days} days`}`} &middot; <span class="coin">${icon('coin')}</span>${fmt(o.reward)}</span></button>`;
       }
-      const next = MILESTONES.find((m) => !s.milestones[m.id]);
-      if (next) html += `<div class="legend">Next milestone: ${esc(next.text)}</div>`;
       const stock = CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0);
-      if (stock) html += `<div class="legend">${stock} in the crate, shipped overnight</div>`;
+      if (stock) html += `<div class="legend">${stock} in the crate</div>`;
     }
     const key = html + this.foldedGoals;
     if (key !== this.goalsKey) {
@@ -373,7 +386,16 @@ export class Hud {
       return;
     }
     const r = resolve(s, s.tool, aim.x, aim.y);
-    const html = describe(s, aim.x, aim.y, r);
+    const prop = propAt(aim.x, aim.y)?.kind;
+    const key = this.touch.shown ? 'the round button' : 'Space';
+    const html =
+      prop === 'board'
+        ? `<b>Notice board</b> <span class="why">${key} to read it</span>`
+        : prop === 'well' && r.verb !== 'refill'
+          ? `<b>The well</b> <span class="why">${s.tool === 'can' ? 'the can is full' : 'take the can to fill it'}</span>`
+          : prop === 'crate'
+            ? `<b>Shipping crate</b> <span class="why">${CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0)} inside, shipped overnight</span>`
+            : describe(s, aim.x, aim.y, r);
     toggle(this.info, 'empty', !html || this.seedOpen || this.buildOpen);
     if (html) setHtml(this.info, html);
     this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };
@@ -399,7 +421,17 @@ export class Hud {
       case 'coins':
         if (e.x !== undefined && e.y !== undefined) this.float(e.x + 0.5, e.y + 0.5, `+${fmt(e.amount)}`);
         break;
+      case 'water':
+        if (e.by === s.actors[0].id) this.markHint('water');
+        break;
+      case 'refill':
+        this.markHint('refill');
+        break;
+      case 'night':
+        this.markHint('sleep');
+        break;
       case 'harvest':
+        if (e.by === s.actors[0].id) this.markHint('pull');
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
         break;
@@ -449,31 +481,31 @@ export class Hud {
     }
   }
 
-  /** First time in each game: how to play it, in two lines. */
-  intro(p: PresetId): void {
-    const key = 'threeacres:v1:intro';
-    let seen: string[] = [];
+  /**
+   * Teach by doing: one short line at a time, near the tools, until the
+   * player has done that thing once. No up-front instructions.
+   */
+  private hintsDone = new Set<string>(readHints());
+
+  markHint(id: string): void {
+    if (this.hintsDone.has(id)) return;
+    this.hintsDone.add(id);
     try {
-      seen = JSON.parse(localStorage.getItem(key) ?? '[]');
+      localStorage.setItem(HINTS_KEY, JSON.stringify([...this.hintsDone]));
     } catch {
-      seen = [];
+      // No storage: hints come back next time.
     }
-    if (seen.includes(p)) return;
-    seen.push(p);
-    try {
-      localStorage.setItem(key, JSON.stringify(seen));
-    } catch {
-      // No storage: the intro just shows again next time.
-    }
-    const touch = matchMedia('(pointer: coarse)').matches;
-    const text: Record<PresetId, string> = {
-      sunup: touch
-        ? 'Drag on the left of the screen to walk and hold the round button to use your tool. Pull the radishes, water the carrots, refill the can at the well, then sleep.'
-        : 'Walk with WASD, face a plot and press Space. Number keys change tools. Pull the radishes, water the carrots, refill the can at the well, then press Enter to sleep.',
-      patchwork: 'Tap plots to plant, water and harvest. Each costs a move. The line above the tools shows what neighbours do for quality. End the day when your moves are spent.',
-      bushel: `${touch ? 'Drag' : 'Click and drag'} across plots to queue jobs. Your hand harvests, waters and replants on their own. Fill orders from the panel, then speed time up.`,
-    };
-    setTimeout(() => this.toast(`<b>How to play ${esc(PRESETS[p].name)}</b><br>${text[p]}`, 'big', 9000), 900);
+  }
+
+  private currentHint(s: WorldState): string {
+    const touch = this.touch.shown;
+    const done = (id: string) => this.hintsDone.has(id);
+    if (!done('pull')) return touch ? 'Walk up to a ripe radish and hold the round button to pull it.' : 'Walk up to a ripe radish and press Space to pull it.';
+    if (!done('water')) return touch ? 'Tap the can, then water the carrots.' : 'Press 3 for the can, then water the carrots.';
+    if (!done('refill') && s.water <= 3) return 'The can is nearly dry. Fill it at the stone well in the yard.';
+    if (!done('sleep') && (s.minute > 600 || s.stamina < 30)) return touch ? 'Tap Sleep when the day is done. The crate ships overnight.' : 'Press Enter to sleep when the day is done. The crate ships overnight.';
+    if (!done('board') && s.day >= 2) return touch ? 'The notice board has requests from town. Tap the pin to read it.' : 'The notice board has requests from town. Press B to read it.';
+    return '';
   }
 
   private morning(s: WorldState): void {
@@ -494,7 +526,7 @@ export class Hud {
   }
 
   toast(html: string, kind: string, ms = 2400): void {
-    const t = el('div', `card toast ${kind}`, html);
+    const t = el('div', `toast ${kind}`, html);
     this.toasts.append(t);
     while (this.toasts.children.length > 3) this.toasts.firstElementChild!.remove();
     setTimeout(() => {

@@ -238,14 +238,15 @@ export class Shell {
       back.onclick = () => this.hide();
       head.append(back);
     }
-    inner.append(head, el('div', 'sub', 'Three farming games, each its own world. Pick one; switch any time with the button in the corner.'));
+    inner.append(head);
     const cards = el('div', 'games');
     for (const g of GAMES) {
       const slot = readJson<Slot>(saveKey(g.id));
       const running = this.games.has(g.id);
       const here = this.current === g.id;
       const status = this.loading === g.id ? 'Loading' : here ? 'Playing now' : running ? `Paused. ${slot?.summary ?? ''}` : slot ? `Saved: ${slot.summary}` : 'New';
-      const b = el('button', `card game ${here ? 'here' : ''}`, `<span class="bar" style="background:${g.accent}"></span><b>${esc(g.name)}</b><span class="line">${esc(g.line)}</span><p>${esc(g.pitch)}</p><span class="tags">${g.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</span><span class="state">${esc(status)}</span>`);
+      const b = el('button', `game ${here ? 'here' : ''}`, `<span class="shot" style="background-image:url(/covers/${g.id}.jpg)"></span><span class="cap"><b>${esc(g.name)}</b><span class="line">${esc(g.line)}</span><span class="pitch">${esc(g.pitch)}</span><span class="state">${esc(status)}</span></span>`);
+      b.style.setProperty('--accent', g.accent);
       b.onclick = () => {
         this.audio.ui('preset');
         if (here) this.hide();
@@ -306,7 +307,7 @@ export class Shell {
     };
     motion.append(box, document.createTextNode('Reduce motion'));
     settings.append(slider('Volume', 'master'), slider('Music', 'music'), slider('Sounds', 'sfx'), el('div', 'legend', 'Graphics'), q, motion, el('div', 'legend', `Version ${esc(APP_VERSION.slice(0, 7))}`));
-    inner.append(settings, el('div', 'foot', 'Each game keeps its own save. The corner button or the ` key brings this screen back.'));
+    inner.append(settings, el('div', 'foot', 'Each game keeps its own save. The corner button brings you back here.'));
     o.append(inner);
   }
 

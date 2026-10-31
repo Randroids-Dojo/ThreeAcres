@@ -24,7 +24,7 @@ export interface DialogHost {
 type Tab = 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
 
 export class Dialogs {
-  readonly root = el('div', 'card dialog');
+  readonly root = el('div', 'dialog cork');
   readonly scrim = el('div', 'scrim');
   private title = el('h2');
   private body = el('div', 'body');
@@ -226,6 +226,8 @@ export class Dialogs {
     }
     this.body.innerHTML = '';
     this.body.append(bar, list);
+    pinNotes(list);
+    for (const [i, b] of [...bar.children].entries()) (b as HTMLElement).style.setProperty('--tilt', `${((i * 53) % 5) - 2}deg`);
   }
 
   // ------------------------------------------------------------ season
@@ -285,6 +287,11 @@ export class Dialogs {
     this.body.append(row);
     if (s.coins < p.price) this.body.append(el('p', 'legend', `You have ${fmt(s.coins)}.`));
   }
+}
+
+/** Notes on a corkboard never hang quite straight. */
+function pinNotes(list: HTMLElement): void {
+  [...list.children].forEach((n, i) => (n as HTMLElement).style.setProperty('--tilt', `${(((i * 37) % 7) - 3) * 0.45}deg`));
 }
 
 function stars(n: number, big = false): string {

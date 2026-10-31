@@ -10,6 +10,7 @@ import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
 import { daylightOf, hourOf, inMap, season, SEASON_NAMES, dayOfSeason } from '../../sim/world';
+import { propAt } from '../../sim/map';
 import type { BuildKind, SimEvent, WorldState } from '../../sim/types';
 import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
@@ -64,7 +65,10 @@ export class Director {
     };
     this.hud = new Hud({
       ...host,
-      openBoard: (tab) => this.dialogs.board(tab as never),
+      openBoard: (tab) => {
+        this.dialogs.board(tab as never);
+        this.hud.markHint('board');
+      },
       offerParcel: (id) => this.dialogs.parcel(id),
       project: (x, y, h) => this.r3d?.project(x, y, h) ?? null,
       input: this.input,
@@ -165,6 +169,7 @@ export class Director {
     switch (code) {
       case 'KeyB':
         this.dialogs.board();
+        this.hud.markHint('board');
         return true;
       case 'Enter':
         this.input.push({ type: 'sleep' });
@@ -203,7 +208,8 @@ export class Director {
     let highlight: FrameView['highlight'] = null;
     if (aim) {
       const r = resolve(s, s.tool, aim.x, aim.y);
-      highlight = { x: aim.x, y: aim.y, verb: r.verb, ok: !!(r.verb && r.ok) };
+      // Ground with nothing to do shows nothing; a plot that refuses shows why.
+      if (r.verb || r.reason) highlight = { x: aim.x, y: aim.y, verb: r.verb, ok: !!(r.verb && r.ok) };
     }
     return {
       state: s,
@@ -232,7 +238,15 @@ export class Director {
     this.frames++;
     const s = this.state;
 
-    const cmds = this.input.collect(dt);
+    let cmds = this.input.collect(dt);
+    // The notice board is in the yard: face it and act to read it.
+    const front = facingTile(farmer(s));
+    const atBoard = (x: number, y: number) => propAt(x, y)?.kind === 'board';
+    if (cmds.some((c) => (c.type === 'act' && atBoard(front.x, front.y)) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
+      cmds = cmds.filter((c) => c.type !== 'act' && c.type !== 'actAt');
+      this.dialogs.board();
+      this.hud.markHint('board');
+    }
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);
@@ -253,6 +267,8 @@ export class Director {
       speed: 1,
       tired: s.stamina < 15,
     });
+    const open = this.dialogs.open;
+    if (this.ctx.root.classList.contains('dialog-open') !== open) this.ctx.root.classList.toggle('dialog-open', open);
     const touchOn = this.hud.touch.shown;
     if (this.ctx.root.classList.contains('touch-on') !== touchOn) this.ctx.root.classList.toggle('touch-on', touchOn);
     this.hud.update(this.aim());
