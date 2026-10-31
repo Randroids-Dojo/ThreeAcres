@@ -3,7 +3,7 @@
 // The farm pauses while one is open.
 
 import type { UiCue } from '../contract';
-import { priceOf } from '../sim/actions';
+import { homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
@@ -21,7 +21,7 @@ export interface DialogHost {
   pickBuild(kind: BuildKind): void;
 }
 
-type Tab = 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
+type Tab = 'requests' | 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
 
 export class Dialogs {
   readonly root = el('div', 'dialog cork');
@@ -77,23 +77,24 @@ export class Dialogs {
 
   board(tab?: Tab): void {
     const s = this.host.state();
-    this.tab = tab ?? (s.rules.goal === 'orders' ? 'market' : this.tab);
+    this.tab = tab ?? (s.rules.goal === 'orders' ? 'market' : homestead(s) && s.learn.includes('requests') ? 'requests' : this.tab);
     this.show('Notice board', 'board');
     this.renderBoard();
   }
 
   private renderBoard(): void {
     const s = this.host.state();
-    const tabs: [Tab, string][] = [
-      ['fields', 'Fields'],
-      ['seeds', 'Seeds'],
-      ['tools', 'Smith'],
-      ['builds', 'Builds'],
-    ];
+    // Sunup shows only what its lessons have brought in.
+    const knows = (what: string) => !homestead(s) || s.learn.includes(what);
+    const tabs: [Tab, string][] = [];
+    if (homestead(s) && knows('requests')) tabs.push(['requests', 'Requests']);
+    tabs.push(['fields', 'Fields'], ['seeds', 'Seeds']);
+    if (knows('smith')) tabs.push(['tools', 'Smith']);
+    if (knows('build')) tabs.push(['builds', 'Builds']);
     if (s.rules.crew === 'crew') tabs.push(['crew', 'Crew']);
     if (s.rules.goal === 'orders') tabs.push(['market', 'Market']);
-    tabs.push(['milestones', s.rules.goal === 'almanac' ? 'Almanac' : 'Milestones']);
-    if (!tabs.some(([t]) => t === this.tab)) this.tab = 'fields';
+    if (!homestead(s)) tabs.push(['milestones', s.rules.goal === 'almanac' ? 'Almanac' : 'Milestones']);
+    if (!tabs.some(([t]) => t === this.tab)) this.tab = tabs[0][0];
     const bar = el('div', 'tabs');
     for (const [t, label] of tabs) {
       const b = el('button', t === this.tab ? 'on' : '', label);
@@ -106,6 +107,29 @@ export class Dialogs {
     }
     const list = el('div', 'list');
     switch (this.tab) {
+      case 'requests': {
+        if (!s.orders.length) list.append(el('p', 'legend', 'No requests just now. More come with the mornings.'));
+        for (const o of s.orders) {
+          const it = o.items[0];
+          const have = Math.min(stockCount(s, it.crop), it.n);
+          const days = o.due - s.day;
+          const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
+          const ready = have >= it.n;
+          const note = el('div', 'item', `<span class="blob" style="background:${CROPS[it.crop].color}"></span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}. Pays ${fmt(o.reward)}</span></span>`);
+          if (ready) {
+            const b = el('button', 'btn primary', 'Deliver');
+            b.onclick = () => {
+              this.host.send({ type: 'deliver', id: o.id });
+              this.host.cue('order');
+              setTimeout(() => this.refresh(), 0);
+            };
+            note.append(b);
+          }
+          list.append(note);
+        }
+        list.append(el('p', 'legend', 'Whatever a request needs goes with the crate at night, before the rest is sold.'));
+        break;
+      }
       case 'fields':
         for (const p of s.parcels) {
           const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : `Four by four, meadow. ${fmt(p.price)} coins`}</span></span>`);

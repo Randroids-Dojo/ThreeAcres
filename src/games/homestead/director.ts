@@ -16,6 +16,7 @@ import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
 import { Hud } from '../../ui/hud';
 import { Input } from '../../game/input';
+import { Tutor } from './lessons';
 import type { GameContext } from '../../shell/types';
 
 export class Director {
@@ -39,6 +40,7 @@ export class Director {
   private bot: Bot | null = null;
   private lastSave = 0;
   private walkAim: { x: number; y: number; t: number } | null = null;
+  readonly tutor = new Tutor();
   frames = 0;
   events: SimEvent[] = [];
 
@@ -67,7 +69,7 @@ export class Director {
       ...host,
       openBoard: (tab) => {
         this.dialogs.board(tab as never);
-        this.hud.markHint('board');
+        this.tutor.board(this.state);
       },
       offerParcel: (id) => this.dialogs.parcel(id),
       project: (x, y, h) => this.r3d?.project(x, y, h) ?? null,
@@ -168,8 +170,9 @@ export class Director {
     }
     switch (code) {
       case 'KeyB':
+        if (!this.state.learn.includes('board')) return false;
         this.dialogs.board();
-        this.hud.markHint('board');
+        this.tutor.board(this.state);
         return true;
       case 'Enter':
         this.input.push({ type: 'sleep' });
@@ -208,8 +211,8 @@ export class Director {
     let highlight: FrameView['highlight'] = null;
     if (aim) {
       const r = resolve(s, s.tool, aim.x, aim.y);
-      // Ground with nothing to do shows nothing; a plot that refuses shows why.
-      if (r.verb || r.reason) highlight = { x: aim.x, y: aim.y, verb: r.verb, ok: !!(r.verb && r.ok) };
+      // Only what the tool can do is marked. A refusal explains itself when you try.
+      if (r.verb && r.ok) highlight = { x: aim.x, y: aim.y, verb: r.verb, ok: true };
     }
     return {
       state: s,
@@ -245,8 +248,12 @@ export class Director {
     if (cmds.some((c) => (c.type === 'act' && atBoard(front.x, front.y)) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
       cmds = cmds.filter((c) => c.type !== 'act' && c.type !== 'actAt');
       this.dialogs.board();
-      this.hud.markHint('board');
+      this.tutor.board(s);
     }
+    // One lesson at a time: it may bring a tool or a system onto the farm.
+    const lesson = this.tutor.update(s, dt, this.hud.touch.shown);
+    cmds.push(...lesson.cmds);
+    this.hud.setLesson(lesson.line);
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);
@@ -281,6 +288,8 @@ export class Director {
   private dispatch(e: SimEvent): void {
     const s = this.state;
     if (this.events.length < 5000) this.events.push(e);
+    this.tutor.onEvent(s, e);
+    if (e.type === 'unlock' && !e.what.startsWith('lesson:')) this.ctx.audio.ui('star');
     this.r3d.onEvent(e, s);
     this.ctx.audio.event(e, s);
     this.hud.onEvent(e);

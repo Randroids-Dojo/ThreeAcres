@@ -6,6 +6,7 @@ import { PRESETS } from '../../sim/presets';
 import { createWorld } from '../../sim/world';
 import type { GameModule } from '../../shell/types';
 import { Director } from './director';
+import { inferLessons } from './lessons';
 
 declare global {
   interface Window {
@@ -43,6 +44,9 @@ export const game: GameModule = {
     s.water ??= 12;
     s.tools ??= { can: 0, hoe: 0 };
     if (s.tool === 'smart') s.tool = 'hands';
+    inferLessons(s);
+    // Phones play close up; the wide view is a desktop choice (C).
+    if (matchMedia('(pointer: coarse)').matches) s.rules.camera = 'close';
     const d = new Director(s, ctx);
     window.sunup = d;
     await d.start();
@@ -51,7 +55,9 @@ export const game: GameModule = {
       resume: () => d.resume(),
       save: () => d.save(),
       reset: () => {
-        d.replace(fresh());
+        const f = fresh();
+        inferLessons(f);
+        d.replace(f);
         d.save();
       },
     };

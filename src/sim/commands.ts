@@ -22,6 +22,8 @@ export type Command =
   | { type: 'sleep' }
   | { type: 'buyParcel'; id: number }
   | { type: 'hire' }
+  /** Sunup: a lesson brings in a feature or finishes. */
+  | { type: 'unlock'; what: string }
   /** Sunup: buy the next level of a tool from the smith. */
   | { type: 'upgrade'; tool: 'can' | 'hoe' }
   | { type: 'deliver'; id: number }

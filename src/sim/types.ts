@@ -294,6 +294,14 @@ export interface WorldState {
   turnover: number;
   /** Minutes today at which crows will come (wild weather). */
   crowPlan: number[];
+  /**
+   * Sunup's lessons: features the farmer has been shown ('can', 'seeds',
+   * 'requests', 'pests' and so on) and lessons finished ('lesson:pull').
+   * Town requests and crows stay away until they have been introduced.
+   */
+  learn: string[];
+  /** Counts the lessons watch for (UI only; the simulation never reads it). */
+  learnCount: Record<string, number>;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */
@@ -330,4 +338,5 @@ export type SimEvent =
   | { type: 'hire'; id: number }
   | { type: 'refill'; x: number; y: number; by: number }
   | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number }
-  | { type: 'request'; id: number; who: string; done: boolean; reward: number };
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number }
+  | { type: 'unlock'; what: string };

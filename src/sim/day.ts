@@ -172,8 +172,10 @@ function morning(s: WorldState, ev: SimEvent[]): void {
     ev.push({ type: 'sprinkle', x: b.x, y: b.y });
   }
 
+  // Pests wait until Sunup has introduced them.
+  const pests = wild && (!homestead(s) || s.learn.includes('pests'));
   // Bugs: a few new, the rest spread to the same crop next door.
-  if (wild) {
+  if (pests) {
     const spread: number[] = [];
     for (let y = 0; y < s.H; y++) {
       for (let x = 0; x < s.W; x++) {
@@ -201,7 +203,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
 
   // Crows plan their visits on dry days.
   s.crowPlan = [];
-  if (wild && s.weather !== 'rain' && s.weather !== 'storm') {
+  if (pests && s.weather !== 'rain' && s.weather !== 'storm') {
     let growing = 0;
     for (const p of s.plots) if (p.crop && !p.crop.dead) growing++;
     if (growing > 0) {
@@ -212,7 +214,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   }
 
   if (s.rules.goal === 'orders') fillOrders(s);
-  if (homestead(s)) fillRequests(s);
+  if (homestead(s) && s.learn.includes('requests')) fillRequests(s);
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);
   ev.push({ type: 'dawn', day: s.day, weather: s.weather, season: season(s.day) });

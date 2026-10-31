@@ -67,13 +67,8 @@ await p.waitForTimeout(900);
 await touch('touchEnd', [[act[0], act[1], 3]]);
 await touch('touchEnd', []);
 check('holding act keeps working', (await S()).harvested >= h1 + 2, `${(await S()).harvested - h1} pulled`);
-// Tool button cycles.
-const tb = await p.evaluate(() => { const r = document.querySelector('.tb-tool').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
-const t0 = (await S()).tool;
-await touch('touchStart', [[tb[0], tb[1], 5]]);
-await touch('touchEnd', []);
-await p.waitForTimeout(80);
-check('tool button cycles the tool', (await S()).tool !== t0, `${t0} to ${(await S()).tool}`);
+// Sunup's tools live on the rack; the touch layer has no second tool button.
+check('no duplicate tool button over the farm', !(await visible('.tb-tool')));
 // A key press hides the touch controls.
 await p.keyboard.press('KeyD');
 await p.waitForTimeout(100);

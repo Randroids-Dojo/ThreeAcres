@@ -90,6 +90,7 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
 export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   const out: Command[] = [];
   if (s.turnover >= 0) return out;
+  if (homestead(s)) for (const what of ['requests', 'pests']) if (!s.learn.includes(what)) out.push({ type: 'unlock', what });
   const f = farmer(s);
 
   // Spend money now and then.

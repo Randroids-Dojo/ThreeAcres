@@ -69,6 +69,7 @@ export function sampleEvents(o: Partial<EventOpts> = {}): Record<SimEvent['type'
     refill: { type: 'refill', x, y, by: p.by },
     upgrade: { type: 'upgrade', tool: 'can', level: 2 },
     request: { type: 'request', id: 4, who: 'Mabel', done: p.done, reward: 120 },
+    unlock: { type: 'unlock', what: 'can' },
   };
 }
 

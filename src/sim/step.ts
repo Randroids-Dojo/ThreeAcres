@@ -71,7 +71,7 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     updateGoals(s, ev);
   }
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
-  if (homestead(s) && s.orders.length < REQUEST_SLOTS) fillRequests(s);
+  if (homestead(s) && s.learn.includes('requests') && s.orders.length < (s.rep >= 1 ? REQUEST_SLOTS : 1)) fillRequests(s);
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -240,6 +240,12 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
     }
     case 'hire':
       hire(s, ev, false);
+      break;
+    case 'unlock':
+      if (!s.learn.includes(c.what)) {
+        s.learn.push(c.what);
+        ev.push({ type: 'unlock', what: c.what });
+      }
       break;
     case 'upgrade': {
       const level = s.tools[c.tool];

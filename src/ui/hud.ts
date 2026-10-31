@@ -5,7 +5,7 @@
 
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
-import { resolve } from '../sim/actions';
+import { homestead, resolve } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason, QUALITY_NAME } from '../sim/crops';
@@ -19,15 +19,6 @@ import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
 
-const HINTS_KEY = 'threeacres:v2:sunup-hints';
-
-function readHints(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(HINTS_KEY) ?? '[]');
-  } catch {
-    return [];
-  }
-}
 
 export interface HudHost {
   state(): WorldState;
@@ -58,6 +49,8 @@ export class Hud {
   private seedbar = el('div', 'seedbar hidden');
   private buildbar = el('div', 'buildbar hidden');
   private toasts = el('div', 'toasts');
+  private boardBtn = el('button', 'btn iconbtn');
+  private fresh = '';
   private hintEl = el('div', 'hint');
   readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
@@ -89,7 +82,8 @@ export class Hud {
     when.append(this.date, this.clockEl);
     this.day.append(when, this.sky, this.meterRow);
     this.coins.append(el('span', 'ic', icon('coin')), this.coinsNum);
-    const board = el('button', 'btn iconbtn', `<span class="ic">${icon('board')}</span>`);
+    const board = this.boardBtn;
+    board.innerHTML = `<span class="ic">${icon('board')}</span><span class="badge"></span>`;
     board.title = 'Notice board (B)';
     board.onclick = () => host.openBoard();
     const btns = el('div', 'topbtns');
@@ -134,9 +128,9 @@ export class Hud {
     this.updateTools(s);
     this.updateInfo(s, aim);
     this.touch.update();
-    const h = this.currentHint(s);
-    setText(this.hintEl, h);
-    toggle(this.hintEl, 'on', !!h);
+    setText(this.hintEl, this.lessonLine);
+    toggle(this.hintEl, 'on', !!this.lessonLine);
+    toggle(this.info, 'quiet', !!this.lessonLine);
   }
 
   private updateDay(s: WorldState): void {
@@ -144,7 +138,7 @@ export class Hud {
     setText(this.date, `${SEASON_NAMES[sn]} ${dayOfSeason(s.day)}`);
     setText(this.clockEl, s.rules.clock === 'turns' ? `${s.ap} of ${s.apMax} moves` : clock(s.minute));
     const wild = s.rules.weather === 'wild';
-    const fc = wild ? `<span class="fc">${s.forecast.map((w) => `<span class="ic" title="${WEATHER_NAMES[w]}">${icon(WEATHER_ICON[w])}</span>`).join('')}</span>` : '';
+    const fc = wild && this.knows(s, 'forecast') ? `<span class="fc">${s.forecast.map((w) => `<span class="ic" title="${WEATHER_NAMES[w]}">${icon(WEATHER_ICON[w])}</span>`).join('')}</span>` : '';
     setHtml(this.sky, `<span class="ic">${icon(WEATHER_ICON[s.weather])}</span><span>${WEATHER_NAMES[s.weather]}</span>${fc}`);
 
     const key = s.rules.clock;
@@ -168,6 +162,7 @@ export class Hud {
         this.meterRow.append(sp);
       }
     }
+    toggle(this.meterRow, 'gone', key === 'day' && !this.knows(s, 'stamina'));
     if (key === 'day') {
       const m = this.meterRow.firstElementChild as HTMLElement;
       const f = s.stamina / s.staminaMax;
@@ -184,6 +179,10 @@ export class Hud {
   }
 
   private updateCoins(s: WorldState): void {
+    toggle(this.coins, 'gone', !this.knows(s, 'coins'));
+    toggle(this.boardBtn, 'gone', !this.knows(s, 'board'));
+    const open = homestead(s) ? s.orders.length : 0;
+    setText(this.boardBtn.querySelector('.badge')!, open ? String(open) : '');
     setText(this.coinsNum, fmt(s.coins));
     if (this.lastCoins >= 0 && s.coins > this.lastCoins) {
       this.coins.classList.remove('bump');
@@ -226,18 +225,7 @@ export class Hud {
         html += `<div class="order"><div class="foot"><span>${n} spare in stock</span><button class="btn" data-sellspare="1">Sell at market</button></div></div>`;
       }
     } else {
-      // Sunup: town requests are paper notes, filled from the crate at nightfall or delivered now.
-      for (const o of s.orders) {
-        const it = o.items[0];
-        const have = Math.min(stockCount(s, it.crop), it.n);
-        const days = o.due - s.day;
-        const ready = canDeliver(s, o);
-        const tilt = ((o.id * 37) % 7) - 3;
-        const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
-        html += `<button class="slip ${ready ? 'ready' : ''}" ${ready ? `data-deliver="${o.id}"` : 'disabled'} style="--tilt:${tilt * 0.7}deg"><span class="who">${esc(o.who)}</span><span class="want"><i style="background:${CROPS[it.crop].color}"></i>${it.n} ${name}</span><span class="small">${ready ? 'Ready, tap to deliver' : `${have} of ${it.n}, ${days <= 0 ? 'due today' : days === 1 ? 'due tomorrow' : `${days} days`}`} &middot; <span class="coin">${icon('coin')}</span>${fmt(o.reward)}</span></button>`;
-      }
-      const stock = CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0);
-      if (stock) html += `<div class="legend">${stock} in the crate</div>`;
+      // Sunup keeps the farm clear: requests live on the notice board.
     }
     const key = html + this.foldedGoals;
     if (key !== this.goalsKey) {
@@ -248,8 +236,8 @@ export class Hud {
 
   private updateTools(s: WorldState): void {
     const r = s.rules;
-    const kit: ToolId[] = r.tools === 'smart' ? ['smart', 'seeds', 'build'] : ['hands', 'hoe', 'can', 'seeds', 'build'];
-    const act = r.clock === 'day' ? 'Sleep' : r.clock === 'turns' ? 'End day' : '';
+    const kit = this.kit(s);
+    const act = r.clock === 'day' ? (this.knows(s, 'sleep') ? 'Sleep' : '') : r.clock === 'turns' ? 'End day' : '';
     const key = `${kit.join()}|${act}`;
     if (key !== this.toolsKey) {
       this.toolsKey = key;
@@ -274,6 +262,13 @@ export class Hud {
       }
       this.renderSeedbar(s);
       this.renderBuildbar();
+      // A tool a lesson just brought in arrives with a little lift.
+      const arrived = this.toolbar.querySelector<HTMLElement>(`.tool[data-tool="${this.fresh}"]`) ?? (this.fresh === 'sleep' ? this.toolbar.querySelector<HTMLElement>('.tool.act') : null);
+      if (arrived) {
+        arrived.classList.add('new');
+        setTimeout(() => arrived.classList.remove('new'), 1600);
+      }
+      this.fresh = '';
     }
     for (const b of this.toolbar.querySelectorAll<HTMLElement>('.tool[data-tool]')) {
       const t = b.dataset.tool as ToolId;
@@ -368,14 +363,14 @@ export class Hud {
   /** Q cycles through the toolbar. */
   cycleTool(back: boolean): void {
     const s = this.host.state();
-    const kit: ToolId[] = s.rules.tools === 'smart' ? ['smart', 'build'] : ['hands', 'hoe', 'can', 'seeds', 'build'];
+    const kit = this.kit(s).filter((t) => t !== 'seeds' || s.rules.tools === 'kit');
     const i = kit.indexOf(s.tool);
     this.pickTool(kit[(i + (back ? kit.length - 1 : 1)) % kit.length]);
   }
 
   toolByNumber(n: number): void {
     const s = this.host.state();
-    const kit: ToolId[] = s.rules.tools === 'smart' ? ['smart', 'seeds', 'build'] : ['hands', 'hoe', 'can', 'seeds', 'build'];
+    const kit = this.kit(s);
     if (kit[n - 1]) this.pickTool(kit[n - 1]);
   }
 
@@ -421,17 +416,7 @@ export class Hud {
       case 'coins':
         if (e.x !== undefined && e.y !== undefined) this.float(e.x + 0.5, e.y + 0.5, `+${fmt(e.amount)}`);
         break;
-      case 'water':
-        if (e.by === s.actors[0].id) this.markHint('water');
-        break;
-      case 'refill':
-        this.markHint('refill');
-        break;
-      case 'night':
-        this.markHint('sleep');
-        break;
       case 'harvest':
-        if (e.by === s.actors[0].id) this.markHint('pull');
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
         break;
@@ -478,34 +463,29 @@ export class Hud {
         break;
       case 'rules':
         break;
+      case 'unlock':
+        this.fresh = e.what;
+        break;
     }
   }
 
-  /**
-   * Teach by doing: one short line at a time, near the tools, until the
-   * player has done that thing once. No up-front instructions.
-   */
-  private hintsDone = new Set<string>(readHints());
+  /** The lesson line from Sunup's tutor. Empty when there is nothing to teach. */
+  private lessonLine = '';
 
-  markHint(id: string): void {
-    if (this.hintsDone.has(id)) return;
-    this.hintsDone.add(id);
-    try {
-      localStorage.setItem(HINTS_KEY, JSON.stringify([...this.hintsDone]));
-    } catch {
-      // No storage: hints come back next time.
-    }
+  setLesson(line: string): void {
+    this.lessonLine = line;
   }
 
-  private currentHint(s: WorldState): string {
-    const touch = this.touch.shown;
-    const done = (id: string) => this.hintsDone.has(id);
-    if (!done('pull')) return touch ? 'Walk up to a ripe radish and hold the round button to pull it.' : 'Walk up to a ripe radish and press Space to pull it.';
-    if (!done('water')) return touch ? 'Tap the can, then water the carrots.' : 'Press 3 for the can, then water the carrots.';
-    if (!done('refill') && s.water <= 3) return 'The can is nearly dry. Fill it at the stone well in the yard.';
-    if (!done('sleep') && (s.minute > 600 || s.stamina < 30)) return touch ? 'Tap Sleep when the day is done. The crate ships overnight.' : 'Press Enter to sleep when the day is done. The crate ships overnight.';
-    if (!done('board') && s.day >= 2) return touch ? 'The notice board has requests from town. Tap the pin to read it.' : 'The notice board has requests from town. Press B to read it.';
-    return '';
+  /** Tools on the rack: only the ones a lesson has brought in (Sunup), or the full kit. */
+  private kit(s: WorldState): ToolId[] {
+    if (s.rules.tools === 'smart') return ['smart', 'seeds', 'build'];
+    const all: ToolId[] = ['hands', 'can', 'seeds', 'hoe', 'build'];
+    if (!homestead(s)) return all;
+    return all.filter((t) => t === 'hands' || s.learn.includes(t));
+  }
+
+  private knows(s: WorldState, what: string): boolean {
+    return !homestead(s) || s.learn.includes(what);
   }
 
   private morning(s: WorldState): void {
@@ -521,8 +501,10 @@ export class Hud {
     if (r.wages) bits.push(`wages ${r.wages}`);
     if (r.withered) bits.push(`${r.withered} withered`);
     if (r.eaten) bits.push(`crows ate ${r.eaten}`);
+    // Only news earns a morning card.
+    if (!bits.length) return;
     const weather = WEATHER_NAMES[s.weather].toLowerCase();
-    this.toast(`<b>${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}</b>, ${weather}<br>${bits.length ? bits.join(', ') : 'A quiet night'}.`, 'big', 3800);
+    this.toast(`<b>${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}</b>, ${weather}<br>${bits.join(', ')}.`, 'big', 3800);
   }
 
   toast(html: string, kind: string, ms = 2400): void {

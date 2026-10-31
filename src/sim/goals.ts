@@ -134,8 +134,10 @@ export function makeRequest(s: WorldState): Order {
   };
 }
 
+/** One request at a time until the first is filled, then a few. */
 export function fillRequests(s: WorldState): void {
-  while (s.orders.length < REQUEST_SLOTS) s.orders.push(makeRequest(s));
+  const slots = s.rep >= 1 ? REQUEST_SLOTS : 1;
+  while (s.orders.length < slots) s.orders.push(makeRequest(s));
 }
 
 /** At nightfall: fill what the crate can, let the late ones go. */

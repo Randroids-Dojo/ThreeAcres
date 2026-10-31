@@ -104,16 +104,16 @@ export function createWorld(seed: number, rules: Rules): WorldState {
     night: 0,
     turnover: -1,
     crowPlan: [],
+    learn: [],
+    learnCount: {},
   };
 
-  // Four radishes ready, four carrots on their way, the rest tilled and bare.
+  // Four radishes ready, four thirsty carrots on their way, the rest tilled and bare.
   for (let x = 2; x < 6; x++) plant(s, x, 5, 'radish', 3);
   for (let x = 2; x < 6; x++) plant(s, x, 6, 'carrot', 2);
   for (let x = 2; x < 6; x++) {
     plots(s, x, 5).wet = true;
-    plots(s, x, 6).wet = true;
     plots(s, x, 5).moisture = 3;
-    plots(s, x, 6).moisture = 3;
   }
   return s;
 }
