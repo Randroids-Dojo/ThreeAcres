@@ -1,0 +1,3 @@
+html, body { margin: 0; height: 100%; background: #1d2a1b; overscroll-behavior: none; }
+body { font-family: 'Bricolage Grotesque Variable', system-ui, sans-serif; color: #2b2418; -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; }
+#app { position: fixed; inset: 0; overflow: hidden; }
