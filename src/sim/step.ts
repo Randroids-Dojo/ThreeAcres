@@ -55,9 +55,13 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   }
   const gameMinutes = Math.max(0, s.minute - minutesBefore);
 
-  if (s.rules.control === 'walk') walkFarmer(s, move.x, move.y, dt, ev);
-  tickActors(s, dt, ev);
-  tickCrows(s, dt, gameMinutes, ev);
+  // A paused flow clock holds everyone still; jobs can still be painted.
+  const frozen = s.rules.clock === 'flow' && s.speed === 0;
+  if (!frozen) {
+    if (s.rules.control === 'walk') walkFarmer(s, move.x, move.y, dt, ev);
+    tickActors(s, dt, ev);
+    tickCrows(s, dt, gameMinutes, ev);
+  } else for (const a of s.actors) a.moving = false;
 
   if (s.rules.growth === 'synergy') refreshQuality(s);
   if (s.rules.goal === 'almanac') {

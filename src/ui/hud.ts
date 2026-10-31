@@ -93,6 +93,12 @@ export class Hud {
         host.cue('order');
         return;
       }
+      if (t.closest('[data-sellspare]')) {
+        const st = host.state();
+        for (const c of CROP_IDS) if (stockCount(st, c) > 0 && !st.orders.some((o) => o.items.some((it) => it.crop === c))) host.send({ type: 'sell', crop: c });
+        host.cue('buy');
+        return;
+      }
       if (t.closest('h3')) {
         this.foldedGoals = !this.foldedGoals;
         toggle(this.goals, 'folded', this.foldedGoals);
@@ -202,6 +208,7 @@ export class Hud {
       if (a.history.length) html += `<div class="legend">${a.stars} star${a.stars === 1 ? '' : 's'} over ${a.history.length} season${a.history.length === 1 ? '' : 's'}</div>`;
     } else if (g === 'orders') {
       html += `<h3><span class="ic" style="width:16px;height:16px">${icon('board')}</span>Orders<span class="sub">reputation ${s.rep} <span class="toggle">${this.foldedGoals ? '+' : ''}</span></span></h3>`;
+      const spare = CROP_IDS.filter((c) => stockCount(s, c) > 0 && !s.orders.some((o) => o.items.some((it) => it.crop === c)));
       for (const o of s.orders) {
         const days = o.due - s.day;
         const items = o.items
@@ -212,6 +219,10 @@ export class Hud {
           .join('');
         const ready = canDeliver(s, o);
         html += `<div class="order"><div class="who"><span>${esc(o.who)}</span><span class="due ${days <= 1 ? 'late' : ''}">${days <= 0 ? 'due today' : days === 1 ? 'due tomorrow' : `${days} days`}</span></div><div class="items">${items}</div><div class="foot"><span class="num">${fmt(o.reward)} coins</span><button class="btn ${ready ? 'primary' : ''}" data-deliver="${o.id}" ${ready ? '' : 'disabled'}>Deliver</button></div></div>`;
+      }
+      if (spare.length) {
+        const n = spare.reduce((a, c) => a + stockCount(s, c), 0);
+        html += `<div class="order"><div class="foot"><span>${n} spare in stock</span><button class="btn" data-sellspare="1">Sell at market</button></div></div>`;
       }
     } else {
       const done = MILESTONES.filter((m) => s.milestones[m.id]).length;
