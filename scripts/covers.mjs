@@ -45,8 +45,27 @@ const setups = {
     });
   },
   ranch: async (p) => {
-    await p.waitForFunction(() => window.ranch, null, { timeout: 30000 });
-    await p.evaluate(() => window.ranch.cover?.());
+    await p.waitForFunction(() => window.ranch && window.ranch.sim, null, { timeout: 30000 });
+    // Late afternoon in the meadow with a handful of downies about.
+    await p.evaluate(() => {
+      const r = window.ranch;
+      const s = r.sim.s;
+      s.hour = 17.4;
+      s.downies = [];
+      s.items = [];
+      const pl = s.player;
+      pl.x = 4;
+      pl.z = -2;
+      pl.y = r.sim.phys.floor(4, -2);
+      pl.yaw = 0.15;
+      pl.pitch = -0.06;
+      const spots = [['clover', 2.6, -6], ['clover', 4.9, -7.4], ['ember', 6.8, -9.5], ['clover', 1.2, -10], ['brook', 3.8, -12.5], ['thistle', 7.5, -14]];
+      for (const [k, x, z] of spots) {
+        const d = r.sim.spawn(k, x, z);
+        d.y = r.sim.phys.floor(d.x, d.z);
+        d.grounded = true;
+      }
+    });
   },
   deck: async (p) => {
     await p.waitForFunction(() => window.deck, null, { timeout: 30000 });
@@ -77,10 +96,10 @@ const setups = {
 const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (const id of games) {
   const p = await b.newPage({ viewport: { width: 720, height: 900 }, deviceScaleFactor: 1.5 });
-  await p.goto(`${base}/?game=${id}&fresh`);
+  await p.goto(`${base}/?game=${id}&fresh${id === 'ranch' ? '&freeze' : ''}`);
   await setups[id](p);
   // Covers show the world, not the interface.
-  await p.addStyleTag({ content: '.shellbtn, .hud, .toasts, .update { display: none !important; }' });
+  await p.addStyleTag({ content: '.shellbtn, .hud, .toasts, .update, .rh-hint, .rh-page, .rh-prompt, .rh-say, .rh-click, .rh-zone, .rh-cross, .rh-count, .rh-coins, .rh-arc { display: none !important; }' });
   await p.waitForTimeout(2500);
   await p.screenshot({ path: `${out}${id}.jpg`, type: 'jpeg', quality: 82 });
   console.log('cover', id);

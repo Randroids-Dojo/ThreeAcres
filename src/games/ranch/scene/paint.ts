@@ -1,0 +1,323 @@
+// Hand-painted canvas textures: the ranch signs, the Exchange's chalk board and
+// the wooden tags that hang from posts as menus. Drawn once (or when their
+// numbers change), never per frame.
+
+import { CanvasTexture, SRGBColorSpace } from 'three';
+import { hash2 } from '../noise';
+
+export const SERIF = "'Fraunces Variable', Georgia, serif";
+
+export function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext('2d')!];
+}
+
+export function tex(c: HTMLCanvasElement): CanvasTexture {
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Weathered plank: warm wood with grain lines. */
+export function plank(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, base = '#b98a5c', seed = 1): void {
+  g.save();
+  g.fillStyle = base;
+  g.fillRect(x, y, w, h);
+  g.globalAlpha = 0.18;
+  for (let i = 0; i < h / 3; i++) {
+    const yy = y + i * 3 + hash2(i, 1, seed) * 2;
+    g.strokeStyle = hash2(i, 2, seed) > 0.5 ? '#5e3f22' : '#f0d2a4';
+    g.lineWidth = 0.8 + hash2(i, 3, seed) * 1.4;
+    g.beginPath();
+    g.moveTo(x, yy);
+    for (let k = 0; k <= 8; k++) g.lineTo(x + (w * k) / 8, yy + Math.sin(k * 1.3 + i) * 1.2);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  g.strokeStyle = 'rgba(60,38,18,0.55)';
+  g.lineWidth = 3;
+  g.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+  g.restore();
+}
+
+/** The draw glyph: a bellows nozzle with the wind curling into it and a downy riding in. */
+export function drawGlyph(g: CanvasRenderingContext2D, cx: number, cy: number, s: number, color: string): void {
+  g.save();
+  g.translate(cx, cy);
+  g.scale(s / 100, s / 100);
+  g.strokeStyle = color;
+  g.fillStyle = color;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.lineWidth = 7;
+  // Nozzle on the right, mouth facing left.
+  g.beginPath();
+  g.moveTo(10, -14);
+  g.lineTo(44, -26);
+  g.lineTo(44, 26);
+  g.lineTo(10, 14);
+  g.closePath();
+  g.stroke();
+  // Wind lines curling in.
+  for (const [y0, bend] of [
+    [-30, -14],
+    [0, 0],
+    [30, 14],
+  ]) {
+    g.beginPath();
+    g.moveTo(-46, y0);
+    g.quadraticCurveTo(-20, y0 + bend * 0.2, 2, y0 * 0.25);
+    g.stroke();
+  }
+  // Arrow heads.
+  g.beginPath();
+  g.moveTo(-6, -8);
+  g.lineTo(4, 0);
+  g.lineTo(-6, 8);
+  g.stroke();
+  // A downy riding the middle line.
+  g.beginPath();
+  g.arc(-30, 0, 9, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+}
+
+/** The puff glyph: the nozzle facing right with a burst leaving it. */
+export function puffGlyph(g: CanvasRenderingContext2D, cx: number, cy: number, s: number, color: string): void {
+  g.save();
+  g.translate(cx, cy);
+  g.scale(s / 100, s / 100);
+  g.strokeStyle = color;
+  g.lineWidth = 7;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(-10, -14);
+  g.lineTo(-44, -26);
+  g.lineTo(-44, 26);
+  g.lineTo(-10, 14);
+  g.closePath();
+  g.stroke();
+  for (const a of [-0.6, -0.2, 0.2, 0.6]) {
+    g.beginPath();
+    g.moveTo(6 + Math.cos(a) * 8, Math.sin(a) * 18);
+    g.lineTo(6 + Math.cos(a) * 34, Math.sin(a) * 40);
+    g.stroke();
+  }
+  g.restore();
+}
+
+let atlasCache: { tex: CanvasTexture; uv: Record<string, [number, number, number, number]> } | null = null;
+
+/** Sign atlas: the gate arch, the teaching sign, the fork signpost's arrows and the pad plates. */
+export function signAtlas(): { tex: CanvasTexture; uv: Record<string, [number, number, number, number]> } {
+  if (atlasCache) return atlasCache;
+  const [c, g] = canvas(1024, 1024);
+  // No transparent gaps: filtering would bleed black into the signs' edges.
+  g.fillStyle = '#6f4a32';
+  g.fillRect(0, 0, 1024, 1024);
+  const uv: Record<string, [number, number, number, number]> = {};
+  const region = (key: string, x: number, y: number, w: number, h: number) => {
+    uv[key] = [x / 1024, 1 - (y + h) / 1024, w / 1024, h / 1024];
+  };
+  // Gate arch: carved lettering.
+  plank(g, 0, 0, 1024, 180, '#a8794d', 3);
+  g.fillStyle = '#f6ecd2';
+  g.font = `600 108px ${SERIF}`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('Thistledown', 512, 96);
+  region('arch', 0, 0, 1024, 180);
+  // Teaching sign: the draw glyph painted in cream on green.
+  g.fillStyle = '#58744a';
+  g.fillRect(0, 200, 400, 300);
+  plank(g, 0, 200, 400, 300, '#5d7a4e', 7);
+  drawGlyph(g, 200, 330, 190, '#f4ead0');
+  g.font = `500 italic 40px ${SERIF}`;
+  g.fillStyle = '#f4ead0';
+  g.fillText('draw them in', 200, 455);
+  region('teach', 0, 200, 400, 300);
+  // Signpost arrows.
+  const arrows: [string, string][] = [
+    ['ridge', 'Ember Ridge'],
+    ['hollow', 'Brook Hollow'],
+    ['ranch', 'The ranch'],
+    ['oak', 'Old oak'],
+  ];
+  const left = new Set(['ridge', 'ranch']);
+  arrows.forEach(([k, label], i) => {
+    const y = 520 + i * 120;
+    const l = left.has(k);
+    g.save();
+    g.beginPath();
+    if (l) {
+      g.moveTo(60, y);
+      g.lineTo(620, y);
+      g.lineTo(620, y + 100);
+      g.lineTo(60, y + 100);
+      g.lineTo(0, y + 50);
+    } else {
+      g.moveTo(0, y);
+      g.lineTo(560, y);
+      g.lineTo(620, y + 50);
+      g.lineTo(560, y + 100);
+      g.lineTo(0, y + 100);
+    }
+    g.closePath();
+    g.clip();
+    plank(g, 0, y, 620, 100, ['#c08a5a', '#a87650', '#b88458', '#9c6e48'][i], 11 + i);
+    g.restore();
+    g.fillStyle = '#f6ecd2';
+    g.font = `600 58px ${SERIF}`;
+    g.textAlign = l ? 'right' : 'left';
+    g.fillText(label, l ? 586 : 34, y + 54);
+    region(k, 0, y, 620, 100);
+  });
+  // Pad post plates: blank, pen, garden, silo.
+  const plates: [string, string][] = [
+    ['plate-empty', 'Pad'],
+    ['plate-pen', 'Pen'],
+    ['plate-garden', 'Garden'],
+    ['plate-silo', 'Silo'],
+    ['plate-bench', 'Workbench'],
+  ];
+  plates.forEach(([k, label], i) => {
+    const x = 640;
+    const y = 200 + i * 110;
+    plank(g, x, y, 380, 96, '#d9c49a', 21 + i);
+    g.fillStyle = '#4a3420';
+    g.font = `600 56px ${SERIF}`;
+    g.textAlign = 'center';
+    g.fillText(label, x + 190, y + 52);
+    region(k, x, y, 380, 96);
+  });
+  atlasCache = { tex: tex(c), uv };
+  return atlasCache;
+}
+
+// ---------------------------------------------------------------- the chalk board
+
+export interface BoardRow {
+  name: string;
+  price: number | null;
+  /** -1 down, 0 same, 1 up against yesterday. */
+  trend: number;
+}
+
+function chalkText(g: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, seed: number, align: CanvasTextAlign = 'left'): void {
+  g.font = `500 ${size}px ${SERIF}`;
+  g.textAlign = align;
+  g.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    g.globalAlpha = 0.22 + hash2(i, seed, 3) * 0.15;
+    g.fillText(text, x + (hash2(i, seed, 1) - 0.5) * 2.4, y + (hash2(i, seed, 2) - 0.5) * 2.4);
+  }
+  g.globalAlpha = 1;
+}
+
+export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, day: number, rows: BoardRow[]): void {
+  g.fillStyle = '#2c3a33';
+  g.fillRect(0, 0, w, h);
+  // Old chalk ghosts.
+  g.globalAlpha = 0.06;
+  g.fillStyle = '#e8e4d8';
+  for (let i = 0; i < 40; i++) {
+    g.beginPath();
+    g.ellipse(hash2(i, 1, 9) * w, hash2(i, 2, 9) * h, 20 + hash2(i, 3, 9) * 60, 6 + hash2(i, 4, 9) * 10, hash2(i, 5, 9) * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = '#f2eee2';
+  g.strokeStyle = '#f2eee2';
+  chalkText(g, 'Down today', w / 2, 46, 46, 1, 'center');
+  chalkText(g, `day ${day}`, w - 24, 46, 24, 2, 'right');
+  g.globalAlpha = 0.5;
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(30, 80);
+  g.lineTo(w - 30, 82);
+  g.stroke();
+  g.globalAlpha = 1;
+  rows.forEach((r, i) => {
+    const y = 122 + i * 62;
+    chalkText(g, r.name, 34, y, 38, 10 + i);
+    if (r.price === null) {
+      chalkText(g, '?', w - 120, y, 38, 20 + i, 'right');
+      return;
+    }
+    chalkText(g, String(r.price), w - 100, y, 42, 20 + i, 'right');
+    // Arrow: chalk strokes, up or down; a dash if steady.
+    const ax = w - 62;
+    g.lineWidth = 4;
+    g.lineCap = 'round';
+    g.globalAlpha = 0.85;
+    g.strokeStyle = r.trend > 0 ? '#bfe3a8' : r.trend < 0 ? '#f2b6a0' : '#f2eee2';
+    g.beginPath();
+    if (r.trend > 0) {
+      g.moveTo(ax, y + 14);
+      g.lineTo(ax, y - 14);
+      g.moveTo(ax - 10, y - 4);
+      g.lineTo(ax, y - 15);
+      g.lineTo(ax + 10, y - 4);
+    } else if (r.trend < 0) {
+      g.moveTo(ax, y - 14);
+      g.lineTo(ax, y + 14);
+      g.moveTo(ax - 10, y + 4);
+      g.lineTo(ax, y + 15);
+      g.lineTo(ax + 10, y + 4);
+    } else {
+      g.moveTo(ax - 10, y);
+      g.lineTo(ax + 10, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  });
+  chalkText(g, 'puff down in the crate', w / 2, h - 30, 24, 40, 'center');
+}
+
+// ---------------------------------------------------------------- hanging tags
+
+export function paintTag(g: CanvasRenderingContext2D, w: number, h: number, title: string, price: number | null, note: string, ok: boolean, hot: boolean, seed: number): void {
+  g.clearRect(0, 0, w, h);
+  // Tag shape: a plank with clipped top corners and a twine hole.
+  g.save();
+  g.beginPath();
+  g.moveTo(26, 0);
+  g.lineTo(w - 26, 0);
+  g.lineTo(w, 26);
+  g.lineTo(w, h);
+  g.lineTo(0, h);
+  g.lineTo(0, 26);
+  g.closePath();
+  g.clip();
+  plank(g, 0, 0, w, h, hot ? '#e2c48e' : '#cfae7c', seed);
+  g.restore();
+  g.fillStyle = '#3b2814';
+  g.beginPath();
+  g.arc(w / 2, 18, 8, 0, Math.PI * 2);
+  g.fill();
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  g.fillStyle = ok ? '#2f2012' : 'rgba(47,32,18,0.55)';
+  g.font = `650 ${title.length > 16 ? 34 : 40}px ${SERIF}`;
+  g.fillText(title, 22, 78);
+  if (note) {
+    g.font = `italic 400 24px ${SERIF}`;
+    g.fillStyle = ok ? 'rgba(47,32,18,0.8)' : 'rgba(47,32,18,0.5)';
+    g.fillText(note, 22, h - 22);
+  }
+  if (price !== null) {
+    g.textAlign = 'right';
+    g.font = `700 42px ${SERIF}`;
+    g.fillStyle = ok ? '#2f2012' : '#8e3a26';
+    g.fillText(price.toLocaleString('en-US'), w - 22, 78);
+  }
+  if (hot) {
+    g.strokeStyle = '#2f2012';
+    g.lineWidth = 5;
+    g.strokeRect(7, 30, w - 14, h - 37);
+  }
+}

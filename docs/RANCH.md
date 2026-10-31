@@ -167,3 +167,47 @@ Build in this order. Each step should be playable before the next.
    - Glide.
    - Juice everywhere: squash, puffs of fluff, coins, camera feel.
    - Ambient life: butterflies, drifting fluff, birds.
+
+## As built: decisions and notes
+
+Recorded while building, where the design left a choice open or play showed a better answer.
+
+**Readouts live in the world.** The canister's contents show on the bellows: the chosen slot's things sit in the glass jar, a brass dial counts them, and a row of little windows on the gauge plate shows every slot filled to its level with a pointer over the chosen one. A plain number sits beside the crosshair (with the kind's name for two seconds after it changes). Coins are plain type in the top right; the hour is a small sun-and-moon arc under them. Prices are on the Exchange's chalk board. There is no slot bar, clock card or toast stack.
+
+**Menus are tags.** A pad post's arm, the workbench pegboard, the porch beam and each closed gate hang wooden tags with the options and prices. Look at a tag and press E (or click, or X on a pad), tap it on touch, or press its number key. Tags hang in a zigzag so a set stays narrow on a phone. Walking more than about 3 m away folds them up. The view turns gently to face them when they drop.
+
+**Teaching.** No how-to card. A clover downy hops about the porch, the sign at the ranch gate shows the draw glyph, the first journal page slides up after the first thing is drawn, and each device hint shows only until its action is done once (saved). The pause page carries a two-line controls reminder.
+
+**Keys.** E uses whatever is in reach; with nothing in reach it moves to the next slot (the table gives E to both). Q is the previous slot; the wheel and 1 to 5 also work; F also draws, for trackpads. Esc or P pauses. J brings the journal page back up. With no pointer lock (or `&nolock`), right-drag looks.
+
+**Touch.** Tapping the bellows' body flicks to the next slot that holds something; tapping one of its windows picks that slot. On a tall phone the bellows shrinks and tucks in low, and the Draw, Puff and Jump buttons sit above it. A quick tap anywhere that is not a button counts as a tap on what is under it (tags, windows).
+
+**The canister.** One slot per kind: a full slot refuses more of its kind, and a full canister refuses a new kind (the "full" cue and a short note under the crosshair).
+
+**Pens.** Food and down in flight slip between the rails, so you can puff food into a pen at the floor; rolling on the ground, the fence stops them. Downies need about 1.05 m to clear a low fence: calm hops are 0.4 to 0.6 m, frazzled ones about 1.3 m, thistles 1.6 m. A thistle in a low pen backs off from the rails and hops so the top of its hop is over them. The high fence is 2 m.
+
+**Food groups.** Each group has one food (clover heads, sweetroot, dewberries), so clover, ember and brook downies only eat their own group, always their favourite (2 down). Thistles eat anything for 2 down. A trough gives brook downies a third.
+
+**Wild downies** get hungry at half the rate and never past 0.7, and forage the wild food. Groups refill one at a time, out of sight (over 30 m away); thistles come to the ridge top from half past five to half past eight in the evening and leave after dark if not caught. Wild spawning stops at 56 downies.
+
+**Nettlebacks** come in from the north edge of the meadow after half past eight at night (two at first, up to four), head for the ranch gate, then wander between pens without hedges, eating down on the ground and frightening downies within 3 m. A hedge keeps them out and keeps its pen calm. Anything puffed, in the air or skidding fast, sends one rolling; it flees for 20 s and comes back. At dawn they leave.
+
+**Gardens** grow 5 (8 with rich soil) every 2 game hours (1.33 with a sprinkler), and stop when twice a crop is lying on the bed. "Pull the crop" empties a bed so something new can be puffed in; this is how the planting goal is met with the starter garden.
+
+**Money.** You start with 300 coins (enough for the first pen). Journal rewards are 20 to 500.
+
+**Light.** A pastel day leans on a strong soft sky light and a gentler sun, so slopes facing away from the low sun stay apricot and lilac instead of going brown. Nothing in the scene is pure black: the darkest colours are lifted so the flash scan can treat any pure black pixel as a fault.
+
+**Checks.** Dev server: `npx vite --config scripts/ranch-vite.config.ts` (port 5251, no hot reload). URL flags: `&fresh`, `&nolock`, `&touch`, `&freeze` (no updates), `&slow` (fifth speed), `&hour=19`. `window.ranch` is the debug hook (sim, renderInfo, aimAt, step, watchNaN, injectNaN, tagScreen, slotScreen).
+
+| Script | What it checks |
+| --- | --- |
+| `node scripts/ranch-play.mjs` | Desktop play with real keys and mouse: walk, look, draw, build through tags, puff into a pen, feed, collect, sell, shell pause and resume, Esc pause, save and reload |
+| `node scripts/ranch-touch.mjs` | The same on a 412 by 900 phone at DPR 2.6 with CDP touch, plus the floating stick, two thumbs at once, slot taps, and the controls hiding on a key press |
+| `node scripts/ranch-valley.mjs` | Gates, ember and brook downies, the workbench, glide, a silo, a feeder, nettlebacks, a thistle at dusk, sleep, cues and held sounds |
+| `node scripts/ranch-pad.mjs` | Every action on a gamepad (a stand-in pad) |
+| `node scripts/ranch-feel.mjs` | Head bob, roll, field of view, landing dip, draw times, puff speed, squash and stretch, pumping |
+| `node scripts/ranch-perf.mjs` | Frame times, draw calls and triangles while playing, phone and desk |
+| `node scripts/ranch-flash.mjs` | Frame readback for black or NaN pixels, after proving it catches a planted NaN |
+| `node scripts/ranch-shots.mjs`, `ranch-hud.mjs`, `ranch-kinds.mjs`, `ranch-drawseq.mjs` | Screenshots and contact sheets |
+| `npx vitest run tests/ranch-sim.test.ts` | The rules, without rendering |
