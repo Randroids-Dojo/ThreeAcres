@@ -62,6 +62,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     tickActors(s, dt, ev);
     tickCrows(s, dt, gameMinutes, ev);
   } else for (const a of s.actors) a.moving = false;
+  // Storms rumble through the day, not just at dawn: about every twelve seconds.
+  if (s.weather === 'storm' && !frozen && rand(s) < dt * 0.08) ev.push({ type: 'thunder' });
 
   if (s.rules.growth === 'synergy') refreshQuality(s);
   if (s.rules.goal === 'almanac') {
