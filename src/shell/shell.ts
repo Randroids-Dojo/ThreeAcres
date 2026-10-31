@@ -247,6 +247,7 @@ export class Shell {
       const status = this.loading === g.id ? 'Loading' : here ? 'Playing now' : running ? `Paused. ${slot?.summary ?? ''}` : slot ? `Saved: ${slot.summary}` : 'New';
       const b = el('button', `game ${here ? 'here' : ''}`, `<span class="shot" style="background-image:url(/covers/${g.id}.jpg)"></span><span class="cap"><b>${esc(g.name)}</b><span class="line">${esc(g.line)}</span><span class="pitch">${esc(g.pitch)}</span><span class="state">${esc(status)}</span></span>`);
       b.style.setProperty('--accent', g.accent);
+      b.dataset.game = g.id;
       b.onclick = () => {
         this.audio.ui('preset');
         if (here) this.hide();
