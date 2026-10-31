@@ -4,15 +4,15 @@ Rules for any coding agent working in Three Acres.
 
 ## Product
 
-Three farming games on one farm, for the browser, phone first. Sunup (homestead day), Patchwork (almanac puzzle) and Bushel & Co. (crew and orders) are presets over nine independent axes: view, camera, control, clock, soil, goal, weather, crew, tools. The player can switch any axis at any moment and keep the same farm. Read `docs/DESIGN.md`, `docs/ART_DIRECTION.md` and `docs/ARCHITECTURE.md` before changing anything.
+Three separate farming games for the browser, phone first, under one shell: Thistledown (first-person creature ranch), Sunup (homestead life sim) and Seedbound (roguelike deckbuilder). Each has its own world, rules, controls, look, music and save; the shell's corner button switches between them. Read `docs/DESIGN.md`, then the game's own doc (`docs/RANCH.md`, `docs/SUNUP.md`, `docs/DECK.md`), `docs/ARCHITECTURE.md` and `docs/AUDIO_CUES.md`.
 
 ## Rules
 
 1. **No em dashes or en dashes.** Not in code, comments, copy, commits or PRs. Use a period, comma, colon or parentheses.
 2. **Commit messages and PR descriptions read as written by a human.** No AI attribution, no generated-by footers.
-3. **Every mix works.** Anything added must work under every value of every axis, be drawn by both renderers and make sense in all three clocks. A switch never loses progress, traps the farmer or strands a job.
-4. **`src/sim` is deterministic and render-free.** No DOM, no `Math.random`, no wall-clock time. Renderers, audio and UI only read the state and its events.
-5. **Both views agree.** The same tile shows the same thing in 2D and 3D. The 2D view is its own painted art, not the 3D scene seen flat.
+3. **Each game stands alone.** Games share only the shell, the audio engine, fonts and small UI helpers. Never make one game depend on another's code paths, and keep them feeling different: their own verbs, camera, pacing and look.
+4. **Rules engines are deterministic and render-free.** Sunup's `src/sim` and Seedbound's rules: No DOM, no `Math.random`, no wall-clock time. Renderers, audio and UI only read the state and its events.
+5. **Leave the shell's corner clear.** The switcher button sits top left (60 px plus the safe area); every game keeps it free.
 6. **Every input path.** Touch, mouse and keyboard must each play the whole game and drive every menu. Gamepad where it is cheap.
 7. **Copy is short, plain and sentence case**, warm and dry, like an almanac. No hype, no exclamation marks.
 8. **Measure, do not eyeball.** Game feel, audio and visuals are checked with instrumented scripts in `scripts/` as well as screenshots.
@@ -43,7 +43,7 @@ node scripts/audio-check.mjs           # audio levels, latency, crossfades, burs
 
 Screenshots stall frames at DPR 2, so take frame times from runs without them.
 
-URL flags: `?preset=sunup|patchwork|bushel` starts that game, `&fresh` starts a new farm, `&autoplay` hands the farm to the bot, `&touch` forces the touch controls on.
+URL flags: `?game=ranch|homestead|deck` opens that game directly, `&fresh` clears its save first. Sunup also takes `&autoplay` (the bot plays) and `&touch` (touch controls forced on).
 
 ## Deploy
 

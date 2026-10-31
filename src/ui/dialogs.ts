@@ -1,9 +1,8 @@
 // Modal cards: the notice board (fields, seeds, builds, crew, market,
-// milestones), the end of an almanac season, settings, and a for-sale field.
+// milestones), the end of an almanac season, and a for-sale field.
 // The farm pauses while one is open.
 
 import type { UiCue } from '../contract';
-import type { Settings } from '../game/save';
 import { priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, HAND_HIRE, HAND_WAGE, HANDS_MAX } from '../sim/constants';
@@ -18,9 +17,6 @@ export interface DialogHost {
   state(): WorldState;
   send(c: Command): void;
   cue(c: UiCue): void;
-  settings(): Settings;
-  setSettings(s: Partial<Settings>): void;
-  newFarm(): void;
   onChange(open: boolean): void;
   pickBuild(kind: BuildKind): void;
 }
@@ -263,63 +259,6 @@ export class Dialogs {
     row.append(buy, no);
     this.body.append(row);
     if (s.coins < p.price) this.body.append(el('p', 'legend', `You have ${fmt(s.coins)}.`));
-  }
-
-  // ------------------------------------------------------------ settings
-
-  settings(): void {
-    this.show('Settings', 'settings');
-    const st = this.host.settings();
-    this.body.innerHTML = '';
-    const slider = (label: string, key: 'master' | 'music' | 'sfx') => {
-      const row = el('label', 'slider', `<span>${label}</span>`);
-      const input = el('input');
-      input.type = 'range';
-      input.min = '0';
-      input.max = '1';
-      input.step = '0.05';
-      input.value = String(st[key]);
-      input.oninput = () => this.host.setSettings({ [key]: Number(input.value) });
-      row.append(input);
-      return row;
-    };
-    const check = (label: string, key: 'reducedMotion' | 'soilOverlay') => {
-      const row = el('label', 'check');
-      const input = el('input');
-      input.type = 'checkbox';
-      input.checked = st[key];
-      input.onchange = () => this.host.setSettings({ [key]: input.checked });
-      row.append(input, document.createTextNode(label));
-      return row;
-    };
-    const quality = el('div', 'tabs');
-    for (const q of ['auto', 'low', 'high'] as const) {
-      const b = el('button', st.quality === q ? 'on' : '', q === 'auto' ? 'Auto' : q === 'low' ? 'Light' : 'Full');
-      b.onclick = () => {
-        this.host.setSettings({ quality: q });
-        for (const o of quality.children) toggle(o, 'on', o === b);
-      };
-      quality.append(b);
-    }
-    const fresh = el('button', 'btn warm', 'Start a new farm');
-    fresh.onclick = () => {
-      if (confirm('Start over on a new farm? This one is lost.')) {
-        this.close();
-        this.host.newFarm();
-      }
-    };
-    this.body.append(
-      slider('Volume', 'master'),
-      slider('Music', 'music'),
-      slider('Sounds', 'sfx'),
-      el('div', 'legend', 'Graphics'),
-      quality,
-      check('Show soil moisture and nutrients (O)', 'soilOverlay'),
-      check('Reduce motion', 'reducedMotion'),
-      el('p', 'legend touch-only', 'Touch: under walk, drag on the left to walk and hold the round button to keep working; tap a plot next to you to work it, or further away to walk there. Under point, tap or drag across plots to queue jobs, and use two fingers to pan and pinch.'),
-      el('p', 'legend kbd-only', 'Keys: WASD or arrows walk, Space acts, 1 to 5 tools, Q next tool, Enter sleeps or ends the day, M the mix, B the board, V swaps 2D and 3D, C the camera, Shift 1 to 3 the three games, P pause and [ ] speed under flow, X clears queued jobs. Wheel zooms; right drag pans.'),
-      fresh,
-    );
   }
 }
 

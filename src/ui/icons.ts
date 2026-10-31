@@ -34,6 +34,7 @@ export const ICONS = {
   copy: wrap('<rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>'),
   person: wrap('<circle cx="12" cy="7" r="3.2"/><path d="M5.5 20.5c.8-4 3.4-6 6.5-6s5.7 2 6.5 6"/>'),
   back: wrap('<path d="M15 5l-7 7 7 7"/>'),
+  games: wrap('<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/>'),
 } as const;
 
 export type IconId = keyof typeof ICONS;

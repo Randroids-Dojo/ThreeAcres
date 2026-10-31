@@ -10,10 +10,10 @@ import type { Command } from '../sim/commands';
 import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES } from '../sim/constants';
 import { CROP_IDS, CROPS, QUALITY_NAME } from '../sim/crops';
 import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
-import { AXIS_INFO, matchPreset, PRESETS, type PresetId } from '../sim/presets';
+import { PRESETS, type PresetId } from '../sim/presets';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import type { Axis, BuildKind, CropId, Rules, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
+import type { BuildKind, CropId, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
 import { describe, denyText } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
@@ -23,9 +23,7 @@ export interface HudHost {
   state(): WorldState;
   send(c: Command): void;
   cue(c: UiCue): void;
-  openMixer(): void;
   openBoard(tab?: string): void;
-  openSettings(): void;
   offerParcel(id: number): void;
   project(x: number, y: number, h?: number): { x: number; y: number } | null;
   input: Input;
@@ -44,7 +42,6 @@ export class Hud {
   private meterRow = el('div');
   private coins = el('div', 'card coins');
   private coinsNum = el('span', 'num');
-  private mixBtn = el('button', 'btn mixbtn');
   private goals = el('div', 'card goals');
   private info = el('div', 'card info empty');
   private toolbar = el('div', 'card toolbar');
@@ -81,17 +78,11 @@ export class Hud {
     when.append(this.date, this.clockEl);
     this.day.append(when, this.sky, this.meterRow);
     this.coins.append(el('span', 'ic', icon('coin')), this.coinsNum);
-    this.mixBtn.innerHTML = `<span class="ic">${icon('mixer')}</span><span class="tag"></span>`;
-    this.mixBtn.title = 'The mix (M)';
-    this.mixBtn.onclick = () => host.openMixer();
     const board = el('button', 'btn iconbtn', `<span class="ic">${icon('board')}</span>`);
     board.title = 'Notice board (B)';
     board.onclick = () => host.openBoard();
-    const gear = el('button', 'btn iconbtn', `<span class="ic">${icon('gear')}</span>`);
-    gear.title = 'Settings';
-    gear.onclick = () => host.openSettings();
     const btns = el('div', 'topbtns');
-    btns.append(board, this.mixBtn, gear);
+    btns.append(board);
     const right = el('div', 'topright');
     right.append(this.coins, btns);
     top.append(this.day, el('div', 'spacer'), right);
@@ -126,10 +117,8 @@ export class Hud {
 
   update(aim: { x: number; y: number } | null): void {
     const s = this.host.state();
-    const r = s.rules;
     this.updateDay(s);
     this.updateCoins(s);
-    this.updateMix(r);
     this.updateGoals(s);
     this.updateTools(s);
     this.updateInfo(s, aim);
@@ -188,11 +177,6 @@ export class Hud {
       this.coins.classList.add('bump');
     }
     this.lastCoins = s.coins;
-  }
-
-  private updateMix(r: Rules): void {
-    const p = matchPreset(r);
-    setText(this.mixBtn.querySelector('.tag')!, p ? PRESETS[p].name : 'Custom mix');
   }
 
   private updateGoals(s: WorldState): void {
@@ -433,23 +417,7 @@ export class Hud {
       case 'sell':
         break;
       case 'rules':
-        this.announce(e.rules, e.changed);
         break;
-    }
-  }
-
-  /** Say what a switch changed, briefly, so hotkey switches are never a mystery. */
-  private announce(r: Rules, changed: Axis[]): void {
-    const p = matchPreset(r);
-    if (changed.length > 2 && p) {
-      this.toast(`<b>${esc(PRESETS[p].name)}</b><br>${esc(PRESETS[p].line)}`, 'big');
-      this.intro(p);
-      return;
-    }
-    for (const a of changed.slice(0, 2)) {
-      const info = AXIS_INFO[a];
-      const o = info.options.find((x) => x.value === r[a]);
-      if (o) this.toast(`<b>${info.name}: ${esc(o.label)}</b><br>${esc(o.hint)}`, '', 2000);
     }
   }
 

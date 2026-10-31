@@ -79,5 +79,8 @@ export function createAudio(debug: AudioDebug = {}): AudioEngine {
       suspended = on;
       core?.suspend(on);
     },
+    // Named cues for the ranch and the deck arrive with their sound sets.
+    cue() {},
+    loop() {},
   };
 }

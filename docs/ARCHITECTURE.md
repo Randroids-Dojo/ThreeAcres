@@ -2,30 +2,29 @@
 
 ```
 src/
-  sim/        the farm and every rule set. Deterministic, no DOM, no Math.random.
-  contract.ts the seams: Renderer, FrameView, CameraIntent, AudioEngine.
-  render2d/   the almanac-page renderer (Canvas 2D). Exports createRenderer2D().
-  render3d/   the toy-diorama renderer (three.js). Exports createRenderer3D().
-  audio/      procedural Web Audio music and sound. Exports createAudio().
-  game/       the director: loop, input, camera intent, view crossfade, saves.
-  ui/         DOM HUD, toolbar, mixer, dialogs.
-  dev/        fixtures, the renderer workbench and a placeholder renderer.
+  main.ts          routes ?dev= workbenches, otherwise starts the shell
+  shell/           title and switcher, shared settings, device tracking, audio unlock, updates
+    types.ts       GameModule, GameContext, GameHandle: the seam every game implements
+    games.ts       the three games' static info and lazy loaders
+  games/
+    ranch/         Thistledown (first person, three.js)
+    homestead/     Sunup: director over src/sim, drawn by src/render3d
+    deck/          Seedbound (rules engine, card UI, a board painted with src/render2d's crop art)
+  audio/           one procedural Web Audio engine for every game (docs/AUDIO_CUES.md)
+  contract.ts      AudioEngine and the renderer contract Sunup's view implements
+  sim/             Sunup's farm simulation (deterministic, tested)
+  render3d/        Sunup's 3D diorama
+  render2d/        the almanac-page renderer; Seedbound reuses its crop paintings
+  ui/              Sunup's HUD and dialogs, shared DOM helpers, icons, styles
+  game/            Sunup's input and the update checker
+  dev/             fixtures and renderer workbenches
 ```
 
-## Flow of a frame
+## A game's life
 
-1. Input becomes `Command`s (src/sim/commands.ts).
-2. `step(state, dt, commands)` advances the world and returns `SimEvent`s.
-3. Events go to both renderers, the audio engine and the UI.
-4. The director builds a `FrameView` (camera intent, highlight, smoothed daylight) and calls `frame` on the visible renderer (both during a crossfade).
+1. The shell shows the title. Picking a game lazy-loads its module and calls `start(ctx)` with a container, the shared audio engine, settings, the device, and the game's own save slot.
+2. The game builds itself inside `ctx.root`, runs its own animation loop, and calls `ctx.audio.mood({ game, ... })` every frame.
+3. Switching away calls `save()` then `pause()`: the loop stops, pointer lock is released, and held sounds stop. Switching back calls `resume()`.
+4. "Start over" clears the save and calls `reset()`.
 
-## Rules
-
-- Only `src/sim` writes the `WorldState`. Renderers treat it as read-only and keep their own effect state.
-- Renderers know nothing about each other or the DOM outside their canvas.
-- The view switch is a 450 ms crossfade. Before the incoming renderer's first frame, the director calls `snap` so its camera starts on the same framing.
-- Tile units everywhere: tile (x, y) covers x to x+1, y to y+1. +y is south (down the screen in 2D, +z in 3D). Actor angle 0 faces east, PI/2 faces south.
-
-## Workbench
-
-`npm run dev`, then open `/?dev=2d`, `/?dev=3d` or `/?dev=both` (V swaps views to check they agree). Fixtures live in `src/dev/fixtures.ts`; `window.harness` drives it from Playwright. `/?dev=audio` is the audio workbench.
+Each game owns its input, apart from the shell's ` key and corner button. The shell tracks the last input device; games read it with `ctx.device()`.

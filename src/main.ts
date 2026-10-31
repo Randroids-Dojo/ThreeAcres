@@ -9,5 +9,5 @@ if (dev === '2d' || dev === '3d' || dev === 'both') {
 } else if (dev === 'audio') {
   void import('./audio/devpage').then((m) => m.runAudioDev());
 } else {
-  void import('./game/app').then((m) => m.startApp());
+  void import('./shell/shell').then((m) => m.startShell());
 }

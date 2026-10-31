@@ -79,7 +79,7 @@ export function devState(rules: Rules = PRESETS.sunup.rules): WorldState {
 }
 
 export function defaultMood(): AudioMood {
-  return { rules: { ...PRESETS.sunup.rules }, hour: 9, season: 0, weather: 'sun', scene: 'farm', night: 0, speed: 1, tired: false };
+  return { game: 'homestead', intensity: 0, rules: { ...PRESETS.sunup.rules }, hour: 9, season: 0, weather: 'sun', scene: 'farm', night: 0, speed: 1, tired: false };
 }
 
 const CSS = `

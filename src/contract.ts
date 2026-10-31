@@ -74,6 +74,11 @@ export interface Renderer {
 export type UiCue = 'tap' | 'open' | 'close' | 'toggle' | 'preset' | 'buy' | 'deny' | 'tool' | 'page' | 'star' | 'order';
 
 export interface AudioMood {
+  /** Which game is playing: picks the music. Homestead, deck and ranch each have their own. */
+  game: 'title' | 'homestead' | 'ranch' | 'deck';
+  /** 0 calm to 1 busy: danger in the ranch, a scoring run in the deck. */
+  intensity: number;
+  /** Homestead rules (the sim's). Other games pass the homestead defaults. */
   rules: Readonly<Rules>;
   hour: number;
   season: Season;
@@ -97,4 +102,17 @@ export interface AudioEngine {
   setVolumes(v: { master: number; music: number; sfx: number }): void;
   /** Tab hidden or app paused. */
   suspend(on: boolean): void;
+  /** A named one-shot sound for the ranch and the deck (see docs/AUDIO_CUES.md). Unknown names are ignored. */
+  cue(name: string, opts?: CueOpts): void;
+  /** Start or stop a held sound (the ranch's bellows drawing, wind). Unknown names are ignored. */
+  loop(name: string, on: boolean, opts?: CueOpts): void;
+}
+
+export interface CueOpts {
+  /** -1 left to 1 right. */
+  pan?: number;
+  /** 0 to 1, default 1. */
+  gain?: number;
+  /** Playback rate or pitch multiplier, default 1. */
+  pitch?: number;
 }
