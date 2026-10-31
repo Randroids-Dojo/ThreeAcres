@@ -37,8 +37,11 @@ node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of ra
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
+node scripts/render3d-flash.mjs        # 3D frame readback for black or NaN pixels; also render3d-shots, -perf, -pick, -leak
 node scripts/audio-check.mjs           # audio levels, latency, crossfades, bursts (writes WAVs to /tmp/acres-audio)
 ```
+
+Screenshots stall frames at DPR 2, so take frame times from runs without them.
 
 URL flags: `?preset=sunup|patchwork|bushel` starts that game, `&fresh` starts a new farm, `&autoplay` hands the farm to the bot, `&touch` forces the touch controls on.
 
