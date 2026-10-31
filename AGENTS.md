@@ -33,12 +33,12 @@ Checks (dev server running; `npx vite --config scripts/lead-vite.config.ts` serv
 
 ```bash
 node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport)
-node scripts/qa/overlap.mjs [url]      # Sunup: no two HUD pieces overlap in any state, phone and desktop
+node scripts/qa/overlap.mjs [url]      # Sunup: no two HUD pieces overlap in any state, phone and desktop; no ruled line through words
 node scripts/qa/lessons.mjs [url]      # Sunup's lessons: one feature at a time, nothing on screen before its lesson
 node scripts/ranch-thumbs.mjs [url]    # Thistledown thumb room at the Pixel's viewport: look, buttons, stick, bellows, journal
-node scripts/ranch-lessons.mjs         # Thistledown's lessons on phone, desktop and pad (RANCH_URL=...); nothing early, frame by frame
+node scripts/ranch-lessons.mjs         # Thistledown's lessons on phone, desktop and pad (RANCH_URL=...); nothing early, frame by frame; no ruled line through journal words
 node scripts/deck-lessons.mjs [url]    # Seedbound's guided first season: one piece of the table at a time
-node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state
+node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state; no ruled line through words, no price tag over a card's name
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
@@ -48,6 +48,8 @@ node scripts/audio-check.mjs           # audio levels, latency, crossfades, burs
 ```
 
 Screenshots stall frames at DPR 2, so take frame times from runs without them.
+
+Ruled paper: draw rules on the lines of writing (a border under a title, or a gradient on the text element sized from its own line height), never at fixed pixel offsets on the page. `scripts/qa/strike.mjs` finds any rule crossing the middle of a line of words; the checks above run it.
 
 URL flags: `?game=ranch|homestead|deck` opens that game directly, `&fresh` clears its save first (once; a reload keeps the save). Sunup also takes `&autoplay` (the bot plays) and `&touch` (touch controls forced on). Thistledown takes `&taught` (lessons skipped) and `&freeze`.
 

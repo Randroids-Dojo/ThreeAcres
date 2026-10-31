@@ -37,13 +37,14 @@
   box-sizing: border-box; padding: 5px 10px 0 22px; overflow: hidden;
   background-color: #f1efda;
   background-image:
-    linear-gradient(90deg, transparent 13px, rgba(190, 60, 50, 0.55) 13px, rgba(190, 60, 50, 0.55) 14px, transparent 14px, transparent 16px, rgba(190, 60, 50, 0.45) 16px, rgba(190, 60, 50, 0.45) 17px, transparent 17px),
-    repeating-linear-gradient(180deg, transparent 0 15px, rgba(70, 110, 160, 0.28) 15px 16px);
+    linear-gradient(90deg, transparent 13px, rgba(190, 60, 50, 0.55) 13px, rgba(190, 60, 50, 0.55) 14px, transparent 14px, transparent 16px, rgba(190, 60, 50, 0.45) 16px, rgba(190, 60, 50, 0.45) 17px, transparent 17px);
   box-shadow: 0 2px 0 rgba(30, 16, 4, 0.35), 0 6px 10px -4px rgba(0, 0, 0, 0.45);
   transform: rotate(-0.6deg);
   display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; align-content: start;
   clip-path: polygon(0 0, 100% 2%, 99.5% 100%, 0.5% 98%);
 }
+/* Each ledger row carries its own rule, so a rule never runs through the words. */
+.sb-led-season, .sb-led-day { border-bottom: 1px solid rgba(70, 110, 160, 0.28); }
 .sb-led-season { font-style: italic; font-weight: 640; font-size: 16px; line-height: 16px; grid-column: 1; white-space: nowrap; }
 .sb-led-day { grid-column: 1; font-size: 12.5px; color: var(--ink-soft); line-height: 16px; font-variant: small-caps; letter-spacing: 0.04em; }
 .sb-led-tally { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 13px; color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -169,6 +170,7 @@
 .sb-pages { overflow: hidden; display: flex; flex-wrap: wrap; gap: 6px 10px; align-content: flex-start; padding-top: 6px; }
 .sb-pages h4 { width: 100%; margin: 0 0 2px; font-size: 13px; font-style: italic; font-weight: 600; color: #f0dfb8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-pages .sb-pagesheet { width: calc(50% - 6px); font-size: 11px; padding: 14px 8px 8px; }
+.sb-pages .sb-pagesheet b { margin: 0 -8px; padding: 0 8px 2px; }
 
 /* ---------------------------------------------------------------- hand */
 .sb-hand { pointer-events: none; }
@@ -352,9 +354,9 @@
 .sb-pagesheet {
   position: relative; display: grid; gap: 4px; padding: 16px 12px 12px; background: #f3e9cf; transform: rotate(var(--tilt, 0deg));
   box-shadow: 0 6px 8px -4px rgba(0, 0, 0, 0.55); font-size: 13px; line-height: 1.3;
-  background-image: linear-gradient(180deg, transparent 0 22px, rgba(42, 30, 18, 0.5) 22px 23px, transparent 23px);
 }
-.sb-pagesheet b { font-size: 15px; font-style: italic; }
+/* The page's rule belongs to its title, edge to edge, so it always sits under the words. */
+.sb-pagesheet b { font-size: 15px; font-style: italic; margin: 0 -12px; padding: 0 12px 3px; border-bottom: 1px solid rgba(42, 30, 18, 0.5); }
 .sb-pinimg { position: absolute; left: 50%; top: -6px; width: 16px; height: 16px; margin-left: -8px; }
 .sb-pencil { font-style: italic; color: #4a4a52; font-size: 14px; justify-self: end; transform: rotate(-3deg); }
 .sb-pagesheet.sold { opacity: 0.5; }
@@ -382,8 +384,9 @@
 .sb[data-layout='wide'] .sb-good.l { width: 172px; height: 241px; }
 .sb[data-layout='wide'] .sb-goods { min-height: 270px; gap: 18px; }
 .sb-chalk { position: absolute; inset: 30% 0 auto; font-size: 22px; font-style: italic; color: rgba(245, 240, 225, 0.75); transform: rotate(-12deg); }
+/* The price hangs from the card's top corner, above the face, so it never covers the name. */
 .sb-pricetag {
-  position: absolute; right: -10px; top: 18px; padding: 3px 8px 3px 12px; font-size: 16px; font-weight: 760; color: var(--ink);
+  position: absolute; right: 2px; bottom: calc(100% + 2px); padding: 3px 8px 3px 12px; font-size: 16px; font-weight: 760; color: var(--ink);
   background: #c79d6b; clip-path: polygon(8px 0, 100% 0, 100% 100%, 8px 100%, 0 50%); transform: rotate(8deg);
   filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.5));
 }

@@ -4,6 +4,7 @@
 // visible HUD piece and fails on any pair that overlaps.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
+import { strikeScan } from './strike.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
 const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
@@ -88,6 +89,8 @@ async function run(label, viewport, touch) {
         if (w > 2 && h > 2) hits.push(`${A.name}/${B.name} ${Math.round(w)}x${Math.round(h)}`);
       }
     }
+    // A ruled line across the middle of any words reads as struck through.
+    for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in}`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name}${ok ? '' : `  (${hits.join(', ')})`}`);

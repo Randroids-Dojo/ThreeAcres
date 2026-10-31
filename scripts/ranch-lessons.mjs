@@ -12,11 +12,14 @@
 //   node scripts/ranch-lessons.mjs [base url]      (or RANCH_URL)
 import fs from 'node:fs';
 import { launch, frames, checker } from './ranch-lib.mjs';
+import { strikeScan } from './qa/strike.mjs';
 
 const BASE = process.argv[2] || process.env.RANCH_URL || 'http://localhost:5253';
 const out = '/tmp/ranch-lessons';
 fs.mkdirSync(out, { recursive: true });
 const { check, failed } = checker();
+/** Ruled lines found running through journal words, at any capture. */
+const struck = [];
 const b = await launch();
 
 /** Every frame: what is visible, and whether each piece's feature has been brought in. */
@@ -125,7 +128,12 @@ function kit(page) {
     return ok;
   };
   const why = () => page.evaluate(() => { const r = window.ranch; const s = r.sim.s; return JSON.stringify({ lesson: r.seen().lesson, line: r.seen().line, hour: +s.hour.toFixed(2), coins: s.coins, menu: r.menuOptions(), learned: s.learn.filter((x) => x.startsWith('lesson:')).map((x) => x.slice(7)).join(' '), slots: s.slots.map((q) => `${q.t}:${q.n}`).join(' '), sel: s.sel }); });
-  const shot = async (name) => { await page.evaluate((n) => (window.__lastStep = n), name); return page.screenshot({ path: `${out}/${name}.png` }); };
+  // Every capture also looks for a ruled journal line running through the words.
+  const shot = async (name) => {
+    await page.evaluate((n) => (window.__lastStep = n), name);
+    for (const q of await page.evaluate(strikeScan)) struck.push(`${name}: "${q.text}" at ${q.at}%`);
+    return page.screenshot({ path: `${out}/${name}.png` });
+  };
   const downy = (which) => page.evaluate((which) => {
     const s = window.ranch.sim.s;
     const p = s.player;
@@ -696,5 +704,6 @@ function only(ui, allowed) {
 }
 
 await b.close();
+check('no ruled journal line runs through the words, at any capture', struck.length === 0, struck.slice(0, 4).join(' | '));
 console.log(failed() ? `LESSONS FAILED (${failed()})` : 'LESSONS OK', `shots in ${out}`);
 process.exit(failed() ? 1 : 0);

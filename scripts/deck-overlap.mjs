@@ -4,10 +4,12 @@
 // 1280 by 800 desktop, collects the boxes of every visible label, button,
 // card and slip, and fails on any pair that overlaps by more than 2 px.
 // Cards in the fanned hand overlap each other by design, so card pairs are
-// skipped; a card against anything else still counts.
+// skipped; a card against anything else still counts. It also fails on a
+// ruled line running through the middle of any words (scripts/qa/strike.mjs).
 // node scripts/deck-overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
+import { strikeScan } from './qa/strike.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5252';
 const out = '/tmp/deck-lessons/overlap';
@@ -194,6 +196,22 @@ async function run(label, viewport, touch) {
         if (w > 2 && h > 2) hits.push(`${A.name} "${A.text}" / ${B.name} "${B.text}" ${Math.round(w)}x${Math.round(h)}`);
       }
     }
+    // A price tag hangs above its card; it must not cover the card's face (the name is at the top).
+    // Measured flat: the small tilts of cards and tags only inflate their boxes.
+    for (const q of await p.evaluate(() => {
+      const flat = document.createElement('style');
+      flat.textContent = '* { transform: none !important; transition: none !important; }';
+      document.head.append(flat);
+      const out = [...document.querySelectorAll('.sb-good')].map((g) => {
+        const tag = g.querySelector('.sb-pricetag')?.getBoundingClientRect();
+        const face = g.querySelector('img')?.getBoundingClientRect();
+        return tag && face ? { name: g.querySelector('img').alt, over: Math.round(tag.bottom - face.top) } : null;
+      });
+      flat.remove();
+      return out.filter((q) => q && q.over > 0);
+    })) hits.push(`price tag covers the top of "${q.name}" by ${q.over} px`);
+    // A ruled line across the middle of any words reads as struck through.
+    for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in} at ${q.at}% of the line`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name} (${bx.length} pieces)${ok ? '' : `\n       ${hits.join('\n       ')}`}`);
