@@ -9,8 +9,11 @@ export async function launch() {
   return chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 }
 
-/** Opens the ranch. opts: width, height, dpr, touch, query (extra URL flags), fresh. */
-export async function openRanch(browser, { width = 1280, height = 800, dpr = 1, touch = false, query = '', fresh = true, ctx: existing } = {}) {
+/**
+ * Opens the ranch. opts: width, height, dpr, touch, query (extra URL flags), fresh,
+ * lessons (false: everything already taught, for checks of single features).
+ */
+export async function openRanch(browser, { width = 1280, height = 800, dpr = 1, touch = false, query = '', fresh = true, lessons = false, ctx: existing } = {}) {
   const ctx = existing ?? (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dpr, hasTouch: touch, isMobile: touch }));
   const page = await ctx.newPage();
   const problems = [];
@@ -19,7 +22,7 @@ export async function openRanch(browser, { width = 1280, height = 800, dpr = 1, 
     if (m.type() === 'error' || (m.type() === 'warning' && !/GPU stall|Automatic fallback|DevTools/.test(t))) problems.push(`[${m.type()}] ${t}`);
   });
   page.on('pageerror', (e) => problems.push(`[pageerror] ${e.message}`));
-  await page.goto(`${BASE}/?game=ranch${fresh ? '&fresh' : ''}${query ? `&${query}` : ''}`);
+  await page.goto(`${BASE}/?game=ranch${fresh ? '&fresh' : ''}${lessons ? '' : '&taught'}${query ? `&${query}` : ''}`);
   await page.waitForFunction(() => window.ranch && window.ranch.frames > 8, null, { timeout: 60000 });
   return { ctx, page, problems };
 }

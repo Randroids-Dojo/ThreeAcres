@@ -162,6 +162,10 @@ export interface RanchState {
   /** Last day the overnight changes ran. */
   night: number;
   nextId: number;
+  /** What the lessons have brought in (features) and finished (`lesson:id`). */
+  learn: string[];
+  /** Counts the lessons wait on. */
+  learnCount: Record<string, number>;
 }
 
 export function emptyPad(): Pad {
@@ -208,6 +212,8 @@ export function freshState(): RanchState {
     stats: { sold: 0, fed: 0, drawn: 0 },
     night: 0,
     nextId: 1,
+    learn: [],
+    learnCount: {},
   };
 }
 
@@ -240,6 +246,9 @@ export interface SaveV1 {
   zones: Zone[];
   stats: { sold: number; fed: number; drawn: number };
   night: number;
+  /** Added with the lessons; older saves have neither and are credited on load. */
+  learn?: string[];
+  learnCount?: Record<string, number>;
 }
 
 export function serialize(s: RanchState): SaveV1 {
@@ -267,6 +276,8 @@ export function serialize(s: RanchState): SaveV1 {
     zones: [...s.zones],
     stats: { ...s.stats },
     night: s.night,
+    learn: [...s.learn],
+    learnCount: Object.fromEntries(Object.entries(s.learnCount).map(([k, v]) => [k, r3(v)])),
   };
 }
 
@@ -375,6 +386,10 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.zones = [...(d.zones ?? ['ranch'])];
   s.stats = { ...s.stats, ...d.stats };
   s.night = num(d.night, 0);
+  // A save from before the lessons has no list: the director credits it (see creditLessons).
+  s.learn = Array.isArray(d.learn) ? d.learn.filter((x) => typeof x === 'string') : [];
+  s.learnCount = {};
+  for (const [k, v] of Object.entries(d.learnCount ?? {})) if (typeof v === 'number' && Number.isFinite(v)) s.learnCount[k] = v;
   return s;
 }
 

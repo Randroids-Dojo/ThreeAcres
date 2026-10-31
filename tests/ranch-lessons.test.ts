@@ -1,0 +1,360 @@
+// Thistledown's lessons, run on the render-free sim: one thing at a time, in
+// order, nothing in the world before its lesson, urgent lessons taking over,
+// lines short enough to read at a glance, and returning saves not taught twice.
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { GOALS } from '../src/games/ranch/defs';
+import { FEATURES, LESSON_IDS, Tutor, allLines, creditLessons, teachAll, type Say } from '../src/games/ranch/lessons';
+import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
+import { deserialize, serialize } from '../src/games/ranch/state';
+import { PADS } from '../src/games/ranch/world';
+import { rng } from '../src/games/ranch/noise';
+
+const realRandom = Math.random;
+beforeEach(() => {
+  Math.random = rng(7);
+});
+afterEach(() => {
+  Math.random = realRandom;
+});
+
+const idle: Controls = { moveX: 0, moveZ: 0, sprint: false, jump: false, jumpPressed: false, draw: false, puff: false, puffPressed: false };
+const touch: Say = { dev: 'touch', locked: false, lockAvailable: false };
+
+function aimAt(sim: Sim, x: number, y: number, z: number): Aim {
+  const p = sim.s.player;
+  const ex = p.x;
+  const ey = p.y + 1.6;
+  const ez = p.z;
+  const l = Math.hypot(x - ex, y - ey, z - ez);
+  const dx = (x - ex) / l;
+  const dy = (y - ey) / l;
+  const dz = (z - ez) / l;
+  return { ex, ey, ez, dx, dy, dz, mx: ex + dx * 0.6 + 0.15, my: ey - 0.2, mz: ez + dz * 0.6 };
+}
+
+/** A teaching ranch with its tutor; run() advances both, feeding the sim's events to the tutor. */
+function ranch() {
+  const sim = new Sim(null);
+  sim.teaching = true;
+  const tutor = new Tutor();
+  const floor = (x: number, z: number) => sim.phys.floor(x, z);
+  let view = tutor.update(sim.s, 0, touch, floor);
+  const lines: string[] = [];
+  const run = (seconds: number, c: Controls = idle, aim?: Aim) => {
+    for (let t = 0; t < seconds; t += 1 / 30) {
+      const a = aim ?? aimAt(sim, sim.s.player.x, sim.s.player.y + 1.6, sim.s.player.z - 5);
+      sim.update(1 / 30, c, a);
+      for (const e of sim.events) tutor.onEvent(sim.s, e);
+      sim.events.length = 0;
+      view = tutor.update(sim.s, 1 / 30, touch, floor);
+      if (view.line && !view.done && lines[lines.length - 1] !== view.id) lines.push(view.id);
+    }
+    return view;
+  };
+  const place = (x: number, z: number) => {
+    const p = sim.s.player;
+    p.x = x;
+    p.z = z;
+    p.y = sim.phys.floor(x, z);
+    p.vx = p.vz = p.vy = 0;
+  };
+  return { sim, tutor, run, place, lines, view: () => view };
+}
+
+describe('the first moments', () => {
+  it('start with one line and nothing else brought in', () => {
+    const { sim, run } = ranch();
+    const v = run(0.1);
+    expect(v.id).toBe('look');
+    expect(v.line).toBe('Drag on the right to look around.');
+    expect(sim.s.learn).toEqual([]);
+    for (const f of ['bellows', 'draw', 'puff', 'coins', 'pads', 'slots', 'jump', 'clock', 'sleep', 'nettles', 'gates', 'bench', 'pause']) expect(sim.knows(f)).toBe(false);
+  });
+
+  it('hold back posts, the door, the bench, gates, the evening and nettlebacks', () => {
+    const { sim, run, place } = ranch();
+    place(PADS[1].px + 1, PADS[1].pz + 1);
+    const aim = aimAt(sim, PADS[1].px, sim.phys.floor(PADS[1].px, PADS[1].pz) + 1.2, PADS[1].pz);
+    expect(sim.interactable(aim)).toBeNull();
+    // The clock stops in the late afternoon until the lessons let the day run on.
+    sim.s.hour = 16;
+    run(40);
+    expect(sim.s.hour).toBeCloseTo(Sim.HOLD_HOUR, 1);
+    // No nettlebacks at night until their lesson.
+    sim.s.hour = 22;
+    run(15);
+    expect(sim.s.nettles.length).toBe(0);
+  });
+});
+
+describe('the lessons in order', () => {
+  it('bring in one thing each, each when the last is done', () => {
+    const { sim, tutor, run, lines } = ranch();
+    const s = sim.s;
+    const n = (k: string, v = 1) => tutor.add(s, k, v);
+    run(0.2);
+    n('look', 1);
+    run(1.5);
+    expect(lines).toEqual(['look', 'walk']);
+    expect(sim.knows('bellows')).toBe(false);
+    n('walk', 1);
+    const d = s.downies.find((q) => q.keep)!;
+    s.player.x = d.x + 1;
+    s.player.z = d.z + 1;
+    run(1.5);
+    expect(lines[2]).toBe('draw');
+    expect(sim.knows('bellows') && sim.knows('draw')).toBe(true);
+    expect(sim.knows('puff')).toBe(false);
+    n('catch');
+    run(1.5);
+    expect(lines[3]).toBe('puff');
+    expect(sim.knows('puff')).toBe(true);
+    n('puff');
+    run(1.5);
+    expect(lines[4]).toBe('feed');
+    expect(sim.knows('pause')).toBe(true);
+    expect(sim.knows('coins')).toBe(false);
+    n('feed');
+    run(1.5);
+    expect(lines[5]).toBe('sell');
+    // Coins arrive with the first sale, not before.
+    expect(sim.knows('coins')).toBe(false);
+    n('sell');
+    run(1.5);
+    expect(sim.knows('coins')).toBe(true);
+    expect(lines[6]).toBe('pen');
+    expect(sim.knows('pads')).toBe(true);
+    // Only the pen is on offer at an empty pad.
+    const post = { kind: 'pad' as const, id: 1, label: '', x: 0, y: 0, z: 0 };
+    expect(sim.menu(post).map((o) => o.id)).toEqual(['build:pen']);
+    expect(sim.choose(post, 'build:pen')).toBe(true);
+    for (const e of sim.events) tutor.onEvent(s, e);
+    sim.events.length = 0;
+    run(1.5);
+    expect(lines[7]).toBe('penin');
+    sim.spawn('clover', PADS[1].x, PADS[1].z);
+    run(2.5);
+    expect(lines[8]).toBe('meadow');
+    expect(sim.knows('time')).toBe(false);
+    n('catch:wild');
+    run(1.5);
+    expect(sim.knows('time')).toBe(true);
+    expect(lines.length).toBe(9);
+  });
+
+  it('end only when the action is done, and tick the line before the next', () => {
+    const { tutor, sim, run } = ranch();
+    run(0.2);
+    expect(run(5).id).toBe('look');
+    tutor.add(sim.s, 'look', 1);
+    const v = run(1 / 30);
+    expect(v.id).toBe('look');
+    expect(v.done).toBe(true);
+    expect(run(0.6).done).toBe(true);
+    expect(run(1).id).toBe('walk');
+  });
+
+  it('let the slots lesson take over when two kinds are aboard, then return', () => {
+    const { tutor, sim, run } = ranch();
+    for (const id of ['look', 'walk', 'draw', 'puff']) {
+      run(0.1);
+      tutor.add(sim.s, id === 'look' ? 'look' : id === 'walk' ? 'walk' : id === 'draw' ? 'catch' : 'puff', 1);
+      if (id === 'walk') {
+        const d = sim.s.downies.find((q) => q.keep)!;
+        sim.s.player.x = d.x + 1;
+        sim.s.player.z = d.z + 1;
+      }
+      run(1.5);
+    }
+    expect(run(0.1).id).toBe('feed');
+    sim.stow('clover');
+    sim.stow('cloverhead');
+    expect(run(0.2).id).toBe('slots');
+    expect(sim.knows('slots')).toBe(true);
+    tutor.add(sim.s, 'slot');
+    run(1.5);
+    expect(run(0.1).id).toBe('feed');
+  });
+
+  it('bring the evening in after the meadow, and nettlebacks with the night', () => {
+    const { tutor, sim, run } = ranch();
+    teachAll(sim.s);
+    sim.s.learn = sim.s.learn.filter((w) => !['lesson:dusk', 'lesson:night', 'clock', 'sleep', 'nettles', 'hedge'].includes(w));
+    sim.s.hour = 18.4;
+    expect(run(0.2).id).toBe('dusk');
+    expect(sim.knows('clock') && sim.knows('sleep')).toBe(true);
+    expect(sim.knows('nettles')).toBe(false);
+    // Staying up: the dusk line lapses at nightfall and the night lesson takes over.
+    sim.s.hour = 20.6;
+    run(0.5);
+    expect(run(0.2).id).toBe('night');
+    expect(sim.knows('nettles')).toBe(true);
+    run(10);
+    expect(sim.s.nettles.length).toBeGreaterThan(0);
+    tutor.add(sim.s, 'nettlehit');
+    run(2);
+    expect(Tutor.finished(sim.s, 'night')).toBe(true);
+  });
+
+  it('point at the porch downy, then the garden with the favourite food over its head', () => {
+    const { tutor, sim, run } = ranch();
+    run(0.1);
+    tutor.add(sim.s, 'look', 1);
+    run(1.5);
+    expect(tutor.mark.on).toBe(true);
+    expect(tutor.mark.icon).toBe('arrow');
+    const d = sim.s.downies.find((q) => q.keep)!;
+    expect(Math.hypot(tutor.mark.x - d.x, tutor.mark.z - d.z)).toBeLessThan(0.01);
+    for (const k of ['walk', 'catch', 'puff']) {
+      tutor.add(sim.s, k, 1);
+      if (k === 'walk') {
+        sim.s.player.x = d.x + 1;
+        sim.s.player.z = d.z + 1;
+      }
+      run(1.5);
+    }
+    expect(run(0.1).id).toBe('feed');
+    expect(tutor.mark.icon).toBe('cloverhead');
+    expect(tutor.mark.r).toBeGreaterThan(0);
+    expect(Math.hypot(tutor.mark.rx - PADS[0].x, tutor.mark.rz - PADS[0].z)).toBeLessThan(0.01);
+    // It has an appetite now, so food puffed near it is eaten.
+    expect(d.hunger).toBeGreaterThan(0.5);
+  });
+});
+
+describe('tags that hang once they matter', () => {
+  it('a pen post offers the feeder first, then a trough once a brook downy is caught', () => {
+    const { sim, run } = ranch();
+    teachAll(sim.s);
+    sim.s.learn = sim.s.learn.filter((w) => !w.startsWith('up:') && w !== 'silo' && !['lesson:ups', 'lesson:bench', 'lesson:night', 'bench'].includes(w));
+    sim.s.pads[1].kind = 'pen';
+    sim.phys.setPads(sim.s.pads);
+    sim.s.coins = 350;
+    sim.s.hour = 10;
+    const post = { kind: 'pad' as const, id: 1, label: '', x: 0, y: 0, z: 0 };
+    expect(sim.menu(post)).toEqual([]);
+    expect(sim.padUsable(1)).toBe(false);
+    expect(run(0.2).id).toBe('ups');
+    expect(sim.menu(post).map((o) => o.id)).toEqual(['pen:feeder']);
+    expect(sim.choose(post, 'pen:feeder')).toBe(true);
+    sim.events.length = 0;
+    sim.s.learnCount.upgrade = 1;
+    run(2);
+    expect(sim.menu(post).map((o) => o.id)).toEqual(['info']);
+    sim.s.caught.push('brook');
+    run(0.1);
+    expect(sim.menu(post).map((o) => o.id)).toEqual(['pen:trough', 'info']);
+  });
+});
+
+describe('a real feeding', () => {
+  it('counts a favourite eaten by a downy of yours, not a wild one foraging', () => {
+    const { sim, tutor, run } = ranch();
+    sim.wild = false;
+    sim.s.downies = [];
+    const wild = sim.spawn('clover', 0, -10, false);
+    wild.hunger = 0.65;
+    sim.drop('cloverhead', 0.4, -10);
+    run(8);
+    expect(sim.s.stats.fed).toBe(1);
+    expect(sim.s.learnCount.feed ?? 0).toBe(0);
+    expect(sim.s.goals).not.toContain('feed');
+    const tame = sim.spawn('clover', 4, -10, true);
+    tame.hunger = 0.8;
+    sim.drop('cloverhead', 4.4, -10);
+    run(8);
+    expect(tutor && sim.s.learnCount.feed).toBe(1);
+    expect(sim.s.goals).toContain('feed');
+  });
+});
+
+describe('food puffed on a slope', () => {
+  it('stops near where it lands instead of skidding downhill', () => {
+    const { sim, run } = ranch();
+    sim.wild = false;
+    sim.s.downies = [];
+    // West of the Exchange the plateau runs downhill towards the windmill.
+    const it = sim.drop('cloverhead', -12.5, 28.7);
+    run(0.5);
+    it.vx = -8;
+    run(3);
+    expect(Math.abs(it.x - -12.5)).toBeLessThan(4);
+  });
+});
+
+describe('the words', () => {
+  it('every lesson line and journal goal is eight words or fewer, plain, with no dashes or exclamations', () => {
+    const lines = [...allLines().map((l) => l.line), ...GOALS.map((g) => g.text)];
+    for (const l of lines) {
+      expect(l.split(/\s+/).filter(Boolean).length, l).toBeLessThanOrEqual(8);
+      expect(l, l).not.toMatch(/[!\u2013\u2014]/);
+      expect(l[0], l).toBe(l[0].toUpperCase());
+    }
+  });
+
+  it('never names keys on touch, or touch on keys', () => {
+    for (const { line } of allLines()) {
+      if (/\b(WASD|Space|click|mouse|LT|RT|LB|RB|Q)\b/.test(line)) expect(/thumb|Tap |Drag /.test(line), line).toBe(false);
+    }
+    const touchOnly = allLines().filter((l) => /thumb|Tap |Drag on/.test(l.line));
+    expect(touchOnly.length).toBeGreaterThan(3);
+  });
+});
+
+describe('returning players', () => {
+  it('a save from before the lessons is credited with what it has done', () => {
+    const old = new Sim(null);
+    old.s.stats.drawn = 3;
+    old.s.stats.sold = 6;
+    old.s.stats.fed = 2;
+    old.s.goals = ['catch', 'pen', 'feed'];
+    old.s.pads[1].kind = 'pen';
+    old.s.hints = ['look', 'move', 'draw', 'puff'];
+    const raw = JSON.parse(JSON.stringify(serialize(old.s)));
+    delete raw.learn;
+    delete raw.learnCount;
+    const back = deserialize(raw, old.s.sources)!;
+    expect(back.learn).toEqual([]);
+    creditLessons(back);
+    for (const id of ['look', 'walk', 'draw', 'puff', 'feed', 'sell', 'pen', 'penin', 'slots', 'jump']) expect(Tutor.finished(back, id), id).toBe(true);
+    for (const f of ['bellows', 'draw', 'puff', 'coins', 'pads', 'slots', 'jump', 'pause']) expect(back.learn, f).toContain(f);
+    // What it has not done yet is still to come.
+    expect(Tutor.finished(back, 'gates')).toBe(false);
+    expect(Tutor.finished(back, 'night')).toBe(false);
+    const sim = new Sim(back);
+    sim.teaching = true;
+    const tutor = new Tutor();
+    const v = tutor.update(back, 1 / 30, touch, (x, z) => sim.phys.floor(x, z));
+    expect(v.id).toBe('meadow');
+  });
+
+  it('a save with nothing done starts at the beginning', () => {
+    const old = new Sim(null);
+    const raw = JSON.parse(JSON.stringify(serialize(old.s)));
+    delete raw.learn;
+    const back = deserialize(raw, old.s.sources)!;
+    creditLessons(back);
+    expect(back.learn).toEqual([]);
+  });
+
+  it('a save made with the lessons keeps them exactly', () => {
+    const { sim, tutor, run } = ranch();
+    run(0.1);
+    tutor.add(sim.s, 'look', 1);
+    run(2);
+    const a = serialize(sim.s);
+    expect(a.learn).toContain('lesson:look');
+    const back = deserialize(JSON.parse(JSON.stringify(a)), sim.s.sources)!;
+    expect(serialize(back)).toEqual(a);
+  });
+
+  it('teaching everything brings in every feature', () => {
+    const sim = new Sim(null);
+    sim.teaching = true;
+    teachAll(sim.s);
+    for (const f of FEATURES) expect(sim.knows(f)).toBe(true);
+    for (const id of LESSON_IDS) expect(Tutor.finished(sim.s, id)).toBe(true);
+    const v = new Tutor().update(sim.s, 1 / 30, touch, (x, z) => sim.phys.floor(x, z));
+    expect(v.line).toBe('');
+  });
+});

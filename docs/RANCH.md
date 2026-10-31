@@ -176,9 +176,48 @@ Recorded while building, where the design left a choice open or play showed a be
 
 **Menus are tags.** A pad post's arm, the workbench pegboard, the porch beam and each closed gate hang wooden tags with the options and prices. Look at a tag and press E (or click, or X on a pad), tap it on touch, or press its number key. Tags hang in a zigzag so a set stays narrow on a phone. Walking more than about 3 m away folds them up. The view turns gently to face them when they drop.
 
-**Teaching.** No how-to card. A clover downy hops about the porch, the sign at the ranch gate shows the draw glyph, the first journal page slides up after the first thing is drawn, and each device hint shows only until its action is done once (saved). The pause page carries a two-line controls reminder.
+**Teaching: one thing at a time** (`src/games/ranch/lessons.ts`). A new ranch starts with only the view, the move stick and the look area. Each lesson brings in one control or system, shows one line on the journal page (top left on a tall phone, bottom left on a wide screen) and waits until you have done it; the line ticks, then the next one comes. Anything not yet brought in is not on screen (Draw, Puff, Jump and pause buttons, coins, the hour arc, the crosshair and count, the bellows and its slot windows) and not in the world (pad posts, the front door, the workbench, gate prices, nettlebacks, nightfall). Lines are eight words or fewer, one action, imperative, worded for the device (never key names on touch, never touch words on keys or a pad). Rules are shown in the world instead of in words: a cream chevron bobs over the spot (a downy, a post, the crate, the door, a nettleback), a soft apricot ring lies on the ground around it (a pad, the garden, the crate), and in the feeding lesson the favourite food bobs over the downy's head. The chevron shrinks away once you are within about 3 m, so it never hangs overhead. When the spot is out of view, a small chevron on the screen's edge points the way (to the side you would turn towards, if it is behind you). The pause page keeps the whole journal (done goals struck), the three most recent notes and the controls learned so far.
 
-**Keys.** E uses whatever is in reach; with nothing in reach it moves to the next slot (the table gives E to both). Q is the previous slot; the wheel and 1 to 5 also work; F also draws, for trackpads. Esc or P pauses. J brings the journal page back up. With no pointer lock (or `&nolock`), right-drag looks.
+| # | Lesson | Brings in | Ends when | Touch | Mouse and keys | Pad |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | look | (the view, the stick) | looked about 0.6 rad | Drag on the right to look around. | Click the view to look around. (Move the mouse to look around. once captured; Right-drag to look around. with no pointer lock) | Use the right stick to look around. |
+| 2 | walk | arrow on the porch downy | walked, and within 3.4 m of it | Walk to the downy with your left thumb. | Walk to the downy with WASD. | Walk to the downy with the left stick. |
+| 3 | draw | the bellows, crosshair and count, Draw | a downy is drawn in | Hold Draw to pull the downy in. | Hold right click to pull the downy in. | Hold LT to pull the downy in. |
+| 4 | puff | Puff | something is puffed out | Tap Puff to send it back out. | Click to send it back out. | Press RT to send it back out. |
+| 5 | feed | the pause button; a clover head over the downy, the garden's ring | one of your downies eats its favourite | Feed the downy a clover head. | same | same |
+| 6 | sell | arrow on the down, then the crate; coins after the sale | down sold at the Exchange | Puff the down into the Exchange crate. | same | same |
+| 7 | pen | pad posts (Pen only), arrow and ring on the nearest empty pad | a pen is built | Build a pen on an empty pad. | same | same |
+| 8 | penin | ring on the pen | a downy is in a pen | Puff the downy into the pen. | same | same |
+| 9 | meadow | arrow at the ranch gate, then a wild downy | a wild downy is caught; then the day may run on | Catch a downy out in Clover Meadow. | same | same |
+| 10 | dusk | the hour arc, the front door | morning (sleep, or the night passes) | Sleep at the front door till morning. | same | same |
+| 11 | night | nettlebacks, the hedge tag | a nettleback is sent rolling (or dawn) | Puff something at a nettleback to shoo it. | same | same |
+| 12 | garden | the Garden tag | a garden is built | Build a garden on an empty pad. | same | same |
+| 13 | plant | ring on the bare bed | food is planted | Puff some food onto the bare soil. | same | same |
+| 14 | ups | the Feeder tag on pen posts | any upgrade is bought | Fit a feeder at a pen post. | same | same |
+| 15 | bench | the workbench (Bigger canister, Longer draw) | a bench upgrade is fitted | Fit a bigger canister at the workbench. | same | same |
+| 16 | gates | gate prices, the gates | the ridge gate is open | Open the gate to Ember Ridge. | same | same |
+| any time after 4 | slots | the slot windows and their tap targets | a slot is picked | Tap a window on the bellows to switch. | Roll the wheel or press Q to switch. | Press LB or RB to switch kinds. |
+| any time after 8 | jump | Jump | a jump | Tap Jump to hop over bumps. | Press Space to jump. | Press A to jump. |
+
+Order and timing:
+- **Lessons 1 to 9 run in order.** Lessons 10 to 16 come when they matter: dusk and night when the clock gets there, the garden at 200 coins, the feeder at 300 coins with a pen, the workbench at 400 after the feeder, the gates at 600 (only once you can pay).
+- **Two lessons take over the one on screen when they become ready, then hand back.** Slots comes when two kinds are first aboard (after Puff); jump comes when you step into the meadow, or push against something for more than a second (after the pen). Dusk and night are urgent too, and dusk lapses quietly at nightfall if you stay up.
+- **A lesson already done when it comes up passes quietly**, with no line. On keys and pads Space and A always jump (nothing on screen depends on it), so the jump lesson usually passes quietly there.
+- **Selling comes before the pen** (the brief had them the other way). The fed downy's down is lying right there to sell, coins arrive with that first sale counting up from before it, and you never spend coins you cannot see.
+- **The clock holds at half past four in the afternoon** until the meadow lesson is done, so the first evening never lands in the middle of the basics. Nettlebacks stay away until the night lesson.
+- **Other tags hang quietly when they matter** (no line): the high fence after the first night or a thistle, a trough once a brook downy is caught, a down chute after 20 down sold, garden upgrades after planting, the silo when the canister is full or refuses a kind, a fifth slot once four kinds are aboard, glide vanes once a gate is open.
+
+Save and returning players: lessons and their counts persist in the save (`learn`, `learnCount`). A save from before the lessons is credited with what it has clearly done (looked and walked, drawn, puffed, fed, sold, a pen, a penned downy, switched slots, a day gone by, a second garden or a planting, upgrades, gates), along with every lesson those come after, so a returning player is not taught again. `&taught` in the URL teaches everything (a sandbox, and what the single-feature checks use).
+
+The journal page shows one goal at a time: the lesson while one is up; between lessons, a goal just done ("Paid 40 coins") and then the next one for a few seconds. First-kind notes and the gate page wait while a lesson has the page.
+
+Fixes found while measuring the lessons:
+- **A touch in the gap between the stick and the look side** (or above the stick) landed on the canvas; Chrome's compatibility mousedown then asked for pointer lock, and after that every touch read as 0,0, so tags could not be tapped. Touch-born mouse events are now ignored, and the view takes touch taps itself.
+- **Food puffed onto a slope used to skid on** (14 m in the sim test), because each dip counted as airborne and lost its ground friction. Rolling things now hug the ground. Feeding a downy went from 15 to 30 s to about 2 s.
+- **A hungry downy that has spotted food now hurries to it.** It still bounces slowly while it is only hungry.
+- **The feed goal counts only your own downies.** Wild ones foraging used to tick it.
+
+**Keys.** E uses whatever is in reach; with nothing in reach it moves to the next slot (the table gives E to both). Q is the previous slot; the wheel and 1 to 5 also work; F also draws, for trackpads. Esc or P pauses. J brings up the next goal when no lesson has the page. With no pointer lock (or `&nolock`), right-drag looks.
 
 **Touch.** Tapping the bellows' body flicks to the next slot that holds something; tapping one of its windows picks that slot. On a tall phone the bellows shrinks and tucks in low, and the Draw, Puff and Jump buttons sit above it. A quick tap anywhere that is not a button counts as a tap on what is under it (tags, windows).
 
@@ -198,16 +237,17 @@ Recorded while building, where the design left a choice open or play showed a be
 
 **Light.** A pastel day leans on a strong soft sky light and a gentler sun, so slopes facing away from the low sun stay apricot and lilac instead of going brown. Nothing in the scene is pure black: the darkest colours are lifted so the flash scan can treat any pure black pixel as a fault.
 
-**Checks.** Dev server: `npx vite --config scripts/ranch-vite.config.ts` (port 5251, no hot reload). URL flags: `&fresh`, `&nolock`, `&touch`, `&freeze` (no updates), `&slow` (fifth speed), `&hour=19`. `window.ranch` is the debug hook (sim, renderInfo, aimAt, step, watchNaN, injectNaN, tagScreen, slotScreen).
+**Checks.** Dev server: `npx vite --config scripts/ranch-vite.config.ts` (port 5251, no hot reload; `scripts/ranch-lessons-vite.config.ts` serves 5253). The scripts read `RANCH_URL`. URL flags: `&fresh`, `&taught` (every lesson done), `&nolock`, `&touch`, `&freeze` (no updates), `&slow` (fifth speed), `&hour=19`. `window.ranch` is the debug hook (sim, renderInfo, aimAt, step, watchNaN, injectNaN, tagScreen, slotScreen, seen, tutor). The single-feature scripts below open a taught ranch; `ranch-lessons.mjs` plays a fresh one.
 
 | Script | What it checks |
 | --- | --- |
+| `node scripts/ranch-lessons.mjs [url]` | Every lesson played for real on a 412 by 838 phone at DPR 2.6 with CDP touch, then the start on a desktop with keys and the mouse, a stand-in pad's wording and a returning player's old save. A watcher checks every frame that nothing (buttons, coins, the clock, crosshair, bellows, slot windows, Use, gate prices, the edge chevron) is on screen before its lesson, and records when each first appeared. Shots in `/tmp/ranch-lessons` |
 | `node scripts/ranch-play.mjs` | Desktop play with real keys and mouse: walk, look, draw, build through tags, puff into a pen, feed, collect, sell, shell pause and resume, Esc pause, save and reload |
 | `node scripts/ranch-touch.mjs` | The same on a 412 by 900 phone at DPR 2.6 with CDP touch, plus the floating stick, two thumbs at once, slot taps, and the controls hiding on a key press |
 | `node scripts/ranch-valley.mjs` | Gates, ember and brook downies, the workbench, glide, a silo, a feeder, nettlebacks, a thistle at dusk, sleep, cues and held sounds |
 | `node scripts/ranch-pad.mjs` | Every action on a gamepad (a stand-in pad) |
 | `node scripts/ranch-feel.mjs` | Head bob, roll, field of view, landing dip, draw times, puff speed, squash and stretch, pumping |
 | `node scripts/ranch-perf.mjs` | Frame times, draw calls and triangles while playing, phone and desk |
-| `node scripts/ranch-flash.mjs` | Frame readback for black or NaN pixels, after proving it catches a planted NaN |
+| `node scripts/ranch-flash.mjs` | Frame readback for black or NaN pixels, after proving it catches a planted NaN; includes the lessons' marks by day and at dusk |
 | `node scripts/ranch-shots.mjs`, `ranch-hud.mjs`, `ranch-kinds.mjs`, `ranch-drawseq.mjs` | Screenshots and contact sheets |
-| `npx vitest run tests/ranch-sim.test.ts` | The rules, without rendering |
+| `npx vitest run tests/ranch` | The rules and the lessons, without rendering: order, gating, urgent lessons, marks, quiet tags, line length and wording, credited saves, food on slopes |

@@ -1,7 +1,8 @@
 // Thistledown's director: owns the renderer, the scene, the camera and the
 // loop; feeds input to the sim; turns sim events into sound, particles and
-// journal pages; drives the hanging-tag menus, hints and the pause page; and
-// saves. Exposes window.ranch for scripted checks.
+// journal pages; runs the lessons (one control or system at a time, nothing
+// on screen before its lesson); drives the hanging-tag menus and the pause
+// page; and saves. Exposes window.ranch for scripted checks.
 
 import {
   Color,
@@ -23,11 +24,13 @@ import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, thingColor, thingName, type DownyKind, type GoalId, type Thing } from './defs';
 import { Hud, type PageLine } from './hud';
 import { Input, type Frame } from './input';
+import { Tutor, creditLessons, teachAll, type Say } from './lessons';
 import { angleDiff, clamp, damp } from './noise';
 import { PORCH } from './physics';
 import { Fx } from './scene/fx';
 import { CreatureView } from './scene/creatures';
 import { GroundTex, buildFluff, buildGrass } from './scene/grass';
+import { Marker } from './scene/marker';
 import { U, armNaNWatch } from './scene/mat';
 import { PadView } from './scene/pads';
 import { canvas, paintBoard, tex, type BoardRow } from './scene/paint';
@@ -45,10 +48,10 @@ const EYE = 1.6;
 const FOV = 72;
 
 const FIRST: Record<DownyKind, [string, string]> = {
-  clover: ['First clover downy', 'Soft as thistledown. Loves clover heads.'],
-  ember: ['First ember downy', 'Warm to the touch. Loves sweetroot.'],
-  brook: ['First brook downy', 'Cool and slick. Loves dewberries.'],
-  thistle: ['A thistle downy', 'Prickly and cross. Eats anything. Best down in the valley.'],
+  clover: ['First clover downy', 'Loves clover heads.'],
+  ember: ['First ember downy', 'Loves sweetroot.'],
+  brook: ['First brook downy', 'Loves dewberries.'],
+  thistle: ['A thistle downy', 'Eats anything. Best down in the valley.'],
 };
 
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
@@ -74,6 +77,13 @@ export class Ranch {
   readonly vm: Viewmodel;
   private tags = new TagMenu();
   readonly hud = new Hud();
+  readonly tutor = new Tutor();
+  private marker: Marker;
+  private say: Say = { dev: 'mouse', locked: false, lockAvailable: false };
+  private stuckT = 0;
+  private lastSale = 0;
+  /** A goal page waiting to follow the one on screen (the next goal after a done one). */
+  private nextGoalT = 0;
   readonly input: Input;
   private canvas: HTMLCanvasElement;
   private board: { ctx: CanvasRenderingContext2D; tex: CanvasTexture; key: string };
@@ -104,7 +114,6 @@ export class Ranch {
   private tmp2 = new Vector3();
   private sunView = new Vector3();
   private loopsOn = { draw: false, wind: false, water: false, vents: false };
-  private prevJournal = false;
   private forceTouch: boolean;
   private wasTouch = false;
   private spotObjs = [0, 1, 2, 3, 4].map(() => ({ x: 0, y: 0 }));
@@ -158,9 +167,13 @@ export class Ranch {
     const sources = new Sim(null).s.sources;
     const st: RanchState | null = saved ? deserialize(saved, sources) : null;
     this.sim = new Sim(st);
+    this.sim.teaching = true;
+    // A ranch saved before the lessons: credit what it has done, so nothing is taught twice.
+    if (st && !Array.isArray((saved as { learn?: unknown }).learn)) creditLessons(this.sim.s);
+    // Everything learned at once: a sandbox, and scripted checks of single features.
+    if (params.has('taught')) teachAll(this.sim.s);
     if (params.has('hour')) this.sim.s.hour = Number(params.get('hour')) || 7;
     this.loaded = serialize(this.sim.s);
-    this.prevJournal = this.sim.s.journal;
 
     // The world.
     this.sky = new Sky(this.scene, !low);
@@ -183,6 +196,8 @@ export class Ranch {
     this.scene.add(this.props.group, this.pads.group, this.creatures.root, this.tags.group, ...this.fx.objects());
     this.pads.sync(this.sim.s.pads);
     this.vm = new Viewmodel(this.creatures.geos);
+    this.marker = new Marker(this.creatures.geos);
+    this.scene.add(this.marker.group);
     this.fx.reduced = ctx.settings().reducedMotion;
 
     // HUD wiring.
@@ -266,13 +281,15 @@ export class Ranch {
   reset(): void {
     this.closeMenu();
     this.sim = new Sim(null);
+    this.sim.teaching = true;
+    this.tutor.clear();
+    this.hud.setLesson('', false);
     this.syncGrass();
     this.pads.sync(this.sim.s.pads);
     this.hud.snapCoins(this.sim.s.coins);
     this.hud.hidePage();
     this.hud.hidePause();
     this.paused = false;
-    this.prevJournal = false;
     this.props.gates.ridge.left.rotation.y = this.props.gates.ridge.right.rotation.y = 0;
     this.props.gates.hollow.left.rotation.y = this.props.gates.hollow.right.rotation.y = 0;
     this.placeCamera(0);
@@ -390,17 +407,22 @@ export class Ranch {
     }
     p.yaw -= f.lookX;
     p.pitch = clamp(p.pitch - f.lookY, -1.45, 1.45);
-    if (f.looked) this.lookAccum += Math.abs(f.lookX) + Math.abs(f.lookY);
+    if (f.looked) {
+      const amt = Math.abs(f.lookX) + Math.abs(f.lookY);
+      this.lookAccum += amt;
+      this.tutor.add(s, 'look', amt);
+    }
     if (this.lookAccum > 0.4) this.doneHint('look');
+    const knows = (w: string) => this.sim.knows(w);
 
-    // Slots.
-    if (!this.menu) {
+    // Slots, once the lesson about them has come.
+    if (!this.menu && knows('slots')) {
       if (f.slotDirect >= 0 && f.slotDirect < s.slots.length) this.selectSlot(f.slotDirect);
       if (f.slotDelta) this.selectSlot((s.sel + f.slotDelta + s.slots.length * 4) % s.slots.length);
     }
 
     // A tap near one of the bellows' windows picks that slot (the nearest).
-    if (f.tapped && !this.menu) {
+    if (f.tapped && !this.menu && knows('slots')) {
       let best = -1;
       let bd = 22;
       for (let i = 0; i < s.slots.length; i++) {
@@ -419,7 +441,7 @@ export class Ranch {
     if (this.menu) this.menuTick(f, dt);
     else if (f.interact) {
       if (near) this.openMenu(near);
-      else this.selectSlot((s.sel + 1) % s.slots.length);
+      else if (knows('slots')) this.selectSlot((s.sel + 1) % s.slots.length);
     }
 
     // Controls.
@@ -430,18 +452,27 @@ export class Ranch {
     c.jump = f.jump;
     c.jumpPressed = f.jumpPressed;
     const busy = !!this.menu;
-    c.draw = f.draw && !busy;
-    c.puff = f.puff && !busy;
-    c.puffPressed = f.puffPressed && !busy;
-    if (f.moveX || f.moveZ) this.walked += dt;
+    // The bellows answers once a lesson has put it in your hands.
+    c.draw = f.draw && !busy && knows('bellows');
+    c.puff = f.puff && !busy && knows('puff');
+    c.puffPressed = f.puffPressed && !busy && knows('puff');
+    if (f.moveX || f.moveZ) {
+      this.walked += dt;
+      this.tutor.add(s, 'walk', dt);
+      // Pushing into something that will not give: the terrain needs a jump.
+      const blocked = Math.hypot(f.moveX, f.moveZ) > 0.5 && p.grounded && Math.hypot(p.vx, p.vz) < 0.6;
+      this.stuckT = blocked ? this.stuckT + dt : 0;
+      // Remember when (in seconds walked): only a recent bump means the ground needs a jump.
+      if (this.stuckT > 1.2) {
+        this.stuckT = 0;
+        s.learnCount.stuckAt = s.learnCount.walk ?? 0;
+      }
+    } else this.stuckT = 0;
     if (this.walked > 0.8) this.doneHint('move');
     if (!this.frozen) this.sim.update(dt, c, this.aim);
     if (this.menu && Math.hypot(p.x - this.menu.x, p.z - this.menu.z) > 3.2) this.closeMenu();
     this.handleEvents();
-    if (s.journal && !this.prevJournal) {
-      this.prevJournal = true;
-      this.showGoals(null);
-    }
+    this.lessonTick(dt);
 
     this.placeCamera(dt);
     this.updateVisuals(dt);
@@ -524,7 +555,8 @@ export class Ranch {
       const side = g === 'ridge' ? 1 : -1;
       o.left.rotation.y = damp(o.left.rotation.y, -want * side, 2.2, dt || 1);
       o.right.rotation.y = damp(o.right.rotation.y, want * side, 2.2, dt || 1);
-      o.tag.visible = !s.gates[g];
+      // Prices hang on the gates once their lesson has come.
+      o.tag.visible = !s.gates[g] && this.sim.knows('gates');
     }
     this.paintBoard();
     // The bellows.
@@ -549,9 +581,13 @@ export class Ranch {
       sunColor: this.sky.sun.color,
       skyColor: this.sky.hemi.color,
       groundColor: this.sky.hemi.groundColor,
-      hidden: this.paused,
+      hidden: this.paused || !this.sim.knows('bellows'),
+      windows: this.sim.knows('slots'),
     });
+    this.marker.update(dt, this.t, this.tutor.mark, this.paused || !!this.menu, this.eye, this.floor, this.ctx.settings().reducedMotion);
   }
+
+  private floor = (x: number, z: number) => this.sim.phys.floor(x, z);
 
   private paintBoard(): void {
     const s = this.sim.s;
@@ -597,7 +633,10 @@ export class Ranch {
     const evs = this.sim.events;
     if (!evs.length) return;
     const a = this.aim;
-    for (const e of evs) this.onEvent(e, a);
+    for (const e of evs) {
+      this.tutor.onEvent(this.sim.s, e);
+      this.onEvent(e, a);
+    }
     evs.length = 0;
   }
 
@@ -649,6 +688,7 @@ export class Ranch {
         this.cue('ranch.sell', e.x, e.y, e.z);
         this.cue('ranch.coins', e.x, e.y, e.z, clamp(0.4 + e.coins / 40, 0, 1));
         this.fx.coinPop(e.x, e.y, e.z, clamp(Math.round(e.coins / 7), 1, 6));
+        this.lastSale = e.coins;
         break;
       case 'reject':
         this.cue('ranch.deny', e.x, e.y, e.z);
@@ -670,7 +710,7 @@ export class Ranch {
         this.ctx.audio.loop('ranch.wind', true, { gain: 1 });
         this.fx.burst(g.x, y + 1.5, g.z, 0xf2c890, 60, 5);
         if (!this.ctx.settings().reducedMotion) this.dipV -= 1.2;
-        this.hud.showPage(`Day ${s.day}`, [{ text: `The way to ${g.name} is open.`, done: true, fresh: true }], 5);
+        if (!this.tutor.busy) this.hud.showPage(`Day ${s.day}`, [{ text: `The way to ${g.name} is open.`, done: true, fresh: true }], 5);
         break;
       }
       case 'nettle':
@@ -686,7 +726,8 @@ export class Ranch {
         break;
       case 'goal':
         this.cue('ranch.goal');
-        this.showGoals(e.id);
+        // While a lesson is up, the page belongs to it; the pause page keeps the tally.
+        if (!this.tutor.busy) this.showGoals(e.id);
         break;
       case 'deny':
         this.cue('ranch.deny');
@@ -711,8 +752,10 @@ export class Ranch {
         const [title, line] = FIRST[e.kind];
         this.fx.burst(a.mx + a.dx * 1.2, a.my + a.dy * 1.2, a.mz + a.dz * 1.2, KIND[e.kind].body, 30, 2.2);
         this.cue('ranch.chirp', undefined, undefined, undefined, 1, CHIRP_PITCH[e.kind]);
-        this.hud.showPage(title, [{ text: line, done: false, fresh: false }], 5);
-        this.hud.el.querySelector('.rh-page')?.classList.add('note');
+        if (!this.tutor.busy) {
+          this.hud.showPage(title, [{ text: line, done: false, fresh: false }], 5);
+          this.hud.el.querySelector('.rh-page')?.classList.add('note');
+        }
         break;
       }
       case 'step':
@@ -741,19 +784,51 @@ export class Ranch {
     }
   }
 
+  /** One goal at a time: the one just done (then the next, a moment later), or the next on its own. */
   private showGoals(done: GoalId | null): void {
-    const s = this.sim.s;
     const lines: PageLine[] = [];
-    let title = `Day ${s.day}, to do`;
+    let title = 'Next';
     if (done) {
       const g = GOALS.find((q) => q.id === done)!;
       lines.push({ text: g.text, done: true, fresh: true });
-      title = `Day ${s.day}, paid ${g.reward} coins`;
+      title = `Paid ${g.reward} coins`;
+      this.nextGoalT = 3.4;
+    } else {
+      const next = this.sim.openGoals(1)[0];
+      if (!next) return;
+      lines.push({ text: next.text, done: false, fresh: false });
+      this.nextGoalT = 0;
     }
-    for (const g of this.sim.openGoals(2)) lines.push({ text: g.text, done: false, fresh: false });
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(title, lines, done ? 6 : 7);
+    this.hud.showPage(title, lines, done ? 3.4 : 5);
   }
+
+  // ------------------------------------------------------------ lessons
+
+  private lessonTick(dt: number): void {
+    const s = this.sim.s;
+    const say = this.say;
+    const dev = this.device();
+    say.dev = dev === 'touch' ? 'touch' : dev === 'pad' ? 'pad' : 'mouse';
+    say.locked = this.input.locked;
+    say.lockAvailable = this.input.lockAvailable;
+    const v = this.tutor.update(s, dt, say, this.floor);
+    for (const w of this.tutor.fresh) {
+      // Coins arrive with the first sale, counting up from before it.
+      if (w === 'coins') this.hud.snapCoins(s.coins - this.lastSale);
+    }
+    if (v.done && this.prevLessonDone !== v.id) {
+      this.prevLessonDone = v.id;
+      this.cue('ranch.slot', undefined, undefined, undefined, 0.7, 1.3);
+    }
+    this.hud.setLesson(v.line, v.done);
+    if (this.nextGoalT > 0 && !v.line) {
+      this.nextGoalT -= dt;
+      if (this.nextGoalT <= 0) this.showGoals(null);
+    }
+  }
+
+  private prevLessonDone = '';
 
   // ------------------------------------------------------------ slots
 
@@ -776,6 +851,7 @@ export class Ranch {
     s.sel = i;
     this.cue('ranch.slot');
     this.doneHint('slot');
+    this.tutor.add(s, 'slot');
   }
 
   // ------------------------------------------------------------ menus
@@ -907,8 +983,36 @@ export class Ranch {
     const m = Math.floor((s.hour - h) * 60);
     const ampm = h < 12 ? 'am' : 'pm';
     const h12 = h % 12 === 0 ? 12 : h % 12;
-    this.hud.showPause(`Day ${s.day}, ${h12}:${String(m).padStart(2, '0')} ${ampm}`, s.goals, this.device());
+    const when = this.sim.knows('clock') ? `Day ${s.day}, ${h12}:${String(m).padStart(2, '0')} ${ampm}` : `Day ${s.day}`;
+    this.hud.showPause(when, s.goals, this.tutor.line, this.tutor.notes(s), this.controlsLine());
     this.save();
+  }
+
+  /** The controls learned so far, in this device's words. */
+  private controlsLine(): string {
+    const k = (w: string) => this.sim.knows(w);
+    const dev = this.device();
+    const out: string[] = [];
+    if (dev === 'touch') {
+      out.push('Left thumb walks, the right side looks.');
+      if (k('draw')) out.push(k('puff') ? 'Hold Draw to pull in, tap Puff to send out.' : 'Hold Draw to pull in.');
+      if (k('slots')) out.push('Tap the bellows to switch kinds.');
+      if (k('jump')) out.push('Jump hops.');
+      if (k('pads')) out.push('The hand uses what is in front of you.');
+    } else if (dev === 'pad') {
+      out.push('Left stick walks, right stick looks.');
+      if (k('draw')) out.push(k('puff') ? 'LT draws, RT puffs.' : 'LT draws.');
+      if (k('slots')) out.push('LB and RB switch kinds.');
+      out.push('A jumps.');
+      if (k('pads')) out.push('X uses what is in front of you.');
+    } else {
+      out.push('WASD walks, the mouse looks, Shift runs.');
+      if (k('draw')) out.push(k('puff') ? 'Hold right click to draw, click to puff.' : 'Hold right click to draw.');
+      if (k('slots')) out.push('Q or the wheel switch kinds.');
+      out.push('Space jumps.');
+      if (k('pads')) out.push('E uses what is in front of you.');
+    }
+    return out.join(' ');
   }
 
   closePause(): void {
@@ -932,30 +1036,14 @@ export class Ranch {
     if (!h.includes(id)) h.push(id);
   }
 
-  private hintText(): string | null {
-    const s = this.sim.s;
-    const dev = this.device();
-    const done = (id: string) => s.hints.includes(id);
-    const touch = dev === 'touch';
-    const pad = dev === 'pad';
-    if (!done('look')) {
-      if (touch) return 'Drag on the right to look';
-      if (pad) return 'Right stick to look';
-      if (this.input.locked) return 'Move the mouse to look';
-      return this.input.lockAvailable ? null : 'Right-drag to look around';
-    }
-    if (!done('move')) return touch ? 'Left thumb to walk' : pad ? 'Left stick to walk' : 'W A S D to walk';
-    if (!done('draw') && this.crossTarget === 'target') return touch ? 'Hold Draw to pull it in' : pad ? 'Hold LT to draw it in' : 'Hold right mouse to draw it in';
-    const filled = s.slots.filter((q) => q.t).length;
-    if (done('draw') && !done('puff') && s.slots[s.sel].t) return touch ? 'Tap Puff to send it out' : pad ? 'RT to puff it out' : 'Click to puff it out';
-    if (!done('slot') && filled >= 2) return touch ? 'Tap the bellows to switch slots' : pad ? 'LB and RB switch slots' : 'Q, E or the wheel switch slots';
-    return null;
-  }
-
   private updateHud(dt: number, f: Frame, near: Interactable | null): void {
     const s = this.sim.s;
     const hud = this.hud;
     const touch = this.isTouch();
+    const knows = (w: string) => this.sim.knows(w);
+    // Only what the lessons have brought in is on the glass.
+    hud.setKnown(knows('bellows'), knows('coins'), knows('clock'));
+    this.input.setKnown(knows('draw'), knows('puff'), knows('jump'), knows('pause'));
     // Crosshair.
     this.crossTarget = this.sim.aimTarget(this.aim);
     if (this.menu) hud.setCross(this.tags.hot >= 0 ? 'tag' : 'idle');
@@ -979,10 +1067,11 @@ export class Ranch {
       hud.setPrompt(null, null);
       this.input.setAct(null);
     }
-    hud.setHint(this.paused ? null : this.hintText());
-    hud.setClick(!touch && !this.input.locked && this.input.lockAvailable && !this.paused && this.device() !== 'pad');
+    this.edgePointer();
+    // The look lesson already says to click the view.
+    hud.setClick(!touch && !this.input.locked && this.input.lockAvailable && !this.paused && this.device() !== 'pad' && this.tutor.current !== 'look');
     // Tap targets over the slot windows.
-    const showSlots = touch || !this.input.locked;
+    const showSlots = (touch || !this.input.locked) && knows('slots');
     // Reused objects: nothing allocated per frame here.
     for (let i = 0; i < 5; i++) {
       const v = i < s.slots.length ? this.vm.windowScreen(i, this.tmp) : null;
@@ -998,11 +1087,47 @@ export class Ranch {
     bb.y0 *= this.h;
     bb.y1 *= this.h;
     hud.placeSlots(this.spots, showSlots && !this.paused, bb);
-    if (f.journal) {
+    // J brings up the next goal, unless a lesson has the page.
+    if (f.journal && !hud.lessonUp) {
       if (hud.pageUp) hud.hidePage();
       else this.showGoals(null);
     }
     hud.update(dt);
+  }
+
+  /** When the lesson's spot is out of view, a chevron on the edge of the screen points the way. */
+  private edgePointer(): void {
+    const m = this.tutor.mark;
+    if (!m.on || this.menu || this.paused) {
+      this.hud.setEdge(null);
+      return;
+    }
+    // Camera space: z < 0 is in front.
+    const v = this.tmp.set(m.x, m.y, m.z).applyMatrix4(this.camera.matrixWorldInverse);
+    const behind = v.z > -0.1;
+    this.tmp.set(m.x, m.y, m.z).project(this.camera);
+    const sx = ((this.tmp.x + 1) / 2) * this.w;
+    const sy = ((1 - this.tmp.y) / 2) * this.h;
+    // The band it may sit in: clear of the shell corner, the journal page, the stick and the buttons.
+    const x0 = 26;
+    const x1 = this.w - 26;
+    const y0 = this.h * 0.2;
+    const y1 = this.h * 0.62;
+    if (!behind && sx > x0 && sx < x1 && sy > 8 && sy < this.h - 8) {
+      this.hud.setEdge(null);
+      return;
+    }
+    // In front but off the edge: point straight at it. Behind you: point to the
+    // side you would turn towards, at mid height.
+    let dx = behind ? (v.x >= 0 ? 1 : -1) : v.x;
+    const dy = behind ? 0 : -v.y;
+    if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4) dx = 1;
+    const cx = this.w / 2;
+    const cy = (y0 + y1) / 2;
+    const k = Math.min(Math.abs(dx) > 1e-6 ? (x1 - cx) / Math.abs(dx) : 1e9, Math.abs(dy) > 1e-6 ? (y1 - cy) / Math.abs(dy) : 1e9);
+    const ex = clamp(cx + dx * k, x0, x1);
+    const ey = clamp(cy + dy * k, y0, y1);
+    this.hud.setEdge(ex, ey, Math.atan2(dy, dx));
   }
 
   // ------------------------------------------------------------ audio
@@ -1122,6 +1247,21 @@ export class Ranch {
 
   caps(): number[] {
     return CAPS;
+  }
+
+  /** What the lessons have put in the 3D layer, for checks: the bellows, its windows, the marker, gate price tags. */
+  seen(): { lesson: string; done: boolean; line: string; bellows: number; windows: boolean; marker: string | null; ring: boolean; gateTags: boolean } {
+    const m = this.marker.showing;
+    return {
+      lesson: this.tutor.current,
+      done: this.tutor.current !== '' && this.tutor.line === '',
+      line: this.tutor.line,
+      bellows: this.vm.raised,
+      windows: this.vm.windowsShown,
+      marker: m.icon,
+      ring: m.ring,
+      gateTags: this.props.gates.ridge.tag.visible || this.props.gates.hollow.tag.visible,
+    };
   }
 
   thing(t: Thing): string {

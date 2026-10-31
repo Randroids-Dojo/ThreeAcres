@@ -2,6 +2,7 @@
 // looking works from the middle and lower right, buttons win over the bellows,
 // the stick works where it overlaps the bellows, the bellows still changes slot,
 // and the journal page never blocks the stick. Real touch events through CDP.
+// Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
 
@@ -11,7 +12,7 @@ const ctx = await b.newContext({ viewport: { width: 412, height: 838 }, deviceSc
 const p = await ctx.newPage();
 const errs = [];
 p.on('pageerror', (e) => errs.push(e.message));
-await p.goto(`${base}/?game=ranch&fresh`);
+await p.goto(`${base}/?game=ranch&fresh&taught`);
 await p.waitForFunction(() => window.ranch && window.ranch.sim, null, { timeout: 30000 });
 const cdp = await ctx.newCDPSession(p);
 const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id, radiusX: 9, radiusY: 9, force: 1 })) });

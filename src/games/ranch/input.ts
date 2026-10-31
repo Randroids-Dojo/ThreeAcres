@@ -134,6 +134,23 @@ export class Input {
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('mousemove', this.onMouseMove);
     canvasEl.addEventListener('wheel', this.onWheel, { passive: false });
+    // A touch that lands on the view itself (between the stick and the look
+    // side, or above the stick) is a tap on what is under it. Its compatibility
+    // mouse events must not count as a mouse: they would ask for pointer lock,
+    // and once locked every touch after it reads as 0,0.
+    window.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') this.lastTouchT = performance.now();
+    }, true);
+    canvasEl.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || !this.enabled) return;
+      this.viewTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    });
+    canvasEl.addEventListener('pointerup', (e) => {
+      const v = this.viewTap;
+      if (!v || v.id !== e.pointerId) return;
+      this.viewTap = null;
+      if (Math.hypot(e.clientX - v.x, e.clientY - v.y) < 12 && performance.now() - v.t < 350) this.tap(v.x, v.y);
+    });
     root.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', this.onLockChange);
     document.addEventListener('pointerlockerror', () => {
@@ -208,8 +225,13 @@ export class Input {
 
   // ------------------------------------------------------------ mouse
 
+  private lastTouchT = -1e9;
+  private viewTap: { id: number; x: number; y: number; t: number } | null = null;
+
   private onMouseDown = (e: MouseEvent) => {
     if (!this.enabled) return;
+    // Mouse events a touch made: the touch handlers have it.
+    if (performance.now() - this.lastTouchT < 800) return;
     this.lastMX = e.clientX;
     this.lastMY = e.clientY;
     if (e.button === 0) {
@@ -417,6 +439,33 @@ export class Input {
     this.touch.classList.toggle('on', on);
     if (!on) this.resetTouch();
   }
+
+  /** Buttons a lesson has not brought in yet are not there at all. */
+  setKnown(draw: boolean, puff: boolean, jump: boolean, pause: boolean): void {
+    const k = this.known;
+    if (k[0] === draw && k[1] === puff && k[2] === jump && k[3] === pause) return;
+    k[0] = draw;
+    k[1] = puff;
+    k[2] = jump;
+    k[3] = pause;
+    const set = (b: HTMLElement, on: boolean) => {
+      b.classList.toggle('gone', !on);
+      // A button that leaves mid-press lets go.
+      if (!on && this.held.has(b)) {
+        this.held.delete(b);
+        b.classList.remove('down');
+        if (b === this.btn.draw) this.tDraw = false;
+        if (b === this.btn.puff) this.tPuff = false;
+        if (b === this.btn.jump) this.tJump = false;
+      }
+    };
+    set(this.btn.draw, draw);
+    set(this.btn.puff, puff);
+    set(this.btn.jump, jump);
+    set(this.btn.pause, pause);
+  }
+
+  private known = [true, true, true, true];
 
   setAct(label: string | null): void {
     this.btn.act.classList.toggle('show', !!label);

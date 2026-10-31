@@ -92,6 +92,7 @@ export class Viewmodel {
   private windows: InstancedMesh;
   private windowSpots: Vector3[] = [];
   private pointer: Mesh;
+  private rims: Mesh;
   private contents: Record<string, InstancedMesh> = {};
   private dialTex: CanvasTexture;
   private dialCtx: CanvasRenderingContext2D;
@@ -242,7 +243,8 @@ export class Viewmodel {
       this.windowSpots.push(new Vector3(x, -0.012, 0.1755));
       rims.push(part(at(new TorusGeometry(0.0135, 0.0025, 5, 14), x, -0.012, 0.1755, -0.2), 0x8a6a28));
     }
-    botBoard.add(new Mesh(merge(rims), brass));
+    this.rims = new Mesh(merge(rims), brass);
+    botBoard.add(this.rims);
     this.pointer = new Mesh(part(at(new BoxGeometry(0.008, 0.012, 0.004), 0, 0.012, 0), 0x6a3a1e), new MeshLambertMaterial({ vertexColors: true, emissive: 0x2a1408 }));
     this.pointer.position.set(0, 0.0, 0.176);
     this.pointer.rotation.x = -0.2;
@@ -298,6 +300,15 @@ export class Viewmodel {
     this.dialCap = cap;
   }
 
+  /** How far the bellows is raised into view, 0 to 1 (for checks). */
+  get raised(): number {
+    return this.rig.visible ? this.shown : 0;
+  }
+
+  get windowsShown(): boolean {
+    return this.rig.visible && this.windows.visible;
+  }
+
   /** Something went in: the jar jiggles. */
   gulp(): void {
     this.jiggle = 1;
@@ -313,8 +324,12 @@ export class Viewmodel {
    * Once a frame. bob: walk phase and amount; look: this frame's turn in
    * radians (for sway); draw: 0..1 drawing power.
    */
-  update(dt: number, t: number, o: { phase: number; walk: number; dyaw: number; dpitch: number; draw: number; slots: Slot[]; sel: number; cap: number; land: number; reduced: boolean; sunDir: Vector3; sunColor: Color; skyColor: Color; groundColor: Color; hidden: boolean }): void {
-    this.shown = damp(this.shown, o.hidden ? 0 : 1, 10, dt);
+  update(dt: number, t: number, o: { phase: number; walk: number; dyaw: number; dpitch: number; draw: number; slots: Slot[]; sel: number; cap: number; land: number; reduced: boolean; sunDir: Vector3; sunColor: Color; skyColor: Color; groundColor: Color; hidden: boolean; windows: boolean }): void {
+    // Raised into view when it first arrives, a little slower than the pause dip.
+    this.shown = damp(this.shown, o.hidden ? 0 : 1, this.shown < 0.5 && !o.hidden ? 5 : 10, dt);
+    this.rig.visible = this.shown > 0.01;
+    // The slot windows arrive with the lesson that needs them.
+    this.windows.visible = this.rims.visible = this.pointer.visible = o.windows;
     // Sway: the bellows lags behind your look a little.
     const sw = o.reduced ? 0.4 : 1;
     this.swayX = damp(this.swayX - o.dyaw * 0.16 * sw, 0, 9, dt);

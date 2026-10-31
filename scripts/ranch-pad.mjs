@@ -16,7 +16,7 @@ const page = await ctx.newPage();
 const problems = [];
 page.on('pageerror', (e) => problems.push(e.message));
 page.on('console', (m) => m.type() === 'error' && problems.push(m.text()));
-await page.goto(`${BASE}/?game=ranch&fresh&nolock`);
+await page.goto(`${BASE}/?game=ranch&fresh&taught&nolock`);
 await page.waitForFunction(() => window.ranch && window.ranch.frames > 8);
 const set = (fn) => page.evaluate(fn);
 const btn = (i, on) => page.evaluate(([i, on]) => { const q = window.__pad.buttons[i]; q.pressed = on; q.value = on ? 1 : 0; }, [i, on]);

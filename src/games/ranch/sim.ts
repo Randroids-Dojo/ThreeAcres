@@ -1,7 +1,10 @@
 // Thistledown's rules, render-free: the clock, walking, the bellows, downies,
 // loose things, gardens, pens, silos, the Exchange, nettlebacks, wild
 // spawning and the journal. The game feeds it controls and an aim each frame
-// and reacts to the events it emits; renderers only read its state.
+// and reacts to the events it emits; renderers only read its state. While
+// teaching, the world holds back what the lessons have not brought in yet
+// (see lessons.ts): posts, the door, the bench and gates stay inert, the
+// clock stops in the late afternoon and nettlebacks stay away.
 
 import {
   BENCH_UPS,
@@ -72,13 +75,13 @@ import {
 } from './world';
 
 export type Ev =
-  | { t: 'suck'; thing: Thing; x: number; y: number; z: number }
+  | { t: 'suck'; thing: Thing; x: number; y: number; z: number; wild?: boolean }
   | { t: 'full'; thing: Thing }
   | { t: 'puff'; thing: Thing | null }
   | { t: 'boing'; x: number; y: number; z: number; v: number; kind: DownyKind }
   | { t: 'chirp'; x: number; y: number; z: number; kind: DownyKind }
   | { t: 'squeak'; x: number; y: number; z: number; kind: DownyKind }
-  | { t: 'eat'; x: number; y: number; z: number; kind: DownyKind; food: Food }
+  | { t: 'eat'; x: number; y: number; z: number; kind: DownyKind; food: Food; fav: boolean; tame: boolean }
   | { t: 'shed'; x: number; y: number; z: number; kind: DownyKind; n: number }
   | { t: 'frazzle'; x: number; y: number; z: number }
   | { t: 'sell'; x: number; y: number; z: number; kind: DownyKind; coins: number }
@@ -233,6 +236,8 @@ export class Sim {
   thistleSeen = false;
   /** Wild downies come and go (off in some tests). */
   wild = true;
+  /** Hold back what the lessons have not brought in. Off, everything is there (tests, sandbox). */
+  teaching = false;
   private airborneVy = 0;
   private pbody = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 0.34, grounded: true };
 
@@ -257,6 +262,11 @@ export class Sim {
 
   emit(e: Ev): void {
     this.events.push(e);
+  }
+
+  /** Has a lesson brought this in? Always yes when not teaching. */
+  knows(what: string): boolean {
+    return !this.teaching || this.s.learn.includes(what);
   }
 
   // ------------------------------------------------------------ setup
@@ -354,8 +364,12 @@ export class Sim {
     return 0;
   }
 
+  /** Until the lessons let the day run on, it stays late afternoon. */
+  static readonly HOLD_HOUR = 16.5;
+
   private tickClock(dt: number): void {
     const s = this.s;
+    if (s.hour >= Sim.HOLD_HOUR && s.hour < 20 && !this.knows('time')) return;
     s.hour += dt / HOUR;
     if (s.hour >= 24) {
       s.hour -= 24;
@@ -600,7 +614,7 @@ export class Sim {
           if (this.stow(d.kind)) {
             d.gone = true;
             s.stats.drawn++;
-            this.emit({ t: 'suck', thing: d.kind, x: d.x, y: d.y, z: d.z });
+            this.emit({ t: 'suck', thing: d.kind, x: d.x, y: d.y, z: d.z, wild: !d.tame && !d.keep });
             if (!s.caught.includes(d.kind)) {
               s.caught.push(d.kind);
               this.emit({ t: 'first', kind: d.kind });
@@ -955,7 +969,9 @@ export class Sim {
     d.grounded = false;
     d.squashV += 2.5;
     if (dist > 0.05) d.yaw = Math.atan2(dx, dz);
-    d.hopT = (0.45 + r() * 1.1) * (hungry ? 1.5 : 1) * (fraz ? 0.45 : 1);
+    // Hungry ones bounce slowly, until they spot food: then they hurry to it.
+    const toFood = !!d.target && !d.target.gone;
+    d.hopT = (0.45 + r() * 1.1) * (toFood ? 0.55 : hungry ? 1.5 : 1) * (fraz ? 0.45 : 1);
     if (d.mood === 'content' && r() < 0.2) this.emit({ t: 'chirp', x: d.x, y: d.y, z: d.z, kind: d.kind });
   }
 
@@ -993,8 +1009,9 @@ export class Sim {
       d.shedQ = n;
       d.shedT = 0.75;
     }
-    this.emit({ t: 'eat', x: d.x, y: d.y, z: d.z, kind: d.kind, food });
-    if (fav) this.complete('feed');
+    this.emit({ t: 'eat', x: d.x, y: d.y, z: d.z, kind: d.kind, food, fav, tame: d.tame });
+    // Wild downies forage on their own; the goal is for feeding one of yours.
+    if (fav && d.tame) this.complete('feed');
   }
 
   private shed(d: Downy): void {
@@ -1048,7 +1065,9 @@ export class Sim {
       this.phys.collide(it, ox, oz, 'item');
       if (it.flyT >= 0 && it.flyT < 3 && this.catchers(it)) continue;
       const fl = this.phys.rest(it.x, it.z, true) + it.r * 0.6;
-      if (it.y <= fl) {
+      // Rolling downhill stays on the ground (and under its friction) instead of
+      // hopping off every dip and skidding on: food puffed by a downy stays by it.
+      if (it.y <= fl || (it.grounded && it.vy <= 0 && it.y - fl < 0.3)) {
         if (!it.grounded) {
           const wet = waterAt(it.x, it.z) > fl - it.r;
           if (wet && it.vy < -2) this.emit({ t: 'splash', x: it.x, y: fl, z: it.z });
@@ -1182,7 +1201,7 @@ export class Sim {
     this.nettleT -= dt;
     const max = Math.min(4, 2 + Math.floor(s.day / 3));
     const alive = s.nettles.filter((n) => !n.gone).length;
-    if (night && this.nettleT <= 0 && alive < max) {
+    if (night && this.nettleT <= 0 && alive < max && this.knows('nettles')) {
       this.nettleT = 22 + this.rand() * 14;
       const x = -26 + this.rand() * 52;
       const z = -53;
@@ -1480,6 +1499,7 @@ export class Sim {
       }
     };
     s.pads.forEach((pad, i) => {
+      if (!this.padUsable(i)) return;
       const sp = padSpots(i);
       const fl = this.phys.floor(sp.post.x, sp.post.z);
       const label = pad.kind === 'empty' ? 'Pad post' : pad.kind === 'pen' ? 'Pen post' : pad.kind === 'garden' ? 'Garden post' : 'Silo post';
@@ -1492,15 +1512,33 @@ export class Sim {
         consider({ kind: 'chute', id: i, label: n ? `Down box, ${n}` : 'Down box, empty', x: sp.chute.x, y: cfl + 0.6, z: sp.chute.z }, 2.4);
       }
     });
-    consider({ kind: 'bench', id: 0, label: 'Workbench', x: WORKBENCH.x, y: this.phys.floor(WORKBENCH.x, WORKBENCH.z) + 1.4, z: WORKBENCH.z }, 2.8);
-    consider({ kind: 'door', id: 0, label: 'Front door', x: DOOR.x, y: this.phys.floor(DOOR.x, DOOR.z) + 1.4, z: DOOR.z }, 2.6);
+    if (this.knows('bench')) consider({ kind: 'bench', id: 0, label: 'Workbench', x: WORKBENCH.x, y: this.phys.floor(WORKBENCH.x, WORKBENCH.z) + 1.4, z: WORKBENCH.z }, 2.8);
+    if (this.knows('sleep')) consider({ kind: 'door', id: 0, label: 'Front door', x: DOOR.x, y: this.phys.floor(DOOR.x, DOOR.z) + 1.4, z: DOOR.z }, 2.6);
     for (const g of Object.keys(GATES) as GateId[]) {
-      if (s.gates[g]) continue;
+      if (s.gates[g] || !this.knows('gates')) continue;
       const gt = GATES[g];
       const side = g === 'ridge' ? 1 : -1;
       consider({ kind: 'gate', id: g, label: `Gate to ${gt.name}`, x: gt.x + side * 0.6, y: this.phys.floor(gt.x, gt.z) + 1.5, z: gt.z }, 3.4);
     }
     return best;
+  }
+
+  /** Which builds and upgrades the lessons have brought in: each tag hangs once it matters. */
+  private buildKnown(k: Exclude<PadKind, 'empty'>): boolean {
+    return k === 'pen' ? this.knows('pads') : k === 'garden' ? this.knows('garden') : this.knows('silo');
+  }
+
+  private upKnown(id: string): boolean {
+    return this.knows(`up:${id}`);
+  }
+
+  /** Does this pad's post have anything to offer yet? (Cheap: no menu is built.) */
+  padUsable(i: number): boolean {
+    if (!this.knows('pads')) return false;
+    const pad = this.s.pads[i];
+    if (pad.kind === 'empty') return true;
+    if (pad.kind === 'pen') return pad.ups.includes('feeder') || PEN_UPS.some((u) => !pad.ups.includes(u.id) && this.upKnown(u.id));
+    return true;
   }
 
   menu(it: Interactable): MenuOption[] {
@@ -1511,12 +1549,12 @@ export class Sim {
       const i = it.id as number;
       const pad = s.pads[i];
       if (pad.kind === 'empty') {
-        for (const k of ['pen', 'garden', 'silo'] as const) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Puff food in to plant' : 'Stores four kinds' });
+        for (const k of ['pen', 'garden', 'silo'] as const) if (this.buildKnown(k)) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Puff food in to plant' : 'Stores four kinds' });
       } else if (pad.kind === 'pen') {
-        for (const u of PEN_UPS) if (!pad.ups.includes(u.id)) out.push({ id: `pen:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
+        for (const u of PEN_UPS) if (!pad.ups.includes(u.id) && this.upKnown(u.id)) out.push({ id: `pen:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
         if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Hopper: ${pad.feeder.n}` : 'Hopper empty', price: null, ok: false, note: 'Puff food in at the top' });
       } else if (pad.kind === 'garden') {
-        for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id)) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
+        if (this.upKnown('garden')) for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id)) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
         out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then puff in something new' : 'Puff a food in to plant it' });
       } else if (pad.kind === 'silo') {
         if (!pad.silo.length) out.push({ id: 'info', title: 'Silo is empty', price: null, ok: false, note: 'Puff food or down at it' });
@@ -1524,6 +1562,7 @@ export class Sim {
       }
     } else if (it.kind === 'bench') {
       for (const u of BENCH_UPS) {
+        if (!this.upKnown(u.id)) continue;
         const lvl = s.up[u.id];
         if (lvl >= u.costs.length) continue;
         const c = u.costs[lvl];

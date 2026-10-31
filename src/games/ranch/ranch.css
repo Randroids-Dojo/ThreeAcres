@@ -7,6 +7,9 @@
 .rh { position: absolute; inset: 0; pointer-events: none; color: #fbf6ea; font-family: var(--sans); user-select: none; -webkit-user-select: none; }
 .rh, .rt { --ink-shadow: 0 1px 2px rgba(28, 22, 44, 0.55), 0 0 8px rgba(28, 22, 44, 0.25); }
 
+/* Anything a lesson has not brought in yet is simply not there. */
+.rh .gone, .rt .rt-btn.gone { display: none !important; }
+
 /* crosshair and count */
 .rh-cross { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; color: #fbf6ea; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.7)); }
 .rh-cross g { display: none; }
@@ -33,12 +36,15 @@
 .rh-prompt kbd { font-family: var(--sans); font-size: 12px; font-weight: 700; min-width: 20px; height: 20px; padding: 0 5px; display: inline-grid; place-items: center; border: 1.5px solid currentColor; border-radius: 4px; text-shadow: none; box-shadow: 0 1px 2px rgba(28, 22, 44, 0.5); }
 .rh-say { position: absolute; left: 50%; top: calc(50% + 72px); transform: translateX(-50%); font-family: var(--serif); font-style: italic; font-size: 15px; text-shadow: var(--ink-shadow); white-space: nowrap; opacity: 0; transition: opacity 0.2s; color: #ffe2c4; }
 .rh-say.on { opacity: 1; }
-.rh-hint { position: absolute; left: 50%; bottom: calc(26px + var(--safe-b)); transform: translateX(-50%); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; text-shadow: var(--ink-shadow); opacity: 0; transition: opacity 0.35s; white-space: nowrap; }
-.rh-hint.on { opacity: 0.95; }
 .rh-zone { position: absolute; left: 50%; top: calc(64px + var(--safe-t)); transform: translateX(-50%); font-family: var(--serif); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-style: italic; font-size: 26px; font-weight: 500; text-shadow: var(--ink-shadow); opacity: 0; transition: opacity 0.8s; white-space: nowrap; letter-spacing: 0.02em; }
 .rh-zone.on { opacity: 1; }
 .rh-click { position: absolute; left: 50%; top: calc(50% + 30px); transform: translateX(-50%); font-family: var(--serif); font-style: italic; font-size: 16px; text-shadow: var(--ink-shadow); opacity: 0; transition: opacity 0.2s; }
 .rh-click.on { opacity: 0.95; }
+
+/* the lesson's spot, when it is out of view: a chevron on the edge pointing at it */
+.rh-edge { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; color: #fff1c4; opacity: 0; visibility: hidden; transition: opacity 0.25s, visibility 0s linear 0.25s; filter: drop-shadow(0 1px 2px rgba(28, 22, 44, 0.7)); }
+.rh-edge.on { opacity: 0.95; visibility: visible; transition: opacity 0.25s, visibility 0s; }
+.rh-edge svg { width: 100%; height: 100%; display: block; }
 
 /* the field journal: a torn page that slides up from the bottom left */
 .rh-page { pointer-events: none; position: absolute; left: max(18px, 4vw); bottom: calc(-10px + var(--safe-b)); width: min(300px, calc(100% - 120px)); padding: 26px 18px 22px 30px; color: #2b3354;
@@ -54,6 +60,9 @@
 .rh-page li.done .tick { stroke-dashoffset: 0; }
 .rh-page li.done span { text-decoration: line-through; text-decoration-color: rgba(43, 51, 84, 0.7); text-decoration-thickness: 1.5px; opacity: 0.7; }
 .rh-page li.fresh .tick { animation: rh-tick 0.5s 0.5s ease-out both; }
+.rh-page li.now .tick { animation: rh-tick 0.35s 0.05s ease-out both; }
+/* A lesson is one line: no heading, a little more room around it. */
+.rh-page.lesson { padding-top: 24px; padding-bottom: 18px; }
 @keyframes rh-tick { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
 
 /* pause: a bigger page in the middle */
@@ -63,9 +72,16 @@
 .rh-pause::before { content: ''; position: absolute; left: 28px; top: 0; bottom: 0; width: 1.5px; background: rgba(196, 92, 80, 0.45); }
 .rh-pause.on { opacity: 1; visibility: visible; transform: translate(-50%, -50%) rotate(-1deg); }
 .rh-pause .when { font-family: var(--serif); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-weight: 650; font-size: 22px; margin-bottom: 8px; }
-.rh-pause ol { margin: 0 0 4px; padding-left: 20px; font-family: var(--serif); font-style: italic; font-size: 17px; line-height: 28px; }
-.rh-pause .tally { font-family: var(--serif); font-size: 13px; opacity: 0.7; margin-bottom: 10px; }
+.rh-pause ol { margin: 0 0 8px; padding-left: 20px; font-family: var(--serif); font-style: italic; font-size: 14px; line-height: 20px; }
+.rh-pause ol li.done { text-decoration: line-through; text-decoration-color: rgba(43, 51, 84, 0.6); opacity: 0.55; }
+.rh-pause .now { margin: 0 0 10px; font-family: var(--serif); font-style: italic; font-size: 17px; line-height: 24px; color: #8a4a3a; }
+.rh-pause .now::before { content: 'Now: '; font-style: normal; font-weight: 650; }
+.rh-pause .notes { margin: 0 0 8px; padding-left: 0; list-style: none; font-size: 13px; line-height: 19px; opacity: 0.85; }
+.rh-pause .notes li { margin-bottom: 3px; }
 .rh-pause .keys { margin: 0 0 12px; font-size: 13px; line-height: 1.5; opacity: 0.8; }
+/* The pause page carries the journal; the small page waits behind it. */
+.rh.paused .rh-page { visibility: hidden; }
+.rh-pause { max-height: calc(100% - 96px - var(--safe-t) - var(--safe-b)); overflow-y: auto; overscroll-behavior: contain; }
 .rh-pause .acts { display: grid; gap: 2px; }
 .rh-pause button { all: unset; cursor: pointer; font-family: var(--serif); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-size: 19px; font-weight: 600; line-height: 34px; color: #2b3354; justify-self: start; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 5px; text-decoration-thickness: 2px; }
 .rh-pause button.focus, .rh-pause button:hover, .rh-pause button:focus-visible { text-decoration-color: #8a4a3a; }
@@ -123,5 +139,6 @@
   .rh-page h4 { font-size: 13px; margin-bottom: 3px; }
   .rh-page li { font-size: 14px; line-height: 20px; gap: 6px; }
   .rh-page li .box { width: 14px; height: 14px; margin-top: 3px; }
-  .rh-hint { bottom: calc(150px + var(--safe-b)); }
+  .rh-page.lesson { width: min(262px, calc(100% - 108px)); padding: 18px 12px 12px 26px; }
+  .rh-page.lesson li { font-size: 15px; line-height: 20px; }
 }

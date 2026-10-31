@@ -1,10 +1,14 @@
 // The little that sits on the glass: a crosshair that changes when something
 // can be drawn, a count beside it, coins in plain type, a sun-and-moon notch
-// for the hour, a use prompt, one hint at a time for the current device, and
-// the field journal: a torn page that slides up when a goal is done. The
-// canister's contents live on the bellows and prices on the Exchange's board.
+// for the hour, a use prompt, and the field journal: a torn page holding the
+// one thing to do now (the current lesson), or a goal just done. Each piece
+// shows only once a lesson has brought it in. The canister's contents live on
+// the bellows and prices on the Exchange's board; the pause page holds the
+// whole journal, notes and controls.
 
 import { GOALS, fmtCoins, type GoalId } from './defs';
+
+const BOX = `<svg class="box" viewBox="0 0 20 20"><path d="M3 4 Q10 2.6 17 3.6 Q17.6 10 16.6 17 Q9 17.6 3.4 16.8 Q2.6 10 3 4 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="tick" d="M5 10 L9 14.5 L17 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 import { hash2 } from './noise';
 
 type CrossState = 'idle' | 'target' | 'prickly' | 'tag';
@@ -49,8 +53,10 @@ export class Hud {
   private arcMoon: SVGPathElement;
   private prompt = el('div', 'rh-prompt');
   private say = el('div', 'rh-say');
-  private hint = el('div', 'rh-hint');
   private zone = el('div', 'rh-zone');
+  /** Points along the screen's edge at a lesson's spot when it is out of view. */
+  private edge = el('div', 'rh-edge', `<svg viewBox="-16 -16 32 32"><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+  private edgeOn = false;
   private page = el('div', 'rh-page');
   private pageBody = el('div', 'rh-page-body');
   private pause = el('div', 'rh-pause');
@@ -71,6 +77,9 @@ export class Hud {
   pauseOpen = false;
   private pauseFocus = 0;
   pageUp = false;
+  /** The lesson line on the page, if one is up. */
+  private lessonLine = '';
+  private lessonDone = false;
   onResume: () => void = () => {};
   onGames: () => void = () => {};
   onSlot: (i: number) => void = () => {};
@@ -102,7 +111,7 @@ export class Hud {
       e.stopPropagation();
       this.onCycle();
     });
-    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.hint, this.zone, this.page, this.click, this.bellowsBtn, ...this.slotBtns, this.pause, this.fade);
+    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, this.bellowsBtn, ...this.slotBtns, this.pause, this.fade);
     this.pause.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t) return;
@@ -185,13 +194,60 @@ export class Hud {
     this.sayT = secs;
   }
 
-  setHint(text: string | null): void {
-    if (!text) {
-      this.hint.classList.remove('on');
+  /** Show only what the lessons have brought in: the crosshair and count (with the bellows), coins, the hour. */
+  setKnown(cross: boolean, coins: boolean, clock: boolean): void {
+    this.cross.classList.toggle('gone', !cross);
+    this.count.classList.toggle('gone', !cross);
+    this.coins.classList.toggle('gone', !coins);
+    this.arc.classList.toggle('gone', !clock);
+  }
+
+  /** The edge pointer at (x, y) CSS px, turned to angle a (radians, 0 points right); null hides it. */
+  setEdge(x: number | null, y = 0, a = 0): void {
+    const on = x !== null;
+    if (on !== this.edgeOn) {
+      this.edgeOn = on;
+      this.edge.classList.toggle('on', on);
+    }
+    if (on) this.edge.style.transform = `translate(${x!.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${a.toFixed(3)}rad)`;
+  }
+
+  /** The current lesson on the journal page: one line that stays until done, then ticks. '' takes it down. */
+  setLesson(line: string, done: boolean): void {
+    if (!line) {
+      if (this.lessonLine) {
+        this.lessonLine = '';
+        this.hidePage();
+      }
       return;
     }
-    setText(this.hint, text);
-    this.hint.classList.add('on');
+    if (line !== this.lessonLine) {
+      // A new lesson slides in as a new page; the same lesson reworded (another device) just changes.
+      const fresh = !this.lessonLine || this.lessonDone || !this.pageUp;
+      this.lessonLine = line;
+      this.lessonDone = done;
+      this.pageBody.innerHTML = `<ul><li class="${done ? 'done now' : ''}">${BOX}<span>${line}</span></li></ul>`;
+      this.page.classList.add('lesson');
+      this.page.classList.remove('note');
+      if (fresh) {
+        this.page.classList.remove('up');
+        void this.page.offsetWidth;
+      }
+      this.page.classList.add('up');
+      this.pageUp = true;
+      this.pageT = 0;
+      return;
+    }
+    if (done !== this.lessonDone) {
+      this.lessonDone = done;
+      const li = this.pageBody.querySelector('li');
+      li?.classList.toggle('done', done);
+      li?.classList.toggle('now', done);
+    }
+  }
+
+  get lessonUp(): boolean {
+    return !!this.lessonLine;
   }
 
   showZone(name: string): void {
@@ -209,11 +265,12 @@ export class Hud {
     const rows = lines
       .map(
         (l) =>
-          `<li class="${l.done ? 'done' : ''} ${l.fresh ? 'fresh' : ''}"><svg class="box" viewBox="0 0 20 20"><path d="M3 4 Q10 2.6 17 3.6 Q17.6 10 16.6 17 Q9 17.6 3.4 16.8 Q2.6 10 3 4 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="tick" d="M5 10 L9 14.5 L17 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${l.text}</span></li>`,
+          `<li class="${l.done ? 'done' : ''} ${l.fresh ? 'fresh' : ''}">${BOX}<span>${l.text}</span></li>`,
       )
       .join('');
     this.pageBody.innerHTML = `<h4>${title}</h4><ul>${rows}</ul>`;
-    this.page.classList.remove('up');
+    this.lessonLine = '';
+    this.page.classList.remove('up', 'lesson');
     void this.page.offsetWidth;
     this.page.classList.add('up');
     this.pageUp = true;
@@ -226,25 +283,22 @@ export class Hud {
     this.pageT = 0;
   }
 
-  showPause(when: string, goals: GoalId[], device: 'touch' | 'mouse' | 'key' | 'pad'): void {
+  /** The pause page: the whole journal (done goals struck), what the lessons taught so far, and the controls learned. */
+  showPause(when: string, goals: GoalId[], now: string, notes: string[], keys: string): void {
     this.pauseOpen = true;
     this.pauseFocus = 0;
-    const open = GOALS.filter((g) => !goals.includes(g.id)).slice(0, 3);
-    const done = goals.length;
-    const goalRows = open.map((g) => `<li>${g.text}</li>`).join('') || '<li>Nothing left on the list. Enjoy the valley.</li>';
-    const keys =
-      device === 'touch'
-        ? 'Left thumb walks, right side looks. Hold Draw, tap Puff. Tap the bellows to switch slots.'
-        : device === 'pad'
-          ? 'Left stick walks, right stick looks. LT draws, RT puffs, LB and RB pick a slot, X uses.'
-          : 'WASD walks, the mouse looks. Hold right mouse to draw, click to puff. Q, E or the wheel pick a slot; E uses what is in front of you.';
-    this.pauseBody.innerHTML = `<div class="when">${when}</div><h4>To do</h4><ol>${goalRows}</ol><div class="tally">${done} of ${GOALS.length} done</div><p class="keys">${keys}</p><div class="acts"><button data-act="resume" class="focus">Back to the ranch</button><button data-act="games">Games and settings</button></div>`;
+    const goalRows = GOALS.map((g) => `<li class="${goals.includes(g.id) ? 'done' : ''}">${g.text}</li>`).join('');
+    const nowRow = now ? `<p class="now">${now}</p>` : '';
+    const noteRows = notes.length ? `<h4>Notes</h4><ul class="notes">${notes.map((n) => `<li>${n}</li>`).join('')}</ul>` : '';
+    this.pauseBody.innerHTML = `<div class="when">${when}</div>${nowRow}<h4>Journal, ${goals.length} of ${GOALS.length} done</h4><ol>${goalRows}</ol>${noteRows}<p class="keys">${keys}</p><div class="acts"><button data-act="resume" class="focus">Back to the ranch</button><button data-act="games">Games and settings</button></div>`;
     this.pause.classList.add('on');
+    this.el.classList.add('paused');
   }
 
   hidePause(): void {
     this.pauseOpen = false;
     this.pause.classList.remove('on');
+    this.el.classList.remove('paused');
   }
 
   /** Arrow keys and Enter drive the pause page. */
@@ -295,7 +349,7 @@ export class Hud {
       this.sayT -= dt;
       if (this.sayT <= 0) this.say.classList.remove('on');
     }
-    if (this.pageT > 0) {
+    if (this.pageT > 0 && !this.lessonLine) {
       this.pageT -= dt;
       if (this.pageT <= 0) this.hidePage();
     }

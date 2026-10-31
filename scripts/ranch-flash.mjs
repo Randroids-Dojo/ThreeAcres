@@ -7,7 +7,8 @@
 //    on (magenta). The scan must catch both or its clean results mean nothing.
 // 2. Scan: hundreds of frames per scenario, sentinel on: day, dawn, dusk,
 //    night with nettlebacks, drawing downies into the muzzle, a puff storm,
-//    selling with coins flying, a gate opening, looking at the sun.
+//    selling with coins flying, a gate opening, looking at the sun, and the
+//    lessons' marks (an arrow, a ring, a bobbing food) by day and at dusk.
 //   node scripts/ranch-flash.mjs [framesPerScenario] [w h dpr]
 import { launch, openRanch, frames } from './ranch-lib.mjs';
 
@@ -128,6 +129,21 @@ await scenario('a gate opening', () => {
   const p = s.player; p.x = 33; p.z = -24; p.y = r.sim.phys.floor(33, -24); r.aimAt(36, r.sim.phys.floor(36, -24) + 1.2, -24);
   r.sim.choose({ kind: 'gate', id: 'hollow', label: '', x: 0, y: 0, z: 0 }, 'gate:hollow');
 });
+await scenario('lesson marks: food over a downy, a ring', () => {
+  // Undo one lesson so its marks show: the favourite food bobbing over a downy, the garden's ring.
+  const r = window.ranch; const s = r.sim.s; s.hour = 9;
+  s.learn = s.learn.filter((w) => w !== 'lesson:feed');
+  const d = r.sim.spawn('clover', 1.5, 31.5);
+  d.hunger = 0.2;
+  const p = s.player; p.x = 2.5; p.z = 35; p.y = r.sim.phys.floor(2.5, 35); r.aimAt(2.5, r.sim.phys.floor(2.5, 28) + 1, 28);
+});
+await scenario('lesson marks at dusk: an arrow at a post, a pad ring', () => {
+  const r = window.ranch; const s = r.sim.s; s.hour = 19.2;
+  s.learn.push('lesson:feed');
+  s.learn = s.learn.filter((w) => w !== 'lesson:pen');
+  const p = s.player; p.x = 18; p.z = 34; p.y = r.sim.phys.floor(18, 34); r.aimAt(15.9, r.sim.phys.floor(15.9, 31) + 1.2, 31);
+});
+await page.evaluate(() => window.ranch.sim.s.learn.push('lesson:pen'));
 await scenario('the day turning, three hours in fast time', () => { window.ranch.sim.s.hour = 17.5; }, async () => {
   for (let i = 0; i < N; i++) {
     await page.evaluate(() => (window.ranch.sim.s.hour += 0.018));
