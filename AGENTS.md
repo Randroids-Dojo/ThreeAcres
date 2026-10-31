@@ -28,3 +28,18 @@ npm run build
 ```
 
 Workbench: `/?dev=2d`, `/?dev=3d`, `/?dev=both`, `/?dev=audio`.
+
+Checks (dev server running; `npx vite --config scripts/lead-vite.config.ts` serves :5247 without hot reload):
+
+```bash
+node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport)
+node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
+node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
+npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
+```
+
+URL flags: `?preset=sunup|patchwork|bushel` starts that game, `&fresh` starts a new farm, `&autoplay` hands the farm to the bot, `&touch` forces the touch controls on.
+
+## Deploy
+
+GitHub `Randroids-Dojo/ThreeAcres`, Vercel project `three-acres` (team randroid88s-projects). Every push to `main` deploys to https://three-acres.vercel.app. The build stamps `/version.json` with the commit and open copies offer a reload.
