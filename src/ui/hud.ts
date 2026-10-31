@@ -14,7 +14,7 @@ import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import { propAt } from '../sim/map';
 import type { BuildKind, CropId, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
-import { describe, denyText } from './describe';
+import { brief, describe, denyText } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
@@ -388,15 +388,17 @@ export class Hud {
     }
     const r = resolve(s, s.tool, aim.x, aim.y);
     const prop = propAt(aim.x, aim.y)?.kind;
-    const key = this.touch.shown ? 'the round button' : 'Space';
+    const inCrate = CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0);
     const html =
       prop === 'board'
-        ? `<b>Notice board</b> <span class="why">${key} to read it</span>`
-        : prop === 'well' && r.verb !== 'refill'
-          ? `<b>The well</b> <span class="why">${s.tool === 'can' ? 'the can is full' : 'take the can to fill it'}</span>`
+        ? '<b>Notice board</b>'
+        : prop === 'well'
+          ? '<b>Well</b>'
           : prop === 'crate'
-            ? `<b>Shipping crate</b> <span class="why">${CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0)} inside, shipped overnight</span>`
-            : describe(s, aim.x, aim.y, r);
+            ? `<b>Crate</b>${inCrate ? ` <span class="why">${inCrate} inside</span>` : ''}`
+            : homestead(s)
+              ? brief(s, aim.x, aim.y)
+              : describe(s, aim.x, aim.y, r);
     toggle(this.info, 'empty', !html || this.seedOpen || this.buildOpen);
     if (html) setHtml(this.info, html);
     this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };

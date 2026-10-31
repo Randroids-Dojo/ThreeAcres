@@ -66,6 +66,7 @@ await frames(10);
 s = await screen();
 check('the can arrives after the radishes', s.tools.join() === 'hands,can', s.tools.join());
 check('one line: water the carrots', /water/i.test(s.line), s.line);
+check('lines stay short', s.line.split(/\s+/).length <= 8, s.line);
 await shot('2-water');
 
 // 2. Water the carrots (row y=6), standing on the row above.
@@ -111,7 +112,7 @@ await send({ type: 'sleep' });
 await p.waitForTimeout(3500);
 await frames(20);
 s = await screen();
-check('day 3: the board appears with a request', s.board && /notice board/i.test(s.line), JSON.stringify(s));
+check('day 3: the board appears with a request', s.board && /board/i.test(s.line), JSON.stringify(s));
 const badge = await p.evaluate(() => document.querySelector('.topbtns .badge')?.textContent ?? '');
 check('one request to start', badge === '1', badge);
 check('requests stay off the farm (no notes)', s.notes === 0);
@@ -124,7 +125,7 @@ await shot('7-board-open');
 await p.evaluate(() => window.sunup.dialogs.close());
 await frames(20);
 s = await screen();
-check('after reading it, the next line explains delivery', /crate|pays/i.test(s.line), s.line);
+check('after reading it, the next line explains delivery', /crate|ships/i.test(s.line), s.line);
 check('crows and the forecast are still to come', !s.forecast && !s.tools.includes('build'));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();

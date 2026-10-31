@@ -93,3 +93,28 @@ export function describe(s: WorldState, x: number, y: number, r: Resolved): stri
   } else if (r.reason && r.reason !== 'Growing') head = `<span class="why">${esc(denyText(r.reason))}.</span> `;
   return head + parts.join(' &middot; ');
 }
+
+/** Sunup's caption: the thing and its state in a few words. The act button shows the verb. */
+export function brief(s: WorldState, x: number, y: number): string {
+  if (!isField(s, x, y)) return '';
+  if (!owned(s, x, y)) {
+    const p = s.parcels[s.parcelOf[y * s.W + x]];
+    return `<b>For sale</b> <span class="why">${p.price} coins</span>`;
+  }
+  const b = buildAt(s, x, y);
+  if (b) return `<b>${b.kind === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b>`;
+  const plot = plots(s, x, y);
+  const c = plot.crop;
+  if (!c) return plot.tilled ? '<b>Bare soil</b>' : '<b>Meadow</b> <span class="why">hoe it first</span>';
+  const d = CROPS[c.kind];
+  let state: string;
+  if (c.dead) state = 'withered';
+  else if (c.stage === 4) state = 'ripe';
+  else if (c.bugs) state = 'bugs';
+  else if (!plot.wet) state = 'thirsty';
+  else {
+    const left = Math.max(1, Math.ceil(d.days - c.age));
+    state = `${left} day${left === 1 ? '' : 's'} to go`;
+  }
+  return `<b>${d.name}</b> <span class="why">${state}</span>`;
+}

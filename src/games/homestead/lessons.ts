@@ -14,6 +14,7 @@ interface Lesson {
   /** Features this lesson brings onto the screen (and into the farm) when it starts. */
   unlocks: string[];
   ready(s: WorldState): boolean;
+  /** Eight words or fewer: one action. The world shows the rest. */
   text(s: WorldState, touch: boolean): string;
   /** Finished? `n` reads the counts the tutor keeps. Passive lessons finish on their own after `passive` seconds. */
   done?(s: WorldState, n: (k: string) => number): boolean;
@@ -29,7 +30,7 @@ const LESSONS: Lesson[] = [
     after: [],
     unlocks: [],
     ready: () => true,
-    text: (_s, touch) => (touch ? 'Pull the ripe radishes. Walk up to one and hold the round button.' : 'Pull the ripe radishes. Walk up to one and press Space.'),
+    text: (_s, touch) => (touch ? 'Walk to a radish. Hold the hand.' : 'Walk to a radish. Space pulls it.'),
     done: (s, n) => n('harvest') >= 4 || !anyRipe(s),
   },
   {
@@ -37,7 +38,7 @@ const LESSONS: Lesson[] = [
     after: ['pull'],
     unlocks: ['can'],
     ready: () => true,
-    text: (_s, touch) => (touch ? 'The carrots are thirsty. Tap the can on the rack, then water each one.' : 'The carrots are thirsty. Take the can from the rack and water each one.'),
+    text: () => 'Take the can. Water the carrots.',
     done: (s, n) => n('water') >= 4 || !anyThirsty(s),
   },
   {
@@ -45,7 +46,7 @@ const LESSONS: Lesson[] = [
     after: ['water'],
     unlocks: [],
     ready: (s) => s.water <= 3,
-    text: () => 'The can is nearly dry. Fill it at the stone well in the yard.',
+    text: () => 'Can nearly dry. Fill it at the well.',
     done: (_s, n) => n('refill') >= 1,
   },
   {
@@ -53,7 +54,7 @@ const LESSONS: Lesson[] = [
     after: ['water'],
     unlocks: ['sleep'],
     ready: () => true,
-    text: (_s, touch) => (touch ? 'That is a day. Tap Sleep: the crate ships overnight and the crops grow.' : 'That is a day. Sleep (Enter): the crate ships overnight and the crops grow.'),
+    text: () => 'Done for today. Sleep.',
     done: (s) => s.stats.days >= 1,
   },
   {
@@ -61,7 +62,7 @@ const LESSONS: Lesson[] = [
     after: ['sleep'],
     unlocks: ['coins', 'seeds', 'stamina'],
     ready: () => true,
-    text: () => 'The radishes sold. Take the seed packet from the rack and sow the bare soil.',
+    text: () => 'Radishes sold. Sow seeds in bare soil.',
     done: (_s, n) => n('plant') >= 3,
   },
   {
@@ -69,7 +70,7 @@ const LESSONS: Lesson[] = [
     after: ['plant'],
     unlocks: ['board', 'requests'],
     ready: (s) => s.day >= 3,
-    text: (_s, touch) => (touch ? 'Someone in town pinned a request to the notice board. Tap the pin, top right.' : 'Someone in town pinned a request to the notice board. Press B to read it.'),
+    text: () => 'A request is pinned on the board.',
     done: (_s, n) => n('board') >= 1,
   },
   {
@@ -77,7 +78,7 @@ const LESSONS: Lesson[] = [
     after: ['requests'],
     unlocks: [],
     ready: () => true,
-    text: () => 'Grow what they ask for. It goes with the crate at night and pays well over market.',
+    text: () => 'Grow it. It ships with the crate.',
     passive: 8,
   },
   {
@@ -85,7 +86,7 @@ const LESSONS: Lesson[] = [
     after: ['deliver'],
     unlocks: ['hoe'],
     ready: (s) => s.coins >= 200 && s.parcels.filter((p) => p.owned).length === 1,
-    text: () => 'You can afford a second field. Buy it on the notice board, then break the ground with the hoe.',
+    text: () => 'Buy a second field. Hoe it first.',
     done: (s, n) => s.parcels.filter((p) => p.owned).length >= 2 && n('till') >= 2,
   },
   {
@@ -93,7 +94,7 @@ const LESSONS: Lesson[] = [
     after: ['deliver'],
     unlocks: ['pests', 'build', 'forecast'],
     ready: (s) => s.day >= 5,
-    text: () => 'Crows have found the farm. Walk at one to send it off, or put up a scarecrow from the rack.',
+    text: () => 'Crows. Walk at them, or build a scarecrow.',
     done: (s, n) => n('scare') + n('build') >= 1 || s.day >= n('since:pests') + 2,
   },
   {
@@ -101,7 +102,7 @@ const LESSONS: Lesson[] = [
     after: ['plant'],
     unlocks: [],
     ready: (s) => dayOfSeason(s.day) >= 8,
-    text: () => 'The season turns in a few days. Crops that do not grow in the next one wither. Seed packets say when each grows.',
+    text: () => 'Season ends soon. Plant what grows next.',
     passive: 9,
   },
   {
@@ -109,7 +110,7 @@ const LESSONS: Lesson[] = [
     after: ['deliver'],
     unlocks: ['smith'],
     ready: (s) => s.rep >= 1,
-    text: () => 'The town knows you now. The smith will make you better tools: see the notice board.',
+    text: () => 'The smith has better tools now.',
     passive: 9,
   },
 ];
