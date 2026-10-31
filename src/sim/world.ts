@@ -30,6 +30,7 @@ export function newFarmer(): Actor {
     hop: 0,
     tint: 0,
     away: false,
+    aim: null,
   };
 }
 
@@ -99,6 +100,8 @@ export function createWorld(seed: number, rules: Rules): WorldState {
     report: null,
     time: 0,
     night: 0,
+    turnover: -1,
+    crowPlan: [],
   };
 
   // Four radishes ready, four carrots on their way, the rest tilled and bare.
@@ -117,7 +120,7 @@ export function createWorld(seed: number, rules: Rules): WorldState {
 export function plant(s: WorldState, x: number, y: number, kind: CropId, age = 0): void {
   const p = plots(s, x, y);
   p.tilled = true;
-  p.crop = { id: s.nextId++, kind, age, stage: stageOf(kind, age), dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, planted: s.day };
+  p.crop = { id: s.nextId++, kind, age, stage: stageOf(kind, age), dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: s.day };
 }
 
 export function inMap(x: number, y: number): boolean {

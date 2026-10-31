@@ -62,6 +62,8 @@ export interface Crop {
   quality: 0 | 1 | 2 | 3;
   /** How many times a regrowing crop has been picked. */
   picks: number;
+  /** Went a night without the moisture it needed (synergy quality penalty). */
+  parched: boolean;
   planted: number;
 }
 
@@ -120,6 +122,8 @@ export interface Actor {
   path: { x: number; y: number }[];
   /** Job the actor is working towards. */
   job: number | null;
+  /** Hands only: the chore picked for itself (not a painted job). */
+  aim: { verb: Verb; x: number; y: number } | null;
   /** Short hop in turns mode: renderers lift the actor by sin(PI * hop). 0..1, 0 when idle. */
   hop: number;
   /** Hands only: shirt colour index 0..5. */
@@ -282,6 +286,10 @@ export interface WorldState {
   time: number;
   /** Set during the night transition so renderers can fade. 0 when awake. */
   night: number;
+  /** Night transition progress 0 to 1, or -1 when awake. The day turns over at 0.5. */
+  turnover: number;
+  /** Minutes today at which crows will come (wild weather). */
+  crowPlan: number[];
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */

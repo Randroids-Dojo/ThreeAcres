@@ -1,0 +1,431 @@
+// Moving people around: the farmer under walk control, paths for point
+// control and the hands, actions in progress, footsteps, and the hands' own
+// choice of chores.
+
+import { crowAt, perform, resolve, type Resolved } from './actions';
+import { ACTION_SECONDS, BUILD_COST, HAND_SLOWER, HAND_SPEED, HOP_SECONDS, WALK_SPEED } from './constants';
+import { CROPS } from './crops';
+import { BUNK } from './map';
+import { pathNextTo, pathTo } from './path';
+import { needsWater } from './soil';
+import { idx, owned, walkable } from './world';
+import type { Actor, Facing, Job, SimEvent, Verb, WorldState } from './types';
+
+const RADIUS = 0.28;
+const STEP_EVERY = 0.55;
+
+export function farmer(s: WorldState): Actor {
+  return s.actors[0];
+}
+
+export function hands(s: WorldState): Actor[] {
+  return s.actors.filter((a) => a.role === 'hand' && !a.away);
+}
+
+export function tileOf(a: Actor): { x: number; y: number } {
+  return { x: Math.floor(a.x), y: Math.floor(a.y) };
+}
+
+export function facingVec(f: Facing): { x: number; y: number } {
+  return f === 'n' ? { x: 0, y: -1 } : f === 's' ? { x: 0, y: 1 } : f === 'e' ? { x: 1, y: 0 } : { x: -1, y: 0 };
+}
+
+/** The tile in front of the farmer, which walk control acts on. */
+export function facingTile(a: Actor): { x: number; y: number } {
+  const t = tileOf(a);
+  const v = facingVec(a.facing);
+  return { x: t.x + v.x, y: t.y + v.y };
+}
+
+function faceTowards(a: Actor, dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return;
+  a.facing = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'e' : 'w') : dy > 0 ? 's' : 'n';
+}
+
+function turnAngle(a: Actor, target: number, dt: number): void {
+  let d = target - a.angle;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  a.angle += d * Math.min(1, dt * 14);
+}
+
+function blockedAt(s: WorldState, x: number, y: number): boolean {
+  const x0 = Math.floor(x - RADIUS);
+  const x1 = Math.floor(x + RADIUS);
+  const y0 = Math.floor(y - RADIUS);
+  const y1 = Math.floor(y + RADIUS);
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (!walkable(s, tx, ty)) return true;
+  return false;
+}
+
+function stepSound(s: WorldState, a: Actor, dist: number, ev: SimEvent[]): void {
+  const before = Math.floor(a.walked / STEP_EVERY);
+  a.walked += dist;
+  if (Math.floor(a.walked / STEP_EVERY) !== before) {
+    const t = tileOf(a);
+    const i = idx(Math.max(0, Math.min(s.W - 1, t.x)), Math.max(0, Math.min(s.H - 1, t.y)));
+    ev.push({ type: 'step', by: a.id, x: t.x, y: t.y, ground: s.tiles[i] });
+  }
+}
+
+/** Walk control: push the farmer by the stick, sliding along walls. */
+export function walkFarmer(s: WorldState, mx: number, my: number, dt: number, ev: SimEvent[]): void {
+  const a = farmer(s);
+  const len = Math.hypot(mx, my);
+  if (a.task || len < 0.15) {
+    a.moving = false;
+    return;
+  }
+  if (a.path.length) a.path = [];
+  const k = Math.min(1, len);
+  const vx = (mx / len) * WALK_SPEED * k * dt;
+  const vy = (my / len) * WALK_SPEED * k * dt;
+  const ox = a.x;
+  const oy = a.y;
+  if (!blockedAt(s, a.x + vx, a.y)) a.x += vx;
+  if (!blockedAt(s, a.x, a.y + vy)) a.y += vy;
+  const moved = Math.hypot(a.x - ox, a.y - oy);
+  a.moving = moved > 1e-4;
+  faceTowards(a, mx, my);
+  turnAngle(a, Math.atan2(my, mx), dt);
+  if (moved > 0) stepSound(s, a, moved, ev);
+}
+
+/** Follow the current path. In turns the steps are quick hops. */
+function followPath(s: WorldState, a: Actor, dt: number, ev: SimEvent[]): void {
+  if (!a.path.length) {
+    a.hop = 0;
+    if (!a.task) a.moving = false;
+    return;
+  }
+  const turns = s.rules.clock === 'turns';
+  let speed = turns ? 1 / HOP_SECONDS : a.role === 'farmer' ? WALK_SPEED : HAND_SPEED;
+  if (s.rules.clock === 'flow' && a.role === 'hand') speed *= Math.max(1, s.speed);
+  let budget = speed * dt;
+  while (budget > 0 && a.path.length) {
+    const next = a.path[0];
+    const tx = next.x + 0.5;
+    const ty = next.y + 0.5;
+    const dx = tx - a.x;
+    const dy = ty - a.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1e-6) {
+      faceTowards(a, dx, dy);
+      turnAngle(a, Math.atan2(dy, dx), dt);
+    }
+    if (d <= budget) {
+      a.x = tx;
+      a.y = ty;
+      budget -= d;
+      a.path.shift();
+      stepSound(s, a, d, ev);
+      a.hop = 0;
+    } else {
+      a.x += (dx / d) * budget;
+      a.y += (dy / d) * budget;
+      stepSound(s, a, budget, ev);
+      a.hop = turns ? Math.max(0, Math.min(1, 1 - (d - budget) / Math.max(1, Math.hypot(Math.round(dx), Math.round(dy))))) : 0;
+      budget = 0;
+    }
+  }
+  a.moving = true;
+}
+
+function actionSeconds(s: WorldState, a: Actor, verb: Verb): number {
+  let t = ACTION_SECONDS[verb] * (a.role === 'hand' ? HAND_SLOWER : 1);
+  if (s.rules.clock === 'flow' && a.role === 'hand') t /= Math.max(1, s.speed);
+  if (s.rules.clock === 'turns') t = Math.min(t, 0.3);
+  return t;
+}
+
+/** Start doing `r` at (x, y) now: the effect lands at once, the animation plays out. */
+export function startAction(s: WorldState, a: Actor, r: Resolved, x: number, y: number, ev: SimEvent[]): boolean {
+  const cx = x + 0.5 - a.x;
+  const cy = y + 0.5 - a.y;
+  if (Math.abs(cx) > 0.01 || Math.abs(cy) > 0.01) {
+    faceTowards(a, cx, cy);
+    a.angle = Math.atan2(cy, cx);
+  }
+  if (!perform(s, a, r, x, y, ev)) return false;
+  a.task = { verb: r.verb!, x, y, t: 0, dur: actionSeconds(s, a, r.verb!) };
+  a.moving = false;
+  return true;
+}
+
+function tickTask(a: Actor, dt: number): void {
+  if (!a.task) return;
+  a.task.t += dt;
+  if (a.task.t >= a.task.dur) a.task = null;
+}
+
+// ---------------------------------------------------------------- jobs
+
+function releaseJob(s: WorldState, a: Actor): void {
+  if (a.job !== null) {
+    const j = s.jobs.find((o) => o.id === a.job);
+    if (j && j.claimedBy === a.id) j.claimedBy = null;
+  }
+  a.job = null;
+}
+
+export function dropJobsOf(s: WorldState, a: Actor): void {
+  releaseJob(s, a);
+  a.aim = null;
+  a.path = [];
+}
+
+/** Turn a job back into a resolved action with its own tool choice. */
+function jobAction(s: WorldState, j: Job): Resolved {
+  const now = resolve(s, 'smart', j.x, j.y);
+  switch (j.verb) {
+    case 'plant': {
+      const kind = j.crop ?? s.seed;
+      const p = s.plots[idx(j.x, j.y)];
+      if (!p.tilled || p.crop || s.builds.some((b) => b.x === j.x && b.y === j.y)) return { verb: null, ok: false, reason: '' };
+      if (s.coins < CROPS[kind].seed) return { verb: 'plant', ok: false, reason: `${CROPS[kind].name} seeds cost ${CROPS[kind].seed}` };
+      return { verb: 'plant', ok: true, reason: '', crop: kind };
+    }
+    case 'build': {
+      const kind = j.build ?? s.buildKind;
+      const p = s.plots[idx(j.x, j.y)];
+      if (p.crop || s.builds.some((b) => b.x === j.x && b.y === j.y)) return { verb: null, ok: false, reason: '' };
+      if (s.coins < BUILD_COST[kind]) return { verb: 'build', ok: false, reason: `A ${kind} costs ${BUILD_COST[kind]}` };
+      return { verb: 'build', ok: true, reason: '', build: kind };
+    }
+    case 'water': {
+      const p = s.plots[idx(j.x, j.y)];
+      return p.tilled ? { verb: 'water', ok: true, reason: '' } : { verb: null, ok: false, reason: '' };
+    }
+    case 'till': {
+      const p = s.plots[idx(j.x, j.y)];
+      return p.tilled ? { verb: null, ok: false, reason: '' } : { verb: 'till', ok: true, reason: '' };
+    }
+    case 'clear': {
+      const r = resolve(s, 'hoe', j.x, j.y);
+      return r.verb === 'clear' ? r : { verb: null, ok: false, reason: '' };
+    }
+    default:
+      return now.verb === j.verb ? now : { verb: null, ok: false, reason: '' };
+  }
+}
+
+function nearestJob(s: WorldState, a: Actor): Job | null {
+  let best: Job | null = null;
+  let bd = Infinity;
+  for (const j of s.jobs) {
+    if (j.claimedBy !== null) continue;
+    const d = Math.abs(j.x + 0.5 - a.x) + Math.abs(j.y + 0.5 - a.y);
+    if (d < bd) {
+      bd = d;
+      best = j;
+    }
+  }
+  return best;
+}
+
+function goTo(s: WorldState, a: Actor, x: number, y: number): boolean {
+  const t = tileOf(a);
+  const p = pathNextTo(s, t.x, t.y, x, y);
+  if (!p) return false;
+  a.path = p;
+  return true;
+}
+
+/** Work through painted jobs: claim the nearest, walk to it, do it. */
+function workJobs(s: WorldState, a: Actor, ev: SimEvent[]): void {
+  if (a.task) return;
+  if (a.job !== null) {
+    const j = s.jobs.find((o) => o.id === a.job);
+    if (!j) {
+      a.job = null;
+      return;
+    }
+    if (a.path.length) return;
+    const t = tileOf(a);
+    if (Math.max(Math.abs(t.x - j.x), Math.abs(t.y - j.y)) > 1) {
+      if (!goTo(s, a, j.x, j.y)) s.jobs = s.jobs.filter((o) => o !== j);
+      return;
+    }
+    s.jobs = s.jobs.filter((o) => o !== j);
+    a.job = null;
+    const r = jobAction(s, j);
+    if (r.verb && r.ok) startAction(s, a, r, j.x, j.y, ev);
+    else if (r.reason && a.role === 'farmer') ev.push({ type: 'deny', x: j.x, y: j.y, reason: r.reason });
+    return;
+  }
+  const j = nearestJob(s, a);
+  if (!j) return;
+  j.claimedBy = a.id;
+  a.job = j.id;
+  const t = tileOf(a);
+  if (Math.max(Math.abs(t.x - j.x), Math.abs(t.y - j.y)) > 1 && !goTo(s, a, j.x, j.y)) {
+    s.jobs = s.jobs.filter((o) => o !== j);
+    a.job = null;
+  }
+}
+
+// ---------------------------------------------------------------- hands
+
+interface Chore {
+  verb: Verb;
+  x: number;
+  y: number;
+  rank: number;
+}
+
+/** The most pressing chore nobody else has taken, nearest first within a rank. */
+export function findChore(s: WorldState, from: { x: number; y: number } | null, taken: Set<number>): Chore | null {
+  let best: Chore | null = null;
+  let bestScore = Infinity;
+  const consider = (verb: Verb, x: number, y: number, rank: number) => {
+    if (taken.has(idx(x, y))) return;
+    const d = from ? Math.abs(x + 0.5 - from.x) + Math.abs(y + 0.5 - from.y) : 0;
+    const score = rank * 100 + d;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { verb, x, y, rank };
+    }
+  };
+  for (const c of s.crows) if (c.phase === 'peck' || c.phase === 'in') consider('scare', c.x, c.y, 0);
+  for (let y = 0; y < s.H; y++) {
+    for (let x = 0; x < s.W; x++) {
+      if (!owned(s, x, y)) continue;
+      const p = s.plots[idx(x, y)];
+      const c = p.crop;
+      if (!c) continue;
+      if (c.dead) consider('clear', x, y, 4);
+      else if (c.stage === 4) consider('harvest', x, y, 1);
+      else if (c.bugs > 0) consider('tend', x, y, 2);
+      else if (needsWater(s, p)) consider('water', x, y, 3);
+    }
+  }
+  return best;
+}
+
+function takenTiles(s: WorldState, except: Actor): Set<number> {
+  const out = new Set<number>();
+  for (const o of s.actors) {
+    if (o === except) continue;
+    if (o.aim) out.add(idx(o.aim.x, o.aim.y));
+    if (o.task) out.add(idx(o.task.x, o.task.y));
+  }
+  for (const j of s.jobs) out.add(idx(j.x, j.y));
+  return out;
+}
+
+function choreAction(s: WorldState, verb: Verb, x: number, y: number): Resolved {
+  if (verb === 'scare') return crowAt(s, x, y) ? { verb, ok: true, reason: '' } : { verb: null, ok: false, reason: '' };
+  if (verb === 'clear') return resolve(s, 'hoe', x, y);
+  if (verb === 'water') {
+    const p = s.plots[idx(x, y)];
+    return needsWater(s, p) ? { verb, ok: true, reason: '' } : { verb: null, ok: false, reason: '' };
+  }
+  const r = resolve(s, 'smart', x, y);
+  return r.verb === verb ? r : { verb: null, ok: false, reason: '' };
+}
+
+/** After a hand harvests a one-shot crop, it puts the same seed back if it can. */
+function replant(s: WorldState, a: Actor, kind: string, x: number, y: number, ev: SimEvent[]): void {
+  const crop = kind as keyof typeof CROPS;
+  const p = s.plots[idx(x, y)];
+  if (p.crop || !p.tilled) return;
+  if (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(crop)) return;
+  if (s.coins < CROPS[crop].seed) return;
+  perform(s, a, { verb: 'plant', ok: true, reason: '', crop }, x, y, ev);
+}
+
+/** Do one chore on the spot. Used for turns, where hands work through the night. */
+export function choreNow(s: WorldState, a: Actor, ev: SimEvent[]): boolean {
+  const c = findChore(s, null, takenTiles(s, a));
+  if (!c) return false;
+  return doChore(s, a, c.verb, c.x, c.y, ev);
+}
+
+function doChore(s: WorldState, a: Actor, verb: Verb, x: number, y: number, ev: SimEvent[]): boolean {
+  const r = choreAction(s, verb, x, y);
+  if (!r.verb || !r.ok) return false;
+  const kind = s.plots[idx(x, y)].crop?.kind;
+  if (!perform(s, a, r, x, y, ev)) return false;
+  if (verb === 'harvest' && kind) replant(s, a, kind, x, y, ev);
+  return true;
+}
+
+function handTick(s: WorldState, a: Actor, ev: SimEvent[]): void {
+  if (a.task) return;
+  // Painted jobs come first, except under turns where the farmer does them.
+  if (s.rules.clock !== 'turns' && (a.job !== null || s.jobs.some((j) => j.claimedBy === null))) {
+    a.aim = null;
+    workJobs(s, a, ev);
+    return;
+  }
+  if (s.rules.clock === 'turns') {
+    a.aim = null;
+    if (!a.path.length) idleHome(s, a);
+    return;
+  }
+  if (a.aim) {
+    if (a.path.length) return;
+    const { verb, x, y } = a.aim;
+    const t = tileOf(a);
+    if (Math.max(Math.abs(t.x - x), Math.abs(t.y - y)) > 1) {
+      if (!goTo(s, a, x, y)) a.aim = null;
+      return;
+    }
+    a.aim = null;
+    const r = choreAction(s, verb, x, y);
+    if (!r.verb || !r.ok) return;
+    const kind = s.plots[idx(x, y)].crop?.kind;
+    if (startAction(s, a, r, x, y, ev) && verb === 'harvest' && kind) replant(s, a, kind, x, y, ev);
+    return;
+  }
+  const c = findChore(s, a, takenTiles(s, a));
+  if (c) {
+    a.aim = { verb: c.verb, x: c.x, y: c.y };
+    const t = tileOf(a);
+    if (Math.max(Math.abs(t.x - c.x), Math.abs(t.y - c.y)) > 1 && !goTo(s, a, c.x, c.y)) a.aim = null;
+    return;
+  }
+  if (!a.path.length) idleHome(s, a);
+}
+
+function idleHome(s: WorldState, a: Actor): void {
+  const t = tileOf(a);
+  if (Math.abs(t.x - BUNK.x) + Math.abs(t.y - BUNK.y) <= 2) return;
+  const p = pathTo(s, t.x, t.y, BUNK.x, BUNK.y + 1);
+  if (p) a.path = p;
+}
+
+// ---------------------------------------------------------------- per step
+
+export function tickActors(s: WorldState, dt: number, ev: SimEvent[]): void {
+  const f = farmer(s);
+  for (const a of s.actors) {
+    if (a.away) continue;
+    tickTask(a, dt);
+    if (a === f) {
+      if (s.rules.control === 'point' && !a.task) workJobs(s, a, ev);
+      else if (s.rules.control === 'walk' && !a.task && a.aim && !a.path.length) finishWalkTap(s, a, ev);
+    } else {
+      handTick(s, a, ev);
+    }
+    if (!a.task) followPath(s, a, dt, ev);
+  }
+}
+
+/** Walk control: a tap on a far tile walks there, then acts if it still makes sense. */
+function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
+  const aim = a.aim!;
+  a.aim = null;
+  const t = tileOf(a);
+  if (Math.max(Math.abs(t.x - aim.x), Math.abs(t.y - aim.y)) > 1) return;
+  const r = resolve(s, s.tool, aim.x, aim.y);
+  if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
+}
+
+export function walkTo(s: WorldState, a: Actor, x: number, y: number, thenAct: boolean): void {
+  const t = tileOf(a);
+  const p = thenAct ? pathNextTo(s, t.x, t.y, x, y) : pathTo(s, t.x, t.y, x, y) ?? pathNextTo(s, t.x, t.y, x, y);
+  if (!p) return;
+  a.path = p;
+  a.aim = thenAct ? { verb: 'harvest', x, y } : null;
+}

@@ -28,6 +28,7 @@ function hand(id: number, n: number, x: number, y: number): Actor {
     hop: 0,
     tint: n,
     away: false,
+    aim: null,
   };
 }
 
@@ -85,7 +86,7 @@ function lush(): WorldState {
     p.moisture = i % 4;
     p.nutrient = (i >> 2) % 4;
   }
-  // Ripe crops in a sprinkler square for a nice cluster: recompute stages.
+  // Keep stored stages in step with ages.
   for (const p of s.plots) if (p.crop) p.crop.stage = stageOf(p.crop.kind, p.crop.age);
 
   s.actors[0].x = 6.5;
