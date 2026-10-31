@@ -4,7 +4,7 @@
 //
 // Close: about nine tiles across the short side, centred on the farmer and
 // gently smoothed. Wide: the whole farm with a small margin, or on a narrow
-// portrait screen the fields (columns 1 to 18), so tiles stay tappable.
+// portrait screen the six fields, so tiles stay tappable.
 
 import type { CameraIntent } from '../contract';
 
@@ -12,6 +12,9 @@ export const HEIGHT_K = 1;
 
 /** Tiles of page the wide camera may show past the edge of the farm. */
 const SLACK = 1.6;
+/** The six fields span columns 2 to 15; narrow screens frame them with half a tile each side. */
+const FIELDS_W = 15;
+const FIELDS_X = 9;
 
 export class PageCamera {
   /** CSS size of the canvas. */
@@ -35,9 +38,14 @@ export class PageCamera {
     // The farm plus a little page, with room for the treetops above row 0.
     const full = Math.min(this.w / (W + 1.2), this.h / (H + 2.2));
     if (full >= 24) return full;
-    // Narrow screens: frame the fields, columns 1 to 18, not the tree border.
-    const fields = Math.min(this.w / (W - 2), this.h / (H + 2.2));
+    // Narrow screens: frame the six fields (columns 1.5 to 16.5); pan for the pond and the road.
+    const fields = Math.min(this.w / FIELDS_W, this.h / (H + 2.2));
     return Math.max(full, fields);
+  }
+
+  /** Where the wide view centres across: the fields on narrow screens, the farm otherwise. */
+  private wideX(W: number, H: number): number {
+    return Math.min(this.w / (W + 1.2), this.h / (H + 2.2)) >= 24 ? W / 2 : FIELDS_X;
   }
 
   target(c: CameraIntent, W: number, H: number): void {
@@ -48,7 +56,7 @@ export class PageCamera {
       this.tx = c.focusX;
       this.ty = c.focusY;
     } else {
-      this.tx = this.clamp(W / 2 + (c.panX || 0), W, this.w / s);
+      this.tx = this.clamp(this.wideX(W, H) + (c.panX || 0), W, this.w / s);
       // The treetops rise above row 0, so the optical centre sits a touch high.
       this.ty = this.clamp(H / 2 - 0.35 + (c.panY || 0), H, this.h / s);
     }
