@@ -58,11 +58,20 @@ const LESSONS: Lesson[] = [
     done: (s) => s.stats.days >= 1,
   },
   {
+    // Seeds cost coins. With an empty purse and a full crate, the night is the answer.
+    id: 'broke',
+    after: ['sleep'],
+    unlocks: [],
+    ready: (s) => s.coins < 10 && Object.values(s.stock).some((q) => q.some((n) => n > 0)),
+    text: () => 'No coins yet. Sleep to sell the crate.',
+    done: (s) => s.coins >= 10,
+  },
+  {
     id: 'plant',
     after: ['sleep'],
     unlocks: ['coins', 'seeds', 'stamina'],
-    ready: () => true,
-    text: () => 'Radishes sold. Sow seeds in bare soil.',
+    ready: (s) => s.coins >= 10,
+    text: () => 'Sow seeds in the bare soil.',
     done: (_s, n) => n('plant') >= 3,
   },
   {
