@@ -22,6 +22,8 @@ export type Command =
   | { type: 'sleep' }
   | { type: 'buyParcel'; id: number }
   | { type: 'hire' }
+  /** Sunup: buy the next level of a tool from the smith. */
+  | { type: 'upgrade'; tool: 'can' | 'hoe' }
   | { type: 'deliver'; id: number }
   | { type: 'sell'; crop: CropId }
   | { type: 'draft'; crop: CropId }

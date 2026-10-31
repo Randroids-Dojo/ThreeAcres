@@ -28,7 +28,7 @@ import { GeoBuilder, block, cyl } from './builder';
 import type { Materials } from './materials';
 import { at, col } from './util';
 
-export const VERBS: Verb[] = ['till', 'water', 'plant', 'harvest', 'tend', 'clear', 'build', 'scare'];
+export const VERBS: Verb[] = ['till', 'water', 'plant', 'harvest', 'tend', 'clear', 'build', 'scare', 'refill'];
 export const VERB_COLOR: Record<Verb, string> = {
   till: '#b07a42',
   water: '#3d8fe0',
@@ -38,6 +38,7 @@ export const VERB_COLOR: Record<Verb, string> = {
   clear: '#8f969e',
   build: '#e6c23a',
   scare: '#4a4a5c',
+  refill: '#2f78c4',
 };
 
 /** Draws a verb glyph centred at (0, 0) in a 100-unit box. */
@@ -59,6 +60,7 @@ function glyph(g: CanvasRenderingContext2D, v: Verb, ink: string): void {
       g.lineTo(26, -4);
       g.stroke();
       break;
+    case 'refill':
     case 'water':
       g.moveTo(0, -36);
       g.bezierCurveTo(16, -12, 28, 2, 28, 14);

@@ -4,9 +4,11 @@
 import { resolve } from './actions';
 import { farmer } from './actors';
 import type { Command } from './commands';
-import { CROP_IDS, CROPS } from './crops';
+import { CROP_IDS, CROPS, inSeason } from './crops';
+import { homestead } from './actions';
+import { DAYS_PER_SEASON, TOOL_UPGRADES } from './constants';
 import { canDeliver } from './goals';
-import { owned } from './world';
+import { owned, season } from './world';
 import type { CropId, ToolId, WorldState } from './types';
 
 const KIT: ToolId[] = ['hands', 'can', 'seeds', 'hoe'];
@@ -27,7 +29,14 @@ function inGround(s: WorldState, c: CropId): number {
 }
 
 function bestSeed(s: WorldState): CropId {
-  const allowed = s.rules.goal === 'almanac' ? s.almanac.unlocked : CROP_IDS;
+  let allowed = s.rules.goal === 'almanac' ? s.almanac.unlocked : CROP_IDS;
+  if (homestead(s)) {
+    // Only what grows this season, and nothing that will not ripen before the turn.
+    const left = DAYS_PER_SEASON - ((s.day - 1) % DAYS_PER_SEASON);
+    const ok = allowed.filter((c) => inSeason(c, season(s.day)) && CROPS[c].days < left);
+    allowed = ok.length ? ok : allowed.filter((c) => inSeason(c, season(s.day)));
+    if (!allowed.length) allowed = ['radish'];
+  }
   // Orders first: whatever an order still needs.
   if (s.rules.goal === 'orders') {
     for (const o of s.orders) {
@@ -67,7 +76,7 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
       for (const tool of tools) {
         const r = resolve(s, tool, x, y);
         if (!r.verb || !r.ok) continue;
-        const rank = { scare: 0, harvest: 1, clear: 2, tend: 2, water: 3, plant: 4, till: 5, build: 9 }[r.verb];
+        const rank = { scare: 0, harvest: 1, clear: 2, tend: 2, water: 3, plant: 4, till: 5, build: 9, refill: 6 }[r.verb];
         out.push({ x, y, tool, rank });
         break;
       }
@@ -93,6 +102,22 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   if (s.rules.clock === 'flow' && s.speed !== 4) out.push({ type: 'speed', speed: 4 });
   const seed = bestSeed(s);
   if (s.seed !== seed) out.push({ type: 'seed', crop: seed });
+
+  // An empty can sends the farmer to the well.
+  if (homestead(s) && s.water <= 1 && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim) {
+    const thirsty = s.plots.some((p) => p.crop && !p.crop.dead && p.crop.stage < 4 && !p.wet);
+    if (thirsty) {
+      if (s.tool !== 'can') out.push({ type: 'tool', tool: 'can' });
+      out.push({ type: 'actAt', x: 11, y: 2 });
+      return out;
+    }
+  }
+  if (homestead(s)) {
+    for (const t of ['can', 'hoe'] as const) {
+      const next = TOOL_UPGRADES[t][s.tools[t]];
+      if (next && s.rep >= next.rep && s.coins > next.cost + 300) out.push({ type: 'upgrade', tool: t });
+    }
+  }
 
   const todo = chores(s);
   const outOfMoves = (s.rules.clock === 'turns' && s.ap - s.jobs.length <= 0) || (s.rules.clock === 'day' && s.stamina < 4);

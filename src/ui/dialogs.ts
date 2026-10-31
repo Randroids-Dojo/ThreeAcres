@@ -5,10 +5,10 @@
 import type { UiCue } from '../contract';
 import { priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
-import { BUILD_COST, HAND_HIRE, HAND_WAGE, HANDS_MAX } from '../sim/constants';
-import { CROP_IDS, CROPS } from '../sim/crops';
+import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, TOOL_UPGRADES } from '../sim/constants';
+import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
 import { MILESTONES, stockCount } from '../sim/goals';
-import { SEASON_NAMES } from '../sim/world';
+import { season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, WorldState } from '../sim/types';
 import { el, esc, fmt, toggle } from './dom';
 import { icon } from './icons';
@@ -21,7 +21,7 @@ export interface DialogHost {
   pickBuild(kind: BuildKind): void;
 }
 
-type Tab = 'fields' | 'seeds' | 'builds' | 'crew' | 'market' | 'milestones';
+type Tab = 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
 
 export class Dialogs {
   readonly root = el('div', 'card dialog');
@@ -87,6 +87,7 @@ export class Dialogs {
     const tabs: [Tab, string][] = [
       ['fields', 'Fields'],
       ['seeds', 'Seeds'],
+      ['tools', 'Smith'],
       ['builds', 'Builds'],
     ];
     if (s.rules.crew === 'crew') tabs.push(['crew', 'Crew']);
@@ -124,8 +125,9 @@ export class Dialogs {
       case 'seeds':
         for (const c of CROP_IDS) {
           const d = CROPS[c];
-          const locked = s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(c);
-          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob" style="background:${d.color}"></span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${d.price}${s.rules.growth === 'synergy' ? `. ${esc(d.likes)}` : ''}${locked ? '. Not in your almanac yet' : ''}</span></span>`);
+          const off = !inSeason(c, season(s.day));
+          const locked = (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || off;
+          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob" style="background:${d.color}"></span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}${off ? ', not now' : ''}</span></span>`);
           if (!locked) {
             const b = el('button', `btn ${s.seed === c ? 'primary' : ''}`, s.seed === c ? 'In hand' : 'Use');
             b.onclick = () => {
@@ -139,6 +141,29 @@ export class Dialogs {
           list.append(it);
         }
         break;
+      case 'tools': {
+        list.append(el('p', 'legend', `The smith works for coins, but only for farmers the town knows. Fill requests to earn reputation. Yours is ${s.rep}.`));
+        for (const t of ['can', 'hoe'] as const) {
+          const level = s.tools[t];
+          const now = level === 0 ? (t === 'can' ? 'Watering can' : 'Hoe') : TOOL_UPGRADES[t][level - 1].name;
+          const next = TOOL_UPGRADES[t][level];
+          const what = (l: number) => (l === 1 ? 'three plots in a row' : 'a three by three square');
+          const it = el('div', `item ${next ? '' : 'done'}`, `<span class="ic">${icon(t)}</span><span class="tx"><b>${next ? esc(next.name) : `${esc(now)}, the best there is`}</b><span>${next ? `Works ${what(level + 1)}${t === 'can' ? `, holds ${CAN_WATER[level + 1]}` : ''}. ${fmt(next.cost)} coins, reputation ${next.rep}` : `Works ${what(level)}`}</span></span>`);
+          if (next) {
+            const b = el('button', 'btn primary', 'Buy');
+            b.disabled = s.coins < next.cost || s.rep < next.rep;
+            if (s.rep < next.rep) b.textContent = `Rep ${next.rep}`;
+            b.onclick = () => {
+              this.host.send({ type: 'upgrade', tool: t });
+              this.host.cue('buy');
+              setTimeout(() => this.refresh(), 0);
+            };
+            it.append(b);
+          }
+          list.append(it);
+        }
+        break;
+      }
       case 'builds':
         for (const k of ['sprinkler', 'scarecrow'] as BuildKind[]) {
           const it = el('div', 'item', `<span class="ic">${icon(k)}</span><span class="tx"><b>${k === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b><span>${k === 'sprinkler' ? 'Waters the nine plots around it every morning' : 'Keeps crows off everything within three plots'}. ${BUILD_COST[k]} coins, placed on bare soil</span></span>`);

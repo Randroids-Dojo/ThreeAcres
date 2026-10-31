@@ -1,8 +1,9 @@
 // What the farm is for, per goal rule: market milestones, almanac seasons and
 // town orders. Selling lives here too, because the goal decides how it works.
 
-import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, TOWN } from './constants';
-import { CROP_IDS, CROPS, count } from './crops';
+import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_SLOTS, TOWN } from './constants';
+import { CROP_IDS, CROPS, count, inSeason } from './crops';
+import { season } from './world';
 import { priceOf } from './actions';
 import { pick, rand, randInt, shuffle } from './rng';
 import type { CropId, DayReport, Goal, GoalKind, Order, SimEvent, WorldState } from './types';
@@ -104,6 +105,59 @@ export function ordersOvernight(s: WorldState, ev: SimEvent[]): void {
   for (const c of CROP_IDS) {
     const d = s.market.demand[c];
     s.market.demand[c] = Math.max(0.5, Math.min(1.5, d + (1 - d) * 0.2 + (rand(s) - 0.5) * 0.08));
+  }
+}
+
+// ---------------------------------------------------------------- town requests (Sunup)
+
+/**
+ * Townsfolk ask for a few of one crop that is in season. A request is filled
+ * from the crate when the day ends, before the rest ships, and pays well over
+ * market price plus a point of reputation, which the smith wants before he
+ * will make better tools. Requests that run out simply lapse.
+ */
+export function makeRequest(s: WorldState): Order {
+  const now = season(s.day);
+  const known = s.rep < 2 ? ['radish', 'lettuce', 'carrot', 'strawberry', 'beans', 'sunflower'] : CROP_IDS;
+  let kinds = CROP_IDS.filter((c) => known.includes(c) && inSeason(c, now) && !s.orders.some((o) => o.items[0].crop === c));
+  if (!kinds.length) kinds = CROP_IDS.filter((c) => inSeason(c, now));
+  const crop = kinds[Math.floor(rand(s) * kinds.length)];
+  const big = CROPS[crop].price > 150;
+  const n = big ? randInt(s, 1, 2) : randInt(s, 3, 5) + Math.min(4, Math.floor(s.rep / 3));
+  return {
+    id: s.nextId++,
+    who: pick(s, TOWN),
+    items: [{ crop, n }],
+    reward: Math.round((CROPS[crop].price * n * 1.5) / 5) * 5,
+    rep: 1,
+    due: s.day + Math.max(3, CROPS[crop].days + 1) + randInt(s, 0, 2),
+  };
+}
+
+export function fillRequests(s: WorldState): void {
+  while (s.orders.length < REQUEST_SLOTS) s.orders.push(makeRequest(s));
+}
+
+/** At nightfall: fill what the crate can, let the late ones go. */
+export function settleRequests(s: WorldState, ev: SimEvent[]): void {
+  for (const o of s.orders.slice()) {
+    if (canDeliver(s, o)) {
+      const it = o.items[0];
+      let left = it.n;
+      for (let q = 0; q < 4 && left > 0; q++) {
+        const take = Math.min(left, s.stock[it.crop][q]);
+        s.stock[it.crop][q] -= take;
+        left -= take;
+      }
+      s.orders = s.orders.filter((x) => x !== o);
+      s.coins += o.reward;
+      s.stats.earned += o.reward;
+      s.rep += o.rep;
+      ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: o.reward });
+    } else if (o.due <= s.day) {
+      s.orders = s.orders.filter((x) => x !== o);
+      ev.push({ type: 'request', id: o.id, who: o.who, done: false, reward: 0 });
+    }
   }
 }
 

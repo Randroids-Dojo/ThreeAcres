@@ -3,7 +3,7 @@
 // a row of carrots coming up, so the first minute has something to do.
 
 import { CROP_IDS, stageOf } from './crops';
-import { AP_MAX, DAYS_PER_SEASON, STAMINA_MAX, START_COINS } from './constants';
+import { AP_MAX, CAN_WATER, DAYS_PER_SEASON, STAMINA_MAX, START_COINS } from './constants';
 import { HOME, MAP_H, MAP_W, PARCELS, baseTiles, propAt } from './map';
 import type { Actor, CropId, Plot, Rules, Season, WorldState } from './types';
 
@@ -70,6 +70,8 @@ export function createWorld(seed: number, rules: Rules): WorldState {
     forecast: ['cloud', 'rain', 'sun'],
     stamina: STAMINA_MAX,
     staminaMax: STAMINA_MAX,
+    water: CAN_WATER[0],
+    tools: { can: 0, hoe: 0 },
     ap: AP_MAX,
     apMax: AP_MAX,
     speed: 1,

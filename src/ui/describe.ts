@@ -19,6 +19,7 @@ export const VERB_NAMES: Record<Verb, string> = {
   clear: 'Clear',
   build: 'Build',
   scare: 'Shoo the crow',
+  refill: 'Fill the can',
 };
 
 export function denyText(reason: string): string {

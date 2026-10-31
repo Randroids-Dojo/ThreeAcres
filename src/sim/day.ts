@@ -5,7 +5,9 @@
 import { choreNow, hands } from './actors';
 import { AP_MAX, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, SCARECROW_RADIUS } from './constants';
 import { CROP_IDS, stageOf } from './crops';
-import { endRound, fillOrders, ordersOvernight, sellCrop, startRound, updateGoals } from './goals';
+import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, updateGoals } from './goals';
+import { homestead } from './actions';
+import { inSeason } from './crops';
 import { HOME } from './map';
 import { rand, randInt } from './rng';
 import { refreshQuality, soak, wateredForTonight } from './soil';
@@ -95,7 +97,8 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
     }
   }
 
-  // Selling and wages.
+  // Requests take their share of the crate first, then the rest ships.
+  if (homestead(s)) settleRequests(s, ev);
   if (s.rules.goal !== 'orders') for (const crop of CROP_IDS) sellCrop(s, crop, ev, report);
   const crew = hands(s);
   if (crew.length) {
@@ -115,6 +118,18 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
       startRound(s);
     }
     ev.push({ type: 'season', season: season(s.day), round: Math.floor((s.day - 1) / DAYS_PER_SEASON) });
+    // The turn of the season takes whatever does not grow in the new one.
+    if (homestead(s)) {
+      for (let y = 0; y < s.H; y++) {
+        for (let x = 0; x < s.W; x++) {
+          const c = s.plots[idx(x, y)].crop;
+          if (!c || c.dead || inSeason(c.kind, season(s.day))) continue;
+          c.dead = true;
+          report.withered++;
+          ev.push({ type: 'wither', x, y, crop: c.kind });
+        }
+      }
+    }
   }
   s.report = report;
   morning(s, ev);
@@ -197,6 +212,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   }
 
   if (s.rules.goal === 'orders') fillOrders(s);
+  if (homestead(s)) fillRequests(s);
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);
   ev.push({ type: 'dawn', day: s.day, weather: s.weather, season: season(s.day) });

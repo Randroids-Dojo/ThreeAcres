@@ -48,7 +48,7 @@ export const PARCELS = [
   { x: 12, y: 10, w: 4, h: 4, price: 1500 },
 ] as const;
 
-export type PropKind = 'house' | 'crate' | 'board' | 'bunkhouse';
+export type PropKind = 'house' | 'crate' | 'board' | 'bunkhouse' | 'well';
 
 export interface Prop {
   kind: PropKind;
@@ -68,6 +68,7 @@ export const PROPS: readonly Prop[] = [
   { kind: 'crate', x: 5, y: 2, w: 1, h: 1, doorX: 5, doorY: 3 },
   { kind: 'board', x: 8, y: 2, w: 2, h: 1, doorX: 8, doorY: 3 },
   { kind: 'bunkhouse', x: 13, y: 1, w: 3, h: 2, doorX: 14, doorY: 3 },
+  { kind: 'well', x: 11, y: 2, w: 1, h: 1, doorX: 11, doorY: 3 },
 ];
 
 /** The road off the farm leaves at the east end of the yard path. */

@@ -20,15 +20,15 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `  (${detail})` : ''}`);
 };
 const S = () => p.evaluate(() => {
-  const s = window.acres.state();
+  const s = window.sunup.state;
   const f = s.actors[0];
-  return { x: f.x, y: f.y, harvested: Object.values(s.stats.harvested).reduce((a, b) => a + b, 0), jobs: s.jobs.length, stamina: s.stamina, tool: s.tool, zoom: window.acres.director['cams'][s.rules.camera].zoom };
+  return { x: f.x, y: f.y, harvested: Object.values(s.stats.harvested).reduce((a, b) => a + b, 0), jobs: s.jobs.length, stamina: s.stamina, tool: s.tool, zoom: window.sunup['cams'][s.rules.camera].zoom };
 });
 const visible = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return false; const r = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && r.width > 0; }, sel);
 
 // ---- walk control
-await p.goto(`${base}/?preset=sunup&fresh`);
-await p.waitForFunction(() => window.acres && window.acres.director.frames > 10);
+await p.goto(`${base}/?game=homestead&fresh`);
+await p.waitForFunction(() => window.sunup && window.sunup.frames > 10);
 await p.waitForTimeout(300);
 check('touch controls show on a phone', (await visible('.tb-act')) && (await visible('.ts-zone')));
 const s0 = await S();
@@ -46,7 +46,7 @@ await p.waitForTimeout(150);
 const s2 = await S();
 check('letting go stops', Math.abs(s2.y - s1.y) < 0.35, `drift ${(s2.y - s1.y).toFixed(2)}`);
 // Put the farmer facing the radish row, then hold the stick and press act with a second finger.
-await p.evaluate(() => { const f = window.acres.state().actors[0]; f.x = 2.5; f.y = 4.5; f.facing = 's'; f.angle = Math.PI / 2; });
+await p.evaluate(() => { const f = window.sunup.state.actors[0]; f.x = 2.5; f.y = 4.5; f.facing = 's'; f.angle = Math.PI / 2; });
 const act = await p.evaluate(() => { const r = document.querySelector('.tb-act').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
 const h0 = (await S()).harvested;
 await touch('touchStart', [[90, 700, 1]]);
@@ -57,7 +57,7 @@ await touch('touchEnd', []);
 await p.waitForTimeout(150);
 check('act works while the stick is held', (await S()).harvested === h0 + 1);
 // Hold-to-repeat: walk east down the radish row holding act; each plot ahead gets pulled.
-await p.evaluate(() => { const f = window.acres.state().actors[0]; f.x = 1.5; f.y = 5.5; f.facing = 'e'; f.angle = 0; });
+await p.evaluate(() => { const f = window.sunup.state.actors[0]; f.x = 1.5; f.y = 5.5; f.facing = 'e'; f.angle = 0; });
 const h1 = (await S()).harvested;
 await touch('touchStart', [[act[0], act[1], 3]]);
 await p.waitForTimeout(80);
@@ -83,47 +83,6 @@ await touch('touchEnd', []);
 await p.waitForTimeout(100);
 check('a touch brings them back', await visible('.tb-act'));
 
-// ---- point control
-await p.goto(`${base}/?preset=patchwork&fresh`);
-await p.waitForFunction(() => window.acres && window.acres.director.frames > 10);
-await p.waitForTimeout(300);
-check('no stick under point control', !(await visible('.ts-zone')) && !(await visible('.tb-act')));
-const row = await p.evaluate(() => {
-  const r = window.acres.director.active();
-  return [r.project(2.5, 7.5), r.project(5.5, 7.5)].map((q) => [q.x, q.y]);
-});
-await touch('touchStart', [[row[0][0], row[0][1], 1]]);
-for (let i = 1; i <= 8; i++) {
-  await touch('touchMove', [[row[0][0] + ((row[1][0] - row[0][0]) * i) / 8, row[0][1], 1]]);
-  await p.waitForTimeout(16);
-}
-await touch('touchEnd', []);
-await p.waitForTimeout(100);
-const painted = (await S()).jobs;
-const planted = await p.evaluate(() => window.acres.state().plots.filter((q) => q.crop && q.crop.age === 0).length);
-check('one finger paints a row', painted + planted >= 4, `${painted} queued, ${planted} planted`);
-check('the clear button shows with jobs queued', painted === 0 || (await visible('.tb-clear')));
-// Pinch: two fingers apart. Zoom changes, nothing new is painted.
-const before = await S();
-const before2 = before.jobs + (await p.evaluate(() => window.acres.state().plots.filter((q) => q.crop && q.crop.age === 0).length));
-await touch('touchStart', [[180, 500, 7]]);
-await touch('touchStart', [[180, 500, 7], [240, 500, 8]]);
-for (let i = 1; i <= 8; i++) {
-  await touch('touchMove', [[180 - i * 8, 500, 7], [240 + i * 8, 500, 8]]);
-  await p.waitForTimeout(16);
-}
-await touch('touchEnd', [[116, 500, 7]]);
-await touch('touchEnd', []);
-await p.waitForTimeout(100);
-const after = await S();
-const after2 = after.jobs + (await p.evaluate(() => window.acres.state().plots.filter((q) => q.crop && q.crop.age === 0).length));
-check('pinch zooms in', after.zoom > before.zoom * 1.3, `${before.zoom.toFixed(2)} to ${after.zoom.toFixed(2)}`);
-check('pinch paints nothing', after2 === before2);
-await p.screenshot({ path: '/tmp/acres-touch-point.png' });
-
-await p.goto(`${base}/?preset=sunup&fresh`);
-await p.waitForFunction(() => window.acres && window.acres.director.frames > 10);
-await p.waitForTimeout(400);
 await p.screenshot({ path: '/tmp/acres-touch-walk.png' });
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

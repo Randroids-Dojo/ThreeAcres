@@ -28,6 +28,7 @@ export const STAMINA_COST: Record<Verb, number> = {
   clear: 2,
   build: 3,
   scare: 0,
+  refill: 0,
 };
 
 /** Real seconds an action takes to perform (farmer). Hands are slower. */
@@ -40,7 +41,26 @@ export const ACTION_SECONDS: Record<Verb, number> = {
   clear: 0.45,
   build: 0.6,
   scare: 0.25,
+  refill: 0.7,
 };
+
+/** Water the can holds at each level. */
+export const CAN_WATER = [12, 24, 40] as const;
+
+/** Tool upgrades: coins, and the town reputation needed before the smith will make them. */
+export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; name: string }[]> = {
+  can: [
+    { cost: 400, rep: 2, name: 'Copper can' },
+    { cost: 1500, rep: 6, name: 'Gold can' },
+  ],
+  hoe: [
+    { cost: 300, rep: 1, name: 'Copper hoe' },
+    { cost: 1200, rep: 5, name: 'Gold hoe' },
+  ],
+};
+
+/** Town requests open at once under the homestead. */
+export const REQUEST_SLOTS = 2;
 export const HAND_SLOWER = 1.4;
 
 /** Tiles per second. */

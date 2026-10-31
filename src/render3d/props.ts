@@ -120,6 +120,7 @@ export function buildProps(season: Season, mats: Materials, glass: MeshLambertMa
     if (p.kind === 'house') house(b, gl, lamps, cx, cz, p.w, p.h, p.doorX + 0.5, season, chimney);
     else if (p.kind === 'bunkhouse') bunkhouse(b, gl, lamps, cx, cz, p.w, p.h, p.doorX + 0.5, r);
     else if (p.kind === 'crate') crate(b, cx, cz, crateMouth);
+    else if (p.kind === 'well') well(b, cx, cz);
     else board(b, cx, cz, p.w);
   }
   // Lantern posts along the yard edge of the main path, and one at the road.
@@ -360,6 +361,29 @@ function crate(b: GeoBuilder, cx: number, cz: number, mouth: Vector3): void {
   b.add(ico(1, 1), at(cx + 0.5, 0.14, cz + 0.18, 0.4, 0, 0.2, 0.13, 0.16, 0.12), C.sack, { flat: true });
   b.add(cyl(0.035, 0.05, 0.06, 6), at(cx + 0.52, 0.28, cz + 0.18), C.sack, { flat: true });
   mouth.set(cx, h - 0.05, cz);
+}
+
+function well(b: GeoBuilder, cx: number, cz: number): void {
+  // A ring of fieldstones with water inside, two posts, a little roof, a crank and a bucket.
+  const r = rng(321);
+  const ring = 12;
+  for (let i = 0; i < ring; i++) {
+    const a = (i / ring) * Math.PI * 2;
+    for (let layer = 0; layer < 2; layer++) {
+      const aa = a + (layer ? Math.PI / ring : 0);
+      const s = 0.13 + r() * 0.03;
+      b.add(ico(1, 1), at(cx + Math.cos(aa) * 0.36, 0.09 + layer * 0.15, cz + Math.sin(aa) * 0.36, r(), r(), r(), s, 0.09, s), layer ? C.stone : C.plinthDark, { flat: true });
+    }
+  }
+  b.add(cyl(0.3, 0.3, 0.02, 14), at(cx, 0.22, cz), C.water);
+  for (const s of [-1, 1]) b.add(block(0.07, 0.95, 0.07, 0.015), at(cx + s * 0.4, 0.55, cz), C.post);
+  b.add(block(0.95, 0.04, 0.34, 0.01), at(cx, 1.08, cz - 0.12, 0.55, 0, 0), C.roof);
+  b.add(block(0.95, 0.04, 0.34, 0.01), at(cx, 1.08, cz + 0.12, -0.55, 0, 0), C.roofDark);
+  b.add(cyl(0.035, 0.035, 0.86, 8), at(cx, 0.82, cz, 0, 0, Math.PI / 2), C.log);
+  b.add(block(0.04, 0.16, 0.04, 0.005), at(cx + 0.47, 0.76, cz), C.metal);
+  b.add(cyl(0.004, 0.004, 0.36, 4), at(cx, 0.62, cz), C.metal);
+  b.add(cyl(0.08, 0.065, 0.12, 8), at(cx, 0.4, cz), C.crateDark);
+  b.add(cyl(0.085, 0.085, 0.015, 8), at(cx, 0.46, cz), C.metal);
 }
 
 function board(b: GeoBuilder, cx: number, cz: number, w: number): void {

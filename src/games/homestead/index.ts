@@ -39,6 +39,9 @@ export const game: GameModule = {
     }
     const s = usable(state) ? state : fresh();
     s.rules = { ...HOMESTEAD_RULES, camera: s.rules?.camera ?? 'close' };
+    // Saves from before the can and the smith.
+    s.water ??= 12;
+    s.tools ??= { can: 0, hoe: 0 };
     if (s.tool === 'smart') s.tool = 'hands';
     const d = new Director(s, ctx);
     window.sunup = d;

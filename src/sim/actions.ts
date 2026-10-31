@@ -1,10 +1,11 @@
 // What a tool does to a tile, and doing it. resolve() is pure and is also used
 // by the UI for the highlight; perform() changes the farm and reports events.
 
-import { BUILD_COST, STAMINA_COST } from './constants';
-import { CROPS, QUALITY_MULT, stageOf } from './crops';
+import { BUILD_COST, CAN_WATER, STAMINA_COST } from './constants';
+import { CROPS, inSeason, QUALITY_MULT, stageOf } from './crops';
+import { propAt } from './map';
 import { feedAround, needsWater, qualityAt, soak } from './soil';
-import { buildAt, isField, owned, plots } from './world';
+import { buildAt, idx, inMap, isField, owned, plots, season, SEASON_NAMES } from './world';
 import type { Actor, BuildKind, CropId, SimEvent, ToolId, Verb, WorldState } from './types';
 
 export interface Resolved {
@@ -23,7 +24,13 @@ export function crowAt(s: WorldState, x: number, y: number) {
   return s.crows.find((c) => c.x === x && c.y === y && (c.phase === 'peck' || c.phase === 'in')) ?? null;
 }
 
+/** Sunup's homestead rules: seasonal crops, a can that runs dry, town requests. */
+export function homestead(s: WorldState): boolean {
+  return s.rules.goal === 'market' && s.rules.tools === 'kit';
+}
+
 function plantCheck(s: WorldState, crop: CropId): Resolved {
+  if (homestead(s) && !inSeason(crop, season(s.day))) return NO('plant', `${CROPS[crop].name} won\u2019t grow in ${SEASON_NAMES[season(s.day)].toLowerCase()}`);
   if (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(crop)) return NO('plant', `${CROPS[crop].name} is not in your almanac yet`);
   if (s.coins < CROPS[crop].seed) return NO('plant', `${CROPS[crop].name} seeds cost ${CROPS[crop].seed}`);
   return { verb: 'plant', ok: true, reason: '', crop };
@@ -36,6 +43,11 @@ function buildCheck(s: WorldState, kind: BuildKind): Resolved {
 
 /** What `tool` would do at (x, y), and whether it can. */
 export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Resolved {
+  // The can fills at the well or from the pond.
+  if (tool === 'can' && inMap(x, y) && (s.tiles[idx(x, y)] === 'water' || propAt(x, y)?.kind === 'well')) {
+    if (s.water >= CAN_WATER[s.tools.can]) return NO('refill', 'The can is full');
+    return { verb: 'refill', ok: true, reason: '' };
+  }
   if (!isField(s, x, y)) return NONE('');
   if (!owned(s, x, y)) return NONE('unowned');
   const plot = plots(s, x, y);
@@ -66,6 +78,7 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
       if (build) return NO('water', 'Nothing to water');
       if (!plot.tilled) return NO('water', 'Till it first');
       if (s.rules.growth === 'classic' ? plot.wet : plot.moisture >= 3) return NO('water', 'Already watered');
+      if (homestead(s) && s.water <= 0) return NO('water', 'The can is empty. Fill it at the well or the pond');
       return { verb: 'water', ok: true, reason: '' };
     case 'seeds':
       if (build) return NO('plant', 'Something is built here');
@@ -117,14 +130,45 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
     }
   }
 
+  let extra = 0;
   switch (verb) {
-    case 'till':
-      plot.tilled = true;
-      ev.push({ type: 'till', x, y, by });
+    case 'till': {
+      const tiles = isFarmer && homestead(s) ? area(actor, x, y, s.tools.hoe) : [{ x, y }];
+      let n = 0;
+      for (const t of tiles) {
+        if (!owned(s, t.x, t.y)) continue;
+        const p = plots(s, t.x, t.y);
+        if (p.tilled || p.crop || buildAt(s, t.x, t.y)) continue;
+        p.tilled = true;
+        ev.push({ type: 'till', x: t.x, y: t.y, by });
+        n++;
+      }
+      if (!n) return false;
+      extra = (n - 1) * 2;
       break;
-    case 'water':
-      soak(plot);
-      ev.push({ type: 'water', x, y, by });
+    }
+    case 'water': {
+      const limited = isFarmer && homestead(s);
+      const tiles = limited ? area(actor, x, y, s.tools.can) : [{ x, y }];
+      let n = 0;
+      for (const t of tiles) {
+        if (limited && s.water <= 0) break;
+        if (!owned(s, t.x, t.y)) continue;
+        const p = plots(s, t.x, t.y);
+        if (!p.tilled || buildAt(s, t.x, t.y)) continue;
+        if (t !== tiles[0] && (s.rules.growth === 'classic' ? p.wet : p.moisture >= 3)) continue;
+        soak(p);
+        if (limited) s.water -= 1;
+        ev.push({ type: 'water', x: t.x, y: t.y, by });
+        n++;
+      }
+      if (!n) return false;
+      extra = n - 1;
+      break;
+    }
+    case 'refill':
+      s.water = CAN_WATER[s.tools.can];
+      ev.push({ type: 'refill', x, y, by });
       break;
     case 'plant': {
       const kind = r.crop ?? s.seed;
@@ -198,8 +242,32 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       break;
     }
   }
-  if (isFarmer) charge(s, verb);
+  if (isFarmer) {
+    charge(s, verb);
+    if (extra && s.rules.clock === 'day') s.stamina = Math.max(0, s.stamina - extra);
+  }
   return true;
+}
+
+/**
+ * Plots an upgraded tool works: level 1 three in a row away from the farmer,
+ * level 2 the three by three square around the aimed plot.
+ */
+export function area(actor: Actor, x: number, y: number, level: number): { x: number; y: number }[] {
+  if (level <= 0) return [{ x, y }];
+  if (level >= 2) {
+    const out = [{ x, y }];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) out.push({ x: x + dx, y: y + dy });
+    return out.filter((t) => inMap(t.x, t.y));
+  }
+  let dx = Math.sign(x - Math.floor(actor.x));
+  let dy = Math.sign(y - Math.floor(actor.y));
+  if (dx && dy) dy = 0;
+  if (!dx && !dy) {
+    dx = actor.facing === 'e' ? 1 : actor.facing === 'w' ? -1 : 0;
+    dy = actor.facing === 's' ? 1 : actor.facing === 'n' ? -1 : 0;
+  }
+  return [0, 1, 2].map((k) => ({ x: x + dx * k, y: y + dy * k })).filter((t) => inMap(t.x, t.y));
 }
 
 /** Sale value of one crop at a quality, with the market's mood under orders. */

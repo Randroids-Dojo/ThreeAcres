@@ -23,7 +23,7 @@ export interface TouchHost {
   clearJobs(): void;
 }
 
-const VERB_ICON: Record<Verb, IconId> = { till: 'hoe', water: 'can', plant: 'seeds', harvest: 'hands', tend: 'hands', clear: 'hoe', build: 'build', scare: 'hands' };
+const VERB_ICON: Record<Verb, IconId> = { till: 'hoe', water: 'can', plant: 'seeds', harvest: 'hands', tend: 'hands', clear: 'hoe', build: 'build', scare: 'hands', refill: 'can' };
 const STICK_R = 50;
 const DEAD = 0.16;
 

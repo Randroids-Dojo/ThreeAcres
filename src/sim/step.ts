@@ -1,13 +1,13 @@
 // One tick of the farm. Applies the player's commands, moves the clock by the
 // current clock rule, runs people and crows, and returns what happened.
 
-import { canAfford, resolve } from './actions';
+import { canAfford, homestead, resolve } from './actions';
 import { dropJobsOf, facingTile, farmer, hands, startAction, tickActors, tileOf, walkFarmer, walkTo } from './actors';
 import type { Command } from './commands';
-import { CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS } from './constants';
+import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, REQUEST_SLOTS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, nightfall, turnsMinute } from './day';
-import { checkMilestones, deliver, draft, fillOrders, joinAlmanac, sellCrop, updateGoals } from './goals';
+import { checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -71,6 +71,7 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     updateGoals(s, ev);
   }
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
+  if (homestead(s) && s.orders.length < REQUEST_SLOTS) fillRequests(s);
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -240,6 +241,17 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
     case 'hire':
       hire(s, ev, false);
       break;
+    case 'upgrade': {
+      const level = s.tools[c.tool];
+      const next = TOOL_UPGRADES[c.tool][level];
+      if (!next || s.rep < next.rep || s.coins < next.cost) return;
+      s.coins -= next.cost;
+      s.tools[c.tool] = level + 1;
+      if (c.tool === 'can') s.water = CAN_WATER[s.tools.can];
+      ev.push({ type: 'upgrade', tool: c.tool, level: level + 1 });
+      ev.push({ type: 'buy', item: `${c.tool}:${level + 1}`, cost: next.cost });
+      break;
+    }
     case 'deliver':
       deliver(s, c.id, ev);
       break;

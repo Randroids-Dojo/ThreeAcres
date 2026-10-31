@@ -39,7 +39,7 @@ export type TileKind = 'grass' | 'field' | 'path' | 'water' | 'wood' | 'yard';
 export type BuildKind = 'scarecrow' | 'sprinkler';
 
 /** What the hands do. A tool maps to one of these, smart picks one for you. */
-export type Verb = 'till' | 'water' | 'plant' | 'harvest' | 'tend' | 'clear' | 'build' | 'scare';
+export type Verb = 'till' | 'water' | 'plant' | 'harvest' | 'tend' | 'clear' | 'build' | 'scare' | 'refill';
 
 /** The kit. 'smart' is the single context tool used when rules.tools is 'smart'. */
 export type ToolId = 'hoe' | 'can' | 'seeds' | 'hands' | 'build' | 'smart';
@@ -257,6 +257,10 @@ export interface WorldState {
 
   stamina: number;
   staminaMax: number;
+  /** Water left in the can. Refill at the well or the pond. */
+  water: number;
+  /** Tool levels, 0 to 2. Level 1 works three plots in a row, level 2 a three by three square. */
+  tools: { can: number; hoe: number };
   ap: number;
   apMax: number;
   /** Flow clock speed: 0 paused, 1, 2 or 4. */
@@ -323,4 +327,7 @@ export type SimEvent =
   | { type: 'thunder' }
   | { type: 'rules'; rules: Rules; changed: Axis[] }
   | { type: 'tired' }
-  | { type: 'hire'; id: number };
+  | { type: 'hire'; id: number }
+  | { type: 'refill'; x: number; y: number; by: number }
+  | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number }
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number };

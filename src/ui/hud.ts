@@ -7,8 +7,8 @@ import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
 import { resolve } from '../sim/actions';
 import type { Command } from '../sim/commands';
-import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES } from '../sim/constants';
-import { CROP_IDS, CROPS, QUALITY_NAME } from '../sim/crops';
+import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
+import { CROP_IDS, CROPS, inSeason, QUALITY_NAME } from '../sim/crops';
 import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
 import { PRESETS, type PresetId } from '../sim/presets';
 import { WEATHER_NAMES } from '../sim/weather';
@@ -212,12 +212,19 @@ export class Hud {
         html += `<div class="order"><div class="foot"><span>${n} spare in stock</span><button class="btn" data-sellspare="1">Sell at market</button></div></div>`;
       }
     } else {
-      const done = MILESTONES.filter((m) => s.milestones[m.id]).length;
+      // Sunup: town requests, filled from the crate at nightfall or delivered now.
+      html += `<h3><span class="ic" style="width:16px;height:16px">${icon('board')}</span>Town requests<span class="sub">reputation ${s.rep} <span class="toggle">${this.foldedGoals ? '+' : ''}</span></span></h3>`;
+      for (const o of s.orders) {
+        const it = o.items[0];
+        const have = stockCount(s, it.crop);
+        const days = o.due - s.day;
+        const ready = canDeliver(s, o);
+        html += `<div class="order"><div class="who"><span>${esc(o.who)}</span><span class="due ${days <= 1 ? 'late' : ''}">${days <= 0 ? 'today' : days === 1 ? 'by tomorrow' : `${days} days`}</span></div><div class="items"><span><i style="background:${CROPS[it.crop].color}"></i>${it.n} ${it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural} <b class="${have >= it.n ? 'have' : ''}">${Math.min(have, it.n)}/${it.n}</b></span></div><div class="foot"><span class="num">${fmt(o.reward)} coins</span><button class="btn ${ready ? 'primary' : ''}" data-deliver="${o.id}" ${ready ? '' : 'disabled'}>Deliver</button></div></div>`;
+      }
       const next = MILESTONES.find((m) => !s.milestones[m.id]);
-      html += `<h3><span class="ic" style="width:16px;height:16px">${icon('leaf')}</span>Milestones<span class="sub">${done} of ${MILESTONES.length} <span class="toggle">${this.foldedGoals ? '+' : ''}</span></span></h3>`;
-      if (next) html += `<div class="goal"><div class="row"><span>Next: ${esc(next.text)}</span></div></div>`;
+      if (next) html += `<div class="legend">Next milestone: ${esc(next.text)}</div>`;
       const stock = CROP_IDS.reduce((a, c) => a + stockCount(s, c), 0);
-      if (stock) html += `<div class="legend">${stock} in the crate, sold overnight</div>`;
+      if (stock) html += `<div class="legend">${stock} in the crate, shipped overnight</div>`;
     }
     const key = html + this.foldedGoals;
     if (key !== this.goalsKey) {
@@ -238,6 +245,7 @@ export class Hud {
         const b = el('button', 'tool', `<span class="ic">${icon(TOOL_ICON[t])}</span><span class="lbl">${TOOL_NAME[t]}</span><span class="key">${i + 1}</span>`);
         b.dataset.tool = t;
         if (t === 'seeds') b.append(el('span', 'seedchip'));
+        if (t === 'can') b.append(el('span', 'watermeter', '<i></i>'));
         b.onclick = () => this.pickTool(t);
         this.toolbar.append(b);
       });
@@ -259,6 +267,12 @@ export class Hud {
       const on = t === 'seeds' ? (r.tools === 'kit' ? s.tool === 'seeds' : this.seedOpen) : s.tool === t;
       toggle(b, 'on', on);
     }
+    const can = this.toolbar.querySelector<HTMLElement>('.tool[data-tool="can"] .watermeter > i');
+    if (can) {
+      const max = CAN_WATER[s.tools.can];
+      can.style.width = `${Math.round((s.water / max) * 100)}%`;
+      toggle(can.parentElement!, 'low', s.water <= Math.max(2, max * 0.15));
+    }
     const chip = this.toolbar.querySelector<HTMLElement>('.seedchip');
     if (chip) chip.style.background = CROPS[s.seed].color;
     const actBtn = this.toolbar.querySelector<HTMLElement>('.tool.act');
@@ -267,7 +281,7 @@ export class Hud {
     for (const b of this.seedbar.querySelectorAll<HTMLElement>('.seed')) {
       const c = b.dataset.crop as CropId;
       toggle(b, 'on', s.seed === c);
-      toggle(b, 'locked', r.goal === 'almanac' && !s.almanac.unlocked.includes(c));
+      toggle(b, 'locked', (r.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || !inSeason(c, season(s.day)));
     }
     for (const b of this.buildbar.querySelectorAll<HTMLElement>('.seed')) toggle(b, 'on', s.buildKind === b.dataset.kind);
     const seedVisible = this.seedOpen && (r.tools === 'smart' || s.tool === 'seeds');
@@ -284,6 +298,11 @@ export class Hud {
       b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. ${d.likes}.`;
       b.onclick = () => {
         const st = this.host.state();
+        if (!inSeason(c, season(st.day))) {
+          this.toast(`${d.name} grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}.`, 'deny');
+          this.host.cue('deny');
+          return;
+        }
         if (st.rules.goal === 'almanac' && !st.almanac.unlocked.includes(c)) {
           this.toast(`${d.name} is not in your almanac yet. New seeds come at the end of each season.`, 'deny');
           this.host.cue('deny');
@@ -400,6 +419,15 @@ export class Hud {
         if (!e.done) this.toast('An order lapsed. Reputation dips.', 'deny');
         else this.toast('<b>Order filled</b>', 'big');
         break;
+      case 'request':
+        if (e.done) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins and a little reputation.`, 'big', 3200);
+        else this.toast(`${esc(e.who)} found what they needed elsewhere.`, '');
+        break;
+      case 'upgrade': {
+        const u = TOOL_UPGRADES[e.tool][e.level - 1];
+        this.toast(`<b>${esc(u.name)}</b><br>${e.level === 1 ? 'Works three plots in a row.' : 'Works a three by three square.'}`, 'big', 3200);
+        break;
+      }
       case 'hire': {
         const a = s.actors.find((x) => x.id === e.id);
         if (a) this.toast(`${esc(a.name)} joins the crew`, '');
@@ -440,8 +468,8 @@ export class Hud {
     const touch = matchMedia('(pointer: coarse)').matches;
     const text: Record<PresetId, string> = {
       sunup: touch
-        ? 'Drag on the left of the screen to walk and tap the round button to use your tool. Pull the radishes, water the carrots, then sleep.'
-        : 'Walk with WASD, face a plot and press Space. Number keys change tools. Pull the radishes, water the carrots, then press Enter to sleep.',
+        ? 'Drag on the left of the screen to walk and hold the round button to use your tool. Pull the radishes, water the carrots, refill the can at the well, then sleep.'
+        : 'Walk with WASD, face a plot and press Space. Number keys change tools. Pull the radishes, water the carrots, refill the can at the well, then press Enter to sleep.',
       patchwork: 'Tap plots to plant, water and harvest. Each costs a move. The line above the tools shows what neighbours do for quality. End the day when your moves are spent.',
       bushel: `${touch ? 'Drag' : 'Click and drag'} across plots to queue jobs. Your hand harvests, waters and replants on their own. Fill orders from the panel, then speed time up.`,
     };

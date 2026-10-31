@@ -486,6 +486,18 @@ export function buildActors(mats: Materials): Actors {
           if (p < 0.1) f.lastStrike = -1;
           break;
         }
+        case 'refill': {
+          // Dip the can and lift it, heavy.
+          tool = 'can';
+          const dip = smooth(0, 0.35, p) * (1 - smooth(0.65, 1, p));
+          bodyY -= dip * 0.12;
+          lean = -dip * 0.5;
+          armRz = 0.6 + dip * 0.5;
+          armRx = 0.1;
+          toolRot = -0.4 + dip * 0.6;
+          armLz = 0.3 + dip * 0.4;
+          break;
+        }
         case 'water': {
           tool = 'can';
           const tip = smooth(0.1, 0.35, p) * (1 - smooth(0.85, 1, p));
