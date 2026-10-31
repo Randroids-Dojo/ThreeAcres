@@ -33,6 +33,7 @@ Checks (dev server running; `npx vite --config scripts/lead-vite.config.ts` serv
 
 ```bash
 node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport)
+node scripts/ranch-thumbs.mjs [url]    # Thistledown thumb room at the Pixel's viewport: look, buttons, stick, bellows, journal
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers

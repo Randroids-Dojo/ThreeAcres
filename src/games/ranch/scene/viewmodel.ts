@@ -258,9 +258,11 @@ export class Viewmodel {
     this.camera.updateProjectionMatrix();
     const halfW = Math.tan(((fov / 2) * Math.PI) / 180) * aspect * 0.6;
     const portrait = aspect < 0.85;
-    // On a tall phone the bellows shrinks and tucks in low, under the thumbs' buttons.
+    // On a tall phone the bellows shrinks and tucks in low. Under touch it sits
+    // at bottom centre, between the stick and the buttons in the right corner,
+    // so the thumb has the whole middle of the right side to look with.
     this.scale = portrait ? 0.6 : 0.86;
-    this.baseX = portrait ? halfW * 0.25 : Math.min(0.27, halfW * (touch ? 0.5 : 0.62));
+    this.baseX = touch ? (portrait ? -halfW * 0.08 : 0) : portrait ? halfW * 0.25 : Math.min(0.27, halfW * 0.62);
     this.baseY = portrait ? -0.255 : -0.235;
     this.baseZ = -0.6;
     this.rig.scale.setScalar(this.scale);
