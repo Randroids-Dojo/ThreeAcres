@@ -289,12 +289,17 @@ export class Hud {
     for (const b of this.seedbar.querySelectorAll<HTMLElement>('.seed')) {
       const c = b.dataset.crop as CropId;
       toggle(b, 'on', s.seed === c);
-      toggle(b, 'locked', (r.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || !inSeason(c, season(s.day)));
+      toggle(b, 'locked', r.goal === 'almanac' && !s.almanac.unlocked.includes(c));
+      // Sunup offers only what can be sown this season.
+      toggle(b, 'gone', homestead(s) && !inSeason(c, season(s.day)));
     }
     for (const b of this.buildbar.querySelectorAll<HTMLElement>('.seed')) toggle(b, 'on', s.buildKind === b.dataset.kind);
     const seedVisible = this.seedOpen && (r.tools === 'smart' || s.tool === 'seeds');
+    const buildVisible = this.buildOpen && s.tool === 'build';
     toggle(this.seedbar, 'hidden', !seedVisible);
-    toggle(this.buildbar, 'hidden', !(this.buildOpen && s.tool === 'build'));
+    toggle(this.buildbar, 'hidden', !buildVisible);
+    // An open picker has the player's attention: the lesson line and caption step aside.
+    toggle(this.root, 'picking', seedVisible || buildVisible);
   }
 
   private renderSeedbar(s: WorldState): void {
@@ -335,6 +340,7 @@ export class Hud {
       b.onclick = () => {
         this.host.send({ type: 'buildKind', kind: k });
         this.host.cue('tool');
+        if (window.innerWidth < 640) this.buildOpen = false;
       };
       this.buildbar.append(b);
     }

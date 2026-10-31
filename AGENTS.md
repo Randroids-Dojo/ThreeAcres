@@ -33,6 +33,7 @@ Checks (dev server running; `npx vite --config scripts/lead-vite.config.ts` serv
 
 ```bash
 node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport)
+node scripts/qa/overlap.mjs [url]      # Sunup: no two HUD pieces overlap in any state, phone and desktop
 node scripts/qa/lessons.mjs [url]      # Sunup's lessons: one feature at a time, nothing on screen before its lesson
 node scripts/ranch-thumbs.mjs [url]    # Thistledown thumb room at the Pixel's viewport: look, buttons, stick, bellows, journal
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches

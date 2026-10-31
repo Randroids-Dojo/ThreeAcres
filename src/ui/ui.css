@@ -179,7 +179,7 @@ svg { width: 100%; height: 100%; display: block; }
   background: #4b321e; border-radius: 9px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 .seedbar.hidden, .buildbar.hidden { display: none; }
-.seed { min-width: 62px; height: 66px; border-radius: 3px; border: 0; background: #f4e8c8; color: var(--ink); cursor: pointer; display: grid; place-items: center; gap: 1px; padding: 5px 4px; box-shadow: 0 2px 0 #b99b68; }
+.seed { min-width: 74px; height: 66px; border-radius: 3px; border: 0; background: #f4e8c8; color: var(--ink); cursor: pointer; display: grid; place-items: center; gap: 1px; padding: 5px 4px; box-shadow: 0 2px 0 #b99b68; }
 .seed .blob { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.18) inset; }
 .seed .nm { font-size: 11.5px; font-weight: 650; }
 .seed .pr { font-size: 11px; color: var(--ink2); font-family: var(--serif); }
@@ -437,3 +437,10 @@ svg { width: 100%; height: 100%; display: block; }
 @keyframes arrive-on { 0% { transform: translateY(16px) scale(0.6); opacity: 0; } 35% { transform: translateY(-14px) scale(1.12); opacity: 1; } 100% { transform: translateY(-7px); } }
 /* The rack is right there; Sunup's touch controls need only the act button. */
 .gameroot[data-game='homestead'] .tb-tool { display: none !important; }
+
+/* Pickers: the lesson line and caption step aside, and on touch the picker
+   opens above the stick and the act button so neither is covered. */
+.hud.picking .hint, .hud.picking .info { opacity: 0 !important; }
+@media (max-width: 640px) {
+  .gameroot.touch-on .seedbar, .gameroot.touch-on .buildbar { bottom: calc(236px + var(--safe-b)); }
+}
