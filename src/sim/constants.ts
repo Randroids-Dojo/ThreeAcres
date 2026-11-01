@@ -7,12 +7,13 @@ export const DAY_MINUTES = 1080;
 export const DAYS_PER_SEASON = 10;
 
 /**
- * Day clock: real seconds from 6:00 to midnight. Sized so a busy day on a
- * grown farm, at a person's pace, runs into the afternoon or evening, and
- * stamina (with Sunup's cheaper actions) lasts about as long as the work.
+ * Day clock: real seconds from 6:00 to midnight. Sized so a dry day's work on
+ * a farm of two or three fields, at a person's pace, runs to early afternoon
+ * (the can wets a plot for one night, so dry days mean watering), and stamina
+ * (with Sunup's cheaper actions) lasts about as long as the work.
  * `npx tsx scripts/balance.ts` measures both.
  */
-export const DAY_SECONDS = 150;
+export const DAY_SECONDS = 120;
 /** Flow clock: real seconds per day at speed 1. */
 export const FLOW_SECONDS = 60;
 export const FLOW_SPEEDS = [0, 1, 2, 4] as const;
@@ -49,6 +50,8 @@ export const ACTION_SECONDS: Record<Verb, number> = {
   refill: 0.7,
 };
 
+/** Sunup: the moisture a can's watering leaves, enough for one night (rain leaves 3, two nights). */
+export const CAN_MOISTURE = 2;
 /** Water the can holds at each level. */
 export const CAN_WATER = [12, 24, 40] as const;
 
@@ -64,11 +67,24 @@ export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; n
   ],
 };
 
-/** Town requests open at once under the homestead: one until the first is filled, then two, then three once the town knows you. */
+/** Town requests open at once under the homestead: one until the first is filled, then two, never more. */
 export const REQUEST_SLOTS = 2;
 export function requestSlots(rep: number): number {
-  return rep >= 4 ? 3 : rep >= 1 ? REQUEST_SLOTS : 1;
+  return rep >= 1 ? REQUEST_SLOTS : 1;
 }
+/** A request pays what its crops fetch at market and at most this much more (a fifth), ... */
+export const REQUEST_PREMIUM = 1.2;
+/** ... and never more than this many coins over market. */
+export const REQUEST_EXTRA = 60;
+/** The most a request asks for (so two of them can still outgrow two fields of free soil), or five of the big crops. */
+export const REQUEST_MAX = 20;
+export const REQUEST_MAX_BIG = 5;
+/** Days a request leaves to get the seed in, beyond its crop's growing time. */
+export const REQUEST_SLACK = [2, 3] as const;
+/** The chance a morning pins a second request while one is open. */
+export const REQUEST_CHANCE = 0.6;
+/** Sunup's fields beyond the first: the reputation the land agent wants before he sells each (by field id). */
+export const FIELD_REP = [0, 0, 2, 4, 6, 8] as const;
 /** Sunup: in the last days of a season the next season's seeds can go in, so the turn takes nothing you could have planned for. */
 export const SEASON_PREVIEW_DAYS = 3;
 export const HAND_SLOWER = 1.4;
@@ -90,7 +106,9 @@ export const HAND_NAMES = ['Ada', 'Bram', 'Cass', 'Dov'];
 export const HAND_NIGHT_JOBS = 6;
 
 /** Wild weather: crows land at a random time and eat after pecking this long. */
-export const CROW_PECK_MINUTES = 120;
+export const CROW_PECK_MINUTES = 150;
+/** Sunup: before the crow lesson, the one crow a day comes between these minutes (6:30 to 8:00). */
+export const CROW_FIRST = [30, 120] as const;
 export const CROW_FLY_SECONDS = 1.6;
 export const CROW_SCARE_RANGE = 1.6;
 

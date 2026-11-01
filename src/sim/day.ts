@@ -3,7 +3,7 @@
 // and orders.
 
 import { choreNow, hands } from './actors';
-import { AP_MAX, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, SCARECROW_RADIUS } from './constants';
+import { AP_MAX, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, SCARECROW_RADIUS } from './constants';
 import { CROP_IDS, stageOf } from './crops';
 import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted } from './goals';
 import { homestead, sowing } from './actions';
@@ -41,11 +41,14 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
     }
   }
 
-  // Crows still pecking at nightfall get their meal.
+  // Crows still pecking at nightfall get their meal. In Sunup, until the crow
+  // lesson has been seen, a crow takes nothing in the hours sleep skips: the
+  // first crop a crow takes is one the farmer watched it go for.
+  const crowsEat = !homestead(s) || s.learn.includes('lesson:pests');
   for (const c of s.crows) {
     if (c.phase !== 'peck' && c.phase !== 'in') continue;
     const p = s.plots[idx(c.x, c.y)];
-    if (p.crop && c.phase === 'peck') {
+    if (p.crop && c.phase === 'peck' && crowsEat) {
       ev.push({ type: 'crowEat', id: c.id, x: c.x, y: c.y });
       p.crop = null;
       report.eaten++;
@@ -145,11 +148,8 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
         const p = s.plots[i];
         const c = p.crop;
         if (!c) continue;
-        if (c.dead) {
-          p.crop = null;
-          continue;
-        }
-        if (inSeason(c.kind, now) || c.stage === 4) continue;
+        // A crop that withered tonight stays a day, like any other, and clears for free.
+        if (c.dead || inSeason(c.kind, now) || c.stage === 4) continue;
         p.crop = null;
         turned++;
       }
@@ -171,6 +171,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   s.stamina = s.staminaMax;
   s.apMax = AP_MAX;
   s.ap = s.apMax;
+  s.taps = [];
   if (s.rules.clock === 'day') {
     const f = s.actors[0];
     f.x = HOME.x + 0.5;
@@ -228,15 +229,20 @@ function morning(s: WorldState, ev: SimEvent[]): void {
     }
   }
 
-  // Crows plan their visits on dry days.
+  // Crows plan their visits on dry days. Until Sunup's crow lesson has been
+  // seen, one crow comes, early in the morning, while the farmer is surely
+  // still out: never in hours an early night would skip.
   s.crowPlan = [];
   if (pests && s.weather !== 'rain' && s.weather !== 'storm') {
     let growing = 0;
-    for (const p of s.plots) if (p.crop && !p.crop.dead) growing++;
+    for (const p of s.plots) if (p.crop && !p.crop.dead && p.crop.stage >= 1) growing++;
     if (growing > 0) {
-      const n = 1 + (rand(s) < 0.4 ? 1 : 0) + (growing > 24 ? 1 : 0);
-      for (let k = 0; k < n; k++) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, 60, DAY_MINUTES - CROW_PECK_MINUTES - 120));
-      s.crowPlan.sort((a, b) => a - b);
+      if (homestead(s) && !s.learn.includes('lesson:pests')) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, CROW_FIRST[0], CROW_FIRST[1]));
+      else {
+        const n = 1 + (rand(s) < 0.4 ? 1 : 0) + (growing > 24 ? 1 : 0);
+        for (let k = 0; k < n; k++) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, 60, DAY_MINUTES - CROW_PECK_MINUTES - 120));
+        s.crowPlan.sort((a, b) => a - b);
+      }
     }
   }
 
@@ -245,7 +251,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
     const gift = rescue(s);
     if (gift && s.report) s.report.gift = gift;
   }
-  if (homestead(s) && s.learn.includes('requests')) fillRequests(s);
+  if (homestead(s) && s.learn.includes('requests')) fillRequests(s, true);
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);
   ev.push({ type: 'dawn', day: s.day, weather: s.weather, season: season(s.day) });

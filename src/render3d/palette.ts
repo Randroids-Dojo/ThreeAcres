@@ -203,6 +203,11 @@ function toDisplay(c: Color, out: Vector3): void {
   out.set(_d.r, _d.g, _d.b);
 }
 
+/** 1 at first light, easing to 0 by mid-morning: how much a wet morning is spared its gloom. */
+export function stormDawn(daylight: number): number {
+  return smooth(0.85, 0.36, daylight);
+}
+
 /** Fills sky for an hour (6..24), smoothed daylight (0..1), weather and season. */
 export function computeSky(hour: number, daylight: number, weather: Weather, season: Season, out: Sky): void {
   const t = (hour - SUNRISE) / (SUNSET - SUNRISE);
@@ -219,7 +224,9 @@ export function computeSky(hour: number, daylight: number, weather: Weather, sea
   if (moon < 0.5) out.keyDir.set(Math.cos(el) * dx, Math.sin(el), Math.cos(el) * dz).normalize();
   else out.keyDir.copy(MOON_DIR);
 
-  const wk = WEATHER_KEY[weather];
+  const wet = weather === 'storm' || weather === 'rain';
+  // A wet dawn lets more of the low sun through, so the crops read at 6 am (see stormDawn).
+  const wk = wet ? lerp(WEATHER_KEY[weather], 0.7, stormDawn(daylight)) : WEATHER_KEY[weather];
   ramp(KEY, hour, out.keyColor);
   if (weather === 'heat') mixInto(out.keyColor, out.keyColor, HEAT_KEY, 0.35);
   if (moon >= 0.5) out.keyColor.copy(MOONLIGHT);
@@ -231,9 +238,12 @@ export function computeSky(hour: number, daylight: number, weather: Weather, sea
   mixInto(out.hemiSky, SKY_DAY, SKY_DUSK, dusk);
   mixInto(out.hemiSky, out.hemiSky, SKY_NIGHT, smooth(0.75, 0.25, daylight));
   mixInto(out.hemiGround, GROUND_DAY, GROUND_NIGHT, smooth(0.8, 0.25, daylight));
-  const wetDim = weather === 'storm' ? 0.6 : weather === 'rain' ? 0.74 : 1;
+  // Rain and storms darken the day, but much less at dawn: the farm is read first thing in the morning, and a
+  // 6 am storm was too dark to tell a ripe crop from a green one.
+  const dawnEase = stormDawn(daylight);
+  const wetDim = lerp(weather === 'storm' ? 0.6 : weather === 'rain' ? 0.74 : 1, weather === 'storm' ? 0.95 : weather === 'rain' ? 1 : 1, dawnEase);
   // Dawn is golden, not gloomy: the fill rises fast from night to morning.
-  out.hemiI = lerp(0.46, 1.5, smooth(0.1, 0.42, daylight)) * wetDim * (weather === 'cloud' ? 1.1 : 1);
+  out.hemiI = lerp(0.46, 1.5, smooth(0.1, 0.42, daylight)) * wetDim * (weather === 'cloud' ? 1.1 : 1) * (1 + 0.5 * dawnEase * (wet ? 1 : 0));
 
   ramp(BG_TOP, hour, _c);
   mixInto(_c, _c, WEATHER_GREY[weather], WEATHER_MIX[weather] * clamp(daylight * 1.4, 0.2, 1));

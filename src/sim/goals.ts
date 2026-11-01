@@ -1,7 +1,7 @@
 // What the farm is for, per goal rule: market milestones, almanac seasons and
 // town orders. Selling lives here too, because the goal decides how it works.
 
-import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, requestSlots, TOWN } from './constants';
+import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_CHANCE, REQUEST_EXTRA, REQUEST_MAX, REQUEST_MAX_BIG, REQUEST_PREMIUM, REQUEST_SLACK, requestSlots, TOWN } from './constants';
 import { CROP_IDS, CROPS, count, inSeason } from './crops';
 import { season } from './world';
 import { nightsToTurn, priceOf, sowing } from './actions';
@@ -88,7 +88,9 @@ export function deliver(s: WorldState, id: number, ev: SimEvent[]): boolean {
   s.stats.earned += o.reward;
   s.almanac.earned += o.reward;
   s.rep += o.rep;
-  ev.push({ type: 'order', id: o.id, done: true });
+  // Sunup calls them requests, and says who took the crops.
+  if (s.rules.goal === 'market' && s.rules.tools === 'kit') ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: o.reward });
+  else ev.push({ type: 'order', id: o.id, done: true });
   ev.push({ type: 'coins', amount: o.reward });
   return true;
 }
@@ -134,19 +136,45 @@ function lastDayFor(s: WorldState, crop: CropId): number {
   return inSeason(crop, next) ? Infinity : turn;
 }
 
-function round5(n: number): number {
-  return Math.max(5, Math.round(n / 5) * 5);
+/**
+ * Plots of owned field that can grow something (not built on), and how many
+ * of them are free to plant within `days` days: bare now, or with a one-shot
+ * crop ripe by then (picked, its plot is free again).
+ */
+export function farmPlots(s: WorldState, days = 0): { all: number; free: number } {
+  let all = 0;
+  let free = 0;
+  for (let i = 0; i < s.plots.length; i++) {
+    if (s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned || s.tiles[i] !== 'field') continue;
+    if (s.builds.some((b) => b.y * s.W + b.x === i)) continue;
+    all++;
+    const c = s.plots[i].crop;
+    if (!c || c.dead || (CROPS[c.kind].regrow === 0 && CROPS[c.kind].days - c.age <= days)) free++;
+  }
+  return { all, free };
 }
 
 /**
- * Townsfolk ask for a few of one crop. A request is filled from the crate
- * when the day ends, before the rest ships, and pays well over market price
- * plus a point of reputation, which the smith wants before he will make
- * better tools. Requests are the backbone of a day: always a crop that can
- * be grown and handed over in time (from seed today, or already in the
- * ground), never due after its season ends, sized to the farm, and a fresh
- * one is pinned as soon as one is filled. The very first is a few radishes,
- * cheap to grow, so it can be filled with what the first days teach.
+ * What a request pays for `n` of a crop: what they would fetch at market, and
+ * a little over, at most a fifth more and never more than REQUEST_EXTRA over
+ * (the good word in town is the real prize).
+ */
+export function requestReward(crop: CropId, n: number): number {
+  const market = CROPS[crop].price * n;
+  return Math.round((market + Math.min(market * (REQUEST_PREMIUM - 1), REQUEST_EXTRA)) / 5) * 5;
+}
+
+/**
+ * Townsfolk ask for some of one crop. A request is filled from the crate
+ * when the day ends, before the rest ships, and pays a little over market
+ * plus a point of reputation, which the smith and the land agent want before
+ * they will deal. Requests are few and they compete: at most two are open,
+ * new ones come with the mornings, and each asks for a good share of the
+ * farm, so two together want more than its plots can grow in time. Choosing
+ * which to grow for is the morning's decision. A request is always for a crop
+ * that can be grown and handed over in time (from seed today, or already in
+ * the ground), never due after its season ends. The very first is three
+ * radishes, cheap to grow, so it can be filled with what the first days teach.
  */
 export function makeRequest(s: WorldState): Order | null {
   const known = s.rep < 2 ? ['radish', 'lettuce', 'carrot', 'strawberry', 'beans', 'sunflower', 'corn'] : CROP_IDS;
@@ -175,21 +203,34 @@ export function makeRequest(s: WorldState): Order | null {
   if (!pickFrom.length) return null;
   const o = pickFrom[Math.floor(rand(s) * pickFrom.length)];
   const big = CROPS[o.crop].price > 150;
-  const fields = s.parcels.filter((p) => p.owned).length;
-  // Small, and a little bigger as the town and the farm grow.
-  let n = first ? 3 : big ? randInt(s, 1, 2) : randInt(s, 2, 4) + Math.min(4, Math.floor(s.rep / 3) + (fields - 1));
+  // Days to get the seed in: the request is due its growing time after that, too soon to grow two requests one
+  // after the other on the same plots.
+  const slack = first ? 2 : randInt(s, REQUEST_SLACK[0], REQUEST_SLACK[1]);
+  // The soil free to plant in that time, and a good share of it: half to most (a third as many of the big crops).
+  const room = farmPlots(s, slack);
+  const most = big ? REQUEST_MAX_BIG : REQUEST_MAX;
+  const share = 0.5 + rand(s) * 0.3;
+  let n = first ? 3 : Math.max(3, Math.round((room.free * share) / (big ? 3 : 1)));
+  // A second request competes with the first: the two together want more than that soil can grow, so only one
+  // can be met. (What the first already has growing or in the crate does not need soil.)
+  const other = s.orders[0];
+  if (!first && other && !big) {
+    const it = other.items[0];
+    const still = Math.max(0, it.n - stockCount(s, it.crop) - growing(s, it.crop).n);
+    n = Math.max(n, room.free - still + 1);
+  }
+  n = Math.min(n, most, Math.max(3, room.free));
   // Out of seed time, it asks only for what is already growing.
   if (!o.seedOk) n = Math.max(1, Math.min(n, o.have));
   // Ready when enough is in the ground, or when seed sown today would be.
   const ready = o.growOk && o.have >= n ? Math.min(o.soonest, o.seedOk ? CROPS[o.crop].days : Infinity) : CROPS[o.crop].days;
-  const slack = first ? 2 : randInt(s, 2, 3);
   const due = Math.min(o.last, s.day + ready + slack);
   s.requested = (s.requested ?? 0) + 1;
   return {
     id: s.nextId++,
     who: pick(s, TOWN),
     items: [{ crop: o.crop, n }],
-    reward: round5(CROPS[o.crop].price * n * 1.5) + 10,
+    reward: requestReward(o.crop, n),
     rep: 1,
     due,
   };
@@ -202,20 +243,45 @@ function feasible(s: WorldState, crop: CropId): boolean {
   return (sowing(s.day, crop).ok && s.day + CROPS[crop].days <= last) || (g.n > 0 && s.day + g.soonest <= last);
 }
 
-/** One request at a time until the first is filled, then a few. */
-export function fillRequests(s: WorldState): void {
+/**
+ * Pin new requests. The first comes as soon as the board is read; after that
+ * they come only with the mornings, one at a time, and not every morning:
+ * one until the first is filled, then at most two.
+ */
+export function fillRequests(s: WorldState, morning = false): void {
   const slots = requestSlots(s.rep);
-  while (s.orders.length < slots) {
+  if (!s.requested && !s.orders.length) {
     const o = makeRequest(s);
-    if (!o) break;
-    s.orders.push(o);
+    if (o) s.orders.push(o);
+    return;
   }
+  if (!morning || s.orders.length >= slots) return;
+  // An empty board always gets one; a second waits on the town's mood.
+  if (s.orders.length && rand(s) >= REQUEST_CHANCE) return;
+  const o = makeRequest(s);
+  if (o) s.orders.push(o);
 }
 
-/** How many of each crop the open requests still want from the crate. */
+/**
+ * How many of each crop the open requests still want from the crate: the
+ * crate keeps them overnight instead of selling them. Only for a request that
+ * can still be met (the crate and what will be ripe by its day make enough);
+ * crops held for one that cannot would only miss a night's sale.
+ */
 export function wanted(s: WorldState): Partial<Record<CropId, number>> {
   const out: Partial<Record<CropId, number>> = {};
-  for (const o of s.orders) for (const it of o.items) out[it.crop] = (out[it.crop] ?? 0) + it.n;
+  for (const o of s.orders) {
+    for (const it of o.items) {
+      let soon = stockCount(s, it.crop);
+      for (let i = 0; i < s.plots.length && soon < it.n; i++) {
+        const c = s.plots[i].crop;
+        if (!c || c.dead || c.kind !== it.crop || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+        // Ripe tomorrow when grown tonight; else it needs a night for each day of growth left.
+        if (CROPS[c.kind].days - c.age <= o.due - s.day - 1) soon++;
+      }
+      if (soon >= it.n) out[it.crop] = (out[it.crop] ?? 0) + it.n;
+    }
+  }
   return out;
 }
 
@@ -238,6 +304,7 @@ export function settleRequests(s: WorldState, ev: SimEvent[], report?: DayReport
       ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: o.reward });
     } else if (o.due <= s.day) {
       s.orders = s.orders.filter((x) => x !== o);
+      if (report) (report.lapsed ??= []).push({ who: o.who, crop: o.items[0].crop, n: o.items[0].n });
       ev.push({ type: 'request', id: o.id, who: o.who, done: false, reward: 0 });
     }
   }

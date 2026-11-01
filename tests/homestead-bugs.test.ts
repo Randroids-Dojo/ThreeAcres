@@ -10,7 +10,8 @@ import { actWord } from '../src/ui/touch';
 import { EARLY, EARLY_FEATURES, stand, teach, world } from './helpers';
 
 function farm() {
-  const s = teach(world('sunup'), [...EARLY, 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'scarecrow'], [...EARLY_FEATURES, 'board', 'requests', 'pests']);
+  const s = teach(world('sunup'), [...EARLY, 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'scarecrow', 'wide'], [...EARLY_FEATURES, 'board', 'requests', 'pests']);
+  s.tool = 'hands';
   s.day = 6;
   return s;
 }
@@ -27,9 +28,11 @@ describe('the bug lesson', () => {
     const t = new Tutor();
     t.update(s, 0.1, true);
     plots(s, 4, 6).crop!.bugs = 1;
-    const out = t.update(s, 0.1, true);
+    let out = t.update(s, 0.1, true);
     expect(out.line).toBe('Bugs on your carrots. Pick them off.');
     expect(out.point).toEqual({ x: 4.5, y: 6.5 });
+    // On screen a couple of seconds, so it counts as seen.
+    for (let i = 0; i < 20; i++) out = t.update(s, 0.1, true);
     stand(s, 4, 5, 's');
     s.tool = 'hands';
     s.actors[0].x = 4.5;

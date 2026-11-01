@@ -230,6 +230,8 @@ export interface DayReport {
   filled?: { who: string; reward: number }[];
   /** Sunup: coins a neighbour left so a farm with nothing left can start again. */
   gift?: number;
+  /** Sunup: requests that ran out of time overnight, unfilled. */
+  lapsed?: { who: string; crop: CropId; n: number }[];
 }
 
 export interface WorldState {
@@ -289,6 +291,11 @@ export interface WorldState {
   orders: Order[];
   /** Sunup: town requests pinned so far (the first is always a cheap one). Missing in older saves. */
   requested?: number;
+  /**
+   * Sunup: plots tapped while the farmer was busy, each with the tool it
+   * wants, done in order once the job in hand is finished. Missing in older saves.
+   */
+  taps?: { x: number; y: number; tool: ToolId }[];
   rep: number;
   almanac: Almanac;
   milestones: Record<string, boolean>;

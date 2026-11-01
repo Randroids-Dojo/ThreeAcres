@@ -531,3 +531,22 @@ svg { width: 100%; height: 100%; display: block; }
 .toasts { z-index: 7; }
 .dialog-open .toasts { top: auto; bottom: calc(8px + var(--safe-b)); }
 .dialog-open .toasts[style*='top'] { bottom: auto; }
+
+/* ---------------------------------------------------------------- Sunup, after the second playtest */
+/* Keys on the buttons, whenever a keyboard is at hand (a mouse or keys, not touch): tools 1 to 5, Enter to sleep,
+   B for the board, C for the view, and a number on each card in a picker. */
+#app[data-device='mouse'] .tool .key { display: block; }
+.tool.act .key { right: 3px; font-size: 8.5px; letter-spacing: 0.02em; }
+.hud .topbtns .kcap { display: none; position: absolute; bottom: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px; background: #f4e8c8; color: var(--ink); font-size: 9.5px; font-weight: 800; line-height: 15px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+#app[data-device='key'] .hud .topbtns .kcap, #app[data-device='mouse'] .hud .topbtns .kcap { display: block; }
+
+.hud .topbtns .viewbtn { position: relative; }
+.seed { position: relative; }
+.seed .key { display: none; position: absolute; top: 2px; right: 4px; font-size: 9.5px; font-weight: 700; color: rgba(45, 36, 22, 0.5); }
+#app[data-device='key'] .seed .key, #app[data-device='mouse'] .seed .key { display: block; }
+/* The pointer at the screen's edge sits on a dark disc: an arrow you can see is turned towards something, not a 7. */
+.tpoint .disc { display: none; fill: rgba(36, 27, 16, 0.86); stroke: #fbf3dc; stroke-width: 2; }
+.tpoint.on:not(.over) .disc { display: block; }
+.tpoint.on:not(.over) path { transform: scale(0.72) translateX(2px); }
+/* Floating words over a plot stay short and narrow: they wrap rather than run across the screen. */
+.floater { max-width: min(220px, 56vw); white-space: normal; text-align: center; line-height: 1.15; }

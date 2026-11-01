@@ -4,6 +4,7 @@
 import type { WorldState } from '../../sim/types';
 import { PRESETS } from '../../sim/presets';
 import { createWorld } from '../../sim/world';
+import { PARCELS } from '../../sim/map';
 import type { GameModule } from '../../shell/types';
 import { Director } from './director';
 import { inferLessons } from './lessons';
@@ -45,6 +46,8 @@ export const game: GameModule = {
       s.actors = s.actors.filter((a) => a.role === 'farmer');
       s.jobs = [];
     }
+    // Fields still for sale cost what they cost now (the second playtest found them far too cheap).
+    for (const p of s.parcels) if (!p.owned && PARCELS[p.id]) p.price = PARCELS[p.id].price;
     // Saves from before the can and the smith.
     s.water ??= 12;
     s.tools ??= { can: 0, hoe: 0 };

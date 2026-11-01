@@ -43,7 +43,7 @@ describe('the crow lesson', () => {
   it('lets crows in quietly, and speaks only while a crow is actually on the farm', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith']) s.learn.push(`lesson:${id}`);
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
     s.day = 5;
     const t = new Tutor();
     // Day 5, no crow: no line, but crows are let in.
@@ -53,9 +53,9 @@ describe('the crow lesson', () => {
     s.learn.push('pests');
     out = t.update(s, 0.1, true);
     expect(out.line).toBe('');
-    // A crow lands: now the line.
+    // A crow lands: now the line (on screen for a couple of seconds, so it counts as seen).
     s.crows.push({ id: 900, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
-    out = t.update(s, 0.1, true);
+    for (let i = 0; i < 20; i++) out = t.update(s, 0.1, true);
     expect(out.line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     // Shooed: the crow lesson ends, and the scarecrow note follows.
     t.onEvent(s, { type: 'crowScared', id: 900, x: 3, y: 5 } as never);
@@ -71,14 +71,14 @@ describe('a crow will not wait', () => {
   it('takes the line from a calm lesson, then hands it back', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'turn', 'smith']) s.learn.push(`lesson:${id}`);
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
     s.learn.push('pests');
     s.day = 5;
     s.coins = 500;
     const t = new Tutor();
     expect(t.update(s, 0.1, true).line).toBe('Buy a second field.');
     s.crows.push({ id: 901, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
-    expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
+    for (let i = 0; i < 20; i++) expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     t.onEvent(s, { type: 'crowScared', id: 901, x: 3, y: 5 } as never);
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);
@@ -101,7 +101,7 @@ describe('Sunup copy after the playtest', () => {
   it('never says "Build one" to a farmer who cannot pay for it', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'bugs']) s.learn.push(`lesson:${id}`);
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'bugs', 'wide']) s.learn.push(`lesson:${id}`);
     s.coins = 0;
     const t = new Tutor();
     const line = t.update(s, 0.1, true).line;

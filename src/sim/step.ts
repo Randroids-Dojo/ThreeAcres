@@ -1,10 +1,10 @@
 // One tick of the farm. Applies the player's commands, moves the clock by the
 // current clock rule, runs people and crows, and returns what happened.
 
-import { canAfford, homestead, resolve } from './actions';
-import { dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tickActors, tileOf, walkFarmer, walkTo } from './actors';
+import { canAfford, fieldRep, homestead, resolve } from './actions';
+import { doTap, dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tapTool, TAP_QUEUE, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
-import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, requestSlots, TOOL_UPGRADES } from './constants';
+import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, nightfall, turnsMinute } from './day';
 import { checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
@@ -27,6 +27,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     if (c.type === 'move') move = c;
     else command(s, c, ev);
   }
+  // Pushing the stick takes over: taps still waiting are dropped.
+  if (s.taps?.length && Math.hypot(move.x, move.y) >= 0.15 && s.rules.control === 'walk') s.taps = [];
 
   // The night transition: everything waits, the day turns over in the dark.
   if (s.turnover >= 0) {
@@ -71,7 +73,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     updateGoals(s, ev);
   }
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
-  if (homestead(s) && s.learn.includes('requests') && s.orders.length < requestSlots(s.rep)) fillRequests(s);
+  // The first request comes as soon as the board brings requests in; the rest come with the mornings.
+  if (homestead(s) && s.learn.includes('requests') && !s.requested && !s.orders.length) fillRequests(s);
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -86,6 +89,7 @@ function beginNight(s: WorldState, ev: SimEvent[]): void {
   if (s.turnover >= 0) return;
   s.turnover = 0;
   s.night = 0;
+  s.taps = [];
   for (const a of s.actors) {
     a.moving = false;
     a.hop = 0;
@@ -177,16 +181,28 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     }
     case 'actAt': {
-      if (!awake || s.rules.control !== 'walk' || f.task) return;
+      if (!awake || s.rules.control !== 'walk') return;
       if (!inMap(c.x, c.y)) return;
-      const t = tileOf(f);
-      const near = Math.max(Math.abs(t.x - c.x), Math.abs(t.y - c.y)) <= 1;
       const r = resolve(s, s.tool, c.x, c.y);
       // A tap on a field for sale offers it, from wherever the farmer stands.
       if (r.reason === 'unowned') {
         ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
         break;
       }
+      if (homestead(s)) {
+        // Sunup: a tap beside the well means the well, and a tap is for the job on its plot, with the tool for it.
+        // Taps made while the farmer is busy wait their turn, so quick taps on three radishes harvest three.
+        const t = wellTap(s, c.x, c.y) ?? { x: c.x, y: c.y };
+        const tap = { x: t.x, y: t.y, tool: tapTool(s, s.tool, t.x, t.y) };
+        const queue = (s.taps ??= []);
+        if (f.task || f.path.length || f.aim || queue.length) {
+          if (queue.length < TAP_QUEUE && !queue.some((q) => q.x === tap.x && q.y === tap.y)) queue.push(tap);
+        } else doTap(s, f, tap, ev);
+        break;
+      }
+      if (f.task) return;
+      const t = tileOf(f);
+      const near = Math.max(Math.abs(t.x - c.x), Math.abs(t.y - c.y)) <= 1;
       if (near) {
         if (r.verb && r.ok) startAction(s, f, r, c.x, c.y, ev);
         else if (r.reason) ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
@@ -242,7 +258,7 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     case 'buyParcel': {
       const p = s.parcels[c.id];
-      if (!p || p.owned || s.coins < p.price) return;
+      if (!p || p.owned || s.coins < p.price || s.rep < fieldRep(s, c.id)) return;
       s.coins -= p.price;
       p.owned = true;
       ev.push({ type: 'buy', item: `field:${p.id}`, cost: p.price });

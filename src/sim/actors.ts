@@ -2,14 +2,14 @@
 // control and the hands, actions in progress, footsteps, and the hands' own
 // choice of chores.
 
-import { crowAt, perform, resolve, type Resolved } from './actions';
+import { crowAt, homestead, perform, resolve, type Resolved } from './actions';
 import { ACTION_SECONDS, BUILD_COST, HAND_SLOWER, HAND_SPEED, HOP_SECONDS, WALK_SPEED } from './constants';
 import { CROPS } from './crops';
-import { BUNK } from './map';
+import { BUNK, PROPS, propAt } from './map';
 import { pathNextTo, pathTo } from './path';
 import { needsWater } from './soil';
 import { idx, inMap, owned, walkable } from './world';
-import type { Actor, Facing, Job, SimEvent, Verb, WorldState } from './types';
+import type { Actor, Facing, Job, SimEvent, ToolId, Verb, WorldState } from './types';
 
 const RADIUS = 0.28;
 const STEP_EVERY = 0.55;
@@ -103,16 +103,24 @@ function stepSound(s: WorldState, a: Actor, dist: number, ev: SimEvent[]): void 
   }
 }
 
+/** Jobs quick enough to do on the move: walking with the act button held does not stop at each plot. */
+const ON_THE_MOVE = new Set<Verb>(['harvest', 'water', 'plant', 'tend', 'clear', 'scare']);
+/** How fast the farmer walks through a quick job, as a share of a walk. */
+const MOVE_WHILE_WORKING = 0.6;
+
 /** Walk control: push the farmer by the stick, sliding along walls. */
 export function walkFarmer(s: WorldState, mx: number, my: number, dt: number, ev: SimEvent[]): void {
   const a = farmer(s);
   const len = Math.hypot(mx, my);
-  if (a.task || len < 0.15) {
+  // Sunup keeps walking, a little slower, through a quick job: holding the act button along a row is one smooth walk.
+  const working = !!a.task && homestead(s) && ON_THE_MOVE.has(a.task.verb);
+  if ((a.task && !working) || len < 0.15) {
     a.moving = false;
     return;
   }
   if (a.path.length) a.path = [];
-  const k = Math.min(1, len);
+  if (a.aim) a.aim = null;
+  const k = Math.min(1, len) * (working ? MOVE_WHILE_WORKING : 1);
   const vx = (mx / len) * WALK_SPEED * k * dt;
   const vy = (my / len) * WALK_SPEED * k * dt;
   const ox = a.x;
@@ -121,8 +129,11 @@ export function walkFarmer(s: WorldState, mx: number, my: number, dt: number, ev
   if (!blockedAt(s, a.x, a.y + vy)) a.y += vy;
   const moved = Math.hypot(a.x - ox, a.y - oy);
   a.moving = moved > 1e-4;
-  faceTowards(a, mx, my);
-  turnAngle(a, Math.atan2(my, mx), dt);
+  // While a job plays out the farmer keeps facing it.
+  if (!working) {
+    faceTowards(a, mx, my);
+    turnAngle(a, Math.atan2(my, mx), dt);
+  }
   if (moved > 0) stepSound(s, a, moved, ev);
 }
 
@@ -440,6 +451,8 @@ export function tickActors(s: WorldState, dt: number, ev: SimEvent[]): void {
     if (a === f) {
       if (s.rules.control === 'point' && !a.task) workJobs(s, a, ev);
       else if (s.rules.control === 'walk' && !a.task && a.aim && !a.path.length) finishWalkTap(s, a, ev);
+      // Sunup: the next tap waiting its turn, once the farmer is free.
+      if (s.rules.control === 'walk' && !a.task && !a.aim && !a.path.length && s.taps?.length) doTap(s, a, s.taps.shift()!, ev);
     } else {
       handTick(s, a, ev);
     }
@@ -455,6 +468,60 @@ function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
   if (Math.max(Math.abs(t.x - aim.x), Math.abs(t.y - aim.y)) > 1) return;
   const r = resolve(s, s.tool, aim.x, aim.y);
   if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
+}
+
+/** Taps that can wait their turn while the farmer is busy. */
+export const TAP_QUEUE = 12;
+
+/** Jobs a tap may change tools for: free of coins and never undoing anything. */
+const TAP_JOBS = new Set<Verb>(['harvest', 'tend', 'scare', 'clear', 'water']);
+
+/**
+ * Sunup: the tool for a tapped plot. The tool in hand when it can do the job
+ * there; otherwise, when a free job waits there for the hands or the can (a
+ * ripe crop, bugs, a crow, a withered crop, a thirsty one), the tool for it.
+ * Never seeds or the hoe: a stray tap must not spend coins or turn meadow.
+ */
+export function tapTool(s: WorldState, inHand: ToolId, x: number, y: number): ToolId {
+  const r = resolve(s, inHand, x, y);
+  if ((r.verb && r.ok) || !homestead(s)) return inHand;
+  for (const t of ['hands', 'can'] as ToolId[]) {
+    if (t === inHand || (t !== 'hands' && !s.learn.includes(t))) continue;
+    const q = resolve(s, t, x, y);
+    if (q.verb && q.ok && TAP_JOBS.has(q.verb)) return t;
+  }
+  return inHand;
+}
+
+/** Sunup: a tap on the ground beside the well, with nothing to do there, is a tap on the well (it fills the can). */
+export function wellTap(s: WorldState, x: number, y: number): { x: number; y: number } | null {
+  const w = PROPS.find((p) => p.kind === 'well');
+  if (!w || !homestead(s) || propAt(x, y) === w) return null;
+  if (Math.max(Math.abs(x - w.x), Math.abs(y - w.y)) > 1) return null;
+  const here = resolve(s, s.tool, x, y);
+  if (here.verb && here.ok) return null;
+  const r = resolve(s, s.tool, w.x, w.y);
+  return r.verb === 'refill' && r.ok ? { x: w.x, y: w.y } : null;
+}
+
+/** Sunup: do one tap now, with its tool: act on it from beside it, or walk there and then act. */
+export function doTap(s: WorldState, a: Actor, tap: { x: number; y: number; tool: ToolId }, ev: SimEvent[]): void {
+  // The tool chosen when it was tapped, if it still does the job; else whatever does it now.
+  const fits = (t: ToolId) => {
+    const r = resolve(s, t, tap.x, tap.y);
+    return !!(r.verb && r.ok);
+  };
+  const tool = fits(tap.tool) ? tap.tool : tapTool(s, s.tool, tap.x, tap.y);
+  if (tool !== s.tool) {
+    s.tool = tool;
+    s.kitTool = tool;
+  }
+  const r = resolve(s, s.tool, tap.x, tap.y);
+  const t = tileOf(a);
+  if (Math.max(Math.abs(t.x - tap.x), Math.abs(t.y - tap.y)) <= 1) {
+    if (r.verb && r.ok) startAction(s, a, r, tap.x, tap.y, ev);
+    else if (r.reason) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
+  } else walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok));
 }
 
 export function walkTo(s: WorldState, a: Actor, x: number, y: number, thenAct: boolean): void {

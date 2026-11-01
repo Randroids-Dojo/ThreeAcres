@@ -67,7 +67,8 @@ export function createWorld(seed: number, rules: Rules): WorldState {
     day: 1,
     minute: 0,
     weather: 'sun',
-    forecast: ['cloud', 'rain', 'sun'],
+    // Day 3 is dry, so the seeds sown on day 2 want water; the rain comes on day 4.
+    forecast: ['cloud', 'sun', 'rain'],
     stamina: STAMINA_MAX,
     staminaMax: STAMINA_MAX,
     water: CAN_WATER[0],

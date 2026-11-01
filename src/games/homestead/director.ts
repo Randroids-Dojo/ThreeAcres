@@ -10,7 +10,7 @@ import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
 import { daylightOf, hourOf, inMap, season, SEASON_NAMES, dayOfSeason } from '../../sim/world';
-import { propAt } from '../../sim/map';
+import { PROPS, propAt } from '../../sim/map';
 import type { BuildKind, SimEvent, WorldState } from '../../sim/types';
 import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
@@ -18,6 +18,11 @@ import { Hud } from '../../ui/hud';
 import { Input } from '../../game/input';
 import { Tutor } from './lessons';
 import type { GameContext } from '../../shell/types';
+
+/** How tall the well and the notice board are drawn, in tiles, for taps on them. */
+const PROP_HEIGHT: Record<string, number> = { well: 1.3, board: 1.6 };
+/** A wide screen's close camera looks this many tiles south of the farmer. */
+const CLOSE_LEAD = 1.4;
 
 export class Director {
   state: WorldState;
@@ -50,6 +55,8 @@ export class Director {
     this.input = new Input(this.stage, {
       rules: () => this.state.rules,
       pick: (px, py) => this.r3d?.pick(px, py) ?? null,
+      pickTap: (px, py) => this.pickTap(px, py),
+      picking: () => this.hud?.picking ?? false,
       canPaint: (x, y) => {
         const r = resolve(this.state, this.state.tool, x, y);
         return !!(r.verb && r.ok);
@@ -74,6 +81,7 @@ export class Director {
       offerParcel: (id) => this.dialogs.parcel(id),
       project: (x, y, h) => this.r3d?.project(x, y, h) ?? null,
       sleep: () => this.sleep(),
+      toggleCamera: () => this.toggleCamera(),
       input: this.input,
     });
     this.dialogs = new Dialogs({
@@ -123,11 +131,27 @@ export class Director {
 
   // ------------------------------------------------------------ camera
 
+  /** Where the lesson pointer is aimed, so a wide screen's close camera can keep it clear of the rack and line. */
+  private lessonPoint: { x: number; y: number } | null = null;
+
   private camera(): CameraIntent {
     const mode = this.state.rules.camera;
     const c = this.cams[mode];
     const f = farmer(this.state);
-    return { mode, focusX: f.x, focusY: f.y, zoom: c.zoom, panX: mode === 'wide' ? c.panX : 0, panY: mode === 'wide' ? c.panY : 0 };
+    let fx = f.x;
+    let fy = f.y;
+    // A wide screen's close view keeps the tool rack and the lesson line along its bottom: it looks a little ahead
+    // (south) of the farmer, and leans towards what a lesson points at, so neither covers the crops being taught.
+    const wideScreen = this.stage.clientWidth > this.stage.clientHeight;
+    if (mode === 'close' && wideScreen) {
+      fy += CLOSE_LEAD;
+      const p = this.lessonPoint;
+      if (p && Math.abs(p.x - f.x) < 7 && Math.abs(p.y - f.y) < 6) {
+        fx += (p.x - f.x) * 0.35;
+        fy += Math.max(0, p.y - f.y) * 0.35;
+      }
+    }
+    return { mode, focusX: fx, focusY: fy, zoom: c.zoom, panX: mode === 'wide' ? c.panX : 0, panY: mode === 'wide' ? c.panY : 0 };
   }
 
   private pxPerTile(): number {
@@ -157,8 +181,39 @@ export class Director {
     this.ctx.audio.ui('toggle');
   }
 
+  /**
+   * A tap on the screen to a tile. The well and the notice board stand up off
+   * the ground, so a tap on their drawing (which the ground pick would put on
+   * the tile behind them) is a tap on them.
+   */
+  private pickTap(px: number, py: number): { x: number; y: number } | null {
+    if (!this.r3d) return null;
+    for (const p of PROPS) {
+      if (p.kind !== 'well' && p.kind !== 'board') continue;
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      for (const [x, y] of [[p.x, p.y], [p.x + p.w, p.y], [p.x, p.y + p.h], [p.x + p.w, p.y + p.h]]) {
+        for (const h of [0, PROP_HEIGHT[p.kind]]) {
+          const q = this.r3d.project(x, y, h);
+          if (!q) continue;
+          x0 = Math.min(x0, q.x);
+          x1 = Math.max(x1, q.x);
+          y0 = Math.min(y0, q.y);
+          y1 = Math.max(y1, q.y);
+        }
+      }
+      if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return { x: p.x, y: p.y };
+    }
+    return this.r3d.pick(px, py);
+  }
+
   private hotkey(code: string, shift: boolean): boolean {
     if (!this.running) return false;
+    // An open picker answers first: arrows and numbers choose, Enter and Escape close it (Escape never reaches
+    // the game switcher while a picker is open).
+    if (!this.dialogs.open && this.hud.pickerKey(code)) return true;
     if (code === 'Escape') {
       if (this.dialogs.open) this.dialogs.close();
       else this.ctx.openSwitcher();
@@ -297,10 +352,12 @@ export class Director {
       this.tutor.board(s);
     }
     // One lesson at a time: it may bring a tool or a system onto the farm.
-    const lesson = this.tutor.update(s, dt, this.hud.touch.shown);
+    // The line counts as seen only while it can be: no board or picker over it.
+    const lesson = this.tutor.update(s, dt, this.hud.touch.shown, !this.dialogs.open && !this.hud.picking);
     cmds.push(...lesson.cmds);
     this.hud.setLesson(lesson.line);
     this.hud.setPoint(lesson.point);
+    this.lessonPoint = lesson.line ? lesson.point : null;
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);

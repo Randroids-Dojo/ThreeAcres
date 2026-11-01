@@ -70,9 +70,12 @@ describe('a bot farm over twenty days', () => {
       expect(r.problems).toEqual([]);
       const water = r.events.filter((e) => e.type === 'water').length;
       const harvest = r.events.filter((e) => e.type === 'harvest').length;
-      // Before: 6.7 waterings per harvest and 15 quiet nights in 30 (11.8 and 12 in the playtest's bot farm).
-      expect(water / harvest).toBeLessThan(3);
-      expect(quietNights(r.events as never)).toBeLessThanOrEqual(6);
+      // Before round 1: 6.7 waterings per harvest and 15 quiet nights in 30 (11.8 and 12 in the playtest's bot farm).
+      // Round 1 brought it to about 2 with two-day soil, and the second playtest found too little to do: the can now
+      // wets a plot for one night, so dry days mean watering, but not the old grind. Requests are scarce now, so a
+      // few more nights pass without a sale.
+      expect(water / harvest).toBeLessThan(5);
+      expect(quietNights(r.events as never)).toBeLessThanOrEqual(9);
       expect(turned).toBeLessThan(10);
     });
   }

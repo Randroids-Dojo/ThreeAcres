@@ -9,6 +9,10 @@ export interface InputHost {
   rules(): Rules;
   /** CSS px on the stage to the tile under it. */
   pick(px: number, py: number): { x: number; y: number } | null;
+  /** A tap to a tile: like pick, but a tap on a building drawn up off the ground is a tap on it. Defaults to pick. */
+  pickTap?(px: number, py: number): { x: number; y: number } | null;
+  /** Is a picker (seeds, builds) open? Then the arrow keys choose in it instead of walking. */
+  picking?(): boolean;
   /** Can the current tool do something at this tile? Used to keep drags quiet. */
   canPaint(x: number, y: number): boolean;
   hasJob(x: number, y: number): boolean;
@@ -67,6 +71,15 @@ export class Input {
     document.addEventListener('dblclick', (e) => e.preventDefault());
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    // A button clicked with a mouse or a finger does not keep the keyboard: Space and Enter go back to the farm.
+    window.addEventListener(
+      'click',
+      (e) => {
+        const b = document.activeElement as HTMLElement | null;
+        if (e.detail > 0 && b?.tagName === 'BUTTON') b.blur();
+      },
+      true,
+    );
     window.addEventListener('blur', () => this.keys.clear());
     stage.addEventListener('pointerdown', this.onDown);
     stage.addEventListener('pointermove', this.onMove);
@@ -125,10 +138,12 @@ export class Input {
     }
     let mx = this.stick.x;
     let my = this.stick.y;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) mx -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) mx += 1;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) my -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) my += 1;
+    // Arrow keys held from before a picker opened stop walking while it is open.
+    const arrows = !this.host.picking?.();
+    if (this.keys.has('KeyA') || (arrows && this.keys.has('ArrowLeft'))) mx -= 1;
+    if (this.keys.has('KeyD') || (arrows && this.keys.has('ArrowRight'))) mx += 1;
+    if (this.keys.has('KeyW') || (arrows && this.keys.has('ArrowUp'))) my -= 1;
+    if (this.keys.has('KeyS') || (arrows && this.keys.has('ArrowDown'))) my += 1;
     const len = Math.hypot(mx, my);
     if (len > 1) {
       mx /= len;
@@ -150,6 +165,16 @@ export class Input {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
     this.saw('key');
+    // A button reached with Tab takes Enter and Space itself, as buttons do. (A clicked button gives up its
+    // focus straight away, so Space after a click still harvests.)
+    if (t && t.tagName === 'BUTTON' && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) return;
+    // While a picker is open the arrow keys choose in it, so they never walk the farmer (WASD still do).
+    const picking = !!this.host.picking?.();
+    if (picking && e.code.startsWith('Arrow')) {
+      e.preventDefault();
+      this.host.hotkey(e.code, e.shiftKey);
+      return;
+    }
     if (this.host.hotkey(e.code, e.shiftKey)) {
       e.preventDefault();
       return;
@@ -265,7 +290,7 @@ export class Input {
   };
 
   private tapAt(px: number, py: number) {
-    const tile = this.host.pick(px, py);
+    const tile = this.host.pickTap ? this.host.pickTap(px, py) : this.host.pick(px, py);
     if (tile) this.queue.push({ type: 'actAt', x: tile.x, y: tile.y });
   }
 

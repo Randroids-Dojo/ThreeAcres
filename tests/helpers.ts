@@ -49,7 +49,11 @@ export interface RunResult {
 }
 
 /** Play with the bot until `days` have passed (or a step cap), checking invariants. */
-export function play(s: WorldState, days: number, opts: { dt?: number; maxSteps?: number; pace?: number; each?: (s: WorldState, i: number) => Command[] } = {}): RunResult {
+export function play(
+  s: WorldState,
+  days: number,
+  opts: { dt?: number; maxSteps?: number; pace?: number; each?: (s: WorldState, i: number) => Command[]; after?: (s: WorldState, ev: SimEvent[]) => void } = {},
+): RunResult {
   const bot = newBot(opts.pace);
   const dt = opts.dt ?? 1 / 30;
   const target = s.day + days;
@@ -60,6 +64,7 @@ export function play(s: WorldState, days: number, opts: { dt?: number; maxSteps?
   for (; i < max && s.day < target; i++) {
     const cmds = [...(opts.each?.(s, i) ?? []), ...botCommands(s, bot, dt)];
     const ev = step(s, dt, cmds);
+    opts.after?.(s, ev);
     for (const e of ev) events.push(e);
     const bad = invariants(s);
     if (bad.length) {

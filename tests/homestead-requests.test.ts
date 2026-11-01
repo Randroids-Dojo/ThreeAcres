@@ -36,10 +36,13 @@ describe('the first request', () => {
 });
 
 describe('a request keeps its crops', () => {
-  it('a short order stays in the crate overnight instead of being sold', () => {
+  it('a short order stays in the crate overnight instead of being sold', async () => {
+    const { plant } = await import('../src/sim/world');
     const s = onDay3(5);
     s.orders = [{ id: 1, who: 'Mabel', items: [{ crop: 'strawberry', n: 3 }], reward: 190, rep: 1, due: 9 }];
     s.stock.strawberry[0] = 2;
+    // The third is growing and will be ripe in time.
+    plant(s, 2, 7, 'strawberry', 4);
     s.stock.radish[0] = 4;
     const coins = s.coins;
     nightfall(s, []);
@@ -53,6 +56,15 @@ describe('a request keeps its crops', () => {
     expect(s.orders.some((o) => o.id === 1)).toBe(false);
     expect(s.report!.filled).toEqual([{ who: 'Mabel', reward: 190 }]);
     expect(s.rep).toBe(1);
+  });
+
+  it('but not for a request that can no longer be met: holding those would only miss a sale', () => {
+    const s = onDay3(5);
+    s.orders = [{ id: 1, who: 'Mabel', items: [{ crop: 'strawberry', n: 3 }], reward: 190, rep: 1, due: 5 }];
+    s.stock.strawberry[0] = 2;
+    nightfall(s, []);
+    expect(s.stock.strawberry[0]).toBe(0);
+    expect(s.report!.kept).toBeUndefined();
   });
 });
 
@@ -86,21 +98,28 @@ describe('requests fit the season', () => {
     expect(made).toBeGreaterThan(1000);
   });
 
-  it('come one at a time until the first is filled, then more, and a filled one is replaced at once', () => {
+  // Round 2: requests were constant (a filled one replaced at once, three open from reputation 4). Now they are
+  // few: one until the first is filled, then two at most, and new ones come only with the mornings.
+  it('come one at a time until the first is filled, then two at most, and only with the mornings', () => {
     const s = onDay3(9);
     s.learn.push('requests');
-    fillRequests(s);
+    step(s, 0.016);
+    expect(s.orders.length).toBe(1);
+    // Mornings bring no second while the first is unfilled.
+    for (let k = 0; k < 5; k++) fillRequests(s, true);
     expect(s.orders.length).toBe(1);
     s.rep = 1;
     step(s, 0.016);
+    expect(s.orders.length).toBe(1);
+    for (let k = 0; k < 20 && s.orders.length < 2; k++) fillRequests(s, true);
     expect(s.orders.length).toBe(2);
-    s.rep = 4;
-    step(s, 0.016);
-    expect(s.orders.length).toBe(3);
+    s.rep = 9;
+    for (let k = 0; k < 20; k++) fillRequests(s, true);
+    expect(s.orders.length).toBe(2);
     const it0 = s.orders[0].items[0];
     s.stock[it0.crop][0] = it0.n;
     step(s, 0.016, [{ type: 'deliver', id: s.orders[0].id }]);
-    expect(s.orders.length).toBe(3);
+    expect(s.orders.length).toBe(1);
   });
 
   it('the board says how far the town’s good word is from the smith’s next tool', () => {

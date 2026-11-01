@@ -105,7 +105,8 @@ export class TouchControls {
     const aim = this.host.aimVerb();
     const verb = aim?.verb ?? null;
     const water = this.host.water();
-    setHtml(this.act.querySelector('.ic')!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : 'hands')));
+    // With nothing to do, the button wears the tool in hand (a can, not a hand, while the can is held).
+    setHtml(this.act.querySelector('.ic')!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : this.host.toolIcon())));
     // A verb on the button, always: Pick for the bugs, Shoo for a crow. An empty can says so.
     const word = aim?.label ?? (verb ? actWord(verb) : '');
     setText(this.act.querySelector('.tb-t')!, water?.empty && !(aim && aim.ok) ? 'Empty' : word);

@@ -2,7 +2,7 @@
 // do. Under synergy soil it also explains the crop's quality, which is most
 // of the puzzle.
 
-import { homestead, sowing, type Resolved } from '../sim/actions';
+import { fieldRep, homestead, sowing, type Resolved } from '../sim/actions';
 import { BUILD_COST, CAN_WATER, STAMINA_COST } from '../sim/constants';
 import { CROPS, QUALITY_NAME } from '../sim/crops';
 import { qualityAt } from '../sim/soil';
@@ -21,6 +21,17 @@ export const VERB_NAMES: Record<Verb, string> = {
   scare: 'Shoo the crow',
   refill: 'Fill the can',
 };
+
+/** A townsperson's name inside a sentence: "the lighthouse keeper", never "The lighthouse keeper" after "for". */
+export function townName(who: string): string {
+  return who.replace(/^The /, 'the ');
+}
+
+/** A sentence from parts: the first starts with a capital, the rest run on in lower case ("Sold 4 for 120, 2 grew"). */
+export function sentence(parts: string[]): string {
+  const s = parts.join(', ');
+  return s ? `${s[0].toUpperCase()}${s.slice(1)}.` : '';
+}
 
 export function denyText(reason: string): string {
   if (reason === 'unowned') return 'This field is for sale';
@@ -99,7 +110,8 @@ export function brief(s: WorldState, x: number, y: number): string {
   if (!isField(s, x, y)) return '';
   if (!owned(s, x, y)) {
     const p = s.parcels[s.parcelOf[y * s.W + x]];
-    return `<b>For sale</b> <span class="why">${p.price} coins</span>`;
+    const rep = fieldRep(s, p.id);
+    return `<b>For sale</b> <span class="why">${s.rep < rep ? `to farmers with reputation ${rep}` : `${p.price} coins`}</span>`;
   }
   const b = buildAt(s, x, y);
   if (b) return `<b>${b.kind === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b>`;

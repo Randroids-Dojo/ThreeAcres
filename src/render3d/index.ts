@@ -30,7 +30,7 @@ import { makeParticles, makeTileFlashes } from './fx';
 import { buildGlow, type Glow } from './glow';
 import { buildMarkers, type Markers } from './markers';
 import { U, armNaNWatch, makeMaterials, patch } from './materials';
-import { computeSky, makeSky, SEASONS } from './palette';
+import { computeSky, makeSky, SEASONS, stormDawn } from './palette';
 import { buildProps, makeGlassMaterial, signTexture, type Props } from './props';
 import { makeScreen } from './screen';
 import { buildTerrain, makeWaterMaterial, type Terrain } from './terrain';
@@ -361,8 +361,9 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
     else fv.set(dawnCol.x, dawnCol.y, dawnCol.z, dawn);
     const tv = screen.ou.uTint.value;
     if (weatherNow === 'heat') tv.set(tintHeat.x, tintHeat.y, tintHeat.z, 0.08 * v.daylight);
-    else if (weatherNow === 'storm') tv.set(tintStorm.x, tintStorm.y, tintStorm.z, 0.24);
-    else if (weatherNow === 'rain') tv.set(tintStorm.x, tintStorm.y, tintStorm.z, 0.12);
+    // A wet dawn keeps less of the grey grade, so the crops can be read at 6 am.
+    else if (weatherNow === 'storm') tv.set(tintStorm.x, tintStorm.y, tintStorm.z, 0.24 * (1 - 0.6 * stormDawn(v.daylight)));
+    else if (weatherNow === 'rain') tv.set(tintStorm.x, tintStorm.y, tintStorm.z, 0.12 * (1 - 0.6 * stormDawn(v.daylight)));
     else tv.set(0, 0, 0, 0);
     // Moonlight grade: a cool wash after dusk that keeps the lamps warm by contrast.
     if (sky.glow > 0.01) {

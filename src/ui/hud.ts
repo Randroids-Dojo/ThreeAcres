@@ -15,7 +15,7 @@ import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import { propAt } from '../sim/map';
 import type { BuildKind, CropId, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
-import { brief, canLevel, describe, denyText, seedNote } from './describe';
+import { brief, canLevel, describe, denyText, seedNote, sentence, townName } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
@@ -30,8 +30,69 @@ export interface HudHost {
   project(x: number, y: number, h?: number): { x: number; y: number } | null;
   /** Sleep from the button (asks first before noon). */
   sleep(): void;
+  /** Close up or the whole farm (C). */
+  toggleCamera(): void;
   input: Input;
 }
+
+/**
+ * The morning card's news from the night's report, as one sentence with a
+ * capital at its start only ("Old Tamsin paid 145, sold 8 for 340."). Empty
+ * when nothing happened worth a card.
+ */
+export function morningNews(s: WorldState): string {
+  const r = s.report;
+  if (!r) return '';
+  const sold = r.sold.reduce((a, x) => a + x.n, 0);
+  const value = r.sold.reduce((a, x) => a + x.value, 0);
+  const bits: string[] = [];
+  for (const f of r.filled ?? []) bits.push(`${esc(townName(f.who))} paid ${fmt(f.reward)}`);
+  if (sold) bits.push(`sold ${sold} for ${fmt(value)}`);
+  // A request that ran out of time says so, rather than vanishing from the board.
+  for (const l of r.lapsed ?? []) bits.push(`${esc(townName(l.who))} gave up on the ${cropWord(l.crop, l.n)}`);
+  for (const k of r.kept ?? []) bits.push(`${k.n} ${cropWord(k.crop, k.n)} kept for a request`);
+  if (r.grew) bits.push(`${r.grew} grew`);
+  if (r.crewWork) bits.push(`the crew did ${r.crewWork} jobs overnight`);
+  if (r.wages) bits.push(`wages ${r.wages}`);
+  if (r.withered) bits.push(`${r.withered} withered`);
+  if (r.turned) bits.push(`the turn took ${r.turned} green ${r.turned === 1 ? 'crop' : 'crops'}`);
+  if (r.eaten) bits.push(`crows ate ${r.eaten}`);
+  if (r.gift) bits.push(`a neighbour left ${fmt(r.gift)} coins for seed`);
+  return sentence(bits);
+}
+
+/**
+ * The keyboard in a picker: where an arrow key moves the choice among the
+ * cards that can be chosen (in reading order, with their places on screen),
+ * or which card a number key names. Null when the key does not move it.
+ */
+export function pickerStep(cards: { id: string; ok: boolean; x: number; y: number }[], current: string, code: string): string | null {
+  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(code);
+  if (digit) return cards[Number(digit[1]) - 1]?.id ?? null;
+  const ok = cards.filter((c) => c.ok);
+  if (!ok.length) return null;
+  const at = ok.findIndex((c) => c.id === current);
+  if (code === 'ArrowRight' || code === 'ArrowLeft') {
+    if (at < 0) return ok[0].id;
+    return ok[(at + (code === 'ArrowRight' ? 1 : ok.length - 1)) % ok.length].id;
+  }
+  if (code === 'ArrowUp' || code === 'ArrowDown') {
+    const me = cards.find((c) => c.id === current) ?? ok[0];
+    const down = code === 'ArrowDown';
+    // The nearest card on the next row up or down, else round to the other end.
+    const rows = ok.filter((c) => (down ? c.y > me.y + 4 : c.y < me.y - 4));
+    const pool = rows.length ? rows : ok.filter((c) => (down ? c.y < me.y - 4 : c.y > me.y + 4));
+    if (!pool.length) return null;
+    const rowY = down === !!rows.length ? Math.min(...pool.map((c) => c.y)) : Math.max(...pool.map((c) => c.y));
+    const row = pool.filter((c) => Math.abs(c.y - rowY) <= 4);
+    return row.reduce((a, b) => (Math.abs(b.x - me.x) < Math.abs(a.x - me.x) ? b : a)).id;
+  }
+  return null;
+}
+
+/** The lesson pointer aims this high over its tile (a crop's top), and its middle sits this many px above that. */
+const POINT_HEIGHT = 0.4;
+const POINT_LIFT = 17;
 
 const WEATHER_ICON: Record<Weather, IconId> = { sun: 'sun', cloud: 'cloud', rain: 'rain', storm: 'storm', heat: 'heat' };
 const TOOL_ICON: Record<ToolId, IconId> = { hands: 'hands', hoe: 'hoe', can: 'can', seeds: 'seeds', build: 'build', smart: 'smart' };
@@ -53,12 +114,14 @@ export class Hud {
   private buildbar = el('div', 'buildbar hidden');
   private toasts = el('div', 'toasts');
   private boardBtn = el('button', 'btn iconbtn');
+  private viewBtn = el('button', 'btn iconbtn viewbtn');
   private fresh = '';
   private hintEl = el('div', 'hint');
   readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
   /** The lesson's pointer: a cream chevron over what the line is about, or at the screen's edge when it is out of view. */
-  private pointer = el('div', 'tpoint', '<svg viewBox="-16 -16 32 32"><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  // Over a target it is a bobbing chevron; at the screen's edge it sits on a dark disc, so it reads as an arrow and not a figure.
+  private pointer = el('div', 'tpoint', '<svg viewBox="-16 -16 32 32"><circle class="disc" r="14.5"/><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
   private pointAt: { x: number; y: number } | null = null;
   private toolsKey = '';
   private goalsKey = '';
@@ -66,6 +129,8 @@ export class Hud {
   private lastCoins = -1;
   private seedOpen = false;
   private buildOpen = false;
+  /** A picker is open and on screen (the lesson line steps aside for it). */
+  picking = false;
   private lastDeny = { text: '', t: 0 };
   private foldedGoals = false;
   private lastAim: { x: number; y: number } | null = null;
@@ -92,11 +157,17 @@ export class Hud {
     this.day.append(when, this.sky, this.meterRow);
     this.coins.append(el('span', 'ic', icon('coin')), this.coinsNum);
     const board = this.boardBtn;
-    board.innerHTML = `<span class="ic">${icon('board')}</span><span class="badge"></span>`;
+    board.innerHTML = `<span class="ic">${icon('board')}</span><span class="badge"></span><span class="kcap">B</span>`;
     board.title = 'Notice board (B)';
     board.onclick = () => host.openBoard();
+    // The whole farm or close up: C on a keyboard, this button with a mouse.
+    const view = this.viewBtn;
+    view.innerHTML = `<span class="ic">${icon('view')}</span><span class="kcap">C</span>`;
+    view.title = 'Whole farm or close up (C)';
+    view.setAttribute('aria-label', 'Whole farm or close up');
+    view.onclick = () => host.toggleCamera();
     const btns = el('div', 'topbtns');
-    btns.append(board);
+    btns.append(board, view);
     const right = el('div', 'topright');
     right.append(this.coins, btns);
     top.append(this.day, el('div', 'spacer'), right);
@@ -197,6 +268,8 @@ export class Hud {
   private updateCoins(s: WorldState): void {
     toggle(this.coins, 'gone', !this.knows(s, 'coins'));
     toggle(this.boardBtn, 'gone', !this.knows(s, 'board'));
+    // Phones play close up; the view button is for a mouse and a keyboard, once the wide view has been mentioned.
+    toggle(this.viewBtn, 'gone', this.touch.shown || !this.knows(s, 'wide'));
     const open = homestead(s) ? s.orders.length : 0;
     setText(this.boardBtn.querySelector('.badge')!, open ? String(open) : '');
     setText(this.coinsNum, fmt(s.coins));
@@ -268,7 +341,7 @@ export class Hud {
       });
       if (act) {
         this.toolbar.append(el('div', 'sep'));
-        const b = el('button', 'tool act', `<span class="ic">${icon('moon')}</span><span class="lbl">${act}</span>`);
+        const b = el('button', 'tool act', `<span class="ic">${icon('moon')}</span><span class="lbl">${act}</span><span class="key">Enter</span>`);
         b.title = `${act} (Enter)`;
         b.onclick = () => {
           this.host.sleep();
@@ -313,15 +386,19 @@ export class Hud {
     // Seed bar shows prices, locks and the selection. Sunup offers what grows
     // now, next season's crops in the last days of a season (marked), and
     // marks what is too late to ripen before the turn.
+    let k = 0;
     for (const b of this.seedbar.querySelectorAll<HTMLElement>('.seed')) {
       const c = b.dataset.crop as CropId;
       const note = seedNote(s, c);
       toggle(b, 'on', s.seed === c);
       toggle(b, 'locked', (r.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || note.state === 'late');
       toggle(b, 'next', note.state === 'next');
-      toggle(b, 'gone', homestead(s) && note.state === 'off');
+      const gone = homestead(s) && note.state === 'off';
+      toggle(b, 'gone', gone);
       setText(b.querySelector('.pr')!, note.price);
       setText(b.querySelector('.wh')!, note.when);
+      // Number keys pick a card: each shown card wears its number while a keyboard or mouse is in use.
+      setText(b.querySelector('.key')!, gone ? '' : String(++k));
     }
     for (const b of this.buildbar.querySelectorAll<HTMLElement>('.seed')) toggle(b, 'on', s.buildKind === b.dataset.kind);
     const seedVisible = this.seedOpen && (r.tools === 'smart' || s.tool === 'seeds');
@@ -346,7 +423,8 @@ export class Hud {
     }
     if (this.toasts.style.top !== below) this.toasts.style.top = below;
     // An open picker has the player's attention: the lesson line and caption step aside.
-    toggle(this.root, 'picking', seedVisible || buildVisible);
+    this.picking = seedVisible || buildVisible;
+    toggle(this.root, 'picking', this.picking);
   }
 
   /** Is the plot being worked (the aim) in the lower part of the screen, where a picker would cover it? */
@@ -361,7 +439,7 @@ export class Hud {
     this.seedbar.innerHTML = '';
     for (const c of CROP_IDS) {
       const d = CROPS[c];
-      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"></span><span class="wh"></span>`);
+      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"></span><span class="wh"></span><span class="key"></span>`);
       b.dataset.crop = c;
       b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}. ${d.likes}.`;
       b.onclick = () => {
@@ -390,7 +468,7 @@ export class Hud {
   private renderBuildbar(): void {
     this.buildbar.innerHTML = '';
     for (const k of ['scarecrow', 'sprinkler'] as BuildKind[]) {
-      const b = el('button', 'seed', `<span class="ic" style="width:24px;height:24px">${icon(k)}</span><span class="nm">${k === 'scarecrow' ? 'Scarecrow' : 'Sprinkler'}</span><span class="pr">${BUILD_COST[k]}</span>`);
+      const b = el('button', 'seed', `<span class="ic" style="width:24px;height:24px">${icon(k)}</span><span class="nm">${k === 'scarecrow' ? 'Scarecrow' : 'Sprinkler'}</span><span class="pr">${BUILD_COST[k]}</span><span class="key">${k === 'scarecrow' ? 1 : 2}</span>`);
       b.dataset.kind = k;
       b.title = k === 'scarecrow' ? 'Keeps crows off everything within three plots' : 'Waters the nine plots around it every morning';
       b.onclick = () => {
@@ -420,6 +498,43 @@ export class Hud {
       this.host.send({ type: 'tool', tool: t });
     }
     this.host.cue('tool');
+  }
+
+  /** Close an open picker (Enter or Escape). False when none is open. */
+  closePicker(): boolean {
+    if (!this.picking) return false;
+    this.seedOpen = false;
+    this.buildOpen = false;
+    this.picking = false;
+    this.host.cue('close');
+    return true;
+  }
+
+  /**
+   * A key while a picker is open: the arrows move the choice among the cards
+   * that can be chosen, a number picks that card (as a tap would), Enter and
+   * Escape close the picker. True when the picker took the key.
+   */
+  pickerKey(code: string): boolean {
+    if (!this.picking) return false;
+    if (code === 'Enter' || code === 'NumpadEnter' || code === 'Escape') return this.closePicker();
+    const s = this.host.state();
+    const seeds = !this.seedbar.classList.contains('hidden');
+    const bar = seeds ? this.seedbar : this.buildbar;
+    const shown = [...bar.querySelectorAll<HTMLElement>('.seed')].filter((b) => !b.classList.contains('gone'));
+    const cards = shown.map((b) => {
+      const r = b.getBoundingClientRect();
+      return { id: (seeds ? b.dataset.crop : b.dataset.kind)!, ok: !b.classList.contains('locked'), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    const id = pickerStep(cards, seeds ? s.seed : s.buildKind, code);
+    if (id === null) return /^Arrow/.test(code) || /^(?:Digit|Numpad)[1-9]$/.test(code);
+    // The same as a tap on the card: a seed that cannot go in says why.
+    const card = shown[cards.findIndex((c) => c.id === id)];
+    card?.click();
+    // A tap closes a picker on a phone; the keyboard keeps it open until Enter.
+    if (seeds) this.seedOpen = true;
+    else this.buildOpen = true;
+    return true;
   }
 
   /** Q cycles through the toolbar. */
@@ -486,11 +601,12 @@ export class Hud {
       case 'harvest': {
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
         // A crop a request wants says how far along the request is, right where it was picked.
+        // Short, so it fits over the plot: the crop names the request.
         const o = homestead(s) ? s.orders.find((q) => q.items[0].crop === e.crop) : null;
         if (o && e.by === s.actors[0].id) {
           const it = o.items[0];
           const have = Math.min(stockCount(s, it.crop), it.n);
-          this.float(e.x + 0.5, e.y + 0.5, have >= it.n ? `${it.n} ${cropWord(it.crop, it.n)} ready for ${o.who}` : `${have} of ${it.n} for ${o.who}`);
+          this.float(e.x + 0.5, e.y + 0.5, have >= it.n ? `${it.n} ${cropWord(it.crop, it.n)} ready` : `${have} of ${it.n} ${cropWord(it.crop, it.n)}`);
           break;
         }
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
@@ -514,9 +630,8 @@ export class Hud {
         else this.toast('<b>Order filled</b>', 'big');
         break;
       case 'request':
-        // Filled overnight requests are on the morning card; this is one handed over by day.
+        // Requests filled or gone overnight are on the morning card; this is one handed over by day.
         if (e.done && s.turnover < 0) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins and a good word.`, 'big', 3200);
-        else if (!e.done) this.toast(`${esc(e.who)} found what they needed elsewhere.`, '');
         break;
       case 'upgrade': {
         const u = TOOL_UPGRADES[e.tool][e.level - 1];
@@ -534,9 +649,14 @@ export class Hud {
       case 'dawn':
         this.morning(s);
         break;
-      case 'buy':
-        if (e.item.startsWith('field:')) this.toast('The field is yours.', '');
+      case 'buy': {
+        // One toast for one field: the second field (and the last) say so as a milestone instead.
+        // (The milestone has already been ticked by the time the purchase is shown, in the same step.)
+        const owned = s.parcels.filter((p) => p.owned).length;
+        const milestone = owned === 2 || owned === s.parcels.length;
+        if (e.item.startsWith('field:') && !(milestone && s.rules.goal === 'market')) this.toast('The field is yours.', '');
         break;
+      }
       case 'sell':
         break;
       case 'rules':
@@ -562,7 +682,8 @@ export class Hud {
   /** Over the tile when it is in view, else on the edge of the clear band, turned towards it. */
   private updatePointer(): void {
     const t = this.pointAt;
-    const pp = t && !this.seedOpen && !this.buildOpen ? this.host.project(t.x, t.y, 0.9) : null;
+    // Aimed at the top of a crop (half a tile up), so the chevron sits just over its target, not a tile above it.
+    const pp = t && !this.seedOpen && !this.buildOpen ? this.host.project(t.x, t.y, POINT_HEIGHT) : null;
     toggle(this.pointer, 'on', !!pp);
     if (!pp) return;
     const W = this.root.clientWidth;
@@ -575,7 +696,8 @@ export class Hud {
     const inside = pp.x > x0 && pp.x < x1 && pp.y > y0 && pp.y < y1;
     toggle(this.pointer, 'over', inside);
     if (inside) {
-      this.pointer.style.transform = `translate(${pp.x.toFixed(0)}px, ${(pp.y - 30).toFixed(0)}px) rotate(90deg)`;
+      // The chevron's tip is 7 px below its middle once turned down.
+      this.pointer.style.transform = `translate(${pp.x.toFixed(0)}px, ${(pp.y - POINT_LIFT).toFixed(0)}px) rotate(90deg)`;
       return;
     }
     const cx = (x0 + x1) / 2;
@@ -599,26 +721,12 @@ export class Hud {
   }
 
   private morning(s: WorldState): void {
-    const r = s.report;
-    if (!r) return;
     if (s.rules.clock === 'flow' && s.speed > 1) return;
-    const sold = r.sold.reduce((a, x) => a + x.n, 0);
-    const value = r.sold.reduce((a, x) => a + x.value, 0);
-    const bits: string[] = [];
-    for (const f of r.filled ?? []) bits.push(`${esc(f.who)} paid ${fmt(f.reward)}`);
-    if (sold) bits.push(`Sold ${sold} for ${fmt(value)}`);
-    for (const k of r.kept ?? []) bits.push(`${k.n} ${cropWord(k.crop, k.n)} kept for a request`);
-    if (r.grew) bits.push(`${r.grew} grew`);
-    if (r.crewWork) bits.push(`the crew did ${r.crewWork} jobs overnight`);
-    if (r.wages) bits.push(`wages ${r.wages}`);
-    if (r.withered) bits.push(`${r.withered} withered`);
-    if (r.turned) bits.push(`the turn took ${r.turned} green ${r.turned === 1 ? 'crop' : 'crops'}`);
-    if (r.eaten) bits.push(`crows ate ${r.eaten}`);
-    if (r.gift) bits.push(`a neighbour left ${fmt(r.gift)} coins for seed`);
+    const news = morningNews(s);
     // Only news earns a morning card.
-    if (!bits.length) return;
+    if (!news) return;
     const weather = WEATHER_NAMES[s.weather].toLowerCase();
-    this.toast(`<b>${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}</b>, ${weather}<br>${bits.join(', ')}.`, 'big', 3800);
+    this.toast(`<b>${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}</b>, ${weather}<br>${news}`, 'big', 3800);
   }
 
   toast(html: string, kind: string, ms = 2400): void {

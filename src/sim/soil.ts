@@ -100,9 +100,10 @@ export function wateredForTonight(s: WorldState, p: Plot): boolean {
   return p.moisture >= CROPS[c.kind].thirst;
 }
 
-export function soak(p: Plot): void {
+/** Wet the soil. Rain and sprinklers soak it (3); Sunup's can wets it for one night (2). */
+export function soak(p: Plot, moisture = 3): void {
   p.wet = true;
-  p.moisture = 3;
+  p.moisture = Math.max(p.moisture, moisture);
 }
 
 /** Beans put nutrient back into their plot and the four around it. */

@@ -4,7 +4,7 @@
 
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
-import { homestead, priceOf } from '../sim/actions';
+import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
@@ -12,6 +12,7 @@ import { MILESTONES, stockCount } from '../sim/goals';
 import { season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
+import { townName } from './describe';
 import { icon } from './icons';
 
 export interface DialogHost {
@@ -162,7 +163,7 @@ export class Dialogs {
           const days = o.due - s.day;
           const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
           const ready = have >= it.n;
-          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}.</span><span class="pay">Pays ${fmt(o.reward)} and a good word</span></span>`);
+          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}.</span><span class="pay">Pays ${fmt(o.reward)} and a good word</span></span>`);
           if (ready) {
             const b = el('button', 'btn primary', 'Deliver');
             b.onclick = () => {
@@ -174,15 +175,17 @@ export class Dialogs {
           }
           list.append(note);
         }
-        list.append(el('p', 'legend', 'What a request needs stays in the crate for it and goes at night, before the rest is sold.'));
+        list.append(el('p', 'legend', 'The crate keeps what a request needs.'));
         break;
       }
       case 'fields':
         for (const p of s.parcels) {
-          const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : `Four by four, meadow. ${fmt(p.price)} coins`}</span></span>`);
+          // The price is on the stamp only; a field the land agent will not sell yet says the reputation it wants.
+          const rep = fieldRep(s, p.id);
+          const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : s.rep < rep ? `Four by four, meadow. Sold to farmers with reputation ${rep}` : 'Four by four, meadow'}</span></span>`);
           if (!p.owned) {
-            const short = s.coins < p.price;
-            const b = el('button', 'btn primary', short ? `Need ${fmt(p.price)}` : 'Buy');
+            const short = s.coins < p.price || s.rep < rep;
+            const b = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
             b.disabled = short;
             // A field is a big spend: the card asks before it buys.
             b.onclick = () => this.parcel(p.id, () => this.board('fields'));
@@ -350,10 +353,13 @@ export class Dialogs {
     if (!p || p.owned) return;
     this.show(`Field ${id + 1} is for sale`, 'parcel');
     this.body.innerHTML = '';
-    this.body.append(el('p', '', `Four by four, meadow now. Rich soil that has not been farmed. ${fmt(p.price)} coins. You have ${fmt(s.coins)}.`));
+    // The price is on the stamp; the words say what it is and what you have.
+    const rep = fieldRep(s, id);
+    const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${s.rep}.` : ` You have ${fmt(s.coins)} coins.`;
+    this.body.append(el('p', '', `Four by four, meadow now. Rich soil that has not been farmed.${known}`));
     const row = el('div', 'row ask');
-    const short = s.coins < p.price;
-    const buy = el('button', 'btn primary', short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
+    const short = s.coins < p.price || s.rep < rep;
+    const buy = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
     buy.disabled = short;
     const go = () => {
       this.host.send({ type: 'buyParcel', id });

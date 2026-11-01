@@ -6,27 +6,31 @@ Three farming games share one farm. The player can change any rule at any moment
 
 ## Sunup as it plays now
 
-What follows the playtest of Spring 1 to Autumn 1 on a phone (and a 40-day bot farm). These rules hold only under Sunup's rules (`homestead(s)` in `src/sim/actions.ts`); the other rule sets keep the older behaviour their tests check.
+What follows two playtests: Spring 1 to Autumn 1 on a phone, then 31 days on a phone and a desktop (with a 6-farm, 30-day bot run each time). These rules hold only under Sunup's rules (`homestead(s)` in `src/sim/actions.ts`); the other rule sets keep the older behaviour their tests check.
 
-**The day.** 6:00 to midnight in 150 real seconds (it was 240). Stamina is 100 and the jobs cost less: harvest, water, plant and pick off bugs 1 each, hoe and build 2, clearing a withered crop nothing. On a grown farm a busy day at a person's pace now runs into the afternoon or evening, and stamina runs out first on a few days a month instead of by 8 am. Sleeping before noon asks first ("Sleep now?"), except while the first lesson teaches it and when stamina is nearly gone.
+**The day.** 6:00 to midnight in 120 real seconds (it was 240, then 150). Stamina is 100 and the jobs are cheap: harvest, water, plant and pick off bugs 1 each, hoe and build 2, clearing a withered crop nothing. A dry day's work on a farm of two or three fields, at a person's pace, runs to early afternoon. Sleeping before noon asks first ("Sleep now?"), except while the first lesson teaches it and when stamina is nearly gone. Day 3 is dry (the rain comes on day 4), so the seeds sown on day 2 want water.
 
-**Soil and water.** A full watering keeps a plot wet for two days (one in a heat wave). The can's water is always on the can: a level up the side of the tool on the rack, and a gauge on the act button while it is in hand. Empty, both say Empty, and the line "Can empty. Fill the can at the well." points at the well. The upgraded cans and hoes are judged by their whole reach: aimed at a wet plot, the gold can still waters the dry ones around it (and wastes no water on wet ones), and the faint frames of its reach show where it will work.
+**Soil and water.** The can wets a plot for one night; rain (or a sprinkler) soaks it for two, one in a heat wave. So dry days mean watering, and sprinklers, the copper can and quick crops are worth having. The can's water is always on the can: a level up the side of the tool on the rack, and a gauge on the act button while it is in hand. Empty, both say Empty, and the line "Can empty. Fill the can at the well." points at the well. The upgraded cans and hoes are judged by their whole reach.
 
-**Seasons.** In the last three days of a season the seed picker also offers the next season's crops, marked "Summer crop" (and so on); they grow on and are in season when it turns. Crops that would still be green at the turn and do not grow in the next season are marked "Too late" and cannot be sown. At the turn, ripe crops stay to be picked (a regrowing one gives its last pick and is done); what the turn takes is simply gone, nothing withered to clear. Any withered crop left alone is gone the next morning. If a farm ever has nothing growing, nothing in the crate and too few coins for any seed, a neighbour leaves enough for four packets of the cheapest.
+**Seasons.** In the last three days of a season the seed picker also offers the next season's crops, marked "Summer crop" (and so on). Crops that would still be green at the turn and do not grow in the next season are marked "Too late". At the turn, ripe crops stay to be picked; what the turn takes is simply gone. A crop that withers (by drought, bugs, or on the night of the turn) stays on its plot one day, clears for free, and is gone the night after. If a farm ever has nothing growing, nothing in the crate and too few coins for any seed, a neighbour leaves enough for four packets of the cheapest.
 
-**Requests** are the backbone of a day. The first is three radishes. Each is for a crop that can be grown and handed over in time (from seed today or already in the ground), is never due after its crop's season ends, and is sized to the farm. One at a time until the first is filled, then two, then three from reputation 4; a filled one is replaced at once. What an open request still needs stays in the crate overnight instead of being sold. The board's Requests tab says how far the town's good word is from the smith's next tool ("Two more and the smith makes you a copper hoe"); the smith wants reputation 2 and 8 for the hoes, 3 and 10 for the cans. A harvest a request wants floats "2 of 3 for Mabel's bakery" where it was picked, and the morning card names who paid and what was kept.
+**Requests** are few and they compete; choosing which to grow for is the morning's decision. The first is three radishes, pinned when the board is read. After that new ones come only with the mornings (an empty board always gets one, a second about three mornings in five), one open until the first is filled, then two at most. Each asks for a good share of the soil free to plant in the two or three days it leaves for sowing (half to most of it, a third as many of the big crops, never more than 20), and a second one is sized so that the two together want more than that soil: only one can be met, and they are due too soon to grow one after the other. A request pays what its crops fetch at market and a little over, at most a fifth more and never more than 60 coins over (`requestReward` in `src/sim/goals.ts`), plus a good word in town. Each is for a crop that can be grown and handed over in time and is never due after its crop's season ends. The crate keeps what an open request still needs overnight, while the request can still be met. A request that runs out of time says so on the morning card ("the lighthouse keeper gave up on the corn"). The smith wants reputation 2 and 8 for the hoes, 3 and 10 for the cans.
 
-**Aiming.** A faint frame always marks the plot in front, so you can see what you face; it brightens, with the verb's badge, where acting would do something. When the plot in front has nothing to do, acting snaps to the nearest useful plot in reach (your own and the eight around it, ties to the one most ahead), so holding Harvest along a row works every plot in turn, and the well answers from any side or corner. Facing the notice board reads it; otherwise the farm's own choice comes first and the board only when nothing else in reach is useful. Tapping a plot walks there and does the job; a quick tap on the walk stick's zone counts as a tap on the farm under it. The act button always says a verb: Harvest, Water, Plant, Hoe, Fill the can, Read, Shoo, and Pick for bugs.
+**Fields** cost 250, 800, 1,500, 2,400 and 3,500, and from the third the land agent also wants reputation 2, 4, 6 and 8 (`FIELD_REP`). The price is on the stamp ("Buy for 250", "Need 800") or, when the good word is short, "Reputation 4". Saves keep their fields; fields still for sale take the new prices on load.
 
-**The phone camera.** A tall screen looks down at 70 degrees and fits the farm's whole depth, from the back trees to the front hedge, between the day card and the tool rack, with 10 to 12 columns (42 px tiles on a 412 by 900 phone). It slides sideways with the farmer only as far as the farm's edges and keeps still up and down; the desktop close camera keeps to the farm's edges the same way. `tests/homestead-camera.test.ts` measures it: on 412 by 838 and 900 the clear band is at least 85% farm with all fifteen rows (it was about half, and eight rows), and no sky shows below the day card. Off-screen lesson targets get the edge chevron.
+**Aiming and tapping.** A faint frame always marks the plot in front; it brightens, with the verb's badge, where acting would do something. When the plot in front has nothing to do, acting snaps to the nearest useful plot in reach. The act button always says a verb, and with nothing to do it wears the tool in hand. Tapping a plot walks there and does the job; taps made while the farmer is busy wait their turn and are done in the order tapped (pushing the stick drops them). A tap takes the tool for the job when the one in hand cannot do it and a free job waits there: the hands for a ripe crop, bugs, a crow or a withered crop, the can for a thirsty one (never seeds or the hoe, which spend coins or turn meadow). A tap on the ground beside the well, or on the well's drawing, walks there and fills the can; a tap on the notice board's drawing reads it. Walking with the act button held does quick jobs on the move, a little slower, instead of stopping at every plot.
 
-**The farm.** Solo, so the old crew mode's bunkhouse is not built (its ground is open yard) and only the working well is drawn. Ripe crops sit in a soft gold ring on the soil. Bugged crops yellow and their bugs are big enough to see on a phone.
+**The keyboard.** Every button shows its key while a mouse or keyboard is in use: the tools 1 to 5, Enter on Sleep, B on the board, C on the view button, and a number on each card in the seed and build pickers. While a picker is open the arrow keys choose in it (they never walk the farmer; WASD still do), a number picks that card, and Enter or Escape closes it; Escape never reaches the game switcher while a picker is open. A button reached with Tab takes Enter and Space itself; a button clicked with the mouse gives the keyboard straight back to the farm. With a mouse, the view button (top right, desktop only) switches between close up and the whole farm, like C.
 
-**The board and the HUD.** Stamps are sentence case (Buy, Use, In hand); what you cannot afford is a dashed, upright "Need 400". A field or a smith's tool asks before it buys. The board hangs from a fixed top so its tabs never move, and they stay on one row on a phone. Toasts show over an open board, just under it. The seed picker shows each seed's price, what it sells for, and its days (or its season, or Too late), wraps onto two rows rather than scrolling seeds away, and opens up top when the plot being worked is low on the screen. The stamina bar is labelled, and the forecast reads "Sunny then" followed by the next three days.
+**The cameras.** A tall phone screen looks down at 70 degrees and fits the farm's whole depth between the day card and the tool rack (`tests/homestead-camera.test.ts`). A wide screen's close camera looks 1.4 tiles south of the farmer and leans towards what a lesson points at, so the rack and the lesson line never cover the crops being taught (`scripts/qa/overlap.mjs` measures it). Rain and storms darken the day but much less at first light: a 6 am storm reads as well as a sunny 6 am (mean light over the clear band 52 sunny, 35 storm before, 54 after; `scripts/qa/lessons.mjs`).
+
+**The board and the HUD.** Stamps are sentence case; what you cannot afford is a dashed "Need 400". A field or a smith's tool asks before it buys, with its price once, on the stamp. One field bought makes one toast. The morning card is one sentence with a capital at its start only ("Old Tamsin paid 145, sold 8 for 340."), and town names read as names inside it ("for the lighthouse keeper"). Harvest words over a plot are short ("2 of 3 radishes", "3 radishes ready") and wrap rather than run across the screen. A request handed over by day says who took the crops.
 
 ## The lessons now
 
-One line at a time, eight words or fewer, in the words on the buttons. Lines about a place point at it.
+One line at a time, eight words or fewer, in the words on the buttons. Lines about a place point at it: a cream chevron just over the top of the thing (aimed half a tile up), or, while it is out of view, an arrow on a dark disc at the screen's edge, turned towards it.
+
+A lesson counts as done only once its line has been on screen (`Tutor.update` in `src/games/homestead/lessons.ts` counts the seconds it was visible: not while asleep, nor under the board or a picker). A calm lesson ends when the farmer has done what it says after seeing it. An urgent one ends when the farmer dealt with the trouble, or when the trouble went away after the line had been up 1.5 seconds; one whose trouble went away unseen is not done and waits for the next time. Urgent lessons have an order: the crow over the scarecrow note and the bugs, and those over the new field; the one taken over from comes back after.
 
 | Lesson | Line | Points at |
 | --- | --- | --- |
@@ -34,33 +38,43 @@ One line at a time, eight words or fewer, in the words on the buttons. Lines abo
 | water | Take the can. Water the carrots. | a thirsty carrot |
 | well | Fill the can at the well. | the well |
 | sleep | Crops grow overnight. Sleep. | |
-| broke | No coins yet. Sleep to sell the crate. | |
+| broke | No coins left. Sleep to sell the crate. | |
 | plant | Plant seeds in the bare soil. | the nearest bare plot |
-| hoe (cuts in) | Hoe the new field. | the new field's nearest meadow |
+| wide (keys only) | Press C to see the whole farm. | |
+| hoe (urgent) | Hoe the new field. | the new field's nearest meadow |
 | requests | Read the board. | the notice board |
-| deliver | Harvest 3 radishes. The crate ships them. | the crate |
+| deliver | Harvest 3 radishes. The crate ships them. (once a crop it wants is ripe, or from day 7) | a ripe one, else the crate |
 | field | Buy a second field. | the field for sale |
-| pests (cuts in) | A crow is on your carrots. Shoo it. | the crow |
-| scarecrow | Scarecrows keep crows away. Build one. (They cost 40, when you cannot pay.) | |
-| bugs (cuts in) | Bugs on your carrots. Pick them off. | the bugged crop |
+| pests (urgent, first) | A crow is on your carrots. Shoo it. | the crow |
+| scarecrow (urgent) | Scarecrows keep crows away. Build one. (They cost 40, when you cannot pay.) | |
+| bugs (urgent) | Bugs on your carrots. Pick them off. (another tool in hand: Take the hands. Pick bugs off the carrots.) | the bugged crop |
 | turn | Spring ends soon. Plant summer seeds. | |
 | smith | The smith has better tools now. | |
 
-Owning a second field always brings the hoe and its line, however the field was bought (the board, or tapping the field); an old save with two fields gets the hoe when it loads. Bugs, like crows, come quietly from day 5 and the bug line shows only while a bug is really there. `scripts/qa/lessons.mjs` plays all of it on a phone with real touch.
+After the bug lesson, bugs still come now and then: no line, but the pointer finds them. Owning a second field always brings the hoe and its line, however the field was bought. `scripts/qa/lessons.mjs` plays all of it on a phone with real touch.
+
+## Crows and bugs in the lessons
+
+Crows and bugs are let onto the farm quietly from day 5, once delivering requests is known. Until the crow lesson is done, one crow comes on a dry day with something growing, between 6:30 and 8:00, while the farmer is surely out, and a crow still pecking at nightfall takes nothing: the first crop a crow takes is one the farmer watched it go for. The crow line takes over from any other line (the bug line included), names the crop, and points at the crow. It ends when the crow is shooed, or when it has gone after its line was seen; then "Scarecrows keep crows away. Build one." shows for a few seconds, and whatever it took over from comes back. `tests/homestead-crow.test.ts` and `scripts/qa/lessons.mjs` check all of it, sleeping through a crow included.
 
 ## Balance
 
-`npx tsx scripts/balance.ts` plays six farms for thirty days with the quick bot and again at a person's pace (about one action every 1.3 seconds). Before the playtest fixes, then after (person's pace in brackets):
+`npx tsx scripts/balance.ts` plays six farms for thirty days with the quick bot and again at a person's pace (about one action every 1.3 seconds). It reports morning coins on days 10, 20 and 30, the day each field is bought, waterings per harvest, nights with no income, what requests pay against the market, and the hour of the last job each day by fields owned.
 
-| | Before | After |
+After round 1 the bot farm (person's pace) bought all six fields by day 22, had 4,398 coins on day 30, filled 27 requests at 1.5 times market and was done by 9:35 on a dry day with two or three fields. Round 2, the same bot (it now spreads its planting over a few crops and no longer waters bare soil; both runs use it), person's pace:
+
+| | Round 1 | Round 2 |
 | --- | --- | --- |
-| Waterings per harvest | 6.73 | 2.24 (2.09) |
-| Nights with no income, of 30 | 14.8 | 6.5 (6.2), mostly nights 2 and 3 |
-| Coins by day 31 | 989 | 7,891 (8,598) |
-| Crops lost to drought, bugs or the turn | 46.3 | 8.3 (8.7) |
-| Requests filled | 3.2 | 28.8 (27.7) |
-| Day ends, median | 7:49 | 9:06 (10:10), busy days to 15:42 (17:30) |
-| Days stamina ran out first | 10.5 | 3.7 (4.5) |
+| Morning coins, days 10 / 20 / 30 | 389 / 668 / 4,398 | 190 / 388 / 1,934 |
+| Fields 2 to 6 bought, day | 4, 8, 13, 17, 22 | 7, 18, 27, 30 (1 farm in 6), never |
+| Earned in 30 days | 22,318 | 10,645 |
+| Requests filled, pay over market | 27.2, median 1.54x, max 1.83x | 7.3, median 1.13x, max 1.22x |
+| Waterings per harvest | 1.89 | 3.05 |
+| Nights with no income, of 30 | 6.0 | 7.7 |
+| Last job, dry days, 2 to 3 fields | median 9:35, three in four by 11:39 | median 12:17, three in four by 13:40 |
+| Days stamina ran out first | 3.3 | 1.3 |
+
+Seed prices for the long crops went up (carrot 15, sunflower 30, corn 45, pumpkin 80), so every crop earns about the same per plot and day and the choice is made by the requests and the calendar.
 
 ## The three games
 
@@ -110,10 +124,6 @@ A switch never loses progress, moves the farmer into a wall, or strands a job.
 ## Feedback for the designer
 
 The mixer shows how long has been spent in each option, and a notes box stamped with the current mix. This is the lab: the game exists to find the best mix.
-
-## Crows and bugs in the lessons
-
-Crows are let onto the farm quietly from day 5, once delivering requests is known; they come on a dry day when something is growing. The crow lesson waits for a real crow: it takes the line from whatever calm lesson is up (a crow will not wait), says "A crow is on your carrots. Shoo it." (naming the crop it is on), and points at it, with a cream chevron bobbing over the crow or sitting on the screen's edge, turned towards it, while it is out of view. It ends when the crow is shooed or flies off, then "Scarecrows keep crows away. Build one." shows for a few seconds (or "They cost 40." to a farmer who cannot pay) and the calm lesson comes back. Bugs work the same way: "Bugs on your carrots. Pick them off." while bugs are really on a crop, with the chevron on it, until they are picked (the act button says Pick). `scripts/qa/lessons.mjs` checks all of it with a crow and bugs on real crops.
 
 ## Crop art
 

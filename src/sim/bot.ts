@@ -61,10 +61,12 @@ function bestSeed(s: WorldState): CropId {
   }
   let best: CropId = allowed[0];
   let bv = -Infinity;
+  // Like a person, it spreads the farm over a few crops so they do not all ripen on the same day.
+  const total = Math.max(1, CROP_IDS.reduce((a, c) => a + inGround(s, c), 0));
   for (const c of allowed) {
     const d = CROPS[c];
     if (d.seed > s.coins * 0.25 && c !== allowed[0]) continue;
-    const v = (d.price - d.seed) / d.days;
+    const v = ((d.price - d.seed) / d.days) * (homestead(s) ? 1 - 0.8 * (inGround(s, c) / total) : 1);
     if (v > bv) {
       bv = v;
       best = c;
@@ -84,6 +86,8 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
       for (const tool of tools) {
         const r = resolve(s, tool, x, y);
         if (!r.verb || !r.ok) continue;
+        // A person waters crops, not bare soil.
+        if (r.verb === 'water' && !s.plots[y * s.W + x].crop) continue;
         const rank = { scare: 0, harvest: 1, clear: 2, tend: 2, water: 3, plant: 4, till: 5, build: 9, refill: 6 }[r.verb];
         out.push({ x, y, tool, rank });
         break;

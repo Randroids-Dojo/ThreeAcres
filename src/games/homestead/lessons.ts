@@ -27,8 +27,15 @@ interface Lesson {
   /** Finished? `n` reads the counts the tutor keeps. Passive lessons finish on their own after `passive` seconds. */
   done?(s: WorldState, n: (k: string) => number): boolean;
   passive?: number;
-  /** Takes over from a calm lesson when it becomes ready (a crow will not wait), which comes back after. */
-  urgent?: boolean;
+  /**
+   * Takes over from a calm lesson when it becomes ready (a crow will not wait), which comes back after. Urgent
+   * lessons have a clear order: a higher one takes over from a lower one (a crow from bugs, bugs from the new field).
+   */
+  urgent?: number;
+  /** Only for a keyboard: on touch it passes quietly. */
+  keys?: boolean;
+  /** The count that goes up when the farmer does what the line says (an urgent lesson ended by the farmer counts at once). */
+  act?: string;
   /** A tile to point at while the line is up (a chevron over it, or at the screen's edge when it is out of view). */
   point?(s: WorldState): Point | null;
 }
@@ -55,6 +62,16 @@ function nearest(s: WorldState, test: (crop: Crop | null, i: number) => boolean)
 
 const live = (c: Crop | null): c is Crop => !!c && !c.dead;
 const anyRipe = (s: WorldState) => !!nearest(s, (c) => live(c) && c.stage === 4);
+/** The first open request, its crop in the crate, and the nearest ripe one of that crop on the farm. */
+const theRequest = (s: WorldState) => {
+  for (const o of s.orders) {
+    const it = o.items[0];
+    const have = s.stock[it.crop].reduce((a, b) => a + b, 0);
+    const ripe = nearest(s, (c) => live(c) && c.stage === 4 && c.kind === it.crop);
+    if (ripe || have > 0) return { o, it, have, ripe };
+  }
+  return null;
+};
 const thirsty = (s: WorldState, c: Crop | null, i: number) => live(c) && c.stage < 4 && !s.plots[i].wet;
 const anyThirsty = (s: WorldState) => !!nearest(s, (c, i) => thirsty(s, c, i));
 /** A crow on the farm right now, flying in or pecking. */
@@ -117,7 +134,7 @@ const LESSONS: Lesson[] = [
     after: ['sleep'],
     unlocks: [],
     ready: (s) => s.coins < 10 && Object.values(s.stock).some((q) => q.some((n) => n > 0)),
-    text: () => 'No coins yet. Sleep to sell the crate.',
+    text: () => 'No coins left. Sleep to sell the crate.',
     done: (s) => s.coins >= 10,
   },
   {
@@ -134,7 +151,8 @@ const LESSONS: Lesson[] = [
     // meadow brings the hoe and this line. It cuts in, like the crow: the
     // field is new and the line is about it.
     id: 'hoe',
-    urgent: true,
+    urgent: 1,
+    act: 'till',
     after: ['sleep'],
     unlocks: ['hoe'],
     ready: (s) => fields(s) >= 2 && !!meadow(s),
@@ -152,17 +170,24 @@ const LESSONS: Lesson[] = [
     point: () => ({ x: prop('board').x, y: prop('board').y + 0.1 }),
   },
   {
+    // Up when it matters: once a crop the request wants is ripe (or already in
+    // the crate), not on the day the request is read. Names the request, points
+    // at a ripe one, and ends when the crate holds enough or the request has
+    // gone. From day 7 it comes anyway, so the lessons after it never wait on
+    // a request nobody grew for.
     id: 'deliver',
     after: ['requests'],
     unlocks: [],
-    ready: () => true,
-    // Names what the request wants, so the line says what to grow.
+    ready: (s) => !!theRequest(s) || (s.day >= 7 && s.orders.length > 0),
     text: (s) => {
-      const it = s.orders[0]?.items[0];
+      const it = (theRequest(s)?.o ?? s.orders[0])?.items[0];
       return it ? `Harvest ${it.n} ${cropWord(it.crop, it.n)}. The crate ships them.` : 'Harvest what it asks. The crate ships it.';
     },
-    passive: 8,
-    point: () => prop('crate'),
+    done: (s) => {
+      const r = theRequest(s);
+      return !s.orders.length || (!!r && r.have >= r.it.n);
+    },
+    point: (s) => theRequest(s)?.ripe ?? prop('crate'),
   },
   {
     id: 'field',
@@ -181,7 +206,8 @@ const LESSONS: Lesson[] = [
     // Crows are let onto the farm quietly (see QUIET); the line waits for a
     // real one to land, so it never talks about crows that are not there.
     id: 'pests',
-    urgent: true,
+    urgent: 3,
+    act: 'scare',
     after: ['deliver'],
     unlocks: ['build', 'forecast'],
     ready: (s) => crowHere(s),
@@ -195,12 +221,12 @@ const LESSONS: Lesson[] = [
       const c = theCrow(s);
       return c ? { x: c.x + 0.5, y: c.y + 0.5 } : null;
     },
-    // Shooed, or it flew off with its dinner: either way the crow has gone.
-    done: (s, n) => n('scare') + n('build') >= 1 || !crowHere(s),
+    // Shooed, or it flew off with its dinner: either way the crow has gone (and the line was seen while it was here).
+    done: (s) => !crowHere(s),
   },
   {
     id: 'scarecrow',
-    urgent: true,
+    urgent: 2,
     after: ['pests'],
     unlocks: [],
     ready: () => true,
@@ -212,14 +238,17 @@ const LESSONS: Lesson[] = [
     // Bugs come with the crows, quietly. Like the crow, the line waits for real
     // bugs on a real crop, names it, points at it, and ends when they are picked.
     id: 'bugs',
-    urgent: true,
+    urgent: 2,
+    act: 'tend',
     after: ['deliver'],
     unlocks: [],
     ready: (s) => s.learn.includes('pests') && bugsHere(s),
+    // Says to take the hands when something else is in hand (the act button then says Pick).
     text: (s) => {
       const at = theBugs(s);
       const c = at ? s.plots[Math.floor(at.y) * s.W + Math.floor(at.x)].crop : null;
-      return `Bugs on your ${c ? CROPS[c.kind].plural.toLowerCase() : 'crops'}. Pick them off.`;
+      const crop = c ? CROPS[c.kind].plural.toLowerCase() : 'crops';
+      return s.tool === 'hands' ? `Bugs on your ${crop}. Pick them off.` : `Take the hands. Pick bugs off the ${crop}.`;
     },
     point: (s) => theBugs(s),
     done: (s, n) => n('tend') >= 1 || !bugsHere(s),
@@ -232,6 +261,16 @@ const LESSONS: Lesson[] = [
     ready: (s) => nightsToTurn(s.day) <= 3,
     text: (s) => `${SEASON_NAMES[season(s.day)]} ends soon. Plant ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()} seeds.`,
     passive: 9,
+  },
+  {
+    // A keyboard player hears about the wide view once, after the first seeds go in.
+    id: 'wide',
+    after: ['plant'],
+    unlocks: ['wide'],
+    keys: true,
+    ready: (s) => s.day >= 2,
+    text: () => 'Press C to see the whole farm.',
+    passive: 7,
   },
   {
     id: 'smith',
@@ -267,11 +306,18 @@ export function allLines(s: WorldState): string[] {
   for (const l of LESSONS) out.push(l.text(poor, true));
   const withRequest = { ...s, orders: [{ id: 1, who: 'x', items: [{ crop: 'strawberry', n: 3 }], reward: 1, rep: 1, due: 9 }] } as WorldState;
   for (const l of LESSONS) out.push(l.text(withRequest, true));
+  const canInHand = { ...s, tool: 'can' } as WorldState;
+  for (const l of LESSONS) out.push(l.text(canInHand, true));
   return [...new Set(out)];
 }
 
+/** Seconds a line must have been on screen before its lesson counts as done. */
+export const SEEN = 1.5;
+
 export class Tutor {
   private active: Lesson | null = null;
+  /** The lesson's action count when its line came up, to tell the farmer's own doing from trouble that went away. */
+  private base = new Map<string, number>();
   /** Quiet unlocks already sent (the sim adds them to the farm's learning on its next step). */
   private sent = new Set<string>();
 
@@ -300,49 +346,89 @@ export class Tutor {
     s.learnCount.board = (s.learnCount.board ?? 0) + 1;
   }
 
-  /** Once a frame: the line to show, and any unlocks for the farm. */
-  update(s: WorldState, dt: number, touch: boolean): { line: string; cmds: Command[]; point: Point | null } {
+  /** The lesson whose line is up, if any (for checks). */
+  get current(): string | null {
+    return this.active?.id ?? null;
+  }
+
+  /**
+   * Once a frame: the line to show, and any unlocks for the farm. `visible`
+   * says whether the line can be seen right now (no board or picker over it).
+   * A lesson counts as done only once its line has been on screen: a calm one
+   * when the farmer has done what it says after seeing it; an urgent one when
+   * the farmer dealt with the trouble, or when the trouble went away after the
+   * line had been up for SEEN seconds. One whose trouble went away unseen (the
+   * crow left while the farmer slept, or under the board) is not done: it
+   * waits for the next crow.
+   */
+  update(s: WorldState, dt: number, touch: boolean, visible = true): { line: string; cmds: Command[]; point: Point | null } {
     const cmds: Command[] = [];
     const n = (k: string) => s.learnCount[k] ?? 0;
     const finished = (id: string) => s.learn.includes(`lesson:${id}`);
+    const finish = (l: Lesson) => {
+      cmds.push({ type: 'unlock', what: `lesson:${l.id}` });
+      s.learn.push(`lesson:${l.id}`);
+      if (this.active === l) this.active = null;
+    };
+    const awake = s.turnover < 0;
     for (const q of QUIET) if (!s.learn.includes(q.what) && !this.sent.has(q.what) && q.after.every(finished) && q.when(s)) {
       this.sent.add(q.what);
       cmds.push({ type: 'unlock', what: q.what });
     }
     // A lesson finished elsewhere (credited to an old save) leaves quietly.
     if (this.active && finished(this.active.id)) this.active = null;
-    // Finish the lesson on screen when its condition is met.
+    // Finish the lesson on screen when its condition is met and its line has been seen.
     if (this.active) {
       const l = this.active;
-      if (l.passive) s.learnCount[`shown:${l.id}`] = n(`shown:${l.id}`) + dt;
-      const over = l.passive ? n(`shown:${l.id}`) >= l.passive : l.done!(s, n);
-      if (over) {
-        cmds.push({ type: 'unlock', what: `lesson:${l.id}` });
-        s.learn.push(`lesson:${l.id}`);
-        this.active = null;
+      const seen = n(`seen:${l.id}`);
+      if (l.passive ? seen >= l.passive : l.done!(s, n)) {
+        const acted = !!l.act && n(l.act) > (this.base.get(l.id) ?? Infinity);
+        if (l.passive || (l.urgent ? seen >= SEEN || (acted && seen > 0) : seen > 0)) finish(l);
+        // Its trouble went before anyone saw the line: not done, and the line steps aside until it comes back.
+        else if (l.urgent) this.active = null;
       }
     }
     const eligible = (l: Lesson) => !finished(l.id) && l.after.every(finished) && l.ready(s);
-    const urgentNow = () => LESSONS.find((l) => l.urgent && eligible(l));
-    // An urgent lesson takes the line from a calm one; the calm one is picked up again after.
-    if (this.active && !this.active.urgent && s.turnover < 0 && urgentNow()) this.active = null;
-    if (!this.active && s.turnover < 0) {
-      this.active = urgentNow() ?? LESSONS.find(eligible) ?? null;
-      if (this.active) {
-        s.learnCount[`since:${this.active.id}`] = s.day;
-        for (const what of this.active.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
-        // A lesson already satisfied (rain watered the carrots) passes quietly.
-        if (!this.active.passive && this.active.done!(s, n)) return { line: '', cmds, point: null };
+    const rank = (l: Lesson | null) => l?.urgent ?? 0;
+    const urgentNow = () => LESSONS.filter((l) => l.urgent && eligible(l)).sort((a, b) => rank(b) - rank(a))[0];
+    // An urgent lesson takes the line from a calm one, or from a lower urgent one (a crow over bugs); the one it
+    // took over from is picked up again after.
+    if (awake) {
+      const u = urgentNow();
+      if (u && u !== this.active && rank(u) > rank(this.active)) this.active = null;
+    }
+    if (!this.active && awake) {
+      let next = urgentNow() ?? LESSONS.find(eligible) ?? null;
+      // A keyboard lesson passes quietly on touch (what it brings in still comes).
+      while (next?.keys && touch) {
+        for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
+        finish(next);
+        next = urgentNow() ?? LESSONS.find(eligible) ?? null;
+      }
+      this.active = next;
+      if (next) {
+        s.learnCount[`since:${next.id}`] = s.day;
+        if (next.act && !this.base.has(next.id)) this.base.set(next.id, n(next.act));
+        for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
+        // A calm lesson already satisfied before its line ever showed (rain watered the carrots) passes quietly.
+        if (!next.passive && !next.urgent && n(`seen:${next.id}`) === 0 && next.done!(s, n)) {
+          finish(next);
+          return { line: '', cmds, point: null };
+        }
       }
     }
-    if (s.turnover >= 0) return { line: '', cmds, point: null };
+    if (!awake) return { line: '', cmds, point: null };
     // A reminder that applies right now speaks over a calm lesson (never over an urgent one).
     if (!this.active?.urgent) {
       const nudge = NUDGES.find((g) => finished(g.after) && g.ready(s));
       if (nudge) return { line: nudge.text, cmds, point: nudge.point?.(s) ?? null };
     }
-    const up = !!this.active;
-    return { line: up ? this.active!.text(s, touch) : '', cmds, point: up ? (this.active!.point?.(s) ?? null) : null };
+    const l = this.active;
+    if (l && visible && dt > 0) s.learnCount[`seen:${l.id}`] = n(`seen:${l.id}`) + dt;
+    let point = l ? (l.point?.(s) ?? null) : null;
+    // After their lesson, bugs still arrive now and then: the pointer keeps finding them, without a word.
+    if (!point && finished('bugs')) point = theBugs(s);
+    return { line: l ? l.text(s, touch) : '', cmds, point };
   }
 }
 

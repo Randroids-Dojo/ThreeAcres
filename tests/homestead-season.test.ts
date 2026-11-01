@@ -116,8 +116,8 @@ describe('there is always a way to earn', () => {
     s.day = 12;
     s.coins = 0;
     nightfall(s, []);
-    // The cheapest summer seed is the sunflower at 25.
-    expect(s.report!.gift).toBe(100);
-    expect(s.coins).toBe(100);
+    // The cheapest summer seed is the sunflower at 30.
+    expect(s.report!.gift).toBe(120);
+    expect(s.coins).toBe(120);
   });
 });

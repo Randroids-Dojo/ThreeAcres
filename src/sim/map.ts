@@ -38,14 +38,14 @@ export function baseTiles(): TileKind[] {
   return out;
 }
 
-/** Fields, in the order they are sold. The first is owned from the start. */
+/** Fields, in the order they are sold. The first is owned from the start. Sunup also wants reputation for the later ones (FIELD_REP). */
 export const PARCELS = [
   { x: 2, y: 5, w: 4, h: 4, price: 0 },
-  { x: 7, y: 5, w: 4, h: 4, price: 200 },
-  { x: 2, y: 10, w: 4, h: 4, price: 400 },
-  { x: 7, y: 10, w: 4, h: 4, price: 700 },
-  { x: 12, y: 5, w: 4, h: 4, price: 1000 },
-  { x: 12, y: 10, w: 4, h: 4, price: 1500 },
+  { x: 7, y: 5, w: 4, h: 4, price: 250 },
+  { x: 2, y: 10, w: 4, h: 4, price: 800 },
+  { x: 7, y: 10, w: 4, h: 4, price: 1500 },
+  { x: 12, y: 5, w: 4, h: 4, price: 2400 },
+  { x: 12, y: 10, w: 4, h: 4, price: 3500 },
 ] as const;
 
 export type PropKind = 'house' | 'crate' | 'board' | 'bunkhouse' | 'well';

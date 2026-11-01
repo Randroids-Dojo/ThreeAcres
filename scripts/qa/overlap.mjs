@@ -7,6 +7,13 @@
 // and keeps every seed on screen, a toast shows over an open board (not behind
 // it), what cannot be afforded is not stamped like what can, and the board's
 // tabs stay put from tab to tab.
+// Round 2: on a desktop the close camera keeps the crops a lesson is about
+// clear of the lesson line and the rack; the keys show on the buttons (1 to
+// 5, Enter, B, C, and a number on each seed); the keyboard alone picks a seed
+// (a number key opens the picker, arrows and numbers choose without walking,
+// Enter closes it without a sleep question, Escape closes it without the game
+// switcher, Enter on a seed reached with Tab picks it); harvest words stay
+// narrow; the view button keeps clear of everything.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -21,7 +28,8 @@ const PIECES = {
   shell: '.shellbtn',
   day: '.daycard',
   coins: '.coins',
-  board: '.topbtns .iconbtn',
+  board: '.topbtns .iconbtn:not(.viewbtn)',
+  view: '.topbtns .viewbtn',
   rack: '.toolbar',
   seeds: '.seedbar',
   builds: '.buildbar',
@@ -38,6 +46,21 @@ async function run(label, viewport, touch) {
   const p = await ctx.newPage();
   await p.goto(`${base}/?game=homestead&fresh`);
   await p.waitForFunction(() => window.sunup && window.sunup.frames > 20, null, { timeout: 30000 });
+  // The first lessons are about the radish row and the carrot row: on a desktop, neither sits under the line or the rack.
+  if (!touch) {
+    await p.mouse.move(640, 300);
+    await p.waitForTimeout(1200);
+    const f = await p.evaluate(() => {
+      const line = document.querySelector('.hint.on')?.getBoundingClientRect();
+      const rack = document.querySelector('.toolbar').getBoundingClientRect();
+      const rows = [5, 6].map((y) => Math.max(...[2.5, 3.5, 4.5, 5.5].map((x) => window.sunup.r3d.project(x, y + 0.5, 0.4).y)));
+      return { lineTop: line ? line.top : null, rackTop: rack.top, rows };
+    });
+    const ok = f.lineTop !== null && f.rows.every((y) => y < f.lineTop - 6 && y < f.rackTop);
+    if (!ok) failed++;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} the close camera keeps the radish and carrot rows clear of the lesson line and the rack  (${JSON.stringify(f)})`);
+    await p.screenshot({ path: `/tmp/acres-overlap-${label}-first-lesson.png` });
+  }
   if (touch) {
     const cdp = await ctx.newCDPSession(p);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: viewport.width - 60, y: 300, id: 1 }] });
@@ -45,7 +68,7 @@ async function run(label, viewport, touch) {
   }
   // Everything introduced, so every piece can show.
   await p.evaluate(() => {
-    for (const what of ['can', 'sleep', 'coins', 'seeds', 'stamina', 'board', 'requests', 'hoe', 'pests', 'build', 'forecast', 'smith']) window.sunup.input.push({ type: 'unlock', what });
+    for (const what of ['can', 'sleep', 'coins', 'seeds', 'stamina', 'board', 'requests', 'hoe', 'pests', 'build', 'forecast', 'smith', 'wide']) window.sunup.input.push({ type: 'unlock', what });
   });
   await p.waitForTimeout(400);
   const boxes = () =>
@@ -134,7 +157,7 @@ async function run(label, viewport, touch) {
     // Stamps you cannot afford are dashed and upright and say what they need.
     if (name === 'board fields, short of coins') {
       const b = await p.evaluate(() => [...document.querySelectorAll('.dialog .item .btn')].map((e) => ({ t: e.textContent, dis: e.disabled, dash: getComputedStyle(e).borderStyle, upper: getComputedStyle(e).textTransform })));
-      if (!b.length || b.some((x) => !x.dis || x.dash !== 'dashed' || !/^Need [\d,]+$/.test(x.t))) hits.push(`unaffordable stamps ${JSON.stringify(b)}`);
+      if (!b.length || b.some((x) => !x.dis || x.dash !== 'dashed' || !/^(Need [\d,]+|Reputation \d+)$/.test(x.t))) hits.push(`unaffordable stamps ${JSON.stringify(b)}`);
       if (b.some((x) => x.upper === 'uppercase')) hits.push('stamps in capitals');
     }
     // The picker never covers the plot being worked, and every seed in it is on screen.
@@ -154,6 +177,18 @@ async function run(label, viewport, touch) {
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name}${ok ? '' : `  (${hits.join(', ')})`}`);
     await p.screenshot({ path: `/tmp/acres-overlap-${label}-${name.replace(/[ ,]+/g, '-')}.png` });
   }
+  if (!touch) await keyboardChecks(p, label);
+  if (touch) {
+    // Harvest words over a plot stay narrow, even for a long request.
+    const w = await p.evaluate(() => {
+      window.sunup.hud.float(3.5, 6.5, '18 of 20 strawberries');
+      window.sunup.hud.float(4.5, 6.5, '20 strawberries ready');
+      return [...document.querySelectorAll('.floaters .floater')].map((e) => e.getBoundingClientRect().width / innerWidth);
+    });
+    const ok = w.length > 0 && w.every((x) => x <= 0.6);
+    if (!ok) failed++;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} harvest words stay narrow  (${w.map((x) => `${Math.round(x * 100)}%`).join(', ')} of the width)`);
+  }
   // The board's tabs stay put from tab to tab (a centred board moved them with each tab's length).
   await p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.state.day = 3; });
   const tops = [];
@@ -166,6 +201,70 @@ async function run(label, viewport, touch) {
   if (!still) failed++;
   console.log(`${still ? 'ok  ' : 'FAIL'} ${label} the board's tabs stay put from tab to tab  (${tops.join(', ')})`);
   await ctx.close();
+}
+
+/** Desktop: the keys show on the buttons, and the keyboard alone opens, works and closes the seed picker. */
+async function keyboardChecks(p, label) {
+  const report = (name, ok, detail) => {
+    if (!ok) failed++;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name}${detail ? `  (${detail})` : ''}`);
+  };
+  await p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.day = 2; st.coins = 500; window.sunup.hud.pickTool('hands'); Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [] }); });
+  await p.keyboard.press('KeyW');
+  await p.waitForTimeout(300);
+  const caps = await p.evaluate(() => {
+    const shown = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+    return {
+      tools: [...document.querySelectorAll('.toolbar .tool[data-tool] .key')].filter(shown).map((e) => e.textContent).join(''),
+      sleep: shown(document.querySelector('.toolbar .tool.act .key')) ? document.querySelector('.toolbar .tool.act .key').textContent : '',
+      board: [...document.querySelectorAll('.topbtns .kcap')].filter(shown).map((e) => e.textContent).join(''),
+    };
+  });
+  report('the keys show on the buttons: tools, Enter to sleep, B for the board, C for the view', caps.tools.startsWith('123') && caps.sleep === 'Enter' && caps.board === 'BC', JSON.stringify(caps));
+  const st = () => p.evaluate(() => ({ seed: window.sunup.state.seed, tool: window.sunup.state.tool, x: window.sunup.state.actors[0].x, y: window.sunup.state.actors[0].y, picker: !document.querySelector('.seedbar').classList.contains('hidden'), dialog: window.sunup.dialogs.open, switcher: !!document.querySelector('.shellover.on'), keys: [...document.querySelectorAll('.seedbar .seed:not(.gone) .key')].map((e) => getComputedStyle(e).display !== 'none' ? e.textContent : '').join('') }));
+  await p.keyboard.press('Digit3');
+  await p.waitForTimeout(250);
+  let a = await st();
+  report('a number key opens the seed picker, each seed wearing its number', a.picker && a.tool === 'seeds' && a.keys === '1234', JSON.stringify(a));
+  const seed0 = a.seed;
+  await p.keyboard.down('ArrowRight');
+  await p.waitForTimeout(400);
+  await p.keyboard.up('ArrowRight');
+  let b = await st();
+  report('an arrow key chooses the next seed and does not walk the farmer', b.seed !== seed0 && Math.abs(b.x - a.x) < 0.01 && Math.abs(b.y - a.y) < 0.01 && b.picker, JSON.stringify({ from: seed0, to: b.seed, moved: Math.hypot(b.x - a.x, b.y - a.y).toFixed(2) }));
+  await p.keyboard.press('Digit3');
+  await p.waitForTimeout(200);
+  b = await st();
+  report('a number key picks that seed', b.seed === 'carrot' && b.picker, JSON.stringify(b));
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(300);
+  b = await st();
+  report('Enter closes the picker, with no sleep question', !b.picker && !b.dialog && b.seed === 'carrot', JSON.stringify(b));
+  await p.keyboard.press('Digit3');
+  await p.waitForTimeout(250);
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(300);
+  b = await st();
+  report('Escape closes the picker, and does not open the game switcher', !b.picker && !b.switcher && !b.dialog, JSON.stringify(b));
+  // A seed reached with Tab: Enter presses it (and is not taken for sleep).
+  await p.keyboard.press('Digit3');
+  await p.waitForTimeout(250);
+  await p.evaluate(() => document.querySelector('.seedbar .seed[data-crop="lettuce"]').focus());
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(300);
+  b = await st();
+  report('Enter on a seed reached with Tab picks it, with no sleep question', b.seed === 'lettuce' && !b.dialog, JSON.stringify(b));
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(200);
+  // The C key and the view button: the whole farm, and back.
+  await p.keyboard.press('KeyC');
+  await p.waitForTimeout(200);
+  const wide = await p.evaluate(() => window.sunup.state.rules.camera);
+  await p.evaluate(() => document.querySelector('.topbtns .viewbtn').click());
+  await p.waitForTimeout(200);
+  const back = await p.evaluate(() => window.sunup.state.rules.camera);
+  report('C shows the whole farm and the view button brings the close view back', wide === 'wide' && back === 'close', `${wide}, then ${back}`);
+  await p.evaluate(() => window.sunup.hud.pickTool('hands'));
 }
 
 await run('phone', { width: 412, height: 838 }, true);

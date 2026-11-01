@@ -7,6 +7,11 @@
 // faint cursor on the plot in front even when nothing can be done there (read
 // back from the frame); the well answers from its side and corner, not only
 // its door; sleeping before noon asks first; a tap picks every seed.
+// Round 2: three quick real taps on ripe radishes harvest all three, in order;
+// a tap on a ripe crop with the can in hand takes the hands and harvests it; a
+// tap on the ground in front of the well, or on the well's drawing, fills the
+// can; with nothing to do, the act button wears the tool in hand; walking with
+// the stick while holding Harvest works the row without stopping at each plot.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -277,6 +282,91 @@ for (const sd of [...seeds].reverse()) {
 }
 check('a tap picks every seed in the picker, the stick side too', seeds.length >= 2 && picked.length === seeds.length, `${picked.length} of ${seeds.length}: ${picked.join(', ')}`);
 await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+
+// ---- round 2: taps that wait their turn, taps that take the right tool, the well, walking while acting
+const ripenRow = (y, kind = 'radish', age = 3) => p.evaluate(([y, kind, age]) => {
+  const st = window.sunup.state;
+  for (let x = 2; x < 6; x++) {
+    const q = st.plots[y * st.W + x];
+    q.tilled = true;
+    q.crop = { id: st.nextId++, kind, age, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+  }
+}, [y, kind, age]);
+const tapTile = async (x, y, id) => {
+  const pt = await p.evaluate(([x, y]) => window.sunup.r3d.project(x + 0.5, y + 0.5, 0), [x, y]);
+  await touch('touchStart', [[pt.x, pt.y, id]]);
+  await p.waitForTimeout(40);
+  await touch('touchEnd', []);
+};
+await p.evaluate(() => { const st = window.sunup.state; st.minute = 60; st.stamina = 100; for (const what of ['can']) if (!st.learn.includes(what)) st.learn.push(what); window.sunup.hud.pickTool('hands'); });
+await ripenRow(5);
+await standAt(2, 3, 's');
+await p.waitForTimeout(300);
+const pulled = () => p.evaluate(() => window.sunup.state.stats.harvested.radish);
+let h = await pulled();
+const order = [];
+await p.evaluate(() => { window.__harvests = []; const d = window.sunup; const orig = d.events.push.bind(d.events); d.events.push = (e) => { if (e.type === 'harvest') window.__harvests.push(e.x); return orig(e); }; });
+for (const x of [5, 4, 3]) {
+  await tapTile(x, 5, 20 + x);
+  await p.waitForTimeout(260);
+}
+await p.waitForTimeout(3000);
+order.push(...(await p.evaluate(() => window.__harvests)));
+check('three quick real taps on ripe radishes, 300 ms apart, harvest all three, in the order tapped', (await pulled()) - h === 3 && order.join() === '5,4,3', `${(await pulled()) - h} pulled, order ${order.join()}`);
+
+// A ripe crop tapped with the can in hand: the tap takes the hands and harvests it.
+await ripenRow(5);
+await p.evaluate(() => window.sunup.hud.pickTool('can'));
+await standAt(2, 3, 's');
+await p.waitForTimeout(300);
+h = await pulled();
+await tapTile(4, 5, 30);
+await p.waitForTimeout(1800);
+check('a ripe radish tapped with the can in hand is harvested, and the hands come out', (await pulled()) === h + 1 && (await p.evaluate(() => window.sunup.state.tool)) === 'hands', `${(await pulled()) - h} pulled, tool ${await p.evaluate(() => window.sunup.state.tool)}`);
+// With nothing to do, the act button wears the tool in hand: the can, not a hand.
+await p.evaluate(() => window.sunup.hud.pickTool('can'));
+await standAt(16, 3, 'e');
+await p.waitForTimeout(300);
+const idleIcon = await p.evaluate(() => { const b = document.querySelector('.tb-act'); return { dim: b.classList.contains('no'), html: b.querySelector('.ic').innerHTML, can: document.querySelector('.toolbar .tool[data-tool="can"] .ic').innerHTML }; });
+check('with the can in hand and nothing to do, the act button shows the can', idleIcon.dim && idleIcon.html === idleIcon.can, JSON.stringify({ dim: idleIcon.dim, same: idleIcon.html === idleIcon.can }));
+
+// The well: a tap on the ground in front of it walks there and fills the can; so does a tap on the well's drawing.
+for (const [label, at] of [['the ground in front of the well', async () => p.evaluate(() => window.sunup.r3d.project(11.5, 3.5, 0))], ['the top of the well', async () => p.evaluate(() => window.sunup.r3d.project(11.5, 2.5, 1.1))]]) {
+  await p.evaluate(() => { window.sunup.state.water = 0; window.sunup.hud.pickTool('can'); });
+  // A few steps off, with the well on screen.
+  await standAt(7, 3, 'w');
+  await p.waitForTimeout(900);
+  const pt = await at();
+  await touch('touchStart', [[pt.x, pt.y, 40]]);
+  await p.waitForTimeout(40);
+  await touch('touchEnd', []);
+  await p.waitForTimeout(3200);
+  const w = await p.evaluate(() => window.sunup.state.water);
+  check(`a tap on ${label} walks there and fills the can`, w === 12 && pt.x > 0 && pt.x < 412, `water ${w}, tapped at ${Math.round(pt.x)},${Math.round(pt.y)}`);
+}
+
+// Walking with the stick while holding Harvest: the farmer works the carrot row on the move, never standing still mid-row.
+await ripenRow(6, 'carrot', 5);
+await p.evaluate(() => { window.sunup.hud.pickTool('hands'); const st = window.sunup.state; for (let x = 2; x < 6; x++) st.plots[5 * st.W + x].crop = null; });
+await standAt(1, 6, 'e');
+await p.waitForTimeout(300);
+const carrots = () => p.evaluate(() => window.sunup.state.stats.harvested.carrot);
+const c0 = await carrots();
+// Every 100 ms the farmer must have moved on (a stop at a plot, as before, stands still for a whole job: 350 ms).
+await p.evaluate(() => { window.__still = 0; window.__last = window.sunup.state.actors[0].x; window.__probe = setInterval(() => { const f = window.sunup.state.actors[0]; if (f.x < 5.5 && f.x > 1.6 && Math.abs(f.x - window.__last) < 0.01) window.__still++; window.__last = f.x; }, 100); });
+const actAt2 = await p.evaluate(() => { const r = document.querySelector('.tb-act').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+await touch('touchStart', [[actAt2[0], actAt2[1], 50]]);
+await p.waitForTimeout(60);
+await touch('touchStart', [[actAt2[0], actAt2[1], 50], [90, 700, 51]]);
+for (let i = 1; i <= 5; i++) {
+  await touch('touchMove', [[actAt2[0], actAt2[1], 50], [90 + i * 12, 700, 51]]);
+  await p.waitForTimeout(16);
+}
+for (let i = 0; i < 60 && (await p.evaluate(() => window.sunup.state.actors[0].x)) < 5.6; i++) await p.waitForTimeout(50);
+await touch('touchEnd', [[actAt2[0], actAt2[1], 50]]);
+await touch('touchEnd', []);
+const still = await p.evaluate(() => { clearInterval(window.__probe); return window.__still; });
+check('walking the row holding Harvest picks all four carrots without stopping at each one', (await carrots()) - c0 === 4 && still === 0, `${(await carrots()) - c0} picked, stood still in ${still} of the 100 ms looks`);
 
 // A save from the old crew mode brings a farm hand along; Sunup is worked alone, so the hand has gone home on load.
 await p.evaluate(() => {

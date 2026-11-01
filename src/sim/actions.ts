@@ -1,7 +1,7 @@
 // What a tool does to a tile, and doing it. resolve() is pure and is also used
 // by the UI for the highlight; perform() changes the farm and reports events.
 
-import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, SEASON_PREVIEW_DAYS, STAMINA_COST } from './constants';
+import { BUILD_COST, CAN_MOISTURE, CAN_WATER, DAYS_PER_SEASON, FIELD_REP, SEASON_PREVIEW_DAYS, STAMINA_COST } from './constants';
 import { CROPS, inSeason, QUALITY_MULT, stageOf } from './crops';
 import { propAt } from './map';
 import { feedAround, needsWater, qualityAt, soak } from './soil';
@@ -221,7 +221,8 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
         if (!p.tilled || buildAt(s, t.x, t.y)) continue;
         // A hand watering one plot soaks it; the farmer's can skips plots that are wet already, so no water is wasted.
         if ((limited || t !== tiles[0]) && !soakable(s, t.x, t.y)) continue;
-        soak(p);
+        // Sunup's can wets a plot for tonight; rain soaks it for two nights.
+        soak(p, limited && s.rules.growth === 'classic' ? CAN_MOISTURE : 3);
         if (limited) s.water -= 1;
         ev.push({ type: 'water', x: t.x, y: t.y, by });
         n++;
@@ -333,6 +334,13 @@ export function area(actor: Actor, x: number, y: number, level: number): { x: nu
     dy = actor.facing === 's' ? 1 : actor.facing === 'n' ? -1 : 0;
   }
   return [0, 1, 2].map((k) => ({ x: x + dx * k, y: y + dy * k })).filter((t) => inMap(t.x, t.y));
+}
+
+/** Sunup: the reputation the land agent wants before he sells a field (0 under other rules, or when it is owned). */
+export function fieldRep(s: WorldState, id: number): number {
+  const p = s.parcels[id];
+  if (!p || p.owned || !homestead(s)) return 0;
+  return FIELD_REP[id] ?? 0;
 }
 
 /** Sale value of one crop at a quality, with the market's mood under orders. */

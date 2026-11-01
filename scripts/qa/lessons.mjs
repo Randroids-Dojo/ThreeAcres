@@ -5,6 +5,12 @@
 // the walk stick's zone too), a field bought early from the board bringing the
 // hoe and its line and pointer, next season's seeds in the picker near the
 // turn, the bug lesson and its pointer, and the camera keeping the farm in view.
+// Round 2: the deliver line waits for a ripe crop the request wants; a crow
+// that lands and is slept through does not tick off its lesson (nor eat); a
+// crow takes the line from the bugs, which come back after; the bug line says
+// to take the hands; after its lesson the pointer still finds bugs; the
+// chevron sits just over its target; a 6 am storm is as easy to read as a
+// sunny 6 am.
 // node scripts/qa/lessons.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -100,6 +106,15 @@ await shot('1-pull');
 let pt0 = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const r = e.getBoundingClientRect(); return { on: e.classList.contains('on'), over: e.classList.contains('over'), x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
 const radishNear = await project(2.5, 5.5, 0.9);
 check('the first line points at a radish', pt0.on && pt0.over && Math.abs(pt0.x - radishNear.x) < 14, JSON.stringify({ pt0, radishNear }));
+// The chevron's tip (7 px below its middle, turned down) sits just over the radish: below the top of a tile-tall
+// thing standing on it, above the soil, and not on the tile behind.
+{
+  const ground = await project(2.5, 5.5, 0);
+  const tall = await project(2.5, 5.5, 1);
+  const behind = await project(2.5, 4.5, 0);
+  const tip = pt0.y + 7;
+  check('the chevron sits just over its target, not on the tile above', tip > tall.y - 4 && tip < ground.y && tip > (behind.y + ground.y) / 2, JSON.stringify({ tip, tall: tall.y, ground: ground.y, behind: behind.y }));
+}
 // Ripe crops read at a glance: a gold ring on the soil. Measured on the ring's edge with it drawn and hidden.
 const ringOn = await blockColour(3.5 + 0.39, 5.5, 0.05, 6);
 await p.evaluate(() => { window.sunup.r3d.debug.scene.getObjectByName('ripe-rings').material.visible = false; });
@@ -192,8 +207,38 @@ await shot('7-board-open');
 await p.evaluate(() => window.sunup.dialogs.close());
 await frames(20);
 s = await screen();
-check('after reading it, the next line explains delivery', /crate|ships/i.test(s.line), s.line);
-check('the request line names the crop and count', /^Harvest \d+ [a-z]+\. The crate ships them\.$/.test(s.line), s.line);
+check('after reading it, the line goes (and the reading counts)', s.line !== 'Read the board.' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:requests'))), s.line);
+// The deliver line waits until it matters: nothing the request wants is ripe yet.
+check('nothing it wants is ripe: no deliver line yet', !/crate|ships/i.test(s.line), s.line);
+// Ripen what the request wants (as the days would): now the line names it and points at a ripe one.
+const want = await p.evaluate(() => {
+  const st = window.sunup.state;
+  const it = st.orders[0].items[0];
+  const spots = [];
+  for (let i = 0; i < st.plots.length && spots.length < it.n; i++) {
+    const q = st.plots[i];
+    if (st.parcelOf[i] !== 0 || q.crop) continue;
+    q.tilled = true;
+    q.crop = { id: st.nextId++, kind: it.crop, age: 99, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+    q.crop.age = { radish: 3 }[it.crop] ?? 3;
+    spots.push({ x: i % st.W, y: Math.floor(i / st.W) });
+  }
+  return { crop: it.crop, n: it.n, spots };
+});
+await frames(30);
+s = await screen();
+check('a crop the request wants is ripe: the line names the crop and count', /^Harvest \d+ [a-z]+\. The crate ships them\.$/.test(s.line), `${s.line} (${want.n} ${want.crop})`);
+{
+  const pt = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const r = e.getBoundingClientRect(); return { on: e.classList.contains('on'), x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const near = await Promise.all(want.spots.map((t) => project(t.x + 0.5, t.y + 0.5, 0.5)));
+  check('and the pointer is on a ripe one', pt.on && near.some((q) => Math.abs(q.x - pt.x) < 16), JSON.stringify({ pt, near: near.map((q) => [Math.round(q.x), Math.round(q.y)]) }));
+}
+await shot('6a-deliver');
+await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+for (const t of want.spots) await actAt(t.x, t.y - 1, 's');
+await frames(20);
+s = await screen();
+check('harvesting what it asks ends the deliver line', !/ships/.test(s.line) && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:deliver'))), s.line);
 check('crows and the forecast are still to come', !s.forecast && !s.tools.includes('build'));
 
 // 6b. A field bought early, from the board, before its lesson: the hoe still comes, with a line and a pointer.
@@ -204,12 +249,18 @@ await p.evaluate(() => window.sunup.dialogs.board('fields'));
 await p.waitForTimeout(500);
 const tabsTop = await p.evaluate(() => [...document.querySelectorAll('.dialog .tabs button')].map((b) => Math.round(b.getBoundingClientRect().top)));
 check('the board\u2019s tabs sit on one row on the phone', Math.max(...tabsTop) - Math.min(...tabsTop) < 12, tabsTop.join(','));
-await tapEl('.dialog .item .btn', 'Buy');
+const fieldStamps = await p.evaluate(() => [...document.querySelectorAll('.dialog .item .btn')].map((b) => b.textContent));
+check('each field\u2019s price is on its stamp only, and later fields want reputation', fieldStamps[0] === 'Buy for 250' && fieldStamps.slice(1).every((t) => /^Reputation \d+$/.test(t)) && !(await p.evaluate(() => /\d+ coins/.test(document.querySelector('.dialog .list').textContent))), fieldStamps.join(' | '));
+await tapEl('.dialog .item .btn', 'Buy for 250');
 await p.waitForTimeout(400);
 const askTitle = await p.evaluate(() => document.querySelector('.dialog h2')?.textContent ?? '');
-check('a 200-coin field asks before it buys', /for sale/.test(askTitle) && (await p.evaluate(() => !window.sunup.state.parcels[1].owned)), askTitle);
+check('a 250-coin field asks before it buys', /for sale/.test(askTitle) && (await p.evaluate(() => !window.sunup.state.parcels[1].owned)), askTitle);
+const askText = await p.evaluate(() => document.querySelector('.dialog p')?.textContent ?? '');
+check('and says its price once (on the stamp)', !/250/.test(askText), askText);
 await tapEl('.dialog .ask .btn.primary');
 await p.waitForTimeout(500);
+const fieldToasts = await p.evaluate(() => [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent).filter((t) => /field/i.test(t)));
+check('one field bought, one toast', fieldToasts.length === 1, fieldToasts.join(' | '));
 await p.evaluate(() => window.sunup.dialogs.close(true));
 await frames(30);
 s = await screen();
@@ -234,6 +285,42 @@ await frames(20);
 s = await screen();
 check('day 5 with no crow about: no crow line', !/crow/i.test(s.line), `line "${s.line}"`);
 check('crows are let onto the farm quietly', await p.evaluate(() => window.sunup.state.learn.includes('pests')));
+// 7a. A crow lands and the farmer goes straight to bed: the lesson is not ticked off, and the crow takes nothing.
+const slept = await p.evaluate(() => {
+  const st = window.sunup.state;
+  const i = st.plots.findIndex((q, k) => q.crop && !q.crop.dead && q.crop.stage >= 1 && st.parcelOf[k] >= 0 && st.parcels[st.parcelOf[k]].owned);
+  st.crows.push({ id: st.nextId++, x: i % st.W, y: Math.floor(i / st.W), fromX: -3, fromY: 4, phase: 'peck', t: 0 });
+  return { i, id: st.plots[i].crop.id, day: st.day };
+});
+await frames(2);
+await send({ type: 'sleep' });
+await p.waitForTimeout(3600);
+await frames(20);
+s = await screen();
+const after = await p.evaluate((sl) => ({ done: window.sunup.state.learn.includes('lesson:pests'), crop: window.sunup.state.plots[sl.i].crop?.id ?? null, day: window.sunup.state.day }), slept);
+check('a crow slept through does not tick off its lesson', after.day === slept.day + 1 && !after.done, JSON.stringify(after));
+check('nor does it eat while the farmer sleeps', after.crop === slept.id, JSON.stringify(after));
+check('and the morning has no scarecrow line out of nowhere', !/Scarecrow/.test(s.line), s.line);
+await p.evaluate(() => { window.sunup.state.crows = []; window.sunup.state.crowPlan = []; window.sunup.hud.pickTool('hands'); });
+await frames(10);
+
+// 7b. Bugs first, then a crow: the crow takes the line from the bugs.
+const firstBug = await p.evaluate(() => {
+  const st = window.sunup.state;
+  const i = st.plots.findIndex((q, k) => q.crop && !q.crop.dead && q.crop.stage >= 1 && q.crop.stage < 4 && st.parcelOf[k] >= 0 && st.parcels[st.parcelOf[k]].owned);
+  st.plots[i].crop.bugs = 1;
+  return { x: i % st.W, y: Math.floor(i / st.W) };
+});
+await frames(20);
+s = await screen();
+check('bugs land: the bug line', /^Bugs on your [a-z]+\. Pick them off\.$/.test(s.line), s.line);
+await p.evaluate(() => window.sunup.hud.pickTool('can'));
+await frames(10);
+s = await screen();
+check('with the can in hand, the bug line says to take the hands', /^Take the hands\. Pick bugs off the [a-z]+\.$/.test(s.line), s.line);
+await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+await frames(10);
+
 // A crow comes for the carrots.
 // (It goes for a real growing crop, as crows do.)
 const target = await p.evaluate(() => {
@@ -248,7 +335,7 @@ const target = await p.evaluate(() => {
 });
 await frames(40);
 s = await screen();
-check('a crow lands: the line names it and the crop it is on', /^A crow is on your [a-z]+\. Shoo it\.$/.test(s.line), s.line);
+check('a crow lands while the bug line is up: the crow line takes over, naming it and the crop it is on', /^A crow is on your [a-z]+\. Shoo it\.$/.test(s.line), s.line);
 // It is pecking out of view: a chevron on the screen's edge points the way.
 const pointer = () => p.evaluate(() => {
   const e = document.querySelector('.tpoint');
@@ -272,29 +359,27 @@ for (let i = 0; i < 40; i++) {
 await frames(5);
 pt = await pointer();
 ca = await crowAt();
-check('the crow in view: the chevron bobs just over it', pt.on && pt.over && ca && Math.abs(pt.x - ca.x) < 12 && ca.y - pt.y > 10 && ca.y - pt.y < 50, JSON.stringify({ pt, ca }));
+{
+  // The tip (7 px below the chevron's middle) between the top of a tile-tall thing on the crow's plot and the soil.
+  const c = await p.evaluate(() => { const q = window.sunup.state.crows.find((k) => k.phase === 'in' || k.phase === 'peck'); return q ? { g: window.sunup.r3d.project(q.x + 0.5, q.y + 0.5, 0), t: window.sunup.r3d.project(q.x + 0.5, q.y + 0.5, 1) } : null; });
+  const tip = pt.y + 7;
+  check('the crow in view: the chevron bobs just over it', pt.on && pt.over && ca && c && Math.abs(pt.x - ca.x) < 12 && tip > c.t.y - 4 && tip < c.g.y, JSON.stringify({ pt, tip, top: c?.t.y, ground: c?.g.y }));
+}
 await shot('8b-crow-near');
 // Walk at it.
 await p.evaluate((t) => { const f = window.sunup.state.actors[0]; Object.assign(f, { x: t.x + 0.5, y: t.y - 0.5, task: null, path: [] }); }, target);
 await frames(20);
 check('walking at the crow shoos it and ends the crow lesson', await p.evaluate(() => window.sunup.state.learn.includes('lesson:pests')));
+s = await screen();
+check('then the scarecrow line', /^Scarecrows keep crows away\./.test(s.line), s.line);
 
-// 8. Bugs come quietly with the crows. The line waits for real bugs, names the crop and points at them; the button says Pick.
-await p.evaluate(() => { const st = window.sunup.state; st.learn.push('lesson:scarecrow'); window.sunup.hud.pickTool('hands'); });
-await frames(20);
-s = await screen();
-check('no bug line while no bug is on the farm', !/Bugs/.test(s.line), s.line);
-const bug = await p.evaluate(() => {
-  const st = window.sunup.state;
-  const i = st.plots.findIndex((q, k) => q.crop && !q.crop.dead && q.crop.stage >= 1 && q.crop.stage < 4 && st.parcelOf[k] >= 0 && st.parcels[st.parcelOf[k]].owned);
-  st.plots[i].crop.bugs = 1;
-  const f = st.actors[0];
-  Object.assign(f, { x: 12.5, y: 3.5, task: null, path: [] });
-  return { x: i % st.W, y: Math.floor(i / st.W), kind: st.plots[i].crop.kind };
-});
+// 8. The scarecrow note goes, and the bug line comes back: the bugs were never picked. It names the crop and points
+// at it; the button says Pick.
+await p.evaluate(() => { const st = window.sunup.state; st.learn.push('lesson:scarecrow'); window.sunup.hud.pickTool('hands'); const f = st.actors[0]; Object.assign(f, { x: 12.5, y: 3.5, task: null, path: [] }); });
 await frames(40);
+const bug = { ...firstBug, kind: await p.evaluate((b) => window.sunup.state.plots[b.y * window.sunup.state.W + b.x].crop.kind, firstBug) };
 s = await screen();
-check('bugs land: the line names the crop', /^Bugs on your [a-z]+\. Pick them off\.$/.test(s.line), s.line);
+check('after the crow, the bug line comes back, naming the crop', /^Bugs on your [a-z]+\. Pick them off\.$/.test(s.line) && !(await p.evaluate(() => window.sunup.state.learn.includes('lesson:bugs'))), s.line);
 const bugPt = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const r = e.getBoundingClientRect(); return { on: e.classList.contains('on'), over: e.classList.contains('over'), x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
 const bugAt = await project(bug.x + 0.5, bug.y + 0.5, 0.9);
 const bugOk = bugPt.on && (bugPt.over ? Math.abs(bugPt.x - bugAt.x) < 14 && bugAt.y - bugPt.y > 10 && bugAt.y - bugPt.y < 50 : Math.sign(bugAt.x - 206) === Math.sign(bugPt.x - 206));
@@ -318,6 +403,16 @@ const bugsOn = await blockColour(bug.x + 0.5, bug.y + 0.5, 0.12, 12);
 await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + b.x].crop.bugs = 0; }, bug);
 const bugsOff = await blockColour(bug.x + 0.5, bug.y + 0.5, 0.12, 12);
 check('the bugs can be seen on the crop', dist(bugsOn, bugsOff) > 12, `${bugsOn.map(Math.round)} with bugs, ${bugsOff.map(Math.round)} without`);
+// After the lesson, bugs still come: no line, but the pointer finds them.
+await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + b.x].crop.bugs = 1; }, bug);
+await frames(20);
+{
+  const pt = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const r = e.getBoundingClientRect(); return { on: e.classList.contains('on'), over: e.classList.contains('over'), x: r.x + r.width / 2 }; });
+  const at = await project(bug.x + 0.5, bug.y + 0.5, 0.5);
+  s = await screen();
+  check('after the bug lesson, new bugs get the pointer and no line', pt.on && !/Bugs/.test(s.line) && (pt.over ? Math.abs(pt.x - at.x) < 16 : Math.sign(at.x - 206) === Math.sign(pt.x - 206)), JSON.stringify({ pt, at, line: s.line }));
+}
+await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + b.x].crop.bugs = 0; }, bug);
 
 
 // 9. The last days of a season: the picker offers next season's seeds, marked, and marks what is too late.
@@ -367,6 +462,31 @@ for (const [x, y] of [[2.5, 3.5], [16.5, 12.5], [9.5, 9.5], [1.5, 13.5]]) {
 }
 check('the camera keeps the farm in view (85% of the clear band, all 15 rows)', !camOk.includes('LOW'), camOk.join(' | '));
 await shot('11-camera-corner');
+
+// 11. A 6 am storm: the crops read as well as on a sunny 6 am (mean light over the clear band, read back from WebGL).
+const bandLight = () => p.evaluate(() => new Promise((done) => {
+  const d = window.sunup.r3d.debug;
+  d.afterFrame = (gl) => {
+    d.afterFrame = null;
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0;
+    let n = 0;
+    for (let y = Math.round(h * 0.15); y < Math.round(h * 0.85); y += 3) for (let x = 0; x < w; x += 3) { const i = (y * w + x) * 4; sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]; n++; }
+    done(sum / n);
+  };
+}));
+const dawnLight = {};
+for (const w of ['sun', 'storm']) {
+  await p.evaluate((w) => { const st = window.sunup.state; st.weather = w; st.minute = 0; window.sunup['daylight'] = 0.35; window.sunup['hour'] = 6; const f = st.actors[0]; Object.assign(f, { x: 2.5, y: 3.5, task: null, path: [] }); }, w);
+  await p.waitForTimeout(900);
+  await p.evaluate((w) => { window.sunup.state.weather = w; window.sunup.state.minute = 0; }, w);
+  dawnLight[w] = Math.round(await bandLight());
+}
+await shot('12-storm-dawn');
+check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawnLight.sun * 0.9, JSON.stringify(dawnLight));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 console.log(failed ? `LESSONS FAILED (${failed})` : 'LESSONS OK', `shots in ${out}`);
