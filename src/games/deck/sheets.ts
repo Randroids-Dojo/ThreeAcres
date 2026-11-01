@@ -13,6 +13,8 @@ import {
   buySlot,
   canBuyScoop,
   canRemove,
+  scoopOnSale,
+  scoopsIdle,
   canUpgrade,
   CARDS,
   cardText,
@@ -37,6 +39,8 @@ import {
   slotPrice,
   topCrops,
   TUNING,
+  twistEase,
+  twistQuota,
   twistText,
   upgradeCard,
   upgradeNote,
@@ -53,6 +57,11 @@ import { pinUrl, scoopUrl, thingUrl } from './view/art';
 import { faceUrl, VARIETY } from './view/faces';
 import { paintBell, paintStamp } from './view/glyphs';
 import { twistUrl } from './view/icons';
+
+/** Phone stall goods: the most they grow, and the gaps of two rows of two (a row of price tags between the rows). */
+const GOODS_MAX = 1.8;
+const TWO_COLS = 26;
+const TWO_ROWS = 34;
 
 const NUMS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
 
@@ -259,8 +268,9 @@ export class Sheets {
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
-      'From year 2, the stall offers two twists for the season ahead, such as frost on the bottom row or a buyer for one crop. Pick one; it holds all season.',
-      "Year 3 asks more of a strong plot: each quota is at least a share more than your year 2 seasons took.",
+      'From year 2, the stall offers two twists for the season ahead: one that helps, such as a buyer for one crop, and one that gets in the way, such as frost on the bottom row. The one that gets in the way asks a smaller quota. Pick one; it holds all season.',
+      'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
+      'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
       'From summer, pests settle on crops: a pested crop pays half for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
@@ -302,7 +312,7 @@ export class Sheets {
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
     if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot from season to season, for the rest of the run.'));
     // What improving would do, only once the player has improved a card at the stall.
-    if (!card.up && this.t.tutor.n('improve') > 0) notes.append(el('p', 'sb-quiet', `Improved: ${lowerFirst(upgradeNote(card.id))}`));
+    if (!card.up && this.t.tutor.n('improve') > 0) notes.append(el('p', 'sb-quiet', `Improved: ${lowerFirst(upgradeNote(card.id, this.t.run.pages))}`));
     if (!hover) notes.append(el('p', 'sb-quiet', `${this.touch ? 'Tap' : 'Click'} to put it back.`));
     d.append(notes);
     d.classList.toggle('hover', hover);
@@ -381,7 +391,7 @@ export class Sheets {
             line.innerHTML =
               pick === 'remove'
                 ? `Throw out this ${esc(lower(c.id))}? <b>Tap it again.</b>`
-                : `${esc(CARDS[c.id].name)}: ${esc(lowerFirst(upgradeNote(c.id)))} <b>Tap it again to improve it.</b>`;
+                : `${esc(CARDS[c.id].name)}: ${esc(lowerFirst(upgradeNote(c.id, s.pages)))} <b>Tap it again to improve it.</b>`;
             this.ctx.audio.cue('deck.pick');
             return;
           }
@@ -390,7 +400,7 @@ export class Sheets {
             this.t.tutor.count('service');
             if (pick === 'upgrade') this.t.tutor.count('improve');
             this.ctx.audio.cue(pick === 'remove' ? 'deck.remove' : 'deck.buy');
-            this.done = pick === 'remove' ? `The ${lower(c.id)} is thrown out.` : `${CARDS[c.id].name} improved. ${upgradeNote(c.id)}`;
+            this.done = pick === 'remove' ? `The ${lower(c.id)} is thrown out.` : `${CARDS[c.id].name} improved. ${upgradeNote(c.id, s.pages)}`;
             this.doneCard = pick === 'upgrade' ? c : null;
             this.t.save();
             this.t.syncPurse();
@@ -482,7 +492,9 @@ export class Sheets {
       row.setAttribute('aria-label', `${cap(SEASON_NAMES[coming.season])} brings one of these`);
       sh.twists.forEach((tw, i) => {
         const on = sh.twist === i;
-        const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
+        // A hitch is a trade: it says what it takes off the season's quota ("Summer asks 510, not 600.").
+        const trade = twistEase(tw) ? `<em class="sb-trade">${cap(SEASON_NAMES[coming.season])} asks ${twistQuota(s, tw)}, not ${twistQuota(s, null)}.</em>` : '';
+        const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${trade}${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
           if (!chooseTwist(s, i)) return;
           this.t.tutor.count('twist');
           this.needTwist = false;
@@ -604,7 +616,7 @@ export class Sheets {
     tray.append(goods);
     // Services on the tray's lip: throw a card out, improve one, fresh stock, and a scoop from year 2.
     const lip = el('div', 'sb-lip');
-    const thing = (key: string, url: string, label: string, price: number, ok: boolean, words: string, verb: string, why: string, go: () => void) => {
+    const thing = (key: string, url: string, label: string, price: number, ok: boolean, words: string, verb: string, why: string, go: () => void, stop = '') => {
       const b = btn(`sb-thing${this.picked === key ? ' lifted' : ''}`, `<img src="${url}" alt=""><span>${label}</span><em>${price} coins</em>`, () =>
         this.lift(key, () => {
           if (!ok) {
@@ -615,7 +627,7 @@ export class Sheets {
           go();
         }),
       );
-      if (this.picked === key) read = `${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`;
+      if (this.picked === key) read = `${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : stop ? `<em>${stop}</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`;
       lip.append(b);
     };
     const bucket = thingUrl('compost', 44, (g, px) => paintBucket(g, px));
@@ -635,10 +647,14 @@ export class Sheets {
       this.stall();
     });
     if (s.year >= 2 && s.scoops < TUNING.maxScoops) {
-      thing('scoop', scoopUrl(true), 'A scoop', scoopPrice(s), canBuyScoop(s), 'One more seed scoop on the bench every day, for good.', 'buy it', '', () => {
+      // Said before it is bought: how many scoops a day sat unused last season; with scoops to spare, none is sold
+      // (the sixth playtest's 3,200-coin scoop sat unused with 3 to 6 others most days).
+      const idle = Math.round(scoopsIdle(s));
+      const unused = scoopsIdle(s) >= 1 ? ` Last season ${idle} ${idle === 1 ? 'scoop' : 'scoops'} a day sat unused.` : '';
+      thing('scoop', scoopUrl(true), 'A scoop', scoopPrice(s), canBuyScoop(s), `One more seed scoop on the bench every day, for good.${unused}`, 'buy it', '', () => {
         if (buyScoop(s)) this.bought('service', 'A new scoop for the bench, for good.');
         this.stall();
-      });
+      }, scoopOnSale(s) ? '' : 'You have scoops to spare.');
     }
     if (this.t.seen('services')) tray.append(lip);
     body.append(tray);
@@ -683,6 +699,7 @@ export class Sheets {
     // Keep the keyboard where it was: on the lifted thing, or on what was focused before.
     const was = document.activeElement?.closest('.sb-stall') ? [...this.el.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement) : -1;
     this.show('stall', wrap, this.picked ? '.lifted' : this.needTwist ? '.sb-twistcard' : undefined);
+    this.fitGoods(wrap);
     if (!this.picked && !this.needTwist && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
     body.scrollTop = scroll;
     // A body that scrolls says so: a soft shade at its foot while there is more below (it scrolled 16 px with no sign).
@@ -691,6 +708,36 @@ export class Sheets {
     requestAnimationFrame(more);
   }
   private swapFor: number | null = null;
+
+  /**
+   * On the phone the goods grow into the stall's free height: one row as wide as the tray allows, or two rows of two
+   * when the screen has the room (a year 1 stall). They were about 70 px wide with their rule pictures about 10 px,
+   * and the bottom of the screen bare. Measured at their plain size on every render, so the same stall always lays out
+   * the same way and nothing moves between a first tap and a second.
+   */
+  private fitGoods(wrap: HTMLElement): void {
+    const goods = wrap.querySelector('.sb-goods') as HTMLElement | null;
+    if (!goods) return;
+    goods.style.removeProperty('--sbg');
+    goods.classList.remove('two');
+    const items = [...goods.children] as HTMLElement[];
+    if (this.t.layout !== 'phone' || items.length < 2) return;
+    const kids = [...wrap.children] as HTMLElement[];
+    const gap = parseFloat(getComputedStyle(wrap).rowGap) || 0;
+    const free = Math.max(0, wrap.clientHeight - kids.reduce((a, k) => a + k.offsetHeight, 0) - gap * (kids.length - 1) - 6);
+    const room = goods.clientWidth - 8;
+    const tallest = Math.max(...items.map((e) => e.offsetHeight));
+    const wide = (row: HTMLElement[]) => row.reduce((a, e) => a + e.offsetWidth, 0);
+    const high = (row: HTMLElement[]) => Math.max(...row.map((e) => e.offsetHeight));
+    const colGap = parseFloat(getComputedStyle(goods).columnGap) || 0;
+    const one = Math.min(GOODS_MAX, (room - colGap * (items.length - 1)) / wide(items), 1 + free / tallest);
+    const rows = [items.slice(0, 2), items.slice(2)];
+    const two = items.length > 2 ? Math.min(GOODS_MAX, (room - TWO_COLS) / Math.max(...rows.map(wide)), (tallest + free - TWO_ROWS) / (high(rows[0]) + high(rows[1]))) : 0;
+    // Two rows only when they grow the goods clearly more than one row does: they take a row of price tags too.
+    const k = two > one + 0.15 ? two : one;
+    if (k === two) goods.classList.add('two');
+    goods.style.setProperty('--sbg', Math.max(1, k).toFixed(3));
+  }
   /** The way on was tried with no twist picked: the slip asks for one and the two clippings call for a tap. */
   private needTwist = false;
 

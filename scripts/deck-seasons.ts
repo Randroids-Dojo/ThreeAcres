@@ -7,9 +7,12 @@
 // and the rules' public calls, so the same file runs against an older build.
 // Round 5 adds the second run: the decent bot on the first run after the
 // guided one (a record of one run finished), whose first spring is softer.
+// Round 6: the quota column is the median a season asked (a hitch, Cold Frame
+// and the old year 3 scaling move it), and the share of twists the bot took
+// as the hitch.
 // npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|second]
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
-import { newMeta, newRun, SEASON_NAMES } from '../src/games/deck/rules';
+import { BOONS, newMeta, newRun, SEASON_NAMES } from '../src/games/deck/rules';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 200);
@@ -25,7 +28,10 @@ interface Tally {
   unspent: number[];
   ratio: number[][];
   take: number[][];
-  quota: number[];
+  quota: number[][];
+  /** Stalls offering two twists, and those where the bot took the hitch. */
+  twists: number;
+  hitches: number;
   slots: number[];
   pages: number[];
   kept: number[];
@@ -45,7 +51,9 @@ function play(noise: number, guided: boolean, second = false): Tally {
     unspent: [],
     ratio: Array.from({ length: K }, () => []),
     take: Array.from({ length: K }, () => []),
-    quota: new Array(K).fill(0),
+    quota: Array.from({ length: K }, () => []),
+    twists: 0,
+    hitches: 0,
     slots: [],
     pages: [],
     kept: [],
@@ -73,7 +81,12 @@ function play(noise: number, guided: boolean, second = false): Tally {
       if (k >= K) break;
       if (s.phase === 'shop') {
         tray();
+        const offer = s.shop?.twists ?? [];
         botShop(s, o, dice);
+        if (offer.length === 2 && s.twist) {
+          t.twists++;
+          if (!(BOONS as readonly string[]).includes(s.twist.id)) t.hitches++;
+        }
         // Coins left in the purse on leaving the stall that opens year 2 summer and later: what found no use.
         if (k >= 5) t.kept.push(s.coins);
         continue;
@@ -91,7 +104,7 @@ function play(noise: number, guided: boolean, second = false): Tally {
         if (end.cleared) t.cleared[k]++;
         t.ratio[k].push(end.earned / end.quota);
         t.take[k].push(end.earned);
-        t.quota[k] = end.quota;
+        t.quota[k].push(end.quota);
       }
     }
     t.offered.push(offered.size);
@@ -124,7 +137,7 @@ for (const [name, noise, guided, second] of bots) {
     if (!t.played[k]) continue;
     const label = `year ${Math.floor(k / 4) + 1} ${SEASON_NAMES[k % 4]}`.padEnd(17);
     console.log(
-      `${label} ${String(t.played[k]).padStart(6)}  ${((t.cleared[k] / t.played[k]) * 100).toFixed(0).padStart(3)}%  ${String(t.quota[k]).padStart(5)}  ${String(med(t.take[k])).padStart(11)}  ${med(t.ratio[k]).toFixed(2).padStart(12)}  ${mean(t.dawn[k]).toFixed(1).padStart(19)}  ${med(t.night1[k]).toFixed(0).padStart(7)}  ${med(t.night2[k]).toFixed(0).padStart(7)}`,
+      `${label} ${String(t.played[k]).padStart(6)}  ${((t.cleared[k] / t.played[k]) * 100).toFixed(0).padStart(3)}%  ${String(med(t.quota[k])).padStart(5)}  ${String(med(t.take[k])).padStart(11)}  ${med(t.ratio[k]).toFixed(2).padStart(12)}  ${mean(t.dawn[k]).toFixed(1).padStart(19)}  ${med(t.night1[k]).toFixed(0).padStart(7)}  ${med(t.night2[k]).toFixed(0).padStart(7)}`,
     );
   }
   for (const y of [1, 2, 3]) {
@@ -134,5 +147,6 @@ for (const [name, noise, guided, second] of bots) {
   console.log(`coins unspent when the run ends: median ${med(t.unspent)}, mean ${mean(t.unspent).toFixed(0)}, max ${Math.max(...t.unspent)}`);
   console.log(`coins left on leaving a stall from year 2 summer on: median ${med(t.kept)}, p90 ${[...t.kept].sort((a, b) => a - b)[Math.floor(t.kept.length * 0.9)] ?? 0}`);
   console.log(`pages kept at the end: mean ${mean(t.pages).toFixed(1)}, max ${Math.max(...t.pages)}; page slots bought: ${t.slots.filter((n) => n > 0).length} runs, max ${Math.max(...t.slots)}`);
+  console.log(`twists: the hitch picked at ${t.twists ? Math.round((t.hitches / t.twists) * 100) : 0}% of ${t.twists} stalls`);
   console.log(`stall variety: ${mean(t.offered).toFixed(1)} different cards on the stalls' trays in a run (median ${med(t.offered)}); ${((t.repeats / Math.max(1, t.traySlots)) * 100).toFixed(0)}% of tray slots repeat the stall before`);
 }

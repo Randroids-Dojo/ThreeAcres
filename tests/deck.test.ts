@@ -1,7 +1,7 @@
 // Seedbound's rules: the day, the board, the scoring cascade, hazards, the
 // shop, meta unlocks and determinism.
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { cloneRun, Dice, playRun, botDay, botShop } from '../src/games/deck/bot';
+import { cloneRun, Dice, playRun, botDay, botShop, botTwist } from '../src/games/deck/bot';
 import { newLearn, Tutor, weatherHelps } from '../src/games/deck/lessons';
 import {
   allCards,
@@ -47,6 +47,11 @@ import {
   chooseTwist,
   twistText,
   PAGES,
+  nextQuota,
+  scoopOnSale,
+  twistEase,
+  twistQuota,
+  upgradeNote,
   type CardId,
   type Crop,
   type Ev,
@@ -527,8 +532,10 @@ describe('seasons and the shop', () => {
     expect(s.pages.length).toBe(5);
     expect(s.pages).not.toContain(first);
     expect(s.pages).toContain(offered[0]);
+    // Four scoops for good, each twice the last: a sink for late coins that the bench lays out at any count (round 6:
+    // only when last season's bench had few to spare; this season played no days, so none sat unused).
+    s.stats.log.at(-1)!.idle = 0;
     const e0 = energyMax(s);
-    // Four scoops for good, each twice the last: a sink for late coins that the bench now lays out at any count.
     const prices: number[] = [];
     for (let k = 0; k < 4; k++) {
       prices.push(s.coins);
@@ -620,9 +627,10 @@ describe('the balance bot', () => {
     }
   }, 20000);
 
+  // Round 6: the bot plays each twist's season ahead before it picks, so a whole run takes a few seconds.
   it('is reproducible', () => {
     expect(JSON.stringify(playRun(77, null, { noise: 0.1, seed: 2 }))).toBe(JSON.stringify(playRun(77, null, { noise: 0.1, seed: 2 })));
-  });
+  }, 30000);
 });
 
 describe('the guided first season', () => {
@@ -700,7 +708,8 @@ describe('previews', () => {
     play(s, 'carrot', 5);
     s.plots[5].crop!.age = 1;
     const p = previewPlay(s, 0, 6)!;
-    expect(p.marks).toContainEqual({ plot: 5, yield: 0, bloom: 1, times: 1, nights: 0 });
+    // Round 6: the carrot's mark carries what it will pay now, 5 x 2.
+    expect(p.marks).toContainEqual({ plot: 5, yield: 0, bloom: 1, times: 1, nights: 0, total: 10 });
     play(s, 'radish', 6);
     expect(harvests(endDay(s)).find((x) => x.kind === 'carrot')!.score).toBe(10);
   });
@@ -723,7 +732,7 @@ describe('previews', () => {
     expect(previewPlay(s, 0, 1)!.marks).toEqual([{ plot: 0, yield: 0, bloom: 0, times: 1, nights: 1 }]);
     expect(previewPlay(s, 1, null)!.marks.map((m) => m.plot)).toEqual([0]);
     const sun = previewPlay(s, 2, null)!.marks;
-    expect(sun).toEqual([{ plot: 15, yield: 3, bloom: 0, times: 1, nights: 0 }]);
+    expect(sun).toEqual([{ plot: 15, yield: 3, bloom: 0, times: 1, nights: 0, total: 5 }]);
   });
 
   it('the forecast knows when each crop is pulled and leaves; pests no longer hold a crop back', () => {
@@ -1499,33 +1508,6 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     expect(u.phase).toBe('day');
   });
 
-  it('year 3 asks at least a share of the run\'s own year 2 autumn and winter takes, carried coins left out', () => {
-    calm();
-    const year2 = (early: number, late: number, carried = 0) => [0, 1, 2, 3].map((season) => ({ year: 2, season: season as 0 | 1 | 2 | 3, earned: season >= 2 ? late : early, quota: 400, cleared: true, carried }));
-    const into3 = (log: RunState['stats']['log']) => {
-      const s = table(['radish'], { year: 2, season: 3 });
-      s.stats.log = [...log];
-      toStall(s);
-      // Keep the run's own takes for the mean: drop the entry the stall just wrote.
-      s.stats.log.splice(log.length);
-      leaveShop(s);
-      return s;
-    };
-    const want = (take: number) => Math.round((TUNING.y3scale[0] * take) / 10) * 10;
-    // A strong year 2 (2,000 a season by autumn) faces more than the fixed row in year 3.
-    const strong = into3(year2(800, 2000));
-    expect(strong.year).toBe(3);
-    expect(strong.quota).toBe(want(2000));
-    expect(strong.quota).toBeGreaterThan(TUNING.quotas3[0]);
-    // Only autumn and winter count: a slow start to year 2 does not lower it, a quick one does not raise it.
-    expect(into3(year2(2000, 2000)).quota).toBe(strong.quota);
-    // A weaker one faces the fixed row.
-    expect(into3(year2(500, 500)).quota).toBe(TUNING.quotas3[0]);
-    // Coins carried into a season are not the run's own take.
-    expect(into3(year2(800, 2000, 1000)).quota).toBe(Math.max(TUNING.quotas3[0], want(1000)));
-    expect(TUNING.y3scale.every((k) => k >= 0.9)).toBe(true);
-  });
-
   it('a share of a season\'s surplus carries into the next one: the playtest\'s 817 of 440, then 463 of 510, now clears', () => {
     calm();
     const s = table(['radish'], { year: 2, season: 0 });
@@ -1833,5 +1815,202 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     }
     expect(PAGES.bees.text).not.toMatch(/blooms gets/);
     expect(CARDS.mint.text).toMatch(/free/i);
+  });
+});
+
+describe('round 6: twists that trade, a gentler guided summer, fixed year 3 rows, a scoop only for a bench that runs short', () => {
+  const crop = (uid: number, kind: Crop['kind'], age: number, days: number, extra: Partial<Crop> = {}): Crop => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false, ...extra });
+  /** Meet every day of this season (and any before the stall). */
+  function toStall(s: RunState): void {
+    for (let g = 0; g < 10 && s.phase === 'day'; g++) {
+      s.earned = Math.max(s.earned, s.quota);
+      endDay(s);
+    }
+  }
+  /** Leave the stall with the twist that helps picked, so a quota is the plain row. */
+  function leaveHelped(s: RunState): void {
+    const tw = s.shop?.twists;
+    if (tw?.length) chooseTwist(s, tw.findIndex((t) => BOONS.includes(t.id)));
+    leaveShop(s);
+  }
+  const calm = () => {
+    const was = [TUNING.pestChance, TUNING.crowChance] as const;
+    TUNING.pestChance = [0];
+    TUNING.crowChance = [0];
+    onTestFinished(() => {
+      [TUNING.pestChance, TUNING.crowChance] = was;
+    });
+  };
+
+  it('a hitch pays for itself: it takes its share off the season\'s quota, and the stall says what it would ask before the pick', () => {
+    // Picked, a hitch asks less than the plain row; the help asks the plain row (round 5's hitches gave nothing back).
+    for (let seed = 1; seed <= 8; seed++) {
+      for (const kind of ['hitch', 'help']) {
+        const { s } = newRun(seed, null);
+        s.season = 3;
+        toStall(s);
+        chooseTwist(s, s.shop!.twists!.findIndex((t) => (kind === 'hitch' ? HITCHES : BOONS).includes(t.id)));
+        leaveShop(s);
+        if (kind === 'hitch') expect(s.quota).toBeLessThan(quotaFor(2, 0, s.pages));
+        else expect(s.quota).toBe(quotaFor(2, 0, s.pages));
+      }
+    }
+    for (const id of HITCHES) expect(twistEase({ id })).toBeGreaterThan(0.05);
+    for (const id of BOONS) expect(twistEase({ id })).toBe(0);
+    for (let seed = 1; seed <= 8; seed++) {
+      const { s } = newRun(seed, null);
+      s.season = 3;
+      toStall(s);
+      const tw = s.shop!.twists!;
+      const hi = tw.findIndex((t) => HITCHES.includes(t.id));
+      const plain = quotaFor(2, 0, s.pages);
+      // Nothing picked yet: the stall's head says the plain quota; each clipping knows what it would ask.
+      expect(nextQuota(s)).toBe(plain);
+      const eased = twistQuota(s, tw[hi]);
+      expect(eased).toBe(Math.round((plain * (1 - twistEase(tw[hi]))) / 10) * 10);
+      expect(eased).toBeLessThan(plain);
+      expect(twistQuota(s, tw[1 - hi])).toBe(plain);
+      // Picked, the head follows it, and the season asks it.
+      chooseTwist(s, hi);
+      expect(nextQuota(s)).toBe(eased);
+      leaveShop(s);
+      expect(s.twist!.id).toBe(tw[hi].id);
+      expect(s.quota).toBe(eased);
+      expect(s.stats.log.length).toBeGreaterThan(0);
+    }
+    // The help asks the plain quota.
+    const h = newRun(2, null).s;
+    h.season = 3;
+    toStall(h);
+    leaveHelped(h);
+    expect(h.quota).toBe(quotaFor(2, 0, h.pages));
+  });
+
+  it('the bot\'s pick follows its deck and plot, not the kind of twist: a hitch at some stalls, a help at others', () => {
+    let hitch = 0;
+    let help = 0;
+    for (let seed = 1; seed <= 16; seed++) {
+      const { s } = newRun(seed, null);
+      s.season = 3;
+      toStall(s);
+      botTwist(s, seed);
+      const t = s.shop!.twists![s.shop!.twist ?? 0];
+      if (HITCHES.includes(t.id)) hitch++;
+      else help++;
+    }
+    // Round 5 scored every help above every hitch: the bot, like the sixth playtest, never took a hitch.
+    expect(hitch).toBeGreaterThan(0);
+    expect(help).toBeGreaterThan(0);
+  });
+
+  it('the guided run\'s summer, its first season on its own, asks 180, not 230', () => {
+    const g = newRun(4, null, true).s;
+    expect(g.quota).toBe(TUNING.guidedQuota);
+    toStall(g);
+    leaveShop(g);
+    expect(g.season).toBe(1);
+    expect(g.quota).toBe(180);
+    // Autumn keeps the guided year's 88%, and asks more than summer: no cliff, no dip.
+    toStall(g);
+    leaveShop(g);
+    expect(g.quota).toBe(Math.round((TUNING.quotas[2] * TUNING.firstYear) / 10) * 10);
+    expect(g.quota).toBeGreaterThan(180);
+    // Its year 2 asks a share less than the raised row, about round 5's.
+    for (let k = 0; k < 3; k++) {
+      toStall(g);
+      leaveHelped(g);
+    }
+    expect([g.year, g.season]).toEqual([2, 1]);
+    expect(g.quota).toBe(Math.round((TUNING.quotas2[1] * TUNING.guidedYear2) / 10) * 10);
+    expect(g.quota).toBeLessThan(TUNING.quotas2[1]);
+    // A run that is not guided asks the usual summer.
+    const n = newRun(4, null).s;
+    toStall(n);
+    leaveShop(n);
+    expect(n.quota).toBe(TUNING.quotas[1]);
+  });
+
+  it('year 3 is a fixed row that grows through the year: what the run earned in year 2 never raises it', () => {
+    calm();
+    const into3 = (take: number, coins: number) => {
+      const s = table(['radish'], { year: 2, season: 3 });
+      s.stats.log = [0, 1, 2, 3].map((season) => ({ year: 2, season: season as 0 | 1 | 2 | 3, earned: take, quota: 400, cleared: true, carried: 0 }));
+      s.stats.totalEarned = take * 4;
+      s.coins = coins;
+      const q: number[] = [];
+      for (let k = 0; k < 4; k++) {
+        toStall(s);
+        leaveHelped(s);
+        q.push(s.quota);
+      }
+      expect(s.year).toBe(3);
+      return q;
+    };
+    // The sixth playtest's year 2 took 1,064, 1,788 and 2,311, and every year 3 quota went to a flat 1,550.
+    const weak = into3(500, 100);
+    const strong = into3(2300, 20000);
+    expect(strong).toEqual(weak);
+    expect(weak).toEqual(TUNING.quotas3);
+    for (let k = 1; k < 4; k++) expect(TUNING.quotas3[k]).toBeGreaterThan(TUNING.quotas3[k - 1]);
+    // A step up from year 2 winter, not a cliff.
+    expect(TUNING.quotas3[0]).toBeGreaterThan(TUNING.quotas2[3]);
+    expect(TUNING.quotas3[0]).toBeLessThan(TUNING.quotas2[3] * 1.3);
+    // Year 2 asks more of a built plot from summer.
+    for (let k = 1; k < 4; k++) expect(TUNING.quotas2[k]).toBeGreaterThan(TUNING.quotas2[k - 1]);
+  });
+
+  it('a scoop for good is sold only when last season\'s bench had few to spare', () => {
+    calm();
+    /** A season of six days, leaving this many scoops on the bench at each dusk, then the stall. */
+    const season = (s: RunState, left: number) => {
+      for (let g = 0; g < 10 && s.phase === 'day'; g++) {
+        s.energy = left;
+        s.earned = Math.max(s.earned, s.quota);
+        endDay(s);
+      }
+    };
+    const { s } = newRun(3, null);
+    s.year = 2;
+    // Three scoops a day sat unused (the sixth playtest: 3 to 6 most days, then a 3,200-coin scoop): none for sale.
+    season(s, 3);
+    expect(s.phase).toBe('shop');
+    s.coins = 100000;
+    expect(buyScoop(s)).toBeNull();
+    expect(s.stats.log.at(-1)!.idle).toBe(3);
+    expect(scoopOnSale(s)).toBe(false);
+    // A bench spent to the last scoop most days: scoops for sale, each twice the last, four at most.
+    leaveShop(s);
+    season(s, 0);
+    s.coins = 100000;
+    expect(scoopOnSale(s)).toBe(true);
+    const e0 = energyMax(s);
+    for (let k = 0; k < TUNING.maxScoops; k++) expect(buyScoop(s)).not.toBeNull();
+    expect(buyScoop(s)).toBeNull();
+    expect(energyMax(s)).toBe(e0 + TUNING.maxScoops);
+    // Even one scoop a day to spare: none for sale.
+    const t = newRun(4, null).s;
+    t.year = 2;
+    season(t, 1);
+    t.coins = 100000;
+    expect(buyScoop(t)).toBeNull();
+  });
+
+  it('a held seed shows what a neighbour it changes will pay now; the improve note counts the Root Cellar', () => {
+    calm();
+    const s = table(['radish']);
+    s.pages = ['cellar'];
+    s.plots[5].crop = crop(901, 'carrot', 1, 2);
+    s.plots[4].crop = crop(902, 'radish', 0, 1);
+    const p = previewPlay(s, 0, 6)!;
+    const m = p.marks.find((x) => x.plot === 5)!;
+    expect(m.bloom).toBe(1);
+    // The new seed's own pay is the slip, not a mark's total; the carrot's total is what the night pays it.
+    expect(p.marks.find((x) => x.plot === 6)?.total).toBeUndefined();
+    play(s, 'radish', 6);
+    expect(m.total).toBe(harvests(endDay(s)).find((h) => h.kind === 'carrot')!.score);
+    // "Carrot: basket 5 to 8" ignored the Root Cellar's +2, which the face prints.
+    expect(upgradeNote('carrot', ['cellar'])).toBe('Basket 7 to 10.');
+    expect(upgradeNote('carrot')).toBe('Basket 5 to 8.');
+    expect(upgradeNote('beans', ['cellar'])).toBe('Basket 3 to 5.');
   });
 });

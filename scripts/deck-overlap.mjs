@@ -46,6 +46,15 @@
 // card off the caption and the close-up off the scoops, bench, plate, ledger and
 // hand; garlic and ladybirds picture a pest; the win page; desktop goods 115 px
 // wide and up. ONLY=text runs just the states whose name holds it.
+//
+// Round 6 adds: four-digit takes and quotas (1239 of 1550, 12400 of 15500) and five-digit coins on the ledger and
+// purse, every digit inside its piece and clear of the other (the phone's purse covered "1239 of 15"); a radish aimed
+// beside a carrot paints the carrot's new total on a dark chip inside its plot, and the night pays exactly that; kept
+// pages 40 px tall on the phone stall (they were 18), and a swap by real taps; the hitch's trade line ("Spring asks
+// 370, not 430.") on the hitch only, and picking it moves the stall's head; the phone stall's goods 84 px wide and up
+// where the stall has room (71 to 80 before); the season's note in the lesson strip with the twist stepping aside,
+// never over row 1; "the other beans", the scarecrow before the crows, the improve note counting the Root Cellar, and
+// a won run's ledger saying so.
 // node scripts/deck-overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -689,7 +698,8 @@ async function run(label, viewport, touch) {
     }],
     ['round 5: the twist line on the table', async () => {
       const want = await p.evaluate(() => window.deck.state().shop.twists[1]);
-      const wantText = await p.evaluate(() => document.querySelectorAll('.sb-twistcard')[1]?.textContent.trim());
+      // The clipping's line (a hitch's trade line under it is the stall's, not the table's).
+      const wantText = await p.evaluate(() => document.querySelectorAll('.sb-twistcard')[1]?.querySelector('span')?.textContent.trim());
       await tapAt('.sb-signpost');
       await settle(500);
       const q = await p.evaluate(() => ({ phase: window.deck.state().phase, twist: window.deck.state().twist, line: window.deck.twist() }));
@@ -952,6 +962,265 @@ async function run(label, viewport, touch) {
       });
       if (!q.can || !q.more || q.end) extra.push(`the scroll shade: can scroll ${q.can}, shaded ${q.more}, shaded at the end ${q.end}`);
       await p.evaluate(() => window.deck.table.sheets.stall());
+    }],
+    // Round 6: four-digit takes and quotas on the ledger, a neighbour's new total on its chip, kept pages that take a
+    // tap on the phone, a hitch's trade line, goods that grow into the phone stall's room, notes about the whole table
+    // in the strip (never over row 1), and the plain words the playtest asked for.
+    ['round 6: four-digit takes and quotas on the ledger, the purse whole', async () => {
+      await fresh(4242);
+      const rows = [];
+      for (const [earned, quota, coins] of [[1239, 1550, 1768], [1403, 1240, 3520], [12400, 15500, 12345], [99, 120, 40]]) {
+        const q = await p.evaluate(([earned, quota, coins]) => {
+          const t = window.deck.table;
+          const s = t.run;
+          s.year = 3;
+          s.season = 2;
+          s.earned = earned;
+          s.quota = quota;
+          s.coins = coins;
+          t.syncAll();
+          const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+          // The words themselves (a Range is not clipped by the ledger's edge, so a cut digit shows as words past it).
+          const words = (e) => { const r = document.createRange(); r.selectNodeContents(e); return box(r); };
+          return { led: box(document.querySelector('.sb-ledger')), tally: words(document.querySelector('.sb-led-tally')), season: words(document.querySelector('.sb-led-season')), purse: box(document.querySelector('.sb-purse')), coins: words(document.querySelector('.sb-purse b')), text: document.querySelector('.sb-led-tally').textContent, big: document.querySelector('.sb-ledger').classList.contains('big') };
+        }, [earned, quota, coins]);
+        const cross = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5;
+        if (q.tally.r > q.led.r - 2 || q.tally.l < q.led.l || q.tally.b > q.led.b + 0.5) extra.push(`"${q.text}" runs past the ledger (words ${Math.round(q.tally.l)} to ${Math.round(q.tally.r)}, ledger ${Math.round(q.led.l)} to ${Math.round(q.led.r)})`);
+        if (cross(q.tally, q.purse)) extra.push(`the purse covers "${q.text}"`);
+        if (cross(q.tally, q.season)) extra.push(`"${q.text}" runs into the season's words`);
+        if (q.coins.l < q.purse.l + 3 || q.coins.r > q.purse.r - 3) extra.push(`${coins} coins run past the purse (${Math.round(q.coins.r - q.coins.l)} px in ${Math.round(q.purse.r - q.purse.l)})`);
+        rows.push(`"${q.text}"${q.big ? ' stacked' : ''} ${Math.round(q.led.r - q.tally.r)} px clear of the edge, ${coins} coins ${Math.round(q.coins.r - q.coins.l)} px in a ${Math.round(q.purse.r - q.purse.l)} px purse`);
+      }
+      console.log(`       ${label} ledger: ${rows.join('; ')}`);
+    }],
+    ['round 6: a neighbour\'s new total on its chip, and the night pays it', async () => {
+      await fresh(4242);
+      await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        s.twist = null;
+        s.crow = false;
+        s.pages = ['cellar'];
+        for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+        const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        s.plots[5].crop = crop(9301, 'carrot', 1, 2);
+        s.plots[4].crop = crop(9302, 'radish', 0, 1);
+        s.energy = 5;
+        window.deck.hand(['radish', 'carrot']);
+      });
+      await settle(500);
+      const rects = await p.evaluate(() => { const r = window.deck.rects(); const c = (x) => [x.left + x.width / 2, x.top + x.height / 2]; return { card: c(r.cards[0]), plot: c(r.plots[6]) }; });
+      const tapOrClick = async (x, y) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 11 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(300);
+      };
+      // Take the radish up and aim it beside the carrot: a first tap on the phone, the pointer resting on the desktop.
+      await tapOrClick(...rects.card);
+      if (touch) await tapOrClick(...rects.plot);
+      else {
+        await p.mouse.move(...rects.plot, { steps: 4 });
+        await settle(300);
+      }
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const pv = window.deck.preview();
+        const r = t.board.plotRect(5);
+        return { chips: t.board.chips ?? [], mark: pv?.marks?.find((m) => m.plot === 5) ?? null, own: pv?.total ?? null, plot: r };
+      });
+      const tot = q.chips.filter((c) => c.kind === 'total');
+      const chip = tot.find((c) => c.plot === 5);
+      if (!q.mark?.total) extra.push(`the carrot's mark has no new total: ${JSON.stringify(q.mark)}`);
+      else if (!chip || chip.text !== String(q.mark.total)) extra.push(`no chip on the carrot shows its new total ${q.mark.total}: ${JSON.stringify(tot)}`);
+      if (chip && (chip.x < q.plot.x - 1 || chip.x + chip.w > q.plot.x + q.plot.w + 1 || chip.y < q.plot.y - 1)) extra.push(`the total chip runs out of its plot: ${JSON.stringify(chip)} in ${JSON.stringify(q.plot)}`);
+      for (const c of q.chips) for (const d of q.chips) if (c !== d && Math.min(c.x + c.w, d.x + d.w) - Math.max(c.x, d.x) > 1 && Math.min(c.y + c.h, d.y + d.h) - Math.max(c.y, d.y) > 1) extra.push(`chips "${c.text}" and "${d.text}" overlap`);
+      if (tot.some((c) => c.plot === 6)) extra.push('the aimed seed shows a total chip as well as its slip');
+      // Plant it and play the night: the carrot pays what its chip said.
+      if (touch) await tapOrClick(...rects.plot);
+      else await tapOrClick(...rects.plot);
+      const paid = await p.evaluate(async () => {
+        const d = window.deck;
+        const n = d.ruleScores().length;
+        d.endDay();
+        d.skip();
+        await new Promise((r) => setTimeout(r, 400));
+        return { planted: !!d.state().plots[6].crop || d.ruleScores().length > n, scores: d.ruleScores().slice(n) };
+      });
+      // Harvests in reading order: the radish on B2, the carrot on B2's right, the new radish.
+      if (q.mark?.total && paid.scores[1] !== q.mark.total) extra.push(`the carrot's chip said ${q.mark.total}, the night paid ${paid.scores[1]} (${paid.scores.join(', ')})`);
+      console.log(`       ${label} radish aimed beside the carrot: chips ${q.chips.map((c) => `${c.kind} ${c.text} on ${c.plot}`).join(', ')}; the radish's own slip ${q.own?.score}; the night paid ${paid.scores.join(', ')}`);
+    }],
+    ['round 6: kept pages take a tap on the phone; a hitch says what it takes off', async () => {
+      await toStall(98, 4000, (s) => {
+        s.year = 1;
+        s.season = 3;
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
+      });
+      const q = await p.evaluate(() => {
+        const kept = [...document.querySelectorAll('.sb-keptpage')].map((e) => e.getBoundingClientRect().height);
+        const cards = [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ trade: e.querySelector('.sb-trade')?.textContent ?? '' }));
+        const head = document.querySelector('.sb-purse-line').textContent;
+        return { kept, cards, head, twists: window.deck.state().shop.twists.map((t) => t.id) };
+      });
+      // The phone's tap targets (the desktop's pointer is exact; its kept pages are a line of type, about 22 px).
+      const want = label === 'phone' ? 40 : 20;
+      if (!q.kept.length || Math.min(...q.kept) < want) extra.push(`kept pages are ${Math.round(Math.min(...q.kept))} px tall (want ${want} and up)`);
+      const trades = q.cards.filter((c) => c.trade);
+      const m = trades[0]?.trade.match(/^Spring asks (\d+), not (\d+)\.$/);
+      const plain = Number(q.head.match(/asks (\d+)/)?.[1]);
+      if (trades.length !== 1 || !m || Number(m[1]) >= Number(m[2]) || Number(m[2]) !== plain) extra.push(`the hitch's trade line: ${JSON.stringify(q.cards)}, head "${q.head}"`);
+      // Pick the hitch by a real tap: the head asks the smaller quota.
+      const hi = q.cards.findIndex((c) => c.trade);
+      if (hi >= 0) await tapAt('.sb-twistcard', hi);
+      const head2 = await p.evaluate(() => document.querySelector('.sb-purse-line').textContent);
+      if (m && !head2.includes(`asks ${m[1]}.`)) extra.push(`picking the hitch left the head at "${head2}"`);
+      // A swap by real taps: lift a page for sale, then tap a kept page twice.
+      await tapAt('.sb-pagebtn', 0);
+      await tapAt('.sb-keptpage', 0);
+      await tapAt('.sb-keptpage', 0);
+      const swapped = await p.evaluate(() => window.deck.state().pages.join());
+      if (swapped.startsWith('barrel')) extra.push(`a swap by taps did not take: ${swapped}`);
+      console.log(`       ${label} kept pages ${q.kept.map(Math.round).join('/')} px tall; ${q.twists.join(' / ')}: "${trades[0]?.trade}", head after the pick "${head2}"; pages after a swap ${swapped}`);
+    }],
+    ['round 6: the scoop says how many sat unused, and none is sold to a bench with scoops to spare', async () => {
+      // A season of no plays leaves the bench full at every dusk: the scoop says so, and the stall sells none.
+      await toStall(93, 4000, (s) => {
+        s.year = 2;
+        s.pages = [];
+      });
+      const at = await p.evaluate(() => [...document.querySelectorAll('.sb-thing')].findIndex((e) => /scoop/i.test(e.textContent)));
+      await tapAt('.sb-thing', at);
+      const before = await purse();
+      await tapAt('.sb-thing', at);
+      const spare = await p.evaluate(() => ({ slip: document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '', scoops: window.deck.state().scoops }));
+      const after = await purse();
+      if (!/Last season \d+ scoops? a day sat unused\. You have scoops to spare\./.test(spare.slip) || spare.scoops !== 0 || after.rules !== before.rules) extra.push(`a bench with scoops to spare: "${spare.slip}", scoops ${spare.scoops}, coins ${before.rules} to ${after.rules}`);
+      // A bench spent to the last scoop: for sale, two taps.
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        s.stats.log[s.stats.log.length - 1].idle = 0;
+        window.deck.table.sheets.stall();
+      });
+      await p.keyboard.press('Escape');
+      await settle(150);
+      await tapAt('.sb-thing', at);
+      const open = await p.evaluate(() => document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '');
+      await tapAt('.sb-thing', at);
+      const bought = await p.evaluate(() => window.deck.state().scoops);
+      if (!/again to buy/.test(open) || bought !== 1) extra.push(`a bench spent to the last scoop: "${open}", scoops ${bought}`);
+      console.log(`       ${label} the scoop: "${spare.slip}" / "${open}"`);
+    }],
+    ['round 6: the phone stall\'s goods grow into its room', async () => {
+      await toStall(91, 400, (s) => {
+        s.season = 1;
+        s.pages = ['cellar'];
+      });
+      const q = await p.evaluate(() => ({ goods: [...document.querySelectorAll('.sb-good')].map((e) => e.offsetWidth), two: document.querySelector('.sb-goods').classList.contains('two') }));
+      if (label === 'phone' && Math.min(...q.goods) < 84) extra.push(`phone goods are ${Math.min(...q.goods)} px wide (they were 71 to 80)`);
+      console.log(`       ${label} goods ${q.goods.join('/')} px wide${q.two ? ', two rows' : ''}`);
+    }],
+    ['round 6: notes about the whole table stand in the strip, never over row 1', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const t = window.deck.table;
+        const s = t.run;
+        s.year = 2;
+        s.season = 1;
+        s.twist = { id: 'crows' };
+        s.carried = 40;
+        s.stats.log.push({ year: 2, season: 0, earned: 600, quota: 430, cleared: true, carried: 0, twist: null });
+        t.setLine(null);
+        t.syncAll();
+        await new Promise((r) => setTimeout(r, 300));
+        const twistOn = !!window.deck.twist();
+        t.seasonStart();
+        await new Promise((r) => setTimeout(r, 300));
+        const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+        const note = box(document.querySelector('.sb-note'));
+        const text = document.querySelector('.sb-note').textContent;
+        const row1 = window.deck.rects().plots.slice(0, s.cols).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom }));
+        const hb = t.hintBox;
+        const tr = document.querySelector('.sb-twist').offsetParent.getBoundingClientRect();
+        const strip = { l: tr.left + hb.x, t: tr.top + hb.y, r: tr.left + hb.x + hb.w, b: tr.top + hb.y + hb.h };
+        const hushed = Number(getComputedStyle(document.querySelector('.sb-twist')).opacity);
+        await new Promise((r) => setTimeout(r, 2600));
+        const back = Number(getComputedStyle(document.querySelector('.sb-twist')).opacity);
+        return { twistOn, note, text, row1, strip, hushed, back };
+      });
+      const cross = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 1 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 1;
+      if (!q.twistOn) extra.push('no twist line on the table to stand in front of');
+      if (!/40 carried over from spring/.test(q.text)) extra.push(`the season's note reads "${q.text}"`);
+      if (q.row1.some((r) => cross(q.note, r))) extra.push(`"${q.text}" covers row 1 of the plot`);
+      if (!cross(q.note, q.strip)) extra.push(`"${q.text}" is not in the lesson strip (note ${Math.round(q.note.t)} to ${Math.round(q.note.b)}, strip ${Math.round(q.strip.t)} to ${Math.round(q.strip.b)})`);
+      if (q.hushed > 0.1 || q.back < 0.9) extra.push(`the twist line under the note: opacity ${q.hushed} while it shows, ${q.back} after`);
+      console.log(`       ${label} "${q.text}" in the strip; the twist line steps aside (opacity ${q.hushed}) and comes back (${q.back})`);
+    }],
+    ['round 6: plain words: the other beans, the scarecrow before the crows, the improve note with the Root Cellar, a won run\'s ledger', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const d = window.deck;
+        const t = d.table;
+        const s = t.run;
+        const w = (ms) => new Promise((r) => setTimeout(r, ms));
+        s.twist = null;
+        s.crow = false;
+        s.energy = 9;
+        for (const pl of s.plots) { pl.crop = null; pl.obj = null; pl.boost = 0; }
+        // Beans on their last pick tonight, and beans held beside them: the old beans' +2 is gone before the new ripen.
+        s.plots[5].crop = { uid: 9401, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 2, pest: 0, sprout: false };
+        d.hand(['beans', 'scarecrow']);
+        await w(200);
+        t.pickUp(s.hand[0].uid);
+        t.hover = 6;
+        t.board.preview = null;
+        t.updateHighlight?.();
+        await w(250);
+        const beans = d.preview()?.reason?.text ?? '';
+        t.putDown(true);
+        t.pickUp(s.hand[1].uid);
+        t.hover = 0;
+        t.updateHighlight?.();
+        await w(250);
+        const scarecrow = d.preview()?.none?.text ?? '';
+        t.putDown(true);
+        return { beans, scarecrow };
+      });
+      if (q.beans !== 'The other beans are pulled before these ripen.') extra.push(`two beans side by side read "${q.beans}"`);
+      if (q.scarecrow !== 'Keeps crows off from now on.') extra.push(`a scarecrow before the crows reads "${q.scarecrow}"`);
+      // The improve sheet with the Root Cellar kept: the carrot's basket counts its +2.
+      await toStall(91, 900, (s) => {
+        s.pages = ['cellar'];
+      });
+      await p.evaluate(() => {
+        window.deck.table.tutor.unlock('services');
+        window.deck.table.sheets.deck('all', 'upgrade');
+      });
+      await settle(200);
+      const idx = await p.evaluate(() => [...document.querySelectorAll('.sb-tincard')].findIndex((b) => /Carrot/.test(b.querySelector('img').alt)));
+      await tapAt('.sb-tincard', idx);
+      const improve = await p.evaluate(() => document.querySelector('.sb-pickline')?.textContent ?? '');
+      if (!/Carrot: basket 7 to 10\./.test(improve)) extra.push(`the improve note with the Root Cellar reads "${improve}"`);
+      await p.evaluate(() => window.deck.table.sheets.close());
+      // A won run's ledger.
+      await fresh(4242);
+      const won = await p.evaluate(async () => {
+        const d = window.deck;
+        const s = d.state();
+        s.year = 3;
+        s.season = 3;
+        s.earned = 99999;
+        d.endDay();
+        d.skip();
+        await new Promise((r) => setTimeout(r, 500));
+        return { won: d.state().end?.won, ledger: document.querySelector('.sb-led-day').textContent };
+      });
+      if (!won.won || won.ledger !== 'Run won') extra.push(`a won run's ledger reads "${won.ledger}" (won ${won.won})`);
+      console.log(`       ${label} "${q.beans}" / "${q.scarecrow}" / "${improve}" / the won run's ledger "${won.ledger}"`);
+      await p.evaluate(() => window.deck.table.sheets.close());
     }],
     ['stall', async () => {
       await toStall(91, 400);

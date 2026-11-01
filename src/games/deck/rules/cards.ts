@@ -75,6 +75,9 @@ export const CARDS: Record<CardId, CardDef> = {
 
 export const CARD_IDS = Object.keys(CARDS) as CardId[];
 
+/** The Root Cellar's yield on radishes and carrots: TUNING.cellarYield, the faces and the stall's words all read this. */
+export const CELLAR_YIELD = 2;
+
 export function isSeed(id: CardId): id is SeedId {
   return CARDS[id].type === 'seed';
 }
@@ -96,10 +99,16 @@ export function cardText(id: CardId, up: boolean): string {
   return up && d.upText ? d.upText : d.text;
 }
 
-/** What improving a card does, said plainly: "Basket 5 to 8." Free cards gain a stronger rule instead. */
-export function upgradeNote(id: CardId): string {
+/**
+ * What improving a card does, said plainly: "Basket 5 to 8." Free cards gain a stronger rule instead. With the Root
+ * Cellar kept, a radish's or carrot's basket counts its +2, as the face prints it ("Basket 7 to 10.").
+ */
+export function upgradeNote(id: CardId, pages: readonly PageId[] = []): string {
   const d = CARDS[id];
-  if (d.type === 'seed') return `Basket ${SEEDS[id as SeedId].base} to ${baseChips(id as SeedId, true)}.`;
+  if (d.type === 'seed') {
+    const add = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? CELLAR_YIELD : 0;
+    return `Basket ${SEEDS[id as SeedId].base + add} to ${baseChips(id as SeedId, true) + add}.`;
+  }
   if (d.upText) return d.upText;
   const n = costOf(id, true);
   return `Costs ${n === 0 ? 'nothing' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`} instead of ${d.cost}.`;

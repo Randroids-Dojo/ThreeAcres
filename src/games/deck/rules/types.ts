@@ -136,8 +136,11 @@ export interface RunStats {
   /** Pests landed and crows seen this run: the merchant stocks an answer once a hazard has shown. */
   pests: number;
   crows: number;
-  /** Every season played, for the almanac entry at the end. `carried`: the part of `earned` carried in from the season before. */
-  log: { year: number; season: Season; earned: number; quota: number; cleared: boolean; carried?: number; twist?: Twist | null }[];
+  /**
+   * Every season played, for the almanac entry at the end. `carried`: the part of `earned` carried in from the season
+   * before. `idle`: the scoops a day left on the bench at dusk, on average.
+   */
+  log: { year: number; season: Season; earned: number; quota: number; cleared: boolean; carried?: number; twist?: Twist | null; idle?: number }[];
   /** Coins each crop took this run: the build that won. */
   byKind?: Partial<Record<SeedId, number>>;
 }
@@ -210,6 +213,8 @@ export interface RunState {
   pool: CardId[];
   /** Cards on the last tray the merchant laid out, so the next tray brings different ones where it can. */
   lastTray?: CardId[];
+  /** Scoops left on the bench at dusk this season, and the days counted: the stall says how many sat unused. */
+  idle?: { scoops: number; days: number };
   /** This season's twist, picked at the stall before it (from year 2); null for none. */
   twist?: Twist | null;
   /** Part of the last season's surplus, waiting to be carried into the next season's take. */

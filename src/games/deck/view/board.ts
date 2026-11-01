@@ -768,24 +768,27 @@ export class Board {
    */
   private drawPreview(): void {
     const pv = this.preview;
+    this.chips = [];
     if (!pv || this.night > 0.05) return;
     const { ctx, T } = this;
     const size = Math.max(11, Math.round(T * 0.15));
-    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void, lost = false): number => {
+    let at = -1;
+    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void, lost = false, dark = false): number => {
       const tw = numWidth(ctx, text, size);
       const w = tw + size * 1.25 + 6;
       const h = size + 6;
+      this.chips.push({ plot: at, text, kind: dark ? 'total' : lost ? 'lost' : 'gain', x: x - w, y, w, h });
       ctx.beginPath();
       ctx.roundRect(x - w, y, w, h, 4);
-      ctx.fillStyle = lost ? 'rgba(226, 220, 204, 0.94)' : 'rgba(251, 244, 222, 0.96)';
+      ctx.fillStyle = dark ? 'rgba(42, 30, 18, 0.92)' : lost ? 'rgba(226, 220, 204, 0.94)' : 'rgba(251, 244, 222, 0.96)';
       ctx.fill();
-      ctx.strokeStyle = lost ? '#8c8676' : col;
+      ctx.strokeStyle = dark ? 'rgba(42, 30, 18, 0.92)' : lost ? '#8c8676' : col;
       ctx.lineWidth = 1.2;
       if (lost) ctx.setLineDash([3, 2]);
       ctx.stroke();
       ctx.setLineDash([]);
       if (lost) ctx.globalAlpha = 0.55;
-      num(ctx, text, x - w + 3, y + h / 2, size, lost ? '#5a5448' : col);
+      num(ctx, text, x - w + 3, y + h / 2, size, dark ? '#f6ecd0' : lost ? '#5a5448' : col);
       icon(x - size * 0.62 - 2, y + h / 2);
       ctx.globalAlpha = 1;
       if (lost) {
@@ -804,6 +807,7 @@ export class Board {
       const c = this.centre(m.plot);
       const x = c.x + T / 2 - 3;
       let y = c.y - T / 2 + 3;
+      at = m.plot;
       if (m.yield) y += chip(x, y, sign(m.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05));
       if (m.bloom) y += chip(x, y, sign(m.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
       if (Math.abs(m.times - 1) > 1e-6) y += chip(x, y, `×${fmt(m.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
@@ -814,6 +818,8 @@ export class Board {
         if (l.bloom) y += chip(x, y, sign(l.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
         if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
       }
+      // A neighbour the play changes shows what it will pay now, on a dark chip like the aimed seed's own slip.
+      if (m.total !== undefined) y += chip(x, y, String(m.total), '#f6ecd0', (cx, cy) => basket(ctx, cx, cy, size * 1.05, '#f6ecd0'), false, true);
     }
     const t = pv.total && !pv.total.never ? pv.total : null;
     let under = -1;
@@ -954,6 +960,9 @@ export class Board {
 
   /** Select stakes painted this frame, for checks. */
   stakes: { x: number; y: number; w: number; h: number }[] = [];
+
+  /** Preview chips painted this frame, for checks: a gain, a greyed bonus, or a neighbour's new total (canvas px). */
+  chips: { plot: number; text: string; kind: 'gain' | 'lost' | 'total'; x: number; y: number; w: number; h: number }[] = [];
 
   /** Market Day's stamp: a red-ringed x2 to the left of the crop's moon, on the harvest it doubles tonight. */
   private marketStamp(x: number, y: number): void {

@@ -537,9 +537,11 @@
 /* A stall body with more below it says so, with a soft shade at its foot. */
 .sb-stall-body.more { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.35)); mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.35)); }
 /* A phone holds all four goods in one row. */
-.sb[data-layout='phone'] .sb-good.s { width: 71px; height: 99px; }
-.sb[data-layout='phone'] .sb-good.m { width: 75px; height: 105px; }
-.sb[data-layout='phone'] .sb-good.l { width: 80px; height: 112px; }
+/* --sbg: the stall grows the goods into the screen's free height (sheets.ts, fitGoods). */
+.sb[data-layout='phone'] .sb-good.s { width: calc(71px * var(--sbg, 1)); height: calc(99px * var(--sbg, 1)); }
+.sb[data-layout='phone'] .sb-good.m { width: calc(75px * var(--sbg, 1)); height: calc(105px * var(--sbg, 1)); }
+.sb[data-layout='phone'] .sb-good.l { width: calc(80px * var(--sbg, 1)); height: calc(112px * var(--sbg, 1)); }
+.sb[data-layout='phone'] .sb-goods.two { display: grid; grid-template-columns: auto auto; justify-content: center; align-items: end; column-gap: 26px; row-gap: 34px; }
 .sb[data-layout='phone'] .sb-goods { gap: 8px; }
 .sb[data-layout='phone'] .sb-pricetag { font-size: 14px; padding: 2px 6px 2px 10px; }
 .sb[data-layout='phone'] .sb-tray { padding-top: 26px; border-width: 6px 6px 0; }
@@ -657,3 +659,45 @@
 @media (prefers-reduced-motion: reduce) {
   .sb-flame { animation: none; }
 }
+
+/* Round 6. A note about the whole table stands in the lesson strip; the lesson or the twist steps aside while it shows. */
+.sb-hint.on.hush, .sb-twist.on.hush { opacity: 0; transition: opacity 0.15s ease; }
+/* Four-digit takes and quotas: the take over "of 1550", so the purse never covers a digit (it read "1239 of 15"). */
+.sb-ledger.big .sb-led-tally { display: grid; justify-items: end; align-content: center; line-height: 1.05; }
+.sb-ledger.big .sb-led-tally b { font-size: 20px; }
+.sb-ledger.big .sb-led-tally span { font-size: 12px; }
+.sb[data-narrow] .sb-ledger.big .sb-led-tally b { font-size: 17px; }
+.sb[data-narrow] .sb-ledger.big .sb-led-tally span { font-size: 11px; }
+.sb[data-layout='wide'] .sb-ledger.big .sb-led-tally { display: block; justify-items: start; line-height: 32px; }
+.sb[data-layout='wide'] .sb-ledger.big .sb-led-tally b { font-size: 27px; }
+.sb[data-layout='wide'] .sb-ledger.big .sb-led-tally span { font-size: 16px; }
+.sb-purse.big b { font-size: 12.5px; }
+/* A hitch says what it takes off the season's quota. */
+.sb .sb-twistcard .sb-trade { font-size: 12.5px; font-style: normal; font-weight: 700; line-height: 1.2; color: #8a2a1e; }
+.sb[data-layout='phone'] .sb-twistcard .sb-trade { font-size: 11.5px; }
+.sb[data-layout='wide'] .sb-twistcard .sb-trade { font-size: 14.5px; }
+/* Kept pages are tap targets on the phone too: 40 px tall (they were 18), always, so nothing moves when a swap arms them. */
+.sb[data-layout='phone'] .sb-keptpage { min-height: 40px; padding: 0 8px; font-size: 12.5px; display: inline-flex; align-items: center; }
+.sb[data-layout='phone'] .sb-kept { gap: 2px 4px; align-items: center; }
+/* The phone stall gives the goods the width: a narrower margin and tray lip, so four goods in a row grow about a sixth. */
+.sb[data-layout='phone'] .sb-sheets[data-kind='stall'] { padding-left: 6px; padding-right: 6px; }
+.sb[data-layout='phone'] .sb-tray { padding-left: 3px; padding-right: 3px; }
+.sb[data-layout='phone'] .sb-goods { gap: 6px; }
+.sb[data-layout='phone'] .sb-pricetag { font-size: calc(14px * min(var(--sbg, 1), 1.3)); }
+/* Kept pages read as small slips even when they cannot be tapped, so a 40 px row reads as a row of tags. */
+.sb[data-layout='phone'] .sb-keptpage:disabled { background: rgba(243, 233, 207, 0.32); border: 1px solid rgba(42, 22, 8, 0.12); }
+.sb[data-layout='phone'] .sb-keptpage { font-size: 12px; padding: 0 5px; }
+.sb[data-layout='phone'] .sb-kept > span { font-size: 11.5px; }
+/* Round 6: the year's first phone stall holds a hitch's trade line and 40 px kept pages too, so its pieces sit a
+   little closer (it must fit a 412 by 838 screen without scrolling in every state). */
+.sb[data-layout='phone'] .sb-stall { gap: 4px; }
+.sb[data-layout='phone'] .sb-stall-head { gap: 0; }
+.sb[data-layout='phone'] .sb-cork { padding: 5px 8px 5px; }
+.sb[data-layout='phone'] .sb-pins .sb-pagesheet { padding: 9px 8px 5px; }
+.sb[data-layout='phone'] .sb-kept { margin-top: 3px; }
+.sb[data-layout='phone'] .sb-slot { margin-top: 3px; }
+.sb[data-layout='phone'] .sb-tray { padding-top: 22px; }
+.sb[data-layout='phone'] .sb-twistcard { padding: 3px 6px 4px; }
+.sb[data-layout='phone'] .sb-twistcard .sb-trade { line-height: 1.1; }
+/* Grown goods lean a little less on the phone, so their tilted corners keep clear of each other. */
+.sb[data-layout='phone'] .sb-good:not(.lifted) { transform: rotate(calc(var(--tilt, 0deg) * 0.6)); }

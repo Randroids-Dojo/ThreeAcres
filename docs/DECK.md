@@ -16,6 +16,8 @@ A roguelike deckbuilder about one small plot and a run of seasons. Original rule
 
 **Every season a twist, every surplus a buffer, every win its own page.** The fifth playtest scored the first quarter hour 7 of 10 and the game 6: "Year 1 is a real puzzle. Year 2 is a coin flip on the draw. Year 3 is a victory lap, run after run on the same 23 cards." Every day came down to one improved carrot ringed by radishes with a sunflower above it and chilies beside it. Now from year 2 each stall offers two twists for the season ahead (frost on the bottom row, a buyer for one crop, sunflowers facing up, crows twice as often...), and the one picked holds all season, on the board and in the previews. A quarter of each season's surplus carries into the next one. Year 3 asks at least 0.95 times what the run itself took in year 2 autumn and winter, and the run ends the night its last quota is met, on a page of its own. See Balance, round 5.
 
+**Every twist a trade, every quota fixed.** The sixth playtest scored the first quarter hour 7 of 10 and the game 6: "I would start another run for year 1, not for years 2 and 3... the middle has no tension and the end comes down to luck." Every hitch gave nothing back, so the help was picked nine times of nine; year 3 was set from the run's own year 2, so a strong year 2 pushed every year 3 quota to a flat 1,550 and holding back paid; the guided run's summer asked 230 after a spring of 70 and ended the run in its first season on its own. Now a hitch takes its share off the season's quota ("Summer asks 590, not 660."), so which twist is worth more depends on the deck and the plot; year 3 is a fixed row that grows through the year and nothing the run earns raises a quota; the guided summer asks 180; and the stall sells a scoop only to a bench that ran short. See Balance, round 6.
+
 ## Run structure
 
 - **Run:** three years, twelve seasons. The last winter (year 3) is the finish line: meet it and the run is won (`TUNING.years`), **the night it is met**: the days left are not played (the playtest's winning run stood at 959 of 960 after day 4, and days 5 and 6 were busywork). The stall before it points "On to the last winter", the almanac says "Season 7 of 12", and a note at its first dawn says "The last winter: meet it to win."
@@ -23,11 +25,12 @@ A roguelike deckbuilder about one small plot and a run of seasons. Original rule
 - **Year:** 4 seasons of 6 days each.
 - **Quotas:** coins earned within the season.
   - Year 1: spring 170, summer 260, autumn 300, winter 350.
-  - Year 2: spring 430, summer 600, autumn 710, winter 790.
-  - Year 3: spring 850, summer 940, autumn 1,040, winter 1,100 at least, and **at least 0.95 times the run's own mean take in year 2 autumn and winter** (carried coins left out; `TUNING.y3scale`), so a strong run still faces a fight. Autumn and winter rather than the whole year: an engine is built by then, and roots builds stop growing there while bloom and perennial builds go on (year 3 takes about 1.0 against 1.15 to 1.25 times their late year 2), so scaling on the whole year asked roots for more than they could grow. Each year has its own row: with scoops coming back from pulled crops, takes rise fast through year 1 and flatten through year 3. Rounded to a 5 (under 100) or a 10.
-  - A new player's first run (the guided one) has its own spring quota of 70, since its days are set hands, and the rest of its year 1 at 88% of the usual, because its first stall had fewer coins to spend. (Its year 2 was at 88% too until round 5; with twists and carry, the full rate clears about as often as for the decent bot.)
+  - Year 2: spring 430, summer 620, autumn 740, winter 830 (600, 710, 790 from summer before round 6).
+  - Year 3: spring 900, summer 980, autumn 1,060, winter 1,140. **A fixed row, the same for every run: nothing the run earns moves a quota.** Round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter: the sixth playtest's year 2 took 1,064, 1,788 and 2,311 and every year 3 quota went to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given), and every extra coin in year 2 raised next year's quotas, so holding back paid. Each year has its own row: with scoops coming back from pulled crops, takes rise fast through year 1 and flatten through year 3. Rounded to a 5 (under 100) or a 10.
+  - **A hitch takes its share off its season's quota** (see The season's twist); Cold Frame takes a fifth off a winter.
+  - A new player's first run (the guided one) has its own spring quota of 70, since its days are set hands, **its own summer of 180** (`TUNING.guidedSummer`), and the rest of its year 1 at 88% of the usual, because its first stall had fewer coins to spend. The summer was 230 (88% of 260): a cliff from 70 with set hands, the tightest season of year 1 for the guided bot (a median take of 1.19 times it, against 1.40 to 1.59 for the rest), and the sixth playtest missed it by 5 playing carefully with every preview. Its year 2 asks 93% of the usual (`TUNING.guidedYear2`: 400, 580, 690, 770, about round 5's row): at round 6's raised row the guided bot cleared year 2 22% of the time against the decent bot's 30%. (Its year 2 was at 88% until round 5, then at the full rate.)
   - **The first run after the guided one** has a softer first spring, 120 (`TUNING.softSpring`): the same start deck went from a quota of 70 to 170, and three of the playtester's springs outside the guided run took 225, 151 (dead) and 178.
-  - Round 5 raised years 2 and 3 by about a fifth: the twists (a boon is usually picked) and the carry lifted every player's clear rates (decent bot, year 2: 26% to 63% at the old row).
+  - Round 6 raised year 2 from summer and fixed year 3 (see Balance, round 6). Round 5 raised years 2 and 3 by about a fifth: the twists (a boon is usually picked) and the carry lifted every player's clear rates (decent bot, year 2: 26% to 63% at the old row).
   - Round 4: years 2 and 3 were 400 to 600 and 600 to 740, and the strong builds took 1.8 to 2.5 times them; they are now set against those builds (see Balance, round 4).
   - History: the first draft (60, 130, 240, 380, times 2.4 a year) assumed faster growth than the cards gave; then 40, 55, 65, 80 times 1.75 for the watering rules; then 55, 70, 75, 95 times 2 once crops grew on their own. That last set let a decent bot clear year 1 spring every time at 1.78 times the quota on a board wiped bare most dawns. With the standing start deck the take per card rose (perennials give several harvests per card), so the quotas were refitted for tension (year 1 160, 165, 185, 220; year 2 230, 265, 340, 370; then times 1.45). The second playtest ran year 1 summer to winter at 1.4 to 1.55 times those, and the plot carrying over lifted takes by a further quarter to a third, so year 1 summer to winter rose 24 to 32% and years 2 and 3 were refitted. The third round's economy (scoops back, fuller plots) lifted year 1's takes by a quarter and flattened year 3's, so all three rows were refitted again from deck-tune: see Balance.
 - **Money:** coins are both score and money. They carry over between seasons and are spent in the shop. Spending never counts against a quota.
@@ -146,7 +149,7 @@ The Hose and Mulch were cut with watering. A save that holds them gets Rain for 
 
 ### Improved cards ("Select" stock)
 
-The stall calls it improving a card. An improved seed gets +50% base yield, rounded up (the improve sheet says "basket 5 to 8"). Upgraded tools, weather and objects cost 1 less, so an improved Watering Can is free. The two free cards gain a rule instead: Trowel moves to any empty plot, Ladybirds also draw a card. On the plot an improved crop wears a plant label on a stake by it, a cream disc ringed red with a red star, 14 px or more across (it used to be a 6 by 3 px red bar that read as a glitch).
+The stall calls it improving a card. An improved seed gets +50% base yield, rounded up (the improve sheet says "basket 5 to 8", and with the Root Cellar kept "basket 7 to 10" for a carrot, as its face prints the +2). Upgraded tools, weather and objects cost 1 less, so an improved Watering Can is free. The two free cards gain a rule instead: Trowel moves to any empty plot, Ladybirds also draw a card. On the plot an improved crop wears a plant label on a stake by it, a cream disc ringed red with a red star, 14 px or more across (it used to be a 6 by 3 px red bar that read as a glitch).
 
 ### Rarity
 
@@ -168,26 +171,26 @@ Both hazards ramp a step each season, not a jump at the year's turn. The old odd
 
 ## The season's twist
 
-From year 2 spring (`TUNING.twistFrom`), each stall offers two twists for the season ahead, one that helps and one that gets in the way, in a random order; pick one and it holds all season. Neither repeats the season just played. A buyer or a glut is about a crop the player owns (never the free radish, never the same crop for both); a sunflower twist only comes to a player with a sunflower, long picks only with a perennial.
+From year 2 spring (`TUNING.twistFrom`), each stall offers two twists for the season ahead, one that helps and one that gets in the way, in a random order; pick one and it holds all season. Neither repeats the season just played. **The one that gets in the way pays for itself: it takes its share off the season's quota** (`TUNING.hitchEase`: frost and a glut 15%, crows 12%, sunflowers facing up 10%), and its clipping says what the season would ask: "Summer asks 590, not 660." Picked, the stall's head and then the ledger ask that. Round 5's hitches gave nothing back: the sixth playtest picked the help all nine times, never close, and the bot did at every stall. Now a hitch that misses the build (crows with a scarecrow standing, frost on a plot of perennials) is the better pick, and one that hits it (a glut of the crop the run leans on) is not. A buyer or a glut is about a crop the player owns (never the free radish, never the same crop for both); a sunflower twist only comes to a player with a sunflower, long picks only with a perennial.
 
 | Twist | Kind | Line | Picture |
 |---|---|---|---|
 | Buyer | helps | "A buyer pays double for carrots." (x2 bloom on that crop) | the crop, a gold coin, x2 |
 | Good company | helps | "Crops get +1 yield for each crop beside them." | the cross of plots, +1 basket |
-| Calm | helps | "A calm season: no new pests." (none land, none spread) | a pest kept off the whole plot |
+| Calm | helps | "No new pests." (none land, none spread) | a pest kept off the whole plot |
 | Long picks | helps | "Beans and strawberries pick one more time." | beans, a loop, +1 |
 | Sunflowers all round | helps | "Sunflowers bloom every crop beside them." (+1 to each, the crop below still +2) | a sunflower, the cross, +1 bloom |
-| Frost | in the way | "Frost: no sowing on the bottom row." | the plot with its bottom row iced and crossed |
-| Glut | in the way | "Carrots pay half this season." (x0.5 bloom) | the crop, a grey coin, x½ |
-| Sunflowers face up | in the way | "Sunflowers face up: they bloom the crop above." | a sunflower, the plot above lit, +2 bloom |
-| Crows | in the way | "Crows come twice as often." | a crow, x2 |
+| Frost | in the way, 15% off the quota | "No sowing on the frosted bottom row." | the plot with its bottom row iced and crossed |
+| Glut | in the way, 15% off | "Carrots sell for half." (x0.5 bloom) | the crop, a grey coin, x½ |
+| Sunflowers face up | in the way, 10% off | "Sunflowers face up and bloom the crop above." | a sunflower, the plot above lit, +2 bloom |
+| Crows | in the way, 12% off | "Crows come twice as often." | a crow, x2 |
 
-- **At the stall** the two clippings sit under the stall's head, each its picture and its one line. A tap picks one (it is pinned, the other fades); it can be changed until the stall is left. The way on asks for a pick first ("Pick one of the two for spring first."). The first time, the stall's lesson line says "Pick one of the two for spring."
+- **At the stall** the two clippings sit under the stall's head, each its picture and its one line, and the hitch a red line under it with the quota it would ask ("Summer asks 590, not 660."). A tap picks one (it is pinned, the other fades) and the head's "Summer asks" follows it; it can be changed until the stall is left. The way on asks for a pick first ("Pick one of the two for spring first."). The first time, the stall's lesson line says "Pick one of the two for spring."
 - **On the table** the twist stays in the lesson strip all season whenever no lesson is up: its picture and "Summer: crows come twice as often." Frost paints the bottom row icy with rime, and a held seed's dashed plots leave it out; a tap there says "Frost: nothing grows there now." A buyer's crops wear a gold coin marked 2, a glut's a grey one marked ½. The almanac lists it under the season line, and the run's account by season.
 - **In the previews** the rules score the twist, so every chip, total and reading counts it: a buyer's carrot previews double, good company shows +1 on each neighbour pulled the same night, frost plots are never offered. A pick that falls next season leaves this season's twist out (next season's is not chosen yet). A buyer's and a glut's multiplier count as part of the crop, like the Root Cellar's yield, not as a bonus from the plot aimed at.
 - **The twists push away from the run's own solve:** a buyer pays for a crop the player owns but has not leaned on (not the crop that has taken the most this run), and a glut hits the crop that has.
 - Why: the playtester's top fun change: it breaks the one solve, makes each run different, and gives year 3 a fight. Measured honestly it moves win rates far more than it moves the bot's patterns: the best harvest's recipe changes from one season to the next 3 to 9 points more often with twists than without for most builds (roots builds that own only carrots and radishes cannot change their top crop at all), while the strong builds win 1 to 47% without twists (most under 20%) and 12 to 56% with them (see Balance, round 5).
-- The balance bot picks by a rough worth to its deck (`twistWorth` in `bot.ts`) and its days play to the twist on their own, since every play is scored by the rules.
+- The balance bot picks by playing the coming season ahead on a copy of the run with each twist (`twistWorth` in `bot.ts`: a one-play-deep bot, two samples, the same dice for both twists) and taking the one whose take over its quota is higher, capped at 1.6 times (a bigger surplus carries no more). Round 5 scored every help above every hitch with a rough worth to its deck. Its days play to the twist on their own, since every play is scored by the rules.
 
 ## The shop (the seed merchant's stall)
 
@@ -199,13 +202,15 @@ The shop opens between seasons.
 - **Throw out a card:** 35 coins, then 15 more each time in the same visit. The deck keeps at least 6 cards. A tin bucket on the tray's lip (not the compost heap: Compost is a card).
 - **Improve a card:** 40 coins, then 15 more each time in the same visit. The first tap on a card says what it would become ("Carrot: basket 5 to 8"); after it, a note shows the improved card.
 - **Fresh stock (new cards on the tray):** 8, rising by 3 each time.
-- **A scoop, for good:** from year 2, one more seed scoop on the bench every day. 200 coins times the year's price rise, doubling for each one after; four at most (the bench lays out any number). A late use for coins.
+- **A scoop, for good:** from year 2, one more seed scoop on the bench every day. 200 coins times the year's price rise, doubling for each one after; four at most (the bench lays out any number). A late use for coins. **Sold only to a bench that ran short:** if a scoop a day or more sat unused at dusk last season (`TUNING.scoopIdle`, kept in the season's log as `idle`), the stall sells none and its slip says why: "One more seed scoop on the bench every day, for good. Last season 3 scoops a day sat unused. You have scoops to spare." In a deck of free radishes and one-scoop carrots the hand, not the scoops, limits a day: the sixth playtest bought a 3,200-coin scoop, then left 3 to 6 unspent most days, and won with 3,520 coins unspent. Two other fixes were measured and dropped (`deck-fit play` with each, 80 to 150 runs a build): a scoop that comes with a card lifted the roots builds' year 3 takes by 37% and their wins at the trial rows from 0 to 78% (they use every card) while the dear builds' moved 2 points; a cap at a scoop for each card in hand cut the dear builds' year 3 takes by 2 to 12%, since a hand of two-scoop seeds runs short of scoops, not cards.
 - Everything takes two taps. The first lifts it and a slip says, in a sentence, what it is: a card's cost, when it ripens and its rule, then "Tap again to buy, 20 coins" (or "Short 6 coins"). The second buys. The purse on the table and the purse line at the stall follow every purchase at once.
 - **The slip has a place of its own,** under the goods and above the signpost, always there and always the same height: the slip for a lifted thing, else what was just bought, else the stall's lesson. Nothing on the tray reflows when it changes, so the second tap lands where the first did. (The slip used to open inside the tray and the stall re-centred: goods jumped 22 to 90 px, garlic from y 692 to 607, and second taps missed.) deck-overlap measures every good, page and service between its two taps: nothing moves.
 - **The way on is always in sight.** The goods, pages and services sit in a body that scrolls only if it must; the slip's place and the signpost follow it, pinned at the bottom once the body fills the screen. On a 1280 by 800 desktop and a 412 by 838 phone every control is on the screen without scrolling in every stall state, including a full almanac with the page slot and the scoop (the desktop signpost was at 797 to 839 px, below the fold).
 - **On a wide screen** the cork board of pages stands left of the tray, side by side, so the goods can grow: 143 to 166 px wide on a 1280 by 800 screen (about 90 to 112 before, with their rule pictures about 10 px and over half the screen bare), as large as the screen's height lets every stall state fit (`--sbk`, 1.45 at 800 px).
 - The stall is its own scene, the merchant's plank wall, not the table showing through; its own small almanac (top right) opens the almanac and the rules, which list every card in words.
 - The stall arrives in parts like the table: the first visit has only the goods and the signpost, the second adds the pages, the third the throw-out bucket, the stamp to improve and the bell, and from year 2 the twists. The head is short: the sign, "Summer's harvest: 171 of 150. 5 carries over." and "You have 412 coins. Autumn asks 300." ("Spring is in." read as spring starting.)
+- **On the phone the goods grow into the room the stall has** (`fitGoods` in `sheets.ts`): one row as wide as the tray allows, or two rows of two when the screen's free height grows them clearly more. Measured at their plain size on every render, so the same stall lays out the same way between a first tap and a second. They were 71 to 80 px wide with their rule pictures about 10 px and the bottom of the screen bare; with the narrower margin and lip they are 87 to 93 px in a year 1 stall, and stay at 71 to 80 in the fullest year's first stall (twists, new stock, a full almanac, the page slot), where every control still fits a 412 by 838 screen.
+- **Kept pages are tap targets on the phone:** 40 px tall, always (they were 18), small slips even when they cannot be tapped, four to a row; a swap arms them without moving anything.
 - **On the phone it fits with the twists:** the services lip is tighter (it was 92 px tall, its prices cut off at the foot), the kept pages sit on one line, a page's price is pencilled on its title line, and the Root Cellar's page reads in 11 words (it was 27, with a parenthetical). If the body must ever scroll, a soft shade at its foot says so (it scrolled 16 px with no sign).
 
 ### Almanac pages
@@ -240,19 +245,19 @@ A card game on a warm oak table, with the plot as a painted almanac plate. Its o
   - Objects: painted wooden plaques on a stake, with nail heads and grain. The scarecrow's rule is a crow in a red ring and bar beside the 3 by 3 it guards (it used to be the 3 by 3 alone, which read as nothing). Garlic's rule is an aphid in the same red ring and bar beside the cross of plots it keeps clean, and the ladybirds' beside the whole plot (both were a cross of plots alone).
   - Rarity shows as print quality: commons are plain, uncommons get a finer second rule, rares a gold-leaf corner. Improved cards carry a red "Select" rubber stamp.
   - The picture vocabulary lives in `src/games/deck/view/icons.ts` and is shared by the faces, the board's previews and the slips.
-- **The table is the interface:** a ruled ledger slip names the season and day and the take against the quota (on the desktop in larger type, the take on a row of its own: season 23 px, take 27 px); a cribbage-style pegboard tallies the quota with a brass hole at the end; three wooden seed scoops show what is left to pay with today; a green seed tin is the draw pile; a heap of spent cards is the discard pile and the toss target (a red tick on it once today's toss is used; its label stays "Spent"); a brass lantern is End day (blowing it out brings the night); tonight's weather clippings lie by the lantern; the almanac (a small green book, a little faded) is the pause menu. On desktop, kept almanac pages are pinned in the side panel. Labels on the table are one or two words.
+- **The table is the interface:** a ruled ledger slip names the season and day and the take against the quota (on the desktop in larger type, the take on a row of its own: season 23 px, take 27 px; on the phone a four-digit take or quota stacks the take over "of 1550", since the purse covered the last digit: "1239 of 15"; five-digit coins print smaller in the purse; a won run's ledger says "Run won"); a cribbage-style pegboard tallies the quota with a brass hole at the end; three wooden seed scoops show what is left to pay with today; a green seed tin is the draw pile; a heap of spent cards is the discard pile and the toss target (a red tick on it once today's toss is used; its label stays "Spent"); a brass lantern is End day (blowing it out brings the night); tonight's weather clippings lie by the lantern; the almanac (a small green book, a little faded) is the pause menu. On desktop, kept almanac pages are pinned in the side panel. Labels on the table are one or two words.
 - **Page bonuses on the faces:** with Root Cellar kept, the radish and carrot print their raised basket (4 and 7) in green; with Busy Bees, the sunflower and beehive print its ×2 after their bloom.
 - **A full hand stays readable:** the hand shrinks to fit so the next card covers no more than a strip at each card's right edge; every card's name and rule stay uncovered at 5, 6 and 7 cards (measured by deck-overlap: names 8.2 px and up at five cards on a 412 px phone). Tool tags with two-word names stamp them on two lines.
 - **Any number of scoops fits the bench:** the bench lays out the day's scoops (the refill and those pulled crops put back). The scoops take whatever room the tin, the spent heap, the lantern and tonight's weather leave them, one row while they keep a good size and two rows past that; the tin, the heap and the lantern never shrink. On the phone, 3 scoops are 43 to 48 px, 4 to 6 sit in two rows of 37 px, 7 and 8 in two rows of 31 px; on the desktop 84 px down to two rows of 54. (With Green Thumb and a bought scoop the lantern was squeezed to 10 px and the labels ran together as "SpentEnd day".) deck-overlap checks 3 to 8 scoops on both screens.
 - **The desktop bench is the desktop's controls:** it takes the side panel's lower half, 260 to 380 px tall (360 on a 1280 by 800 screen), with 84 px scoops, a 116 px tin, a 92 px spent heap, a 112 px lantern and 15 px labels. It was 200 px tall, its labels 11.5 px and its heap 54 by 58 px, with about 440 px of bare table above it; the bare table between the pegboard and the bench is now 282 px, 52 of it the lesson strip. The seed tin has a label like Spent and End day ("Seed tin"; painted on the tin it came out 5 px). A card taken up by keys hides its key number, which stood over the plate's caption.
 - **Cost at a glance:** full scoops are heaped with seed; spent ones tip over, empty and pale. Taking up a card lifts and lights the scoops it would use; playing it empties them. A card the scoops cannot pay for is dimmed in the hand with its missing scoops ringed red; tapping it shakes it and flashes the missing scoops on the bench (no note, it is not taken up). At dawn the scoops refill one after another.
-- **The board explains while you play:** while a card is held, every plot where a bonus would apply carries a small chip in its corner (a "+2" by a basket, a red "+1" by a flower, a "×1.5", or a moon "+1" for an extra night), and the plot under the finger, pointer or keyboard cursor shows what the seed would score there ("4", or "5 × 3 = 15") along with what its neighbours would gain. A bonus the night will not pay shows greyed, dashed and struck through, and under the aimed plot one plain line says why ("The radish is pulled before the carrot ripens.", "Too late to ripen this season."). A card that would do nothing says "No effect now." Dragged over the plot, the card shrinks above the finger and goes see-through so the preview shows. Previews come from `previewPlay` in the rules, run on a copy of the run.
+- **The board explains while you play:** while a card is held, every plot where a bonus would apply carries a small chip in its corner (a "+2" by a basket, a red "+1" by a flower, a "×1.5", or a moon "+1" for an extra night), and the plot under the finger, pointer or keyboard cursor shows what the seed would score there ("4", or "5 × 3 = 15") along with what its neighbours would gain. A crop already standing whose pay the play changes also shows **its new total on a dark chip** under its gains, like the aimed seed's own slip (a radish aimed beside a carrot: the radish's "4" and, on the carrot, "+1" and "36"; the sixth playtest saw the carrot's 36 only by tapping its plot); weather, which touches every crop, shows its chips without totals. A bonus the night will not pay shows greyed, dashed and struck through, and under the aimed plot one plain line says why ("The radish is pulled before the carrot ripens.", "The other beans are pulled before these ripen.", "Too late to ripen this season."). A card that would do nothing says "No effect now."; a scarecrow before the crows come says "Keeps crows off from now on." and a beehive with nothing round it "Blooms crops around it from now on.", since both stand for the rest of the run. Dragged over the plot, the card shrinks above the finger and goes see-through so the preview shows. Previews come from `previewPlay` in the rules, run on a copy of the run.
 - **Shop:** the seed merchant's stall, its own scene against a plank wall: a painted sign, almanac pages pinned on cork, a wooden tray of goods with kraft price tags, a tin bucket (throw out), a rubber stamp (improve), a hand bell (fresh stock) and from year 2 a scoop on the tray's lip, and a signpost on to the next season.
 - **Run end:** "The almanac, year N": a ruled entry per season, then the best harvest, coins, seasons met of twelve and new cards ("New in the merchant's catalogue: pumpkin, shears and mint."). A won run has its own page instead (see Run structure). The account scrolls in a long run, its ruling scrolling with it; "Turn to a fresh page" stays in sight under it, with the wax seal beside it for a won run.
 - **The desktop's held card and close-up:** a card taken up on the desktop lifts only as far as the plate's caption (it used to cover it), and the close-up a resting pointer brings stands in the bare table right of the plate, clear of the scoops and the bench (it stood over the scoops).
 - **The hand stays still through the day:** a card played leaves a gap and the rest stay where they were, so a second tap lands on the card that was there (the fan re-centred after every play, and a tap at the old spot missed twice); a card drawn in the day takes the first gap, and the fan closes up at dawn.
-- **"Tap again to plant it."** shows for the first three aims only, in the lesson strip rather than over the plot (it showed on every play forever, over the aimed plot's bonus chip on the top row), and goes the moment the card is played.
-- **Notes, not toasts:** one short ink note at a time beside the plot it concerns ("A crow took one."), gone after two seconds. Eight words at most. A note about a plot stays inside the bed's width and below its top, so it never covers a key letter or number; a note about the whole table ("Quota met." as the peg drops into the brass hole and gilds) sits in the lesson strip when no lesson is up, else just inside the bed's top edge. It used to sit on the plate's caption, whose words showed round it in pieces.
+- **"Tap again to plant it."** shows for the first three aims with no lesson up, in the lesson strip rather than over the plot (it showed on every play forever, over the aimed plot's bonus chip on the top row), and goes the moment the card is played.
+- **Notes, not toasts:** one short ink note at a time beside the plot it concerns ("A crow took one."), gone after two seconds. Eight words at most. A note about a plot stays inside the bed's width and below its top, so it never covers a key letter or number; a note about the whole table ("Quota met." as the peg drops into the brass hole and gilds, "40 carried over from winter.", "The last winter: meet it to win.", "Tap again to plant it.") always sits in the lesson strip, and the lesson or the season's twist there steps aside while it shows. It used to sit on the plate's caption, whose words showed round it in pieces, and then, whenever a lesson or the twist held the strip (all season from year 2), just inside the bed's top edge, over row 1 of the plot. "Tap again to plant it." never shows while a lesson is up.
 - **Reading a plot says what it will pay:** a tap with no card held, or Enter on the cursor, says "C4: carrot pays 15 in 2 nights.", "B2: beans, pests, pays 3 tonight.", "A3: radish pays 6 tomorrow night." or "D1: corn pays 24 next season.", scored like the previews (Market Day too), on the night it is pulled. It names the plot only where the plate shows its row numbers: the phone's plate has the letters alone (its margin has no room for numbers), so there it says "Carrot pays 15 in 2 nights." by the plot.
 - **The score slip wraps:** each bonus takes its place on the slip as it sets off (unseen until it lands), so its arc flies to its own place, shrinking to the chip's size as it lands, and never settles on a bonus already there; the chips wrap onto a second line past four (the second beans +2 under corn's ×1.5 was hidden). deck-overlap watches a corn with seven bonuses.
 - **The shell's corner** (60 px plus the safe area, top left) stays clear on the table and on every sheet: sheets start below it, and sheets and the close-up sit under the shell's button so it always takes a tap. deck-overlap checks every state and sheet.
@@ -513,6 +518,62 @@ The strict bot clears years 1 to 3 at 85%, 30% and 14% (77%, 23% and 11% before)
 
 How the numbers were set: every player was played through all twelve seasons with a missed season going on, recording each season's own take (carried coins left out); then rows were priced with the carry and the year 3 scaling, as `deck-fit` now does, over a grid of year 2 rows, year 3 rows and multipliers on year 2 (the whole year, or its autumn and winter). The aim: the decent and guided bots clearing year 2 about 35 to 40% of the time and winning 10 to 20%, the strong builds about 30% each. Year 3 scaled to the whole of year 2 at 1.1 to 1.4 left the roots builds at 0 to 10%; to autumn and winter at 0.95, 16 to 20%. Year 2 spring was held to 430 so the year's turn is no cliff (500 was 1.43 times year 1 winter). Sunflowers all round at +2 to every neighbour lifted bloom with Busy Bees; it gives +1 to the side and upper neighbours now.
 
+### Round 6: twists that trade, fixed quotas, a gentler guided summer, scoops only for a bench that runs short
+
+The sixth playtest scored the first quarter hour 7 of 10 and the game 6: the help was the twist nine times of nine, year 2 a walkover once a build existed, year 3 set from the run's own year 2 (a flat 1,550 after a strong year 2) and decided by spike nights, the guided summer a cliff. Measured before (the committed round 5 build, a `git archive` copy) and after, 200 runs each.
+
+**The twists are a choice now.** The share of stalls where each policy took the hitch, and which hitch (`deck-strategies.ts`, whole catalogue):
+
+| Policy | Before | After | Frost | Glut | Crows | Sunflowers face up |
+|---|---|---|---|---|---|---|
+| The bot's own buying | 0% of 817 | 49% of 776 | 60% | 39% | 47% | 53% |
+| Bloom with Busy Bees, the Barrel, fresh stock and slots | 0% of 1,170 | 32% of 1,173 | 30% | 18% | 43% | 40% |
+| Perennials without the Barrel | 0% of 1,022 | 31% of 976 | 36% | 18% | 32% | 40% |
+| Bloom, plain | 0% of 1,077 | 29% of 1,076 | 20% | 16% | 46% | 38% |
+| Roots with the Cellar, the Barrel, fresh stock and slots | 0% of 1,209 | 32% of 1,296 | 63% | 5% | 32% | 55% |
+| Roots, plain, with the Cellar | 0% of 999 | 32% of 1,039 | 52% | 8% | 39% | 50% |
+| Pages, no cards | 0% of 601 | 42% of 542 | 49% | 31% | 43% | 45% |
+
+The pick follows the deck: the roots builds, which own one crop worth a glut, take frost two to three times as often as a bloom build and a glut of their carrots one time in twenty; the bot, whose top crop changes, takes a glut two times in five. Every kind of pair seen four times or more was picked both ways by most policies (19 of 20 for the strong bloom build, 11 to 14 of 15 to 18 for roots; none before).
+
+**Win rates with and without twists** (clears of years 1 and 2, and wins):
+
+| Strategy | Before | After | After, no twists |
+|---|---|---|---|
+| Bloom with Busy Bees, the Barrel, fresh stock and slots | 88%, 74%, 56% | 88%, 69%, 60% | 88%, 55%, 44% |
+| Bloom, plain | 87%, 71%, 28% | 87%, 66%, 41% | 87%, 45%, 19% |
+| Roots with the Cellar, the Barrel, fresh stock and slots | 92%, 85%, 20% | 92%, 81%, 38% | 92%, 73%, 10% |
+| The same bloom build without Busy Bees | 87%, 66%, 38% | 87%, 57%, 38% | 87%, 36%, 19% |
+| Perennials, plain | 90%, 72%, 27% | 90%, 70%, 36% | 90%, 43%, 10% |
+| Perennials without the Barrel | 88%, 64%, 31% | 88%, 56%, 32% | 88%, 27%, 9% |
+| The bot's mixed buying | 89%, 40%, 24% | 89%, 36%, 21% | 89%, 24%, 13% |
+| Roots with the Cellar, no Barrel | 91%, 80%, 16% | 91%, 79%, 22% | 91%, 64%, 2% |
+| Bloom, no fresh stock or slots | 72%, 37%, 12% | 72%, 33%, 16% | 72%, 23%, 7% |
+| Perennials with the Barrel | 83%, 45%, 12% | 83%, 34%, 9% | 83%, 13%, 0% |
+| Roots, plain | 92%, 68%, 2% | 92%, 67%, 5% | 92%, 53%, 1% |
+| Roots, no fresh stock or slots | 82%, 32%, 1% | 82%, 26%, 0% | 82%, 2%, 0% |
+| Pages, no cards | 91%, 20%, 0% | 91%, 10%, 0% | 91%, 4%, 0% |
+| Nothing at all | 1%, 0%, 0% | 1%, 0%, 0% | |
+
+- **Year 2 has more tension:** every strong build clears it less often (bloom with Busy Bees 74% to 69%, roots 85% to 81%, perennials 64% to 56%) and takes less over its quotas (median 1.61 to 1.56, 1.82 to 1.74, 1.50 to 1.42).
+- **Year 3 no longer punishes a strong year 2:** five builds win 32 to 41% (four won 27 to 38% before), among them roots with the Cellar at 38% (20%), and the strong builds take 1.17 to 1.45 times their year 3 quotas (1.09 to 1.27), so a season is met by the engine, not one spike night. Bloom with Busy Bees and every page slot is still the strongest build, 60% (56%).
+- **The twists are worth 16 to 28 points of wins** to every strong build (9 to 24 at round 5's rows), 8 to the bot's own buying.
+- **Scoops:** the roots builds' days with three or more scoops above the usual refill fell from about 4,600 of 12,000 to about 530, and their scoops left at dusk from 2.6 to 1.7 a day (rootsplus), with about 1,900 more coins unspent at the end; the bloom builds, which spend their scoops, buy as many as before and leave 1.2 a day on the days they have three or more extra (1.4).
+
+Pass rates per season, decent bot (a new player's catalogue), before and after; the quota is the median a season asked (a hitch takes its share off, Cold Frame a fifth off winter):
+
+| Decent bot | spring | summer | autumn | winter | clears the year |
+|---|---|---|---|---|---|
+| Year 1, before and after (170, 260, 300, 350) | 96% | 98% | 94% | 98% | 87% |
+| Year 2, before (430, 600, 710, 790) | 94% | 74% | 69% | 81% | 34% |
+| Year 2, after (430, 620, 740, 830) | 95% | 75% | 65% | 73% | 29% |
+| Year 3, before (median 900, 960, 1,040, 1,100: at least 0.95 of its own year 2) | 76% | 80% | 85% | 100% | 18% (won) |
+| Year 3, after (900, 980, 1,060, 1,140) | 71% | 90% | 97% | 97% | 18% (won) |
+
+The guided first run clears years 1 to 3 at 96%, 28% and 14% (91%, 28% and 13% before): its summer, asking 180, is met every time at a median 1.52 times the quota (94% at 1.19, asking 230). The strict bot clears them at 85%, 23% and 15% (85%, 30%, 14%); the first run after the guided one at 90%, 28% and 21% (90%, 35%, 19%). The decent bot takes the hitch at 43% of its stalls (0% before).
+
+How the numbers were set: every player was played through all twelve seasons with a missed season going on (`deck-fit play`, 150 runs, the final rules), then rows were priced together, a season with a hitch at its share less. Year 2 summer to winter were raised until the strong builds cleared year 2 1 to 9 points less often, holding the decent bot near 30%; year 3 was held a step over year 2 winter (900 against 830) and grown 80 a season, which keeps the roots builds, whose takes stop growing after year 2 (about 1,050 to 1,100 a season), in the race into winter. A row growing to 1,400 left every roots build at 0%. The hitch shares were left at 15, 15, 12 and 10% once the hitch was taken at about a third to a half of the stalls.
+
 ## Checks
 
 With a dev server running (`npx vite --config scripts/deck-vite.config.ts` on 5252, or the lead server on 5247; each script takes a base url as its first argument):
@@ -533,19 +594,30 @@ npx vitest run tests/deck                # rules: the day, growth, scoring, haza
                                          #   twists a stall from year 2 (one of each kind, picked, held all season, logged, not repeated),
                                          #   each twist's effect and its previews, calm and crow seasons, stock that never runs dry
                                          #   (improved, on the year's first tray), the spent and crow lessons, the record of wins and the
-                                         #   plain copy; each of the ten fails on round 4 (a `git archive` copy)
+                                         #   plain copy; each of the ten fails on round 4 (a `git archive` copy); round 6: a hitch takes its
+                                         #   share off the quota and the stall knows what each twist would ask, the bot takes a hitch at
+                                         #   some stalls and a help at others, the guided summer asks 180, year 3 the same fixed row
+                                         #   whatever year 2 took (round 5 gave 1,510 to a strong year 2), a scoop sold only to a bench
+                                         #   that ran short, a neighbour's new total on its mark and the improve note counting the Root
+                                         #   Cellar; each of the six fails on round 5 on an assertion (a `git archive` copy)
 npx tsx scripts/deck-strategies.ts 200 [policy...] --seasons [--noTwists]
                                          # the tester's strategy table: stall policies on the bot's days, clears of years 1 to 3 and wins;
+                                         #   round 6: which twist each policy took (the hitch's share, by hitch, crows with a scarecrow
+                                         #   standing or not, a glut of the crop the run leans on or not, pairs picked both ways), and
+                                         #   the scoops and cards left at dusk by scoops bought and by scoops above the usual three;
                                          #   round 5: how often the best pattern changes between seasons in years 2 and 3 (the top crop, and
                                          #   the best harvest's recipe), with the twists or without, and the plain builds (no fresh stock,
                                          #   no page slots)
 npx tsx scripts/deck-fit.ts play <player> 150, then fit [y2] [y3]
                                          # quota fit: each player's take per season with a missed season going on (TUNING.noEnd), then
-                                         #   any row of quotas priced against all of them at once
+                                         #   any row of quotas priced against all of them at once; round 6: a season with a hitch priced at
+                                         #   its share less, year 3 a fixed row (--y3scale prices round 5's), --tune=key:value plays any
+                                         #   other TUNING number (--tune=scoopIdle:99 for scoops sold as before)
 npx tsx scripts/deck-balance.ts 200 0.15 # pass rates by season and year (--guided for the first run's set hands)
 npx tsx scripts/deck-seasons.ts 200      # years 1 to 3 season by season for the decent, strict and guided bots (round 5: and the second
                                          #   run, the first after the guided one, with its softer spring): pass rates, crops at a
-                                         #   season's first dawn, first-night takes, coins left at the stall, page slots bought, stall variety
+                                         #   season's first dawn, first-night takes, coins left at the stall, page slots bought, stall variety;
+                                         #   round 6: the median quota a season asked, and the share of twists taken as the hitch
 npx tsx scripts/deck-board.mjs 120 0.15  # does the plot fill and persist, does cost bind: crops at dawn, plots filled at dusk, fullest
                                          #   dusk, the bench at dawn, hands over the bench, days the budget bound, sowings beside standing crops
 npx tsx scripts/deck-hazards.ts 120      # what pests and crows cost: clear rates of years 1 and 2 with hazards and without, same seeds
@@ -568,7 +640,10 @@ node scripts/deck-lessons.mjs            # the guided first season, phone (real 
                                          #   once there is none (then a real toss ends it), the first crow does not ask for a scarecrow in
                                          #   the tin, "Fill the pegboard", and at the stall before year 2 the two twists with their lesson,
                                          #   the way on asking for a pick, a real tap (phone) or arrows and Enter (desktop) picking one,
-                                         #   and the table saying it
+                                         #   and the table saying it; round 6 (R6_ONLY=1 runs just these): the guided run's first stall says
+                                         #   summer asks 180, the hitch's trade line and a real tap on it moving the stall's head and the
+                                         #   ledger, "carried over" and "Tap again to plant it." in the lesson strip with the twist stepping
+                                         #   aside, never over row 1, a radish aimed by touch or pointer painting the carrot's new total
 node scripts/deck-overlap.mjs            # no two labels, buttons, cards or slips overlap, in every state on a phone and a desktop; nothing
                                          #   in the shell's corner on the table or any sheet (almanac, rules, tin, spent, close-up, stall,
                                          #   throw out, improve, run end); the purse agrees with the rules after every stall action; every
@@ -589,7 +664,13 @@ node scripts/deck-overlap.mjs            # no two labels, buttons, cards or slip
                                          #   night it was met), the hand still after a play (by real taps), the aim note for three aims only,
                                          #   off the plot and gone on planting, the desktop hand clear of the foot and no bare stretch over
                                          #   150 px in the side panel, the year's first stall with new stock, twists and a full almanac on
-                                         #   one phone screen, and the scroll shade (ONLY=text runs just the states named so)
+                                         #   one phone screen, and the scroll shade (ONLY=text runs just the states named so); round 6:
+                                         #   takes and quotas of four and five digits and five-digit coins inside the ledger and purse
+                                         #   (round 5: "1239 of 1550" ran 21 px past the ledger, under the purse), the carrot's new total on
+                                         #   a dark chip inside its plot and the night paying it, kept pages 40 px tall on the phone (18
+                                         #   before) and a swap by taps, the hitch's trade line, the scoop's slip (scoops to spare, none
+                                         #   sold), phone goods 84 px and up where there is room, the season's note in the strip, "the other
+                                         #   beans", the scarecrow before the crows, the improve note with the Root Cellar, "Run won"
 node scripts/deck-caption.mjs            # the plate's caption against the printed frame at eight sizes, by pixel readback
 node scripts/deck-play.mjs               # phone, real touch: 14 days from the guided start, totals vs rules, stall, reload, pause, cues, mood
 node scripts/deck-desktop.mjs            # desktop: mouse and keyboard days on a returning player's table, the stall by keyboard

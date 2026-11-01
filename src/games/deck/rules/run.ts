@@ -123,7 +123,8 @@ export function startSeason(s: RunState, ev: Ev[]): void {
   shuffle(s, s.draw);
   s.tonight = [];
   s.shop = null;
-  s.quota = runQuota(s, s.year, s.season);
+  // A hitch picked at the stall takes its share off this season's quota: the twist is a trade.
+  s.quota = runQuota(s, s.year, s.season, s.twist ?? null);
   // Part of the last season's surplus starts this season's take, up to a share of its quota.
   s.carried = Math.min(s.carry ?? 0, Math.round(TUNING.carryCap * s.quota));
   s.carry = 0;
@@ -364,6 +365,8 @@ export function toss(s: RunState, handIdx: number): Ev[] | null {
 export function endDay(s: RunState): Ev[] {
   if (s.phase !== 'day') return [];
   const ev: Ev[] = [];
+  // Scoops left on the bench at dusk, for the stall to say how many sat unused (a scoop for good is worth it or not).
+  s.idle = { scoops: (s.idle?.scoops ?? 0) + s.energy, days: (s.idle?.days ?? 0) + 1 };
   const max = handSize(s);
   if (s.hand.length > max) {
     const extra = s.hand.splice(0, s.hand.length - max);
@@ -382,7 +385,9 @@ export function endDay(s: RunState): Ev[] {
 
 function seasonEnd(s: RunState, ev: Ev[]): void {
   const cleared = s.earned >= s.quota;
-  s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared, carried: s.carried ?? 0, twist: s.twist ?? null });
+  const idle = s.idle?.days ? Math.round((s.idle.scoops / s.idle.days) * 10) / 10 : 0;
+  s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared, carried: s.carried ?? 0, twist: s.twist ?? null, idle });
+  s.idle = { scoops: 0, days: 0 };
   ev.push({ t: 'seasonEnd', cleared, earned: s.earned, quota: s.quota, year: s.year, season: s.season });
   // The cards come home; the plot stands as it is into the next season.
   s.draw = [...s.draw, ...s.hand, ...s.discard];
@@ -638,8 +643,22 @@ export function scoopPrice(s: RunState): number {
   return Math.round(TUNING.scoopPrice * Math.pow(2, s.scoops) * priceScale(s));
 }
 
+/** Scoops a day left on the bench at dusk last season, on average (0 before any season is logged). */
+export function scoopsIdle(s: Pick<RunState, 'stats'>): number {
+  return s.stats.log[s.stats.log.length - 1]?.idle ?? 0;
+}
+
+/**
+ * Whether the stall sells a scoop at all (afford it or not): from year 2, four at most, and only if the bench ran
+ * close to empty last season (fewer than `scoopIdle` scoops a day left at dusk). One more scoop for a bench that
+ * already had scoops to spare would sit unused: the sixth playtest's 3,200-coin scoop sat with 3 to 6 others most days.
+ */
+export function scoopOnSale(s: RunState): boolean {
+  return s.phase === 'shop' && s.year >= 2 && s.scoops < TUNING.maxScoops && scoopsIdle(s) < TUNING.scoopIdle;
+}
+
 export function canBuyScoop(s: RunState): boolean {
-  return s.phase === 'shop' && s.year >= 2 && s.scoops < TUNING.maxScoops && s.coins >= scoopPrice(s);
+  return scoopOnSale(s) && s.coins >= scoopPrice(s);
 }
 
 export function buyScoop(s: RunState): Ev[] | null {
@@ -808,10 +827,16 @@ export function topCrops(s: Pick<RunState, 'stats'>, n = 3): SeedId[] {
   return (Object.keys(by) as SeedId[]).sort((a, b) => (by[b] ?? 0) - (by[a] ?? 0)).slice(0, n);
 }
 
-/** The quota the next season will ask, as things stand at the stall (Cold Frame and all). */
+/** The quota the next season will ask, as things stand at the stall (Cold Frame, and the twist picked so far). */
 export function nextQuota(s: RunState): number {
+  const sh = s.shop;
+  return twistQuota(s, sh?.twist !== undefined ? (sh.twists?.[sh.twist] ?? null) : null);
+}
+
+/** The quota the next season would ask with this twist: a hitch asks less. */
+export function twistQuota(s: RunState, t: Twist | null): number {
   const n = nextSeason(s);
-  return runQuota(s, n.year, n.season);
+  return runQuota(s, n.year, n.season, t);
 }
 
 /** What the next season's take starts from: the surplus carried, up to its share of the next quota. */

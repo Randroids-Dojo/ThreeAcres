@@ -35,6 +35,12 @@ export interface Mark {
   nights: number;
   /** What the plot would seem to give but won't pay, greyed on the board with its reason. */
   lost?: Lost;
+  /**
+   * A crop already standing whose pay the play changes: what its next pick pays after the play, on the night it is
+   * pulled. The sixth playtest saw a held radish's own "4" and only "+1" on the carrot beside it; the carrot's new
+   * total (36) showed only when the plot was tapped.
+   */
+  total?: number;
 }
 
 export interface Preview {
@@ -171,6 +177,7 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     if (j < 0 && final && late1) return;
     const nights = isRipe(crop) || j < 0 ? 0 : Math.max(0, Math.min(f0[j]!.ripeIn, 40) - Math.min(f1[i]!.ripeIn, 40));
     const m: Mark = { plot: i, yield: pay.yield, bloom: pay.bloom, times: pay.times, nights };
+    if (j >= 0 && (pay.yield || pay.bloom || !near(pay.times, 1))) m.total = paid1.score;
     const lost = { yield: shown.yield - pay.yield, bloom: shown.bloom - pay.bloom, times: shown.times / pay.times };
     if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1) };
     if (m.yield || m.bloom || !near(m.times, 1) || m.nights || m.lost) marks.push(m);

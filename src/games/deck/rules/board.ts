@@ -1,8 +1,8 @@
 // Board geometry and the numbers that set a run's pace. Plots are indexed in
 // reading order: row by row, left to right, which is also the harvest order.
 
-import { SEEDS } from './cards';
-import type { Crop, PageId, Plot, RunState, Season, SeedId, Twist } from './types';
+import { CELLAR_YIELD, SEEDS } from './cards';
+import type { Crop, PageId, Plot, RunState, Season, SeedId, Twist, TwistId } from './types';
 
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
 export const TUNING = {
@@ -11,15 +11,17 @@ export const TUNING = {
   /**
    * Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. Round 4 set years 2 and 3 against
    * the strong builds (roots with the Cellar, bloom with Busy Bees, perennials), which ran at 1.8 to 2.5 times the old
-   * quotas: a run that clears year 2 no longer all but surely clears year 3, and the combos are needed to win.
+   * quotas: a run that clears year 2 no longer all but surely clears year 3, and the combos are needed to win. Round 6
+   * raised summer to winter (600, 710, 790 before): the sixth playtest called year 2 a walkover once a build exists.
    */
-  quotas2: [430, 600, 710, 790] as number[],
+  quotas2: [430, 620, 740, 830] as number[],
   /**
-   * Year 3's, the last: its winter is the finish line. Takes climb into year 3 and flatten, so it has its own row too.
-   * Round 5 raised years 2 and 3 by a fifth and a sixth: the season's twists (a boon is usually picked) and the surplus
-   * carried lifted every player's clear rates (decent bot, year 2: 26% to 63% at the old row).
+   * Year 3's, the last: its winter is the finish line. A fixed row that grows through the year, so earning more never
+   * makes the game harder: round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter, which pushed
+   * the sixth playtest's every year 3 quota to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given),
+   * and every extra coin earned in year 2 raised next year's quotas, so holding back paid.
    */
-  quotas3: [850, 940, 1040, 1100] as number[],
+  quotas3: [900, 980, 1060, 1140] as number[],
   /** Each year after the third multiplies year 3's quotas by this (checks and the balance scripts only: a run ends after year 3). */
   yearMult: 1.3,
   /**
@@ -33,11 +35,19 @@ export const TUNING = {
   /** The guided first season's quota: its first three days are set hands, so it takes less. */
   guidedQuota: 70,
   /**
-   * A guided first run's other year 1 quotas are this much of the usual: its first stall had fewer coins to spend.
-   * (Its year 2 was too, until round 5: with the twists and the carry its year 2 at the full rate clears about as
-   * often as the decent bot's, 35% against 38%.)
+   * The guided run's summer, its first season played without set hands. At 88% of the usual (230) it was the
+   * tightest season of year 1 for the bot (a median take of 1.19 times it, against 1.40 to 1.59 for the rest), and the
+   * sixth playtest missed it by 5 playing carefully with every preview: the run ended in its first season on its own.
    */
+  guidedSummer: 180,
+  /** A guided first run's year 1 autumn and winter are this much of the usual: its first stall had fewer coins to spend. */
   firstYear: 0.88,
+  /**
+   * A guided first run's year 2 is this much of the usual, about round 5's row (400, 580, 690, 770): round 6 raised year
+   * 2 from summer for the built plots, and at the full rate the guided bot cleared year 2 22% of the time against the
+   * decent bot's 30% (34% at this).
+   */
+  guidedYear2: 0.93,
   days: 6,
   handSize: 5,
   energy: 3,
@@ -73,7 +83,7 @@ export const TUNING = {
   /** In a season of sunflowers all round (a twist), the bloom it gives each other crop beside it. */
   sunAll: 1,
   /** Yield the Root Cellar adds to radishes and carrots (on top of its bloom for each radish and carrot pair). */
-  cellarYield: 2,
+  cellarYield: CELLAR_YIELD,
   /**
    * The most bloom the Root Cellar gives one crop: +1 when a radish stands beside
    * a carrot (or a carrot beside a radish), up to this. It counted every root
@@ -115,6 +125,15 @@ export const TUNING = {
   /** A seed scoop for good, from year 2: this much, doubling for each one after. The bench holds any number. */
   scoopPrice: 200,
   maxScoops: 4,
+  /**
+   * The stall sells a scoop for good only if fewer than this many scoops a day sat unused on the bench at dusk last
+   * season (`scoopOnSale`): a bench spent to the last scoop on most days. In a deck of free radishes and one-scoop
+   * carrots the hand, not the scoops, limits a day's plays: the sixth playtest bought a 3,200-coin scoop, then left 3
+   * to 6 unspent most days. A deck of dear seeds runs short of scoops, not cards, so a cap at the hand's size (tried)
+   * cut its year 3 takes by 2 to 12%; a scoop that comes with a card (tried) lifted the roots builds' by 37%. At 1.5
+   * the roots builds still bought a scoop or two in a lean season, then left 3 to 4 a day unused.
+   */
+  scoopIdle: 1,
   /** Room for one more almanac page, sold once the almanac is full: this much, doubling each time. A late use for coins. */
   slotPrice: 250,
   /**
@@ -138,13 +157,12 @@ export const TUNING = {
   /** The first run after the guided one: its first spring asks this (the guided spring asked 70, the next 170). */
   softSpring: 120,
   /**
-   * Year 3's quotas are at least these times the run's own mean take in year 2 autumn and winter (carried coins left
-   * out), so a strong run still has a fight: the playtest's winning run took 1.54 to 1.95 times the fixed year 3
-   * quotas. Autumn and winter, not the whole year: an engine is built by then, and the roots builds stop growing
-   * there while the bloom and perennial builds go on (year 3 takes 1.0 and 1.15 to 1.25 times them), so the whole
-   * year's mean asked roots for more than they could grow (roots with fresh stock won 10%).
+   * A season's twist is a trade: a hitch takes this share off the season's quota, so it pays for itself. Round 5's
+   * hitches gave nothing back, and the sixth playtest picked the help all nine times, never close. A hitch that misses
+   * the build (crows with a scarecrow standing, frost on a plot of perennials) is now the better pick, and one that
+   * hits it (a glut of the crop it leans on) is not.
    */
-  y3scale: [0.95, 0.95, 0.95, 0.95] as number[],
+  hitchEase: { frost: 0.15, glut: 0.15, sunup: 0.1, crows: 0.12 } as Partial<Record<TwistId, number>>,
   /** Improved stock costs this many coins more than the plain card (times the year's rise). */
   selectPrice: 25,
   /** Won runs the record keeps, latest last. */
@@ -187,29 +205,32 @@ function nice(q: number): number {
 export interface QuotaOpts {
   /** The first run after the guided one: a softer first spring. */
   soft?: boolean;
-  /** The run's own mean year 2 take: year 3 asks at least a share more than it. */
-  y2?: number;
+  /** The season's twist: a hitch takes its share off the quota. */
+  twist?: Twist | null;
 }
 
+/** The share a twist takes off its season's quota: a hitch pays for itself; a help takes nothing off. */
+export function twistEase(t: Twist | null | undefined): number {
+  return t ? (TUNING.hitchEase[t.id] ?? 0) : 0;
+}
+
+/**
+ * A season's quota. Fixed rows for each year (the guided run's year 1 its own), Cold Frame a fifth off winter, a
+ * hitch its share off its season. Nothing the run earns moves it: round 5 set year 3 from the run's own year 2.
+ */
 export function quotaFor(year: number, season: Season, pages: readonly PageId[], guided = false, o: QuotaOpts = {}): number {
   let q = year === 1 ? TUNING.quotas[season] : year === 2 ? TUNING.quotas2[season] : TUNING.quotas3[season] * Math.pow(TUNING.yearMult, year - 3);
-  if (year === 1 && guided) q = season === 0 ? TUNING.guidedQuota : q * TUNING.firstYear;
+  if (year === 1 && guided) q = season === 0 ? TUNING.guidedQuota : season === 1 ? TUNING.guidedSummer : q * TUNING.firstYear;
+  if (year === 2 && guided) q *= TUNING.guidedYear2;
   if (year === 1 && season === 0 && o.soft && !guided) q = TUNING.softSpring;
-  if (year === 3 && o.y2) q = Math.max(q, TUNING.y3scale[season] * o.y2);
   if (season === 3 && pages.includes('coldframe')) q *= 0.8;
+  q *= 1 - twistEase(o.twist);
   return nice(q);
 }
 
-/** The run's own mean take in year 2 autumn and winter, carried coins left out (0 before then). */
-export function year2Take(s: Pick<RunState, 'stats'>): number {
-  const y2 = s.stats.log.filter((l) => l.year === 2 && l.season >= 2);
-  if (!y2.length) return 0;
-  return y2.reduce((a, l) => a + l.earned - (l.carried ?? 0), 0) / y2.length;
-}
-
-/** The quota for a season of this run, as it would be set now. */
-export function runQuota(s: Pick<RunState, 'pages' | 'guided' | 'soft' | 'stats'>, year: number, season: Season): number {
-  return quotaFor(year, season, s.pages, s.guided, { soft: s.soft, y2: year >= 3 ? year2Take(s) : 0 });
+/** The quota for a season of this run, as it would be set now (with this twist, if one is given). */
+export function runQuota(s: Pick<RunState, 'pages' | 'guided' | 'soft'>, year: number, season: Season, twist: Twist | null = null): number {
+  return quotaFor(year, season, s.pages, s.guided, { soft: s.soft, twist });
 }
 
 // ---------------------------------------------------------------- twists
@@ -236,7 +257,8 @@ export function energyMax(s: Pick<RunState, 'pages' | 'scoops'>): number {
   return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.pages.includes('furrow') ? 1 : 0) + (s.scoops ?? 0);
 }
 
-export function handSize(s: RunState): number {
+/** Cards drawn up to each morning: five, and one more for Big Basket. */
+export function handSize(s: Pick<RunState, 'pages'>): number {
   return TUNING.handSize + (s.pages.includes('basket') ? 1 : 0);
 }
 

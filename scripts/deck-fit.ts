@@ -7,12 +7,16 @@
 // strategy table (whole catalogue), and the decent, strict and guided bots of
 // deck-seasons (the catalogue a new player has).
 // npx tsx scripts/deck-fit.ts play <player> [runs] [--cellarYield=2] [--cellarCap=2] [--newStock=2] [--bees=2] [--tag=-name]
-// npx tsx scripts/deck-fit.ts fit [y2 quotas a,b,c,d] [y3 quotas a,b,c,d] [--y1=a,b,c,d] [--y3scale=a,b,c,d] [--carry=0.25] [--tag=-name]
+// npx tsx scripts/deck-fit.ts fit [y2 quotas a,b,c,d] [y3 quotas a,b,c,d] [--y1=a,b,c,d] [--y3scale=a,b,c,d] [--carry=0.25] [--tag=-name] [--guidedSummer=180]
 // Round 5: a take is the season's own (carried coins left out), and the pricing carries a share of each surplus into
-// the next season and sets year 3 at least y3scale times the run's own year 2 autumn and winter, as the rules do.
-// --noTwists plays without the seasons' twists.
+// the next season. --noTwists plays without the seasons' twists.
+// Round 6: year 3 is a fixed row (--y3scale=a,b,c,d still prices round 5's scaling to the run's own year 2 autumn and
+// winter, for comparison), and a season the player took a hitch in asks its share less, as the rules do.
+// --hitch=frost:0.15,glut:0.15,... plays with other hitch shares (the take, and so the price, follows the play);
+// --tune=key:value,... any other number in TUNING.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
+import * as R from '../src/games/deck/rules';
 import { newMeta, newRun, TUNING } from '../src/games/deck/rules';
 import { ALL, POL } from './deck-policies';
 
@@ -26,7 +30,11 @@ interface Run {
   take: number[];
   /** Cold Frame kept at each winter: its quota is 20% lower. */
   cold: boolean[];
+  /** The share each season's twist took off its quota (a hitch). */
+  ease?: number[];
 }
+
+const easeOf = (t: unknown) => ((R as unknown as { twistEase?: (t: unknown) => number }).twistEase?.(t) ?? 0);
 
 if (args[0] === 'play') {
   const who = args[1];
@@ -37,6 +45,17 @@ if (args[0] === 'play') {
   if (flag('bees')) TUNING.beesTimes = Number(flag('bees'));
   const tag = flag('tag') ?? '';
   if (process.argv.includes('--noTwists')) TUNING.twists = false;
+  // --tune=key:value,... sets any number in TUNING for the play (experiments: --tune=scoopIdle:99 sells scoops as round 5 did).
+  const tune = flag('tune');
+  if (tune) for (const kv of tune.split(',')) {
+    const [k, v] = kv.split(':');
+    (TUNING as unknown as Record<string, number>)[k] = Number(v);
+  }
+  const hitch = flag('hitch');
+  if (hitch) for (const kv of hitch.split(',')) {
+    const [k, v] = kv.split(':');
+    (TUNING as unknown as { hitchEase: Record<string, number> }).hitchEase[k] = Number(v);
+  }
   // The real quotas stay in play (the bot's worth of a scoop reads them); a missed season just goes on.
   TUNING.noEnd = true;
   const out: Run[] = [];
@@ -61,7 +80,7 @@ if (args[0] === 'play') {
       dice = new Dice((131 + i) ^ seed);
       shop = POL[who];
     }
-    const r: Run = { take: [], cold: [] };
+    const r: Run = { take: [], cold: [], ease: [] };
     for (let g = 0; g < 3000 && s.phase !== 'over'; g++) {
       if ((s.year - 1) * 4 + s.season >= 12) break;
       if (s.phase === 'shop') shop(s, dice);
@@ -70,8 +89,10 @@ if (args[0] === 'play') {
         const end = ev.find((e) => e.t === 'seasonEnd');
         if (end && end.t === 'seasonEnd') {
           // The season's own take: what carried in from the season before is left out (the pricing adds its own).
-          r.take.push(end.earned - ((s.stats.log[s.stats.log.length - 1] as { carried?: number }).carried ?? 0));
+          const log = s.stats.log[s.stats.log.length - 1] as { carried?: number; twist?: unknown };
+          r.take.push(end.earned - (log.carried ?? 0));
           r.cold.push(s.pages.includes('coldframe'));
+          r.ease!.push(easeOf(log.twist));
         }
       }
     }
@@ -85,6 +106,7 @@ if (args[0] === 'play') {
   const q2 = row(args[1], TUNING.quotas2);
   const q3 = row(args[2], TUNING.quotas3);
   const sc = row(flag('y3scale'), (TUNING as { y3scale?: number[] }).y3scale ?? [0, 0, 0, 0]);
+  const gSummer = Number(flag('guidedSummer') ?? (TUNING as { guidedSummer?: number }).guidedSummer ?? 0);
   const share = Number(flag('carry') ?? (TUNING as { carryShare?: number }).carryShare ?? 0);
   const cap = (TUNING as { carryCap?: number }).carryCap ?? share;
   const nice = (q: number) => (q < 100 ? Math.round(q / 5) * 5 : Math.round(q / 10) * 10);
@@ -95,13 +117,15 @@ if (args[0] === 'play') {
     const who = f.replace(/\.json$/, '');
     const runs: Run[] = JSON.parse(readFileSync(`${dir}/${f}`, 'utf8'));
     const guided = who.startsWith('guided');
-    const quota = (k: number, cold: boolean, y2: number) => {
+    const quota = (k: number, cold: boolean, y2: number, ease: number) => {
       const y = Math.floor(k / 4);
       const sea = k % 4;
       let q = [q1, q2, q3][y][sea];
-      if (y === 0 && guided) q = sea === 0 ? TUNING.guidedQuota : q * TUNING.firstYear;
+      if (y === 0 && guided) q = sea === 0 ? TUNING.guidedQuota : sea === 1 && gSummer ? gSummer : q * TUNING.firstYear;
+      if (y === 1 && guided) q *= (TUNING as { guidedYear2?: number }).guidedYear2 ?? 1;
       if (y === 2) q = Math.max(q, sc[sea] * y2);
       if (sea === 3 && cold) q *= 0.8;
+      q *= 1 - ease;
       return nice(q);
     };
     const played = new Array(12).fill(0);
@@ -115,7 +139,7 @@ if (args[0] === 'play') {
       const y2 = late.length ? late.reduce((a, b) => a + b, 0) / late.length : 0;
       for (; k < 12 && k < r.take.length; k++) {
         played[k]++;
-        const q = quota(k, r.cold[k], y2);
+        const q = quota(k, r.cold[k], y2, r.ease?.[k] ?? 0);
         const earned = r.take[k] + Math.min(carry, Math.round(cap * q));
         if (earned < q) break;
         carry = Math.round(share * (earned - q));

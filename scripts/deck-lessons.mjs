@@ -37,6 +37,11 @@
 //     the tin; the stall before year 2 does not offer two twists with its lesson line, lets the way on go with none
 //     picked, or does not take a real tap (or arrows and Enter) on a twist; the season's table does not say the
 //     twist; the pegboard's line is not "Fill the pegboard" (no "brass hole")
+//   - round 6: the guided run's first stall does not say summer asks 180; at the stall before year 2 the hitch does
+//     not say what it takes off the quota ("Spring asks 370, not 430."), or picking it by a real tap does not move
+//     the stall's head and the season's ledger to it; the note that says what carried over (and on the phone "Tap
+//     again to plant it.") stands over row 1 of the plot, or not in the lesson strip with the twist stepping aside;
+//     a radish aimed beside a carrot does not paint the carrot's new total on its chip
 // Screens go to /tmp/deck-lessons/; the step-by-step table to steps-*.json.
 // node scripts/deck-lessons.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -651,6 +656,9 @@ async function session(label, viewport, touch) {
     await shot('19-stall');
     check(`${label}: the stall's lesson: buy a seed`, /coins/i.test(t.line), t.line);
     check(`${label}: the first stall shows only the goods`, !t.pieces.pages && !t.pieces.services);
+    // Round 6: the guided run's summer, its first season on its own, asks 180 (it asked 230 and the playtest missed by 5).
+    const head = await p.evaluate(() => document.querySelector('.sb-purse-line')?.textContent ?? '');
+    check(`${label}: the guided run's first stall says summer asks 180`, /Summer asks 180\./.test(head), head);
     const before = await p.evaluate(() => window.deck.state().coins);
     const idx = await p.evaluate(() => window.deck.state().shop.cards.findIndex((c) => c.price <= window.deck.state().coins));
     check(`${label}: the first stall stocks a seed`, await p.evaluate(() => window.deck.state().shop.cards.some((c) => ['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili'].includes(c.card))));
@@ -946,7 +954,7 @@ async function round5(label, viewport, touch) {
     await p.keyboard.press('Enter');
     await wait(300);
   }
-  const picked = await p.evaluate(() => ({ i: window.deck.state().shop.twist, tw: window.deck.state().shop.twists[1], text: document.querySelectorAll('.sb-twistcard')[1]?.textContent.trim(), done: window.deck.table.tutor.learn.done.includes('twist') }));
+  const picked = await p.evaluate(() => ({ i: window.deck.state().shop.twist, tw: window.deck.state().shop.twists[1], text: document.querySelectorAll('.sb-twistcard')[1]?.querySelector('span')?.textContent.trim(), done: window.deck.table.tutor.learn.done.includes('twist') }));
   check(`${label}: a ${touch ? 'tap' : 'keypress'} picks a twist, and its lesson ends`, picked.i === 1 && picked.done, JSON.stringify(picked));
   await tap(...(await at('.sb-signpost')));
   await wait(400);
@@ -1026,6 +1034,107 @@ async function round5(label, viewport, touch) {
 }
 
 /**
+ * Round 6, on the phone with real touch and on the desktop with the mouse: at the stall before year 2 the hitch says
+ * what it takes off the season's quota and picking it moves the stall's head and the season's ledger; the note that
+ * says what carried over stands in the lesson strip with the twist stepping aside, never over row 1 of the plot; on
+ * the phone "Tap again to plant it." does the same; a radish aimed beside a carrot paints the carrot's new total.
+ */
+async function round6(label, viewport, touch) {
+  const ctx = await b.newContext({ viewport, deviceScaleFactor: 2, hasTouch: touch, isMobile: touch });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  const cdp = await ctx.newCDPSession(p);
+  const wait = (ms) => p.waitForTimeout(ms);
+  const tap = async (x, y) => {
+    if (touch) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 12, radiusX: 6, radiusY: 6, force: 1 }] });
+      await wait(45);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else await p.mouse.click(x, y);
+    await wait(300);
+  };
+  const at = (sel, n = 0) => p.evaluate(([sel, n]) => { const e = document.querySelectorAll(sel)[n]; if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, [sel, n]);
+  const cross = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 1 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 1;
+  /** The note on screen, row 1 of the plot and the lesson strip, as boxes. */
+  const noteAt = () =>
+    p.evaluate(() => {
+      const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+      const n = document.querySelector('.sb-note');
+      const t = window.deck.table;
+      return { on: n.classList.contains('on'), text: n.textContent, note: box(n), row1: window.deck.rects().plots.slice(0, t.run.cols).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })), strip: { l: t.hintBox.x, t: t.hintBox.y, r: t.hintBox.x + t.hintBox.w, b: t.hintBox.y + t.hintBox.h }, twist: Number(getComputedStyle(document.querySelector('.sb-twist')).opacity) };
+    });
+  await p.goto(`${base}/?game=deck&fresh`);
+  await p.waitForFunction(() => window.deck && window.deck.frames() > 5, null, { timeout: 20000 });
+  if (touch) await tap(200, 40);
+  // Year 1 winter met with a surplus, at the stall before year 2.
+  await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    d.seed(707);
+    d.learnAll();
+    d.state().season = 3;
+    while (d.state().phase === 'day') {
+      d.state().earned = d.state().quota + 160;
+      d.endDay();
+      d.skip();
+      await w(30);
+    }
+  });
+  await wait(500);
+  const offer = await p.evaluate(() => ({ cards: [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ line: e.querySelector('span')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })), head: document.querySelector('.sb-purse-line').textContent }));
+  const hi = offer.cards.findIndex((c) => c.trade);
+  const m = offer.cards[hi]?.trade.match(/^Spring asks (\d+), not (\d+)\.$/);
+  const plain = Number(offer.head.match(/asks (\d+)/)?.[1]);
+  check(`${label}: the hitch says what it takes off spring's quota, the help says nothing`, offer.cards.length === 2 && offer.cards.filter((c) => c.trade).length === 1 && !!m && Number(m[1]) < Number(m[2]) && Number(m[2]) === plain, JSON.stringify(offer));
+  await p.screenshot({ path: `${out}/${label}-r6-trade.png` });
+  if (hi >= 0) await tap(...(await at('.sb-twistcard', hi)));
+  const head2 = await p.evaluate(() => document.querySelector('.sb-purse-line').textContent);
+  check(`${label}: picking the hitch by a ${touch ? 'tap' : 'click'} moves the stall's head to the smaller quota`, !!m && head2.includes(`asks ${m[1]}.`), head2);
+  await tap(...(await at('.sb-signpost')));
+  await wait(350);
+  const start = await p.evaluate(() => ({ phase: window.deck.state().phase, quota: window.deck.state().quota, tally: window.deck.tally() }));
+  const n1 = await noteAt();
+  await p.screenshot({ path: `${out}/${label}-r6-carried-note.png` });
+  check(`${label}: spring asks what the hitch said, on the ledger too`, start.phase === 'day' && !!m && start.quota === Number(m[1]) && start.tally.includes(m[1]), JSON.stringify(start));
+  check(`${label}: "carried over" stands in the lesson strip, the twist stepping aside, not over row 1`, n1.on && /carried over from winter/.test(n1.text) && !n1.row1.some((r) => cross(n1.note, r)) && cross(n1.note, n1.strip) && n1.twist < 0.1, JSON.stringify({ text: n1.text, twist: n1.twist }));
+  await wait(2600);
+  const back = await p.evaluate(() => ({ twist: Number(getComputedStyle(document.querySelector('.sb-twist')).opacity), line: window.deck.twist() }));
+  check(`${label}: the twist line comes back once the note goes`, back.twist > 0.9 && back.line.length > 0, JSON.stringify(back));
+  // A radish aimed beside a carrot that ripens tonight: the carrot's chip shows what it will pay now.
+  await p.evaluate(() => {
+    const d = window.deck;
+    const s = d.state();
+    s.crow = false;
+    for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+    const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+    s.plots[5].crop = crop(9501, 'carrot', 1, 2);
+    s.plots[4].crop = crop(9502, 'radish', 0, 1);
+    s.energy = 5;
+    d.table.tutor.learn.n.aimNote = 0;
+    d.hand(['radish', 'carrot']);
+  });
+  await wait(450);
+  const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (q) => [q.left + q.width / 2, q.top + q.height / 2]; return { card: c(x.cards[0]), plot: c(x.plots[6]) }; });
+  await tap(...r.card);
+  if (touch) await tap(...r.plot);
+  else {
+    await p.mouse.move(...r.plot, { steps: 4 });
+    await wait(300);
+  }
+  const chip = await p.evaluate(() => ({ chips: (window.deck.table.board.chips ?? []).filter((c) => c.kind === "total"), mark: window.deck.preview()?.marks?.find((m) => m.plot === 5) ?? null }));
+  await p.screenshot({ path: `${out}/${label}-r6-total-chip.png` });
+  check(`${label}: a radish aimed beside a carrot paints the carrot's new total on its chip`, !!chip.mark?.total && chip.chips.some((c) => c.plot === 5 && c.text === String(chip.mark.total)), JSON.stringify(chip));
+  if (touch) {
+    // "Tap again to plant it." for the first aims: in the strip too, never over row 1.
+    const n2 = await noteAt();
+    check(`${label}: "Tap again to plant it." stands in the strip, not over row 1`, !n2.on || (!n2.row1.some((q) => cross(n2.note, q)) && cross(n2.note, n2.strip)), JSON.stringify({ on: n2.on, text: n2.text }));
+  }
+  check(`${label}: round 6 without page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+  await ctx.close();
+}
+
+/**
  * Round 4: giving up from the almanac, by real touch, ends the run the way a missed quota does: the entry follows,
  * the seasons met count for the catalogue and the best harvest is kept (it used to start a new run, recording nothing).
  */
@@ -1083,16 +1192,22 @@ async function giveUpFlow() {
   await ctx.close();
 }
 
-if (!process.env.P1_ONLY) {
+// R6_ONLY=1 runs just the round 6 sessions.
+const r6only = !!process.env.R6_ONLY;
+if (!process.env.P1_ONLY && !r6only) {
   await session('phone', { width: 412, height: 838 }, true);
   await session('desk', { width: 1280, height: 800 }, false);
 }
-await p1('phone', { width: 412, height: 838 }, true);
-await p1('desk', { width: 1280, height: 800 }, false);
-await round5('phone', { width: 412, height: 838 }, true);
-await round5('desk', { width: 1280, height: 800 }, false);
-for (const tool of ['can', 'compost', 'radish', 'beans']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
-if (!process.env.P1_ONLY) {
+if (!r6only) {
+  await p1('phone', { width: 412, height: 838 }, true);
+  await p1('desk', { width: 1280, height: 800 }, false);
+  await round5('phone', { width: 412, height: 838 }, true);
+  await round5('desk', { width: 1280, height: 800 }, false);
+}
+await round6('phone', { width: 412, height: 838 }, true);
+await round6('desk', { width: 1280, height: 800 }, false);
+if (!r6only) for (const tool of ['can', 'compost', 'radish', 'beans']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
+if (!process.env.P1_ONLY && !r6only) {
   await returning();
   await giveUpFlow();
 }

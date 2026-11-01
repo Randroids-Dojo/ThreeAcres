@@ -691,8 +691,12 @@ export class Table {
     const season = SEASON_NAMES[s.season];
     this.ledSeason.textContent = `${season[0].toUpperCase()}${season.slice(1)}, year ${s.year}`;
     // The season's last night still reads as its sixth day while it plays (it used to say "At the stall" over the harvest).
-    this.ledDay.textContent = s.phase === 'day' || this.busy ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'At the stall' : 'Run over';
-    this.ledTally.innerHTML = `<b>${Math.round(this.shownEarned)}</b> of ${s.quota}`;
+    this.ledDay.textContent = s.phase === 'day' || this.busy ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'At the stall' : s.end?.won ? 'Run won' : 'Run over';
+    const take = Math.round(this.shownEarned);
+    // Four-digit takes and quotas stack the take over "of 1550" (the phone's purse covered the last digit: "1239 of 15").
+    this.ledger.classList.toggle('big', Math.max(String(take).length, String(s.quota).length) >= 4);
+    this.ledTally.innerHTML = `<b>${take}</b> <span>of ${s.quota}</span>`;
+    this.purse.classList.toggle('big', String(Math.round(this.shownCoins)).length >= 5);
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
   }
@@ -1079,7 +1083,8 @@ export class Table {
           this.ctx.audio.cue('deck.hover', { gain: 0.6 });
           // The first lesson says what the second tap does itself; otherwise, for the first few aims, a note in the
           // lesson strip (it showed on every play forever, over the aimed plot's bonus chip on the top row).
-          if (this.line?.id !== 'sow' && this.tutor.n('aimNote') < AIM_NOTES) {
+          // Never with a lesson up: the lesson says what to do, and the strip holds one line at a time.
+          if (this.line?.where !== 'table' && this.tutor.n('aimNote') < AIM_NOTES) {
             this.tutor.count('aimNote');
             this.say(`Tap again to ${CARDS[card.id].type === 'seed' ? 'plant it' : (AIM_VERB[card.id] ?? 'play it')}.`, null);
             this.aimNote = true;
@@ -1169,7 +1174,8 @@ export class Table {
     const marks: PreviewMark[] = [];
     let total: { plot: number; yield: number; bloom: number; score: number; late?: boolean; never?: boolean } | null = null;
     if (def.target === 'board') {
-      marks.push(...(previewPlay(s, idx, null)?.marks ?? []));
+      // Weather touches every crop: chips only, no new totals all over the plot.
+      marks.push(...(previewPlay(s, idx, null)?.marks ?? []).map(({ total: _, ...m }) => m));
     } else if (def.target === 'move') {
       const from = this.held!.from;
       if (from !== null && aim !== null && moveTargets(s, idx, from).includes(aim)) marks.push(...(previewPlay(s, idx, from, aim)?.marks ?? []));
@@ -1213,7 +1219,9 @@ export class Table {
       else if (total?.late) reason = { plot: aim, text: 'Ripens next season.' };
     }
     let none: { plot: number | null; text: string } | null = null;
-    if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: 'No effect now.' };
+    // An object stands for the rest of the run: a scarecrow set out before the crows come is not wasted.
+    const later = card.id === 'scarecrow' ? 'Keeps crows off from now on.' : card.id === 'beehive' ? 'Blooms crops around it from now on.' : 'No effect now.';
+    if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: later };
     // What the play would change about tonight: crops it brings in get tonight's moon, and Market Day's stamp moves.
     const after = def.target === 'board' ? previewPlay(s, idx, null) : valid && aim !== null ? (def.target === 'move' ? previewPlay(s, idx, this.held!.from!, aim) : previewPlay(s, idx, aim)) : null;
     b.preview = { marks, total, bloom: this.seen('bloom'), reason, none, tonight: after?.tonight ?? [], market: after ? after.market : marketTonight(s) };
@@ -1228,6 +1236,8 @@ export class Table {
     const taker = kind(plot);
     const giver = kind(from);
     if (!taker || !giver) return 'Its neighbour is pulled first.';
+    // Two of a kind side by side: "The other beans are pulled before these ripen." (it said "the beans ... the beans").
+    if (taker === giver) return PLURAL.includes(giver) ? `The other ${CARDS[giver].name.toLowerCase()} are pulled before these ripen.` : `The other ${CARDS[giver].name.toLowerCase()} is pulled before this one ripens.`;
     return `The ${CARDS[giver].name.toLowerCase()} ${PLURAL.includes(giver) ? 'are' : 'is'} pulled before the ${CARDS[taker].name.toLowerCase()} ${PLURAL.includes(taker) ? 'ripen' : 'ripens'}.`;
   }
 
@@ -1483,7 +1493,7 @@ export class Table {
     // "Tap again to plant it." is done with once it is planted.
     if (this.aimNote) {
       this.aimNote = false;
-      this.note.classList.remove('on');
+      this.hideNote();
     }
     this.held = null;
     if (this.aimed !== null) {
@@ -1688,13 +1698,16 @@ export class Table {
    * A short ink note on the table, gone after a moment. Not a stack: one at a
    * time. A note about a plot sits over that plot, kept inside the bed so it
    * never covers the key letters or numbers (it used to stand above a first-row
-   * plot, over its letter). A note about the whole table ("Quota met.") sits on
-   * the plate's caption under the bed, clear of the key.
+   * plot, over its letter). A note about the whole table ("Quota met.") sits in
+   * the lesson strip, in front of the lesson or the twist while it shows.
    */
   say(text: string, plot: number | null): void {
     const n = this.note;
     this.aimNote = false;
     n.textContent = text;
+    // Measured from the table's left edge, so its width is its own, not what was left of the screen where it last stood
+    // (a note last by the right edge wrapped, measured twice as tall, and hung below the strip).
+    n.style.left = '0px';
     const br = this.boardWrap.getBoundingClientRect();
     const tr = this.tableEl.getBoundingClientRect();
     const b = this.board;
@@ -1706,23 +1719,21 @@ export class Table {
     const bedR = ox + b.bx + b.T * b.cols;
     let x = ox + b.bx + (b.T * b.cols) / 2;
     // The note hangs from its top-centre point upward (translate -50%, -100%): `y` is its bottom edge.
-    // A note about the whole table goes in the lesson strip when no lesson is up (it used to sit on the plate's
-    // caption, whose words showed round it in pieces); with a lesson up, just inside the bed's top edge.
+    // A note about the whole table goes in the lesson strip (it used to sit on the plate's caption, whose words showed
+    // round it in pieces). With a lesson or the season's twist in the strip, they step aside while the note shows:
+    // the note used to go just inside the bed's top edge, over row 1 of the plot, all season from year 2.
     const strip = this.hintBox;
-    let y = oy + b.by + h + 6;
-    // The strip is taken by a lesson or by the season's twist: then just inside the bed's top edge.
-    const busy = this.hint.classList.contains('on') || this.twistEl.classList.contains('on');
-    if (plot === null && !busy) {
-      x = strip.x + strip.w / 2;
-      y = strip.y + strip.h / 2 + h / 2;
-    }
+    let y = strip.y + strip.h / 2 + h / 2;
+    if (plot === null) x = strip.x + strip.w / 2;
+    this.hint.classList.toggle('hush', plot === null);
+    this.twistEl.classList.toggle('hush', plot === null);
     if (plot !== null) {
       const c = b.centre(plot);
       x = ox + c.x;
       y = Math.max(oy + c.y - b.T * 0.7, oy + b.by + h + 4);
     }
     // Inside the bed's width where it fits, so the numbers down the side stay clear too.
-    if (w <= bedR - bedL && (plot !== null || busy)) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
+    if (w <= bedR - bedL && plot !== null) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
     x = Math.max(w / 2 + 4, Math.min(this.W - w / 2 - 4, x));
     n.style.left = `${Math.round(x)}px`;
     n.style.top = `${Math.round(Math.max(60 + h, y))}px`;
@@ -1730,7 +1741,14 @@ export class Table {
     void n.offsetWidth;
     n.classList.add('on');
     clearTimeout(this.noteTimer);
-    this.noteTimer = window.setTimeout(() => n.classList.remove('on'), 2200);
+    this.noteTimer = window.setTimeout(() => this.hideNote(), 2200);
+  }
+
+  /** The note goes, and the lesson or the twist it stood in front of comes back. */
+  private hideNote(): void {
+    this.note.classList.remove('on');
+    this.hint.classList.remove('hush');
+    this.twistEl.classList.remove('hush');
   }
   private noteTimer = 0;
   /** The note on screen is "Tap again to plant it.": it goes when the card is played. */

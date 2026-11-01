@@ -11,7 +11,6 @@ import {
   buyPage,
   buyScoop,
   buySlot,
-  bySeason,
   canBuyScoop,
   chooseTwist,
   canBuySlot,
@@ -44,7 +43,6 @@ import {
   type PageId,
   type RunState,
   type SeedId,
-  type Twist,
 } from './rules';
 
 export interface BotOpts {
@@ -237,46 +235,40 @@ function pageValue(s: RunState, id: PageId): number {
   return PAGE_VALUE[id];
 }
 
+/** Samples of the coming season the bot plays ahead for each twist on offer. */
+const TWIST_SAMPLES = 2;
+/** A take past this many times the quota is worth no more to the bot: the carry is capped, and the season is met. */
+const TWIST_CAP = 1.6;
+
 /**
- * What a twist is worth to the bot's deck, roughly: a buyer for crops it holds many of, good company, long picks for
- * its perennials, sunflowers all round for its sunflowers; frost, a glut of its own crop and crows cost it. Its days
- * then play to the twist on their own, since every play is scored by the rules.
+ * What a twist on offer is worth to the bot's own deck and plot: the coming season played ahead on a copy with that
+ * twist picked (a quick one-play-deep bot, the same sampled dice for both twists), its take over its quota, capped.
+ * A hitch asks less, so it is the better pick when it misses the build (crows with a scarecrow standing) and the worse
+ * one when it hits it (a glut of the crop the run leans on). Round 5 scored every help above every hitch, which gave
+ * nothing back: the bot, like the sixth playtest, picked the help every time.
  */
-export function twistWorth(s: RunState, t: Twist): number {
-  const cards = allCards(s);
-  const n = (id: CardId) => cards.filter((c) => c.id === id).length;
-  const crop = (k?: SeedId) => (k ? n(k) * SEEDS[k].base * SEEDS[k].picks * 0.35 : 0);
-  switch (t.id) {
-    case 'buyer':
-      return 1 + crop(t.crop);
-    case 'glut':
-      return -1 - crop(t.crop);
-    case 'company':
-      return 4;
-    case 'calm':
-      return 1 + bySeason(TUNING.pestChance, s) * 8;
-    case 'picks':
-      return n('beans') * 1.5 + n('strawberry') * 2;
-    case 'sunall':
-      return n('sunflower') * 2.5;
-    case 'sunup':
-      return -n('sunflower');
-    case 'frost':
-      return -3;
-    case 'crows':
-      return s.plots.some((p) => p.obj === 'scarecrow') ? -0.5 : -2.5;
+export function twistWorth(s: RunState, i: number, seed = 1): number {
+  let v = 0;
+  for (let k = 0; k < TWIST_SAMPLES; k++) {
+    const c = cloneRun(s);
+    c.stats = { ...c.stats, log: [...s.stats.log] };
+    c.rng = (Math.imul(seed + k * 7919, 2654435761) ^ s.rng) | 0;
+    chooseTwist(c, i);
+    leaveShop(c);
+    const dice = new Dice(c.rng ^ 0x5bd1e995);
+    for (let d = 0; d < TUNING.days && c.phase === 'day'; d++) botDay(c, { noise: 0, seed, depth: 1 }, dice);
+    const l = c.stats.log[c.stats.log.length - 1];
+    v += l ? Math.min(TWIST_CAP, l.earned / Math.max(1, l.quota)) : 0;
   }
+  return v / TWIST_SAMPLES;
 }
 
 /** Pick the twist worth the most to the bot (the first on a tie). */
-export function botTwist(s: RunState): void {
+export function botTwist(s: RunState, seed = 1): void {
   const tw = s.shop?.twists;
   if (!tw?.length) return;
-  let best = 0;
-  tw.forEach((t, i) => {
-    if (twistWorth(s, t) > twistWorth(s, tw[best])) best = i;
-  });
-  chooseTwist(s, best);
+  const v = tw.map((_, i) => twistWorth(s, i, seed));
+  chooseTwist(s, v.indexOf(Math.max(...v)));
 }
 
 /** Spend in the shop by a simple preference list, then leave. */
@@ -319,7 +311,7 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
     if (!did && s.coins > 60 && sh.rerolls < 2 && !saving && sh.cards.every((c) => c.sold || cardValue(s, c.card) < 4.5) && reroll(s)) did = true;
     if (!did) break;
   }
-  botTwist(s);
+  botTwist(s, o.seed);
   leaveShop(s);
 }
 
