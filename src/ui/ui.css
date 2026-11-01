@@ -165,8 +165,7 @@ svg { width: 100%; height: 100%; display: block; }
 .tool.on .lbl { opacity: 1; }
 .tool.on .ic { filter: none; }
 .tool.on .key { color: rgba(45, 36, 22, 0.45); }
-.tool .seedchip { position: absolute; bottom: 19px; right: 8px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #4b321e; }
-.tool.on .seedchip { border-color: #f4e8c8; }
+.tool .seedchip { position: absolute; bottom: 15px; right: 4px; width: 20px; height: 20px; filter: drop-shadow(0 1px 1px rgba(30, 18, 8, 0.45)); }
 .toolbar .sep { width: 2px; background: rgba(0, 0, 0, 0.25); box-shadow: 1px 0 0 rgba(255, 220, 170, 0.12); margin: 8px 4px; }
 .tool.act .lbl { opacity: 0.85; }
 .tool.act.ready { color: #fff3c9; animation: nudge 1.6s ease-in-out infinite; }
@@ -180,7 +179,9 @@ svg { width: 100%; height: 100%; display: block; }
 }
 .seedbar.hidden, .buildbar.hidden { display: none; }
 .seed { min-width: 74px; height: 66px; border-radius: 3px; border: 0; background: #f4e8c8; color: var(--ink); cursor: pointer; display: grid; place-items: center; gap: 1px; padding: 5px 4px; box-shadow: 0 2px 0 #b99b68; }
-.seed .blob { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.18) inset; }
+/* Crops are drawn (src/ui/crops-art.ts), not dotted in a colour. */
+.crop-art { display: block; width: 100%; height: 100%; }
+.seed .blob { width: 28px; height: 28px; }
 .seed .nm { font-size: 11.5px; font-weight: 650; }
 .seed .pr { font-size: 11px; color: var(--ink2); font-family: var(--serif); }
 .seed.on { transform: translateY(-4px); box-shadow: 0 2px 0 #b99b68, 0 0 0 2px #f0c04f; }
@@ -299,13 +300,14 @@ svg { width: 100%; height: 100%; display: block; }
 .item .btn { min-height: 0; padding: 4px 9px; font-size: 13px; font-family: var(--serif); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; background: transparent; color: #2f6a2a; border: 2px solid #2f6a2a; border-radius: 3px; box-shadow: none; transform: rotate(-5deg); }
 .item .btn:disabled { color: #8b7d63; border-color: #b3a383; opacity: 1; }
 .item.done { filter: saturate(0.6); }
-.item .blob { width: 22px; height: 22px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.18) inset; }
+.item .blob { width: 34px; height: 34px; flex: none; }
+.order .items i.crop { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; margin-right: 3px; }
 .trend.up { color: var(--green); }
 .trend.down { color: var(--red); }
 .report { display: grid; gap: 4px; font-size: 14px; }
 .drafts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .draft { border-radius: 12px; border: 1.5px solid var(--line); background: var(--paper3); padding: 12px 10px; cursor: pointer; display: grid; gap: 4px; justify-items: center; text-align: center; }
-.draft .blob { width: 34px; height: 34px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15) inset; }
+.draft .blob { width: 44px; height: 44px; }
 .draft b { font-family: var(--serif); font-size: 16px; }
 .draft span { font-size: 12px; color: var(--ink2); }
 .draft:hover { border-color: var(--ink); }
@@ -443,6 +445,10 @@ svg { width: 100%; height: 100%; display: block; }
 .hud.picking .hint, .hud.picking .info { opacity: 0 !important; }
 @media (max-width: 640px) {
   .gameroot.touch-on .seedbar, .gameroot.touch-on .buildbar { bottom: calc(236px + var(--safe-b)); }
+}
+/* A tall board (the Seeds tab) stays clear of the shell's corner button: centred, it keeps that much room above and below. */
+@media (max-width: 640px) {
+  .dialog { max-height: calc(100% - 2 * (64px + var(--safe-t))); }
 }
 /* An open picker sits above the touch layer: the walk stick's capture zone
    covers the left half of the screen and would otherwise take its taps. */

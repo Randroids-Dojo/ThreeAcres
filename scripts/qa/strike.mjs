@@ -111,6 +111,13 @@ export function strikeScan() {
       }
     }
   }
+  // Put the transforms back without animating them back in (a transition would
+  // leave sheets mid-slide for whatever the check looks at next).
+  const still = document.createElement('style');
+  still.textContent = '*, *::before, *::after { transition: none !important; }';
+  document.head.append(still);
   flat.remove();
+  void document.body.offsetHeight;
+  still.remove();
   return hits;
 }

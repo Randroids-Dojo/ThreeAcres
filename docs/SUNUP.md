@@ -52,3 +52,8 @@ A switch never loses progress, moves the farmer into a wall, or strands a job.
 ## Feedback for the designer
 
 The mixer shows how long has been spent in each option, and a notes box stamped with the current mix. This is the lab: the game exists to find the best mix.
+
+## Crop art
+
+Each crop has its own small drawing (`src/ui/crops-art.ts`): brown ink outlines, flat fills, one highlight and a darker line for the detail, on a 32 grid so it reads at 16 px and stays crisp at 44. It stands in everywhere a crop is named in the interface: the seed picker, the chosen seed on the Seeds tool, request notes, the board's Seeds tab, the stock list and draft cards. No crop is a coloured dot any more.
+

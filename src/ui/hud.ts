@@ -3,6 +3,7 @@
 // floating numbers. Rebuilt pieces only when the rules change; text is
 // refreshed every frame through setText.
 
+import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
 import { homestead, resolve } from '../sim/actions';
@@ -215,7 +216,7 @@ export class Hud {
         const items = o.items
           .map((it) => {
             const have = stockCount(s, it.crop);
-            return `<span><i style="background:${CROPS[it.crop].color}"></i>${CROPS[it.crop].name} <b class="${have >= it.n ? 'have' : ''}">${Math.min(have, it.n)}/${it.n}</b></span>`;
+            return `<span><i class="crop">${cropArt(it.crop)}</i>${CROPS[it.crop].name} <b class="${have >= it.n ? 'have' : ''}">${Math.min(have, it.n)}/${it.n}</b></span>`;
           })
           .join('');
         const ready = canDeliver(s, o);
@@ -283,7 +284,11 @@ export class Hud {
       toggle(can.parentElement!, 'low', s.water <= Math.max(2, max * 0.15));
     }
     const chip = this.toolbar.querySelector<HTMLElement>('.seedchip');
-    if (chip) chip.style.background = CROPS[s.seed].color;
+    // The chosen seed sits on the Seeds tool as its little plate.
+    if (chip && chip.dataset.crop !== s.seed) {
+      chip.dataset.crop = s.seed;
+      chip.innerHTML = cropArt(s.seed);
+    }
     const actBtn = this.toolbar.querySelector<HTMLElement>('.tool.act');
     if (actBtn) toggle(actBtn, 'ready', (r.clock === 'turns' && s.ap - s.jobs.length <= 0) || (r.clock === 'day' && (s.stamina < 4 || s.minute > 960)));
     // Seed bar shows prices, locks and the selection.
@@ -307,7 +312,7 @@ export class Hud {
     this.seedbar.innerHTML = '';
     for (const c of CROP_IDS) {
       const d = CROPS[c];
-      const b = el('button', 'seed', `<span class="blob" style="background:${d.color}"></span><span class="nm">${d.name}</span><span class="pr">${d.seed} &middot; ${d.days}d</span>`);
+      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr">${d.seed} &middot; ${d.days}d</span>`);
       b.dataset.crop = c;
       b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. ${d.likes}.`;
       b.onclick = () => {

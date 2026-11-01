@@ -2,6 +2,7 @@
 // milestones), the end of an almanac season, and a for-sale field.
 // The farm pauses while one is open.
 
+import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import { homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
@@ -122,7 +123,7 @@ export class Dialogs {
           const days = o.due - s.day;
           const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
           const ready = have >= it.n;
-          const note = el('div', 'item', `<span class="blob" style="background:${CROPS[it.crop].color}"></span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}. Pays ${fmt(o.reward)}</span></span>`);
+          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}. Pays ${fmt(o.reward)}</span></span>`);
           if (ready) {
             const b = el('button', 'btn primary', 'Deliver');
             b.onclick = () => {
@@ -158,7 +159,7 @@ export class Dialogs {
           const d = CROPS[c];
           const off = !inSeason(c, season(s.day));
           const locked = (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || off;
-          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob" style="background:${d.color}"></span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}${off ? ', not now' : ''}</span></span>`);
+          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob">${cropArt(d.id)}</span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}${off ? ', not now' : ''}</span></span>`);
           if (!locked) {
             const b = el('button', `btn ${s.seed === c ? 'primary' : ''}`, s.seed === c ? 'In hand' : 'Use');
             b.onclick = () => {
@@ -231,7 +232,7 @@ export class Dialogs {
           const n = stockCount(s, c);
           const d = s.market.demand[c];
           const trend = d > 1.04 ? '<span class="trend up">up</span>' : d < 0.96 ? '<span class="trend down">down</span>' : 'steady';
-          const it = el('div', `item ${n ? '' : 'done'}`, `<span class="blob" style="background:${CROPS[c].color}"></span><span class="tx"><b>${CROPS[c].name} &middot; ${n} in stock</b><span>${priceOf(s, c, 0)} each, ${trend}</span></span>`);
+          const it = el('div', `item ${n ? '' : 'done'}`, `<span class="blob">${cropArt(c)}</span><span class="tx"><b>${CROPS[c].name} &middot; ${n} in stock</b><span>${priceOf(s, c, 0)} each, ${trend}</span></span>`);
           if (n) {
             const b = el('button', 'btn', 'Sell all');
             b.onclick = () => {
@@ -277,7 +278,7 @@ export class Dialogs {
       const row = el('div', 'drafts');
       for (const c of a.draft) {
         const d = CROPS[c];
-        const b = el('button', 'draft', `<span class="blob" style="background:${d.color}"></span><b>${d.name}</b><span>${d.days} days, sells ${d.price}</span><span>${esc(d.likes)}</span>`);
+        const b = el('button', 'draft', `<span class="blob">${cropArt(d.id)}</span><b>${d.name}</b><span>${d.days} days, sells ${d.price}</span><span>${esc(d.likes)}</span>`);
         b.onclick = () => {
           this.host.send({ type: 'draft', crop: c as CropId });
           this.host.cue('star');

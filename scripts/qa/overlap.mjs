@@ -26,6 +26,7 @@ const PIECES = {
   line: '.hint.on',
   caption: '.info:not(.empty):not(.quiet)',
   toast: '.toasts .toast',
+  dialog: '.dialog.on',
 };
 
 async function run(label, viewport, touch) {
@@ -76,16 +77,21 @@ async function run(label, viewport, touch) {
     ['seed picker', async () => p.evaluate(() => window.sunup.hud.pickTool('seeds'))],
     ['build picker', async () => p.evaluate(() => window.sunup.hud.pickTool('build'))],
     ['toast', async () => p.evaluate(() => { window.sunup.hud.pickTool('hands'); window.sunup.hud.toast('<b>Spring 2</b>, cloudy<br>Sold 4 for 120.', 'big', 5000); })],
+    // The board's longest tab must not grow over the shell's corner button.
+    ['board seeds', async () => p.evaluate(() => window.sunup.dialogs.board('seeds'))],
   ];
   for (const [name, setup] of states) {
     await setup();
     await p.waitForTimeout(450);
     const bx = await boxes();
     const hits = [];
+    // An open board covers the HUD on purpose; then only the shell's corner must stay clear of it.
+    const modal = bx.some((q) => q.name === 'dialog');
     for (let i = 0; i < bx.length; i++) {
       for (let j = i + 1; j < bx.length; j++) {
         const A = bx[i];
         const B = bx[j];
+        if (modal && !((A.name === 'dialog' && B.name === 'shell') || (A.name === 'shell' && B.name === 'dialog'))) continue;
         const w = Math.min(A.r, B.r) - Math.max(A.l, B.l);
         const h = Math.min(A.b, B.b) - Math.max(A.t, B.t);
         if (w > 2 && h > 2) hits.push(`${A.name}/${B.name} ${Math.round(w)}x${Math.round(h)}`);
@@ -94,7 +100,7 @@ async function run(label, viewport, touch) {
     // A ruled line across the middle of any words reads as struck through.
     for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in}`);
     // Every visible button must take a tap, not something lying over it (the stick's capture zone, say).
-    for (const q of await p.evaluate(reachScan, 'button')) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
+    for (const q of await p.evaluate(reachScan, modal ? '.dialog.on button, .shellbtn' : 'button')) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name}${ok ? '' : `  (${hits.join(', ')})`}`);
