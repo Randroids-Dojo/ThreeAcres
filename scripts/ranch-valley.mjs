@@ -47,7 +47,8 @@ await frames(page, 4);
 let opts = await useTag('Digit1');
 check('the ridge gate hangs its price tag', opts.includes('gate:ridge'), opts.join(','));
 let s = await S(page);
-check('buying it opens the gate', await page.evaluate(() => window.ranch.sim.s.gates.ridge) && s.coins === 6000 - 600 + 100 && s.goals.includes('ridge'), `coins ${s.coins}`);
+// The gate's price (500) less, the goal's reward (100) back.
+check('buying it opens the gate', await page.evaluate(() => window.ranch.sim.s.gates.ridge) && s.coins === 6000 - 500 + 100 && s.goals.includes('ridge'), `coins ${s.coins}`);
 await page.waitForTimeout(1200);
 await shot('01-gate-open');
 await page.keyboard.down('KeyW');
@@ -59,12 +60,26 @@ check('a first visit names the zone', await page.evaluate(() => window.ranch.sim
 await shot('02-ridge');
 
 // ---- catch an ember downy
-const ember = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.kind === 'ember'); return d && { x: d.x, y: d.y, z: d.z }; });
-await place(ember.x + 2.5, ember.z + 1.5, ember.x, ember.y + 0.25, ember.z);
-await frames(page, 3);
-await page.mouse.down({ button: 'right' });
-await page.waitForTimeout(1400);
-await page.mouse.up({ button: 'right' });
+/**
+ * Wild downies hop away when you come close and dig in against the pull for
+ * about a second: hold right click and keep the crosshair on the nearest one
+ * of a kind, as a player would, until it comes in (or three seconds pass).
+ */
+const catchWild = async (kind) => {
+  const at = () => page.evaluate((kind) => { const s = window.ranch.sim.s; const p = s.player; const ds = s.downies.filter((q) => !q.gone && !q.tame && q.kind === kind).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z)); return ds[0] && { x: ds[0].x, y: ds[0].y, z: ds[0].z }; }, kind);
+  const d0 = await at();
+  await place(d0.x + 3.6, d0.z + 2.2, d0.x, d0.y + 0.25, d0.z);
+  await frames(page, 2);
+  await page.mouse.down({ button: 'right' });
+  const t0 = Date.now();
+  while (Date.now() - t0 < 3000 && !(await page.evaluate((kind) => window.ranch.sim.s.slots.some((q) => q.t === kind), kind))) {
+    const d = await at();
+    if (d) await page.evaluate(([x, y, z]) => window.ranch.aimAt(x, y, z), [d.x, d.y + 0.25, d.z]);
+    await page.waitForTimeout(80);
+  }
+  await page.mouse.up({ button: 'right' });
+};
+await catchWild('ember');
 s = await S(page);
 check('drawing catches an ember downy', s.slots.some((q) => q[0] === 'ember') && s.goals.includes('ember'), JSON.stringify(s.slots));
 await page.waitForTimeout(200);
@@ -146,12 +161,7 @@ await place(33.2, -24, 36, (await floor(36, -24)) + 1.4, -24);
 await frames(page, 4);
 opts = await useTag('Digit1');
 check('the hollow gate opens', await page.evaluate(() => window.ranch.sim.s.gates.hollow));
-const brook = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.kind === 'brook'); return d && { x: d.x, y: d.y, z: d.z }; });
-await place(brook.x + 2.4, brook.z + 1.4, brook.x, brook.y + 0.25, brook.z);
-await frames(page, 3);
-await page.mouse.down({ button: 'right' });
-await page.waitForTimeout(1400);
-await page.mouse.up({ button: 'right' });
+await catchWild('brook');
 s = await S(page);
 check('a brook downy comes in', s.slots.some((q) => q[0] === 'brook'), JSON.stringify(s.slots));
 await shot('07-hollow');

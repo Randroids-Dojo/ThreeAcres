@@ -249,12 +249,15 @@ export class Fx {
     return (Math.random() - 0.5) * 2 * a;
   }
 
-  /** A puff of air leaving the muzzle. */
+  /**
+   * A puff of air leaving the muzzle: a few small, faint wisps that thin out
+   * fast, so the aim stays clear for the next blow (scripts/ranch-blow-cloud.mjs).
+   */
   puff(x: number, y: number, z: number, dx: number, dy: number, dz: number, loaded: boolean): void {
-    const n = this.reduced ? 5 : loaded ? 12 : 8;
+    const n = this.reduced ? 3 : loaded ? 6 : 4;
     for (let i = 0; i < n; i++) {
-      const sp = 2 + Math.random() * (loaded ? 5 : 3.5);
-      this.spawn(x, y, z, dx * sp + this.rnd(0.9), dy * sp + this.rnd(0.9) + 0.3, dz * sp + this.rnd(0.9), 0.35 + Math.random() * 0.3, 0.06, 0.5, 0xf8f4ec, 0.55, 0, 4);
+      const sp = 3 + Math.random() * (loaded ? 4 : 3);
+      this.spawn(x, y, z, dx * sp + this.rnd(0.6), dy * sp + this.rnd(0.6) + 0.2, dz * sp + this.rnd(0.6), 0.22 + Math.random() * 0.16, 0.025, 0.12, 0xf8f4ec, 0.3, 0, 4.5);
     }
   }
 

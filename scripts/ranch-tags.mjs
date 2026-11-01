@@ -64,6 +64,39 @@ check('every tag option was found', res.length >= 20, `${res.length}`);
 const control = await page.evaluate(() => window.ranch.tagLayout('A very long title that runs on', 1500, 'A note far too long to fit on a tag even on two lines at the smallest size'));
 check('the check catches words that cannot fit', !control.fits, JSON.stringify(control));
 check("every tag's title and note fit on the tag", over.length === 0, over.map((o) => `"${o.title}" / "${o.note}"`).join('; '));
+
+// The workbench's tags hang facing you (they used to hang edge-on), from anywhere you can use it, up to 3.5 m off.
+const bench = await page.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  s.coins = 5000;
+  const out = [];
+  for (const [x, z] of [[-10.6, 38.0], [-8.0, 39.2], [-7.6, 41.6], [-12.4, 38.5]]) {
+    if (r.menuOpen()) r.closeMenu();
+    const p = s.player;
+    p.x = x; p.z = z; p.y = r.sim.phys.floor(x, z);
+    r.aimAt(-10.6, r.sim.phys.floor(-10.6, 41.2) + 1.4, 41.2);
+    const near = r.sim.interactable(r.aim);
+    const reach = Math.hypot(x + 10.6, z - 41.2);
+    if (!near || near.kind !== 'bench') { out.push({ x, z, reach, near: near?.kind ?? null }); continue; }
+    r.openMenu(near);
+    const tags = r.tags.tags.filter((t) => t.opt);
+    const facing = tags.map((t) => {
+      t.pivot.updateWorldMatrix(true, false);
+      const e = t.pivot.matrixWorld.elements;
+      // The tag's front (+z) in the world, against the way to your eye, level.
+      const fx = e[8], fz = e[10];
+      const dx = p.x - t.pivot.position.x, dz = p.z - t.pivot.position.z;
+      return (fx * dx + fz * dz) / (Math.hypot(fx, fz) * Math.hypot(dx, dz));
+    });
+    out.push({ x, z, reach, near: 'bench', n: tags.length, worst: Math.min(...facing) });
+  }
+  if (r.menuOpen()) r.closeMenu();
+  return out;
+});
+for (const q of bench) console.log(`   bench from ${q.x},${q.z} (${q.reach.toFixed(1)} m): ${q.near === 'bench' ? `${q.n} tags, worst facing ${q.worst.toFixed(2)}` : `not in reach (${q.near})`}`);
+check('the workbench is usable from up to about 3.5 m', bench.every((q) => q.near === 'bench'), bench.filter((q) => q.near !== 'bench').map((q) => `${q.x},${q.z}`).join(' '));
+check('every workbench tag faces you (within about 30 degrees)', bench.every((q) => q.near !== 'bench' || q.worst > 0.85), bench.map((q) => (q.worst ?? 0).toFixed(2)).join(' '));
 await b.close();
 console.log(failed() ? `TAGS FAILED (${failed()})` : 'TAGS OK');
 process.exit(failed() ? 1 : 0);

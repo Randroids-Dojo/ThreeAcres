@@ -58,6 +58,16 @@ export interface Downy extends Body {
   gone: boolean;
   /** For the porch downy and other scripted ones: never despawns. */
   keep: boolean;
+  /** Seconds a wild one has dug in against the bellows (a tug of war before it comes loose). */
+  tug: number;
+  /** Under the crosshair and being tugged this frame. */
+  held: boolean;
+  /** A wild one has noticed you close by and is hopping away. */
+  alert: boolean;
+  /** Game hours spent starving without a meal: long neglect makes it restless. */
+  starveT: number;
+  /** The meal you gave it that its next fluff comes from (0: not fed by you). */
+  feedId: number;
 }
 
 export interface Item extends Body {
@@ -74,6 +84,12 @@ export interface Item extends Body {
   gone: boolean;
   /** Seconds lying on the ground, for tufts blowing away. */
   idle: number;
+  /** Left the bellows with a blow (or was tipped out of a window, for food): it is yours. */
+  blown: boolean;
+  /** For fluff: the downy that shed it (0 if none). */
+  by: number;
+  /** For fluff: the meal you gave that it came from (0 if not fed by you). */
+  feed: number;
 }
 
 export interface Nettle extends Body {
@@ -92,6 +108,8 @@ export interface Nettle extends Body {
 export interface Slot {
   t: Thing | null;
   n: number;
+  /** For fluff: the meals you gave that it came from, oldest first (not saved). */
+  feeds?: number[];
 }
 
 export interface Pad {
@@ -314,6 +332,11 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     target: null,
     gone: false,
     keep: false,
+    tug: 0,
+    held: false,
+    alert: false,
+    starveT: 0,
+    feedId: 0,
   };
 }
 
@@ -337,6 +360,9 @@ export function newItem(s: RanchState, type: ItemType, x: number, y: number, z: 
     rest: false,
     gone: false,
     idle: 0,
+    blown: false,
+    by: 0,
+    feed: 0,
   };
 }
 

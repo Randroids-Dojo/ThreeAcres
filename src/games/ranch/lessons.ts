@@ -9,9 +9,9 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { eats, isDowny, isFood, isTuft, wantedFood, type Food } from './defs';
+import { GARDEN_HOURS, eats, isDowny, isFood, isTuft, wantedFood, type Food } from './defs';
 import { padSpots, type Ev } from './sim';
-import type { Downy, RanchState } from './state';
+import type { Downy, Item, RanchState } from './state';
 import { DOOR, EXCHANGE, GATES, PADS, PEN_R, RANCH_GATE, WORKBENCH, zoneAt } from './world';
 
 export type Dev = 'touch' | 'mouse' | 'pad';
@@ -106,25 +106,66 @@ function nearestPad(s: RanchState, ok: (i: number) => boolean): number {
 
 const porch = (s: RanchState) => nearestDowny(s, (d) => d.keep) ?? nearestDowny(s, () => true, 12);
 
-/** Your loose clover downies work up an appetite, so they eat as soon as food lands near them. */
+/** Your loose clover downies work up an appetite, so they eat as soon as food lands near them, but never starve while a lesson waits on them. */
 function appetite(s: RanchState): void {
-  for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0 && d.kind === 'clover') d.hunger = Math.max(d.hunger, 0.62);
+  for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0 && d.kind === 'clover') d.hunger = Math.min(0.8, Math.max(d.hunger, 0.62));
+}
+
+/** Before the feeding lesson, your downy's hunger waits: it is not hungry yet when that lesson comes. */
+function rested(s: RanchState): void {
+  for (const d of s.downies) if (!d.gone && (d.tame || d.keep)) d.hunger = Math.min(d.hunger, 0.3);
+}
+
+/** While a lesson leans on your loose downies, none of them goes past hungry into starving. */
+function noStarving(s: RanchState): void {
+  for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0) d.hunger = Math.min(d.hunger, 0.8);
+}
+
+/** A lesson sending you to the garden never sends you to an empty bed: the nearest clover bed ripens. */
+function ripen(s: RanchState, food: Food = 'cloverhead'): void {
+  const lying = s.items.some((it) => !it.gone && it.type === food && it.src >= 1000);
+  if (lying) return;
+  const g = s.pads.findIndex((p) => p.kind === 'garden' && p.crop === food);
+  if (g >= 0) s.pads[g].grow = Math.max(s.pads[g].grow, 1 - 0.05 / GARDEN_HOURS);
+}
+
+/** Your downies (tame or the porch one), not gone. */
+const mine = (d: Downy) => !d.gone && (d.tame || d.keep);
+
+/** Fluff you have blown that is still in the air: a sale is on its way, so the line stays on blowing. */
+const blowing = (s: RanchState) => s.items.some((it) => !it.gone && it.blown && it.flyT >= 0 && isTuft(it.type));
+
+/** Fluff lying on the ranch: never a wild downy's out in the meadow, never what is already flying into the crate. */
+const ranchFluff = (s: RanchState) => s.items.filter((it) => !it.gone && isTuft(it.type) && zoneAt(it.x, it.z) === 'ranch' && !(it.blown && it.flyT >= 0));
+
+/** The fluff to point at: what your downies dropped last, else the nearest on the ranch. */
+function fluffToPoint(s: RanchState): Item | null {
+  const ids = new Set(s.downies.filter(mine).map((d) => d.id));
+  let best: Item | null = null;
+  let bd = 1e9;
+  for (const it of ranchFluff(s)) {
+    // Your own downies' fluff first, the newest of it; then the nearest.
+    const score = (ids.has(it.by) ? -1e6 - it.id : 0) + dist(s, it.x, it.z);
+    if (score < bd) {
+      bd = score;
+      best = it;
+    }
+  }
+  return best;
 }
 
 /**
- * Where selling stands: blow (fluff is the chosen kind), choose (fluff is
- * aboard but another kind is chosen, so Blow would send that), pull (fluff
- * lies on the ground, or a fed downy is about to drop it) or feed (no fluff
- * anywhere: feed a downy for more).
+ * Where selling stands: blow (fluff is the chosen kind, or a blown one is on
+ * its way in), choose (fluff is aboard but another kind is chosen, so Blow
+ * would send that), pull (fluff lies on the ranch, or a fed downy of yours is
+ * about to drop it) or feed (no fluff anywhere: feed a downy for more).
  */
 function sellStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' {
   const chosen = s.slots[s.sel];
-  if (chosen?.t && chosen.n > 0 && isTuft(chosen.t)) return 'blow';
+  if ((chosen?.t && chosen.n > 0 && isTuft(chosen.t)) || blowing(s)) return 'blow';
   if (carrying(s, isTuft)) return 'choose';
-  return s.items.some((it) => !it.gone && isTuft(it.type)) || s.downies.some((d) => !d.gone && d.shedQ > 0) ? 'pull' : 'feed';
+  return ranchFluff(s).length > 0 || s.downies.some((d) => mine(d) && d.shedQ > 0) ? 'pull' : 'feed';
 }
-/** Your downies (tame or the porch one), not gone. */
-const mine = (d: Downy) => !d.gone && (d.tame || d.keep);
 /** The nearest of your downies that is hungry enough to eat. */
 const hungryOne = (s: RanchState) => nearestDowny(s, (d) => mine(d) && d.hunger > 0.5 && d.drawn === 0);
 
@@ -135,12 +176,13 @@ const hungryOne = (s: RanchState) => nearestDowny(s, (d) => mine(d) && d.hunger 
  */
 function farmStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' | 'food' | 'catch' {
   const sell = sellStep(s);
-  if (sell === 'blow' || sell === 'choose') return sell;
-  if (s.items.some((it) => !it.gone && isTuft(it.type) && zoneAt(it.x, it.z) === 'ranch')) return 'pull';
+  if (sell === 'blow' || sell === 'choose' || sell === 'pull') return sell;
   const d = hungryOne(s);
   if (d) return carrying(s, (t) => isFood(t) && eats(d.kind, t)) ? 'feed' : 'food';
   return 'catch';
 }
+/** Whole turns of the loop the farm lesson waits for. */
+export const FARM_CYCLES = 3;
 const FARM = {
   pull: 'Pull up the fluff your downies dropped.',
   feed: 'Feed the hungry downy its favourite food.',
@@ -156,6 +198,60 @@ const SELL = {
 };
 /** A downy of yours, loose (not penned, not in the canister). */
 const loose = (s: RanchState) => nearestDowny(s, (d) => (d.tame || d.keep) && d.pen < 0);
+
+const FEED = {
+  pull: 'Pull clover heads from the garden.',
+  feed: 'Feed the downy a clover head.',
+  out: 'Blow the downy back out.',
+  choose: (q: Say) => (q.dev === 'touch' ? "Tap the clover heads' window to choose them." : q.dev === 'pad' ? 'Press LB or RB to choose clover heads.' : 'Press Q until the clover heads are chosen.'),
+};
+
+/**
+ * Where feeding stands: pull (no clover heads aboard: fetch some from the
+ * garden), choose (aboard, but another kind is chosen), out (the downy is in
+ * the jar) or feed.
+ */
+function feedStep(s: RanchState): 'pull' | 'choose' | 'out' | 'feed' {
+  if (!loose(s) && carrying(s, isDowny)) return 'out';
+  if (!carrying(s, (t) => t === 'cloverhead')) return 'pull';
+  if (s.slots[s.sel]?.t !== 'cloverhead' && s.learn.includes('slots')) return 'choose';
+  return 'feed';
+}
+
+/** The garden to send you to for food: the nearest with that food lying on it, else the nearest growing it, else the first. */
+function gardenFor(s: RanchState, food: Food): number {
+  const lying = nearestPad(s, (i) => s.pads[i].kind === 'garden' && s.items.some((it) => !it.gone && it.type === food && it.src === 1000 + i));
+  if (lying >= 0) return lying;
+  const growing = nearestPad(s, (i) => s.pads[i].kind === 'garden' && s.pads[i].crop === food);
+  return growing >= 0 ? growing : 0;
+}
+
+/** The feeding marks: the garden ringed while you have no clover heads, the window to choose, or a clover head over the downy. */
+function feedMark(s: RanchState, m: Mark, floor: Floor): boolean {
+  const step = feedStep(s);
+  if (step === 'out') return false;
+  if (step === 'choose') {
+    m.slot = s.slots.findIndex((q) => q.t === 'cloverhead' && q.n > 0);
+    return false;
+  }
+  if (step === 'pull') {
+    const i = gardenFor(s, 'cloverhead');
+    arrow(m, PADS[i].x, floor(PADS[i].x, PADS[i].z) + 2.2, PADS[i].z);
+    ring(m, PADS[i].x, PADS[i].z, 3.1);
+    return true;
+  }
+  const d = loose(s);
+  if (!d) return false;
+  m.icon = 'cloverhead';
+  m.x = d.x;
+  m.y = d.y + 1.05;
+  m.z = d.z;
+  m.r = 0;
+  return true;
+}
+
+/** Steps for the plot lessons: what to tap or press at the post, and which tag to take. */
+const plotLine = (q: Say, tag: string) => `${q.dev === 'touch' ? 'Tap Post' : q.dev === 'pad' ? 'Press X' : 'Press E'} at an empty plot, then ${tag}.`;
 
 function arrow(m: Mark, x: number, y: number, z: number): boolean {
   m.icon = 'arrow';
@@ -217,6 +313,7 @@ const LESSONS: Lesson[] = [
       const d = porch(s);
       return n('walk') >= 0.6 && (!d || dist(s, d.x, d.z) < 3.4);
     },
+    each: rested,
     mark: (s, m) => onDowny(m, porch(s)),
   },
   {
@@ -226,8 +323,9 @@ const LESSONS: Lesson[] = [
     ready: () => true,
     text: (q) => (q.dev === 'touch' ? 'Aim at the downy and hold Pull.' : q.dev === 'pad' ? 'Aim at the downy and hold LT.' : 'Aim at the downy and hold right click.'),
     done: (_s, n) => n('catch') >= 1,
+    each: rested,
     mark: (s, m) => onDowny(m, porch(s)),
-    note: 'Pull brings in downies, food and fluff.',
+    note: 'Pull brings in downies, food and fluff. Wild downies tug back.',
   },
   {
     id: 'puff',
@@ -236,6 +334,7 @@ const LESSONS: Lesson[] = [
     ready: () => true,
     text: (q) => (q.dev === 'touch' ? 'Tap Blow to send it back out.' : q.dev === 'pad' ? 'Press RT to blow it back out.' : 'Click to blow it back out.'),
     done: (_s, n) => n('puff') >= 1,
+    each: rested,
     note: 'Blow sends out one of whatever is chosen.',
   },
   {
@@ -243,21 +342,19 @@ const LESSONS: Lesson[] = [
     after: ['puff'],
     unlocks: ['pause'],
     ready: () => true,
-    text: () => 'Feed the downy a clover head.',
+    // In steps: fetch clover heads from the garden (it points there), then feed the downy (a clover head over it).
+    text: (q, s) => {
+      const step = s ? feedStep(s) : 'feed';
+      return step === 'choose' ? FEED.choose(q) : FEED[step];
+    },
+    also: (q) => [FEED.pull, FEED.out, FEED.choose(q)],
     done: (_s, n) => n('feed') >= 1,
     start: appetite,
-    mark: (s, m) => {
-      const d = loose(s);
-      if (!d) return false;
-      m.icon = 'cloverhead';
-      m.x = d.x;
-      m.y = d.y + 1.05;
-      m.z = d.z;
-      // The garden glows until you have some clover heads aboard.
-      if (carrying(s, (t) => t === 'cloverhead')) m.r = 0;
-      else ring(m, PADS[0].x, PADS[0].z, 3.1);
-      return true;
+    each: (s) => {
+      appetite(s);
+      if (feedStep(s) === 'pull') ripen(s);
     },
+    mark: feedMark,
     note: 'Each kind loves one food. Its favourite makes double fluff.',
   },
   {
@@ -269,12 +366,18 @@ const LESSONS: Lesson[] = [
     // Feeding drops fluff on the ground; the line follows each step from there.
     text: (q, s) => {
       const step = s ? sellStep(s) : 'blow';
+      if (step === 'feed') return s && feedStep(s) === 'pull' ? FEED.pull : SELL.feed;
       return step === 'choose' ? SELL.choose(q) : SELL[step];
     },
-    also: (q) => [SELL.choose(q), SELL.pull, SELL.feed],
-    done: (_s, n) => n('sell') >= 1,
+    also: (q) => [SELL.choose(q), SELL.pull, SELL.feed, FEED.pull],
+    // Only fluff you blew in counts: the crate drawing in fluff that fell beside it is not a sale you made.
+    done: (_s, n) => n('sell:blown') >= 1,
     each: (s) => {
-      if (sellStep(s) === 'feed') appetite(s);
+      noStarving(s);
+      if (sellStep(s) === 'feed') {
+        appetite(s);
+        if (feedStep(s) === 'pull') ripen(s);
+      }
     },
     mark: (s, m, floor) => {
       const step = sellStep(s);
@@ -287,33 +390,12 @@ const LESSONS: Lesson[] = [
         m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
         return false;
       }
-      if (step === 'feed') {
-        const d = loose(s);
-        if (!d) return false;
-        m.icon = 'cloverhead';
-        m.x = d.x;
-        m.y = d.y + 1.05;
-        m.z = d.z;
-        if (carrying(s, (t) => t === 'cloverhead')) m.r = 0;
-        else ring(m, PADS[0].x, PADS[0].z, 3.1);
-        return true;
-      }
-      let best = -1;
-      let bd = 1e9;
-      s.items.forEach((it, i) => {
-        if (it.gone || !isTuft(it.type)) return;
-        const d = dist(s, it.x, it.z);
-        if (d < bd) {
-          bd = d;
-          best = i;
-        }
-      });
-      if (best >= 0) {
-        const it = s.items[best];
-        return arrow(m, it.x, it.y + 0.9, it.z);
-      }
+      if (step === 'feed') return feedMark(s, m, floor);
+      // The fluff your downy dropped, on the ranch; never a wild one's out in the meadow.
+      const it = fluffToPoint(s);
+      if (it) return arrow(m, it.x, it.y + 0.9, it.z);
       // Not dropped yet: point at the downy it is coming from.
-      return onDowny(m, nearestDowny(s, (d) => d.shedQ > 0));
+      return onDowny(m, nearestDowny(s, (d) => mine(d) && d.shedQ > 0));
     },
     note: 'The sell crate buys fluff. Prices change each day.',
   },
@@ -322,7 +404,7 @@ const LESSONS: Lesson[] = [
     after: ['sell'],
     unlocks: ['pads'],
     ready: () => true,
-    text: () => 'Build a pen on an empty plot.',
+    text: (q) => plotLine(q, 'Pen'),
     done: (s, n) => n('build:pen') >= 1 || s.pads.some((p) => p.kind === 'pen'),
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
   },
@@ -374,16 +456,23 @@ const LESSONS: Lesson[] = [
     after: ['meadow'],
     unlocks: [],
     ready: () => true,
-    // Count sales from when it first came up; dusk taking over and handing back must not start the count again.
+    // Count whole turns of the loop from when it first came up (dusk taking over and handing back must
+    // not start the count again): a meal you gave, its fluff pulled up and blown into the crate.
     start: (s) => {
-      s.learnCount['farm:from'] ??= s.learnCount['sell'] ?? 0;
+      s.learnCount['farm:from'] ??= s.learnCount['cycle'] ?? 0;
+    },
+    each: (s) => {
+      if (farmStep(s) === 'food') {
+        const d = hungryOne(s);
+        if (d) ripen(s, wantedFood(d.kind));
+      }
     },
     text: (q, s) => {
       const step = s ? farmStep(s) : 'feed';
       return step === 'blow' ? SELL.blow : step === 'choose' ? SELL.choose(q) : FARM[step];
     },
     also: () => [SELL.blow, FARM.pull, FARM.food, FARM.catch],
-    done: (_s, n) => n('sell') - n('farm:from') >= 4,
+    done: (_s, n) => n('cycle') - n('farm:from') >= FARM_CYCLES,
     mark: (s, m, floor) => {
       const step = farmStep(s);
       if (step === 'blow') {
@@ -396,23 +485,16 @@ const LESSONS: Lesson[] = [
         return false;
       }
       if (step === 'pull') {
-        let best = -1;
-        let bd = 1e9;
-        s.items.forEach((it, i) => {
-          if (it.gone || !isTuft(it.type) || zoneAt(it.x, it.z) !== 'ranch') return;
-          const d = dist(s, it.x, it.z);
-          if (d < bd) {
-            bd = d;
-            best = i;
-          }
-        });
-        if (best < 0) return false;
-        const it = s.items[best];
-        return arrow(m, it.x, it.y + 0.9, it.z);
+        const it = fluffToPoint(s);
+        if (it) return arrow(m, it.x, it.y + 0.9, it.z);
+        return onDowny(m, nearestDowny(s, (d) => mine(d) && d.shedQ > 0));
       }
       if (step === 'feed') {
         const d = hungryOne(s)!;
-        m.icon = wantedFood(d.kind);
+        const f = wantedFood(d.kind);
+        // Its food aboard but not chosen: a chevron over that window too.
+        if (s.slots[s.sel]?.t !== f) m.slot = s.slots.findIndex((q) => q.t === f && q.n > 0);
+        m.icon = f;
         m.x = d.x;
         m.y = d.y + 1.05;
         m.z = d.z;
@@ -420,9 +502,9 @@ const LESSONS: Lesson[] = [
         return true;
       }
       if (step === 'food') {
-        // The nearest garden with something growing, or the first garden.
-        const g = nearestPad(s, (i) => s.pads[i].kind === 'garden' && !!s.pads[i].crop);
-        const i = g >= 0 ? g : 0;
+        // The nearest garden with that food on it, or growing it, or the first garden.
+        const d = hungryOne(s);
+        const i = gardenFor(s, d ? wantedFood(d.kind) : 'cloverhead');
         arrow(m, PADS[i].x, floor(PADS[i].x, PADS[i].z) + 2.2, PADS[i].z);
         ring(m, PADS[i].x, PADS[i].z, 3.1);
         return true;
@@ -464,8 +546,9 @@ const LESSONS: Lesson[] = [
     done: (_s, n) => n('nettlehit') >= 1,
     lapse: (s) => s.hour >= 5.5 && s.hour < 20,
     mark: (s, m) => {
+      // However far off it is: the arrow (or the chevron on the screen's edge) shows the way.
       let best = -1;
-      let bd = 60;
+      let bd = 1e9;
       s.nettles.forEach((q, i) => {
         if (q.gone) return;
         const d = dist(s, q.x, q.z);
@@ -486,7 +569,7 @@ const LESSONS: Lesson[] = [
     after: ['meadow'],
     unlocks: ['garden'],
     ready: (s) => s.coins >= 200,
-    text: () => 'Build a garden on an empty plot.',
+    text: (q) => plotLine(q, 'Garden'),
     done: (s, n) => n('build:garden') >= 1 || s.pads.filter((p) => p.kind === 'garden').length >= 2,
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
   },
@@ -591,9 +674,17 @@ export class Tutor {
   readonly mark: Mark = { on: false, icon: 'arrow', x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0, slot: -1 };
   /** The line a finished lesson showed last, kept while it ticks (a stepped line has moved on by then). */
   private struckLine = '';
+  /** The line on the page now. A stepped line moving on waits a moment first, so a step that lasts a frame never shows. */
+  private shownLine = '';
+  private pendLine = '';
+  private pendT = 0;
+  private lastDev = '';
   /** Features brought in this frame (cleared each update). */
   readonly fresh: string[] = [];
   private view: TutorView = { line: '', done: false, id: '' };
+
+  /** Seconds a stepped line's next step must last before the page changes to it. */
+  static readonly STEP_HOLD = 0.25;
 
   /** The lesson on screen, if any. */
   get current(): string {
@@ -636,6 +727,8 @@ export class Tutor {
         break;
       case 'sell':
         this.add(s, 'sell');
+        if (e.blown) this.add(s, 'sell:blown');
+        if (e.cycle) this.add(s, 'cycle');
         break;
       case 'build':
         if (e.pad < 0) this.add(s, 'bench');
@@ -667,6 +760,8 @@ export class Tutor {
   private begin(s: RanchState, l: Lesson): void {
     this.active = l;
     this.shownFor = 0;
+    this.shownLine = '';
+    this.pendLine = '';
     for (const w of l.unlocks) this.unlock(s, w);
     l.start?.(s);
   }
@@ -745,7 +840,18 @@ export class Tutor {
     }
     this.shownFor += dt;
     l.each?.(s);
-    v.line = l.text(say, s);
+    const want = l.text(say, s);
+    if (want !== this.shownLine) {
+      if (want !== this.pendLine) {
+        this.pendLine = want;
+        this.pendT = 0;
+      }
+      this.pendT += dt;
+      // A new lesson, or another device's words, show at once; a step moving on waits a moment.
+      if (!this.shownLine || say.dev !== this.lastDev || this.pendT >= Tutor.STEP_HOLD) this.shownLine = want;
+    }
+    this.lastDev = say.dev;
+    v.line = this.shownLine;
     v.done = false;
     v.id = l.id;
     if (l.mark) this.mark.on = l.mark(s, this.mark, floor);
@@ -762,6 +868,8 @@ export class Tutor {
   clear(): void {
     this.active = null;
     this.struck = null;
+    this.shownLine = '';
+    this.pendLine = '';
     this.gap = 0;
     this.shownFor = 0;
     this.mark.on = false;

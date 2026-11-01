@@ -17,6 +17,8 @@ import {
   HOUR,
   HUNGER_RATE,
   KIND,
+  NEGLECT_HOURS,
+  PEN_HUNGER,
   KINDS,
   KIND_TUFT,
   PEN_UPS,
@@ -81,10 +83,12 @@ export type Ev =
   | { t: 'boing'; x: number; y: number; z: number; v: number; kind: DownyKind }
   | { t: 'chirp'; x: number; y: number; z: number; kind: DownyKind }
   | { t: 'squeak'; x: number; y: number; z: number; kind: DownyKind }
-  | { t: 'eat'; x: number; y: number; z: number; kind: DownyKind; food: Food; fav: boolean; tame: boolean }
+  | { t: 'eat'; x: number; y: number; z: number; kind: DownyKind; food: Food; fav: boolean; tame: boolean; you: boolean }
   | { t: 'shed'; x: number; y: number; z: number; kind: DownyKind; n: number }
   | { t: 'frazzle'; x: number; y: number; z: number }
-  | { t: 'sell'; x: number; y: number; z: number; kind: DownyKind; coins: number }
+  /** blown: you blew it in (not drawn in by the crate from where it lay); cycle: it finished a meal you gave, start to sale. */
+  | { t: 'sell'; x: number; y: number; z: number; kind: DownyKind; coins: number; blown: boolean; cycle: boolean }
+  | { t: 'empty'; thing: Thing; n: number }
   | { t: 'reject'; x: number; y: number; z: number }
   | { t: 'build'; pad: number; what: string; x: number; z: number }
   | { t: 'gate'; gate: GateId }
@@ -187,6 +191,14 @@ const CONE = Math.cos((25 * Math.PI) / 180);
 const NEAR_CONE = Math.cos((50 * Math.PI) / 180);
 const ABSORB = 1.0;
 const WILD_CAP = 56;
+/** How close you need to be to use the workbench. */
+export const BENCH_REACH = 3.5;
+/** Wild downies notice you within this many metres (more when you run) and hop away. */
+const NOTICE = 5;
+const NOTICE_RUN = 7;
+/** Each fluff of a kind sold today takes this share off its price, down to the floor. */
+export const SATURATION = 0.004;
+export const SAT_FLOOR = 0.6;
 
 interface Group {
   kind: DownyKind;
@@ -266,6 +278,9 @@ export class Sim {
   /** Hold back what the lessons have not brought in. Off, everything is there (tests, sandbox). */
   teaching = false;
   private airborneVy = 0;
+  /** Numbers the meals you give; fluff from one carries it, and its first sale closes the loop. */
+  private feedSerial = 0;
+  private cycled = new Set<number>();
   private pbody = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 0.34, grounded: true };
 
   constructor(state: RanchState | null) {
@@ -367,9 +382,10 @@ export class Sim {
 
   // ------------------------------------------------------------ market
 
+  /** Today's price: the day's drift, softened a little by each sale today, never below the floor. */
   price(k: DownyKind): number {
     const m = this.s.market;
-    return Math.max(1, Math.round(KIND[k].value * m.mult[k] * Math.pow(0.985, m.sold[k])));
+    return Math.max(1, Math.round(KIND[k].value * m.mult[k] * Math.max(SAT_FLOOR, Math.pow(1 - SATURATION, m.sold[k]))));
   }
 
   private rollMarket(first: boolean): void {
@@ -555,14 +571,16 @@ export class Sim {
     return -1;
   }
 
-  /** Puts a thing in the canister. Returns false if refused. */
-  stow(t: Thing): boolean {
+  /** Puts a thing in the canister. Returns false if refused. Fluff remembers the meal it came from. */
+  stow(t: Thing, feed = 0): boolean {
     const i = this.accept(t);
     if (i < 0) return false;
     const s = this.s;
     const slot = s.slots[i];
+    if (slot.t !== t) slot.feeds = undefined;
     slot.t = t;
     slot.n++;
+    if (feed > 0 && isTuft(t)) (slot.feeds ??= []).push(feed);
     if (s.slots[s.sel].t === null) s.sel = i;
     return true;
   }
@@ -621,22 +639,36 @@ export class Sim {
     this.puffWait -= dt;
     this.drawing = c.draw;
     this.drawPower = damp(this.drawPower, c.draw ? 1 : 0, c.draw ? 8 : 5, dt);
+    for (const d of s.downies) d.held = false;
     if (c.draw) {
+      // Downies come only when the crosshair is on them: the cone sweeps up food
+      // and fluff, never a downy standing beside them.
+      const aimed = this.aimedDowny(aim);
       for (const d of s.downies) {
         if (d.gone || (d.flyT >= 0 && d.flyT < 0.35)) {
           d.drawn = 0;
           continue;
         }
         const k = this.inCone(aim, d.x, d.y + 0.25, d.z);
-        if (k <= 0) {
+        // One already coming in keeps coming while it stays in the cone.
+        if (d.drawn <= 0 || k <= 0) {
           d.drawn = 0;
-          continue;
+          if (d !== aimed) continue;
+          // A wild one digs in and struggles for a moment before it comes loose.
+          const need = this.tugNeed(d);
+          if (d.tug < need) {
+            if (d.tug === 0) this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
+            d.held = true;
+            d.tug = Math.min(need, d.tug + dt);
+            this.struggle(d, aim, dt, d.tug / need);
+            continue;
+          }
+          if (need > 0) this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
         }
-        if (d.drawn === 0) this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
         d.drawn += dt;
         d.grounded = false;
         d.target = null;
-        const dist = this.pull(d, aim, k, dt);
+        const dist = this.pull(d, aim, Math.max(k, 0.35), dt);
         if (dist < ABSORB) {
           if (this.stow(d.kind)) {
             d.gone = true;
@@ -673,7 +705,7 @@ export class Sim {
         it.spinV = 14;
         const dist = this.pull(it, aim, k, dt);
         if (dist < ABSORB) {
-          if (this.stow(it.type)) {
+          if (this.stow(it.type, it.feed)) {
             it.gone = true;
             s.stats.drawn++;
             this.emit({ t: 'suck', thing: it.type, x: it.x, y: it.y, z: it.z });
@@ -726,9 +758,75 @@ export class Sim {
     const s = this.s;
     for (const n of s.nettles) if (!n.gone && this.inCone(aim, n.x, n.y + 0.2, n.z) > 0) return 'prickly';
     if (this.wouldSell(aim)) return 'sell';
-    for (const d of s.downies) if (!d.gone && this.inCone(aim, d.x, d.y + 0.25, d.z) > 0) return 'target';
+    if (this.aimedDowny(aim)) return 'target';
     for (const it of s.items) if (!it.gone && this.inCone(aim, it.x, it.y, it.z) > 0) return 'target';
     return null;
+  }
+
+  /**
+   * The downy under the crosshair, if any: within reach, and the aim within
+   * its body (with a little give for thumbs). Food or fluff nearer the
+   * crosshair wins, so pulling fluff up beside a downy leaves the downy be.
+   */
+  aimedDowny(aim: Aim): Downy | null {
+    const s = this.s;
+    const R = this.range + 0.4;
+    let best: Downy | null = null;
+    let bs = 1;
+    let ba = 0;
+    for (const d of s.downies) {
+      if (d.gone || (d.flyT >= 0 && d.flyT < 0.35)) continue;
+      const dx = d.x - aim.ex;
+      const dy = d.y + 0.25 - aim.ey;
+      const dz = d.z - aim.ez;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > R || dist < 1e-3) continue;
+      const ang = Math.acos(clamp((dx * aim.dx + dy * aim.dy + dz * aim.dz) / dist, -1, 1));
+      const tol = Math.max(Math.atan2(d.r + 0.3, dist), 0.07);
+      if (ang / tol < bs) {
+        bs = ang / tol;
+        best = d;
+        ba = ang;
+      }
+    }
+    if (!best) return null;
+    for (const it of s.items) {
+      if (it.gone) continue;
+      const dx = it.x - aim.ex;
+      const dy = it.y - aim.ey;
+      const dz = it.z - aim.ez;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > R || dist < 1e-3) continue;
+      if (Math.acos(clamp((dx * aim.dx + dy * aim.dy + dz * aim.dz) / dist, -1, 1)) < ba * 0.8) return null;
+    }
+    return best;
+  }
+
+  /** Seconds of steady pull before a downy comes loose: wild ones dig in, yours come at once. */
+  tugNeed(d: Downy): number {
+    if (d.tame) return 0;
+    if (d.keep) return 0.35;
+    return d.kind === 'thistle' ? 1.5 : d.kind === 'clover' ? 0.9 : 1.1;
+  }
+
+  /** A downy digging in against the pull: it creeps your way as it tires, shakes, and dodges a little to the side. */
+  private struggle(d: Downy, aim: Aim, dt: number, k: number): void {
+    const dx = aim.ex - d.x;
+    const dz = aim.ez - d.z;
+    const l = Math.hypot(dx, dz) || 1;
+    const creep = 0.2 + 0.7 * k;
+    d.x += (dx / l) * creep * dt;
+    d.z += (dz / l) * creep * dt;
+    d.yaw = Math.atan2(-dx, -dz);
+    d.target = null;
+    if (d.grounded && this.rand() < dt * 3) {
+      const side = this.rand() < 0.5 ? -1 : 1;
+      d.vx = (-dz / l) * side * 0.9;
+      d.vz = (dx / l) * side * 0.9;
+      d.vy = 1.5;
+      d.grounded = false;
+      d.squashV += 3;
+    }
   }
 
   private firstDraw(): void {
@@ -760,9 +858,11 @@ export class Sim {
     }
     const t = slot.t;
     slot.n--;
+    const feed = isTuft(t) ? (slot.feeds?.shift() ?? 0) : 0;
     if (slot.n <= 0) {
       slot.n = 0;
       slot.t = null;
+      slot.feeds = undefined;
     }
     const sp = 14;
     const x = aim.mx + aim.dx * 0.3;
@@ -786,9 +886,60 @@ export class Sim {
       it.vz = aim.dz * sp + p.vz * 0.5;
       it.flyT = 0;
       it.spinV = 10;
+      it.blown = true;
+      it.feed = feed;
       s.items.push(it);
     }
     this.emit({ t: 'puff', thing: t });
+  }
+
+  /**
+   * Tips a whole window out onto the ground just in front of you, so a full
+   * jar never means blowing things out one by one. Returns how many came out.
+   */
+  empty(i: number, aim: Aim): number {
+    const s = this.s;
+    const slot = s.slots[i];
+    if (!slot || !slot.t || slot.n <= 0) return 0;
+    const t = slot.t;
+    const n = slot.n;
+    const feeds = slot.feeds ?? [];
+    slot.t = null;
+    slot.n = 0;
+    slot.feeds = undefined;
+    const p = s.player;
+    const hl = Math.hypot(aim.dx, aim.dz) || 1;
+    const fx = aim.dx / hl;
+    const fz = aim.dz / hl;
+    for (let k = 0; k < n; k++) {
+      const a = this.rand() * Math.PI * 2;
+      const r = Math.sqrt(this.rand()) * 0.45;
+      const x = p.x + fx * 1.3 + Math.cos(a) * r;
+      const z = p.z + fz * 1.3 + Math.sin(a) * r;
+      const y = this.phys.floor(x, z) + 0.45 + k * 0.02;
+      if (isDowny(t)) {
+        const d = newDowny(s, t, x, y, z);
+        d.tame = true;
+        d.hunger = 0.35;
+        d.vx = fx * 0.8;
+        d.vz = fz * 0.8;
+        d.vy = 1.2;
+        d.yaw = Math.atan2(fx, fz);
+        s.downies.push(d);
+      } else {
+        const it = newItem(s, t, x, y, z);
+        it.vx = fx * 0.9 + Math.cos(a) * 0.4;
+        it.vz = fz * 0.9 + Math.sin(a) * 0.4;
+        it.vy = 1 + this.rand() * 0.6;
+        it.spinV = 4;
+        // Food you tip out is still yours to feed with; fluff tipped out is not a sale you aimed.
+        it.blown = isFood(t);
+        it.feed = feeds[k] ?? 0;
+        s.items.push(it);
+      }
+    }
+    this.emit({ t: 'empty', thing: t, n });
+    return n;
   }
 
   // ------------------------------------------------------------ downies
@@ -807,9 +958,10 @@ export class Sim {
       this.penKinds[d.pen][KINDS.indexOf(d.kind)]++;
     }
     const p = s.player;
+    const running = Math.hypot(p.vx, p.vz) > 5.5;
     for (const d of ds) {
       if (d.gone) continue;
-      this.updateDowny(d, dt, p.x, p.z);
+      this.updateDowny(d, dt, p.x, p.z, running);
     }
     // Soft bumps between downies.
     for (let i = 0; i < ds.length; i++) {
@@ -833,19 +985,33 @@ export class Sim {
     }
   }
 
-  private updateDowny(d: Downy, dt: number, px: number, pz: number): void {
+  private updateDowny(d: Downy, dt: number, px: number, pz: number, running: boolean): void {
     const s = this.s;
     const info = KIND[d.kind];
     const wild = !d.tame;
     const kindIdx = KINDS.indexOf(d.kind);
     const company = d.pen >= 0 && this.penKinds[d.pen][kindIdx] > 1;
-    const rate = (HUNGER_RATE / HOUR) * (wild ? 0.5 : 1) * (company ? 0.85 : 1);
+    // Penned downies settle: their hunger runs a third as fast as out in the open.
+    const rate = (HUNGER_RATE / HOUR) * (wild ? 0.5 : 1) * (d.pen >= 0 ? PEN_HUNGER : 1) * (company ? 0.85 : 1);
     d.hunger = Math.min(wild ? 0.7 : 1, d.hunger + rate * dt);
+    d.starveT = d.hunger >= 1 ? d.starveT + dt / HOUR : 0;
     d.sinceFed += dt / HOUR;
     d.fright = Math.max(0, d.fright - dt);
+    if (!d.held) d.tug = Math.max(0, d.tug - dt * 1.5);
     const crowded = d.pen >= 0 && this.penCounts[d.pen] > 10;
+    // Hunger alone never frazzles: a starving downy still eats and sheds. Fright,
+    // crowding and long neglect do.
+    const restless = d.starveT >= NEGLECT_HOURS;
     const was = d.mood;
-    d.mood = d.hunger >= 1 || crowded || d.fright > 0 ? 'frazzled' : d.hunger > 0.5 ? 'hungry' : d.sinceFed < 1 ? 'content' : 'calm';
+    d.mood = crowded || d.fright > 0 || restless ? 'frazzled' : d.hunger > 0.5 ? 'hungry' : d.sinceFed < 1 ? 'content' : 'calm';
+    // A wild one notices you close by and hops away (yours and the porch downy do not).
+    const pd0 = Math.hypot(d.x - px, d.z - pz);
+    const alert = wild && !d.keep && d.drawn === 0 && !d.held && pd0 < (running ? NOTICE_RUN : NOTICE) && Math.abs(d.y - s.player.y) < 3;
+    if (alert && !d.alert) {
+      this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
+      d.hopT = Math.min(d.hopT, 0.12 + this.rand() * 0.15);
+    }
+    d.alert = alert;
     if (d.mood === 'frazzled' && was !== 'frazzled' && d.drawn === 0) this.emit({ t: 'frazzle', x: d.x, y: d.y, z: d.z });
     d.blinkT -= dt;
     if (d.blinkT < -0.12) d.blinkT = 1.5 + this.rand() * 3.5;
@@ -911,7 +1077,7 @@ export class Sim {
     d.squashV += ((want - d.squash) * 140 - d.squashV * 10) * dt;
     d.squash = clamp(d.squash + d.squashV * dt, 0.55, 1.45);
 
-    if (d.drawn > 0 || !d.grounded) return;
+    if (d.drawn > 0 || d.held || !d.grounded) return;
 
     // Eating and shedding.
     if (d.eatT > 0) d.eatT -= dt;
@@ -919,28 +1085,39 @@ export class Sim {
       d.shedT -= dt;
       if (d.shedT <= 0) this.shed(d);
     }
-    if (d.hunger > 0.5 && d.eatT <= 0) {
+    // Hungry or starving, it looks for food it can see, unless something has
+    // frightened it or it is busy getting away from you.
+    if (d.hunger > 0.5 && d.eatT <= 0 && d.fright <= 0 && !alert) {
+      const had = !!d.target && !d.target.gone;
       if (!d.target || d.target.gone || d.target.drawn > 0 || this.rand() < dt * 0.5) d.target = this.findFood(d);
+      // Just spotted it: no more slow hungry bouncing, off it goes.
+      if (!had && d.target) d.hopT = Math.min(d.hopT, d.hunger >= 1 ? 0.12 : 0.25);
       const t = d.target;
       if (t && Math.hypot(t.x - d.x, t.z - d.z) < d.r + 0.32 && Math.abs(t.y - d.y) < 0.9) this.eat(d, t);
     } else d.target = null;
 
     // Facing: towards where it is going, or the player if close and idle.
-    if (pd < 6 && d.hopT > 0.25) d.yaw += clamp(angleTo(d.yaw, Math.atan2(-pdx, -pdz)), -3 * dt, 3 * dt);
+    if (pd < 6 && d.hopT > 0.25 && !alert) d.yaw += clamp(angleTo(d.yaw, Math.atan2(-pdx, -pdz)), -3 * dt, 3 * dt);
 
     d.hopT -= dt;
     if (d.hopT > 0 || d.eatT > 0) return;
-    this.hop(d, info.hop);
+    this.hop(d, info.hop, px, pz, alert);
   }
 
-  private hop(d: Downy, base: number): void {
+  private hop(d: Downy, base: number, px: number, pz: number, flee: boolean): void {
     const fraz = d.mood === 'frazzled';
     let tx = d.x;
     let tz = d.z;
     const r = this.rand;
-    if (d.target && !d.target.gone) {
-      tx = d.target.x;
-      tz = d.target.z;
+    // Food it has seen comes first, whatever its mood: it heads straight for it, never away.
+    const toFood = !!d.target && !d.target.gone && d.fright <= 0;
+    if (toFood) {
+      tx = d.target!.x;
+      tz = d.target!.z;
+    } else if (flee) {
+      const a = Math.atan2(d.z - pz, d.x - px) + (r() - 0.5) * 0.9;
+      tx = d.x + Math.cos(a) * 3;
+      tz = d.z + Math.sin(a) * 3;
     } else if (d.pen >= 0 && d.kind === 'thistle' && !this.s.pads[d.pen].ups.includes('high')) {
       // Thistles will not stay behind a low fence: they back off from the
       // rails, then hop so the top of the hop is over them.
@@ -974,7 +1151,8 @@ export class Sim {
       tx = d.x + (ax / l) * 4;
       tz = d.z + (az / l) * 4;
     }
-    if (fraz) {
+    // Frightened, crowded or long neglected, with no food to go to: wild hops anywhere.
+    if (fraz && !toFood && !flee) {
       const a = r() * Math.PI * 2;
       tx = d.x + Math.cos(a) * 3;
       tz = d.z + Math.sin(a) * 3;
@@ -987,19 +1165,21 @@ export class Sim {
       dz /= dist;
     }
     const hungry = d.mood === 'hungry';
-    const h = d.kind === 'thistle' ? base * (fraz ? 1.3 : 1) : fraz ? base * 2.3 : hungry ? base * 0.72 : base;
+    const starving = d.hunger >= 1;
+    // Only a frazzled downy hops high enough to clear a low fence, and never on its way to food.
+    const h = d.kind === 'thistle' ? base * (fraz ? 1.3 : 1) : toFood || flee ? base : fraz ? base * 2.3 : hungry ? base * 0.72 : base;
     const vy = Math.sqrt(2 * G_DOWNY * h);
     const air = (2 * vy) / G_DOWNY;
-    const hs = Math.min(dist / air, fraz || d.kind === 'thistle' ? 2.8 : 1.8);
+    const cap = toFood ? (starving ? 2.4 : 1.9) : flee ? 2.2 : fraz || d.kind === 'thistle' ? 2.8 : 1.8;
+    const hs = Math.min(dist / air, cap);
     d.vx = dx * hs;
     d.vz = dz * hs;
     d.vy = vy;
     d.grounded = false;
     d.squashV += 2.5;
     if (dist > 0.05) d.yaw = Math.atan2(dx, dz);
-    // Hungry ones bounce slowly, until they spot food: then they hurry to it.
-    const toFood = !!d.target && !d.target.gone;
-    d.hopT = (0.45 + r() * 1.1) * (toFood ? 0.55 : hungry ? 1.5 : 1) * (fraz ? 0.45 : 1);
+    // Hungry ones bounce slowly until they spot food; then they hurry to it, faster when starving.
+    d.hopT = (0.45 + r() * 1.1) * (toFood ? (starving ? 0.35 : 0.55) : flee ? 0.45 : hungry ? 1.5 : 1) * (fraz && !toFood ? 0.45 : 1);
     if (d.mood === 'content' && r() < 0.2) this.emit({ t: 'chirp', x: d.x, y: d.y, z: d.z, kind: d.kind });
   }
 
@@ -1008,7 +1188,8 @@ export class Sim {
     let bd = 10;
     for (const it of this.s.items) {
       if (it.gone || it.drawn > 0 || !isFood(it.type) || !eats(d.kind, it.type)) continue;
-      if (!it.grounded && !it.rest) continue;
+      // Food still flying from a blow is not food yet; food just dropping (a feeder, a crop) is.
+      if (!it.grounded && !it.rest && it.flyT >= 0) continue;
       // Penned downies only see food inside their pen.
       if (d.pen >= 0 && this.phys.penAt(it.x, it.z) !== d.pen) continue;
       const dd = Math.hypot(it.x - d.x, it.z - d.z);
@@ -1026,18 +1207,23 @@ export class Sim {
     it.gone = true;
     d.target = null;
     d.eatT = 0.7;
-    const fraz = d.mood === 'frazzled';
     d.hunger = 0;
+    d.starveT = 0;
     d.sinceFed = 0;
     s.stats.fed++;
     const fav = favourite(d.kind, food);
-    if (!fraz) {
+    // However hungry it was, a meal makes fluff. Only fright and a crowded pen stop it.
+    const crowded = d.pen >= 0 && this.penCounts[d.pen] > 10;
+    if (d.fright <= 0 && !crowded) {
       let n = fav ? 2 : 1;
       if (d.kind === 'brook' && d.pen >= 0 && s.pads[d.pen].ups.includes('trough')) n++;
       d.shedQ = n;
       d.shedT = 0.75;
     }
-    this.emit({ t: 'eat', x: d.x, y: d.y, z: d.z, kind: d.kind, food, fav, tame: d.tame });
+    // A meal you gave (food you blew or tipped out) to a downy of yours: its fluff carries the meal's number.
+    const you = it.blown && (d.tame || d.keep);
+    d.feedId = you ? ++this.feedSerial : 0;
+    this.emit({ t: 'eat', x: d.x, y: d.y, z: d.z, kind: d.kind, food, fav, tame: d.tame, you });
     // Wild downies forage on their own; the goal is for feeding one of yours.
     if (fav && d.tame) this.complete('feed');
   }
@@ -1048,6 +1234,8 @@ export class Sim {
     d.shedQ = 0;
     for (let i = 0; i < n; i++) {
       const it = newItem(s, KIND_TUFT[d.kind], d.x, d.y + 0.55, d.z);
+      it.by = d.id;
+      it.feed = d.feedId;
       const a = this.rand() * Math.PI * 2;
       it.vx = Math.cos(a) * 1.3;
       it.vz = Math.sin(a) * 1.3;
@@ -1208,7 +1396,13 @@ export class Sim {
         s.earned += coins;
         s.stats.sold++;
         it.gone = true;
-        this.emit({ t: 'sell', x: it.x, y: cfl + CRATE.h, z: it.z, kind: k, coins });
+        // The loop closed: a meal you gave, its fluff pulled up and blown in. Counted once per meal.
+        const cycle = it.blown && it.feed > 0 && !this.cycled.has(it.feed);
+        if (cycle) {
+          this.cycled.add(it.feed);
+          if (this.cycled.size > 64) this.cycled.delete(this.cycled.values().next().value!);
+        }
+        this.emit({ t: 'sell', x: it.x, y: cfl + CRATE.h, z: it.z, kind: k, coins, blown: it.blown, cycle });
         if (s.stats.sold >= 20) this.complete('sell');
         return true;
       }
@@ -1613,7 +1807,7 @@ export class Sim {
         consider({ kind: 'chute', id: i, label: n ? `Fluff box, ${n}` : 'Fluff box, empty', x: sp.chute.x, y: cfl + 0.6, z: sp.chute.z }, 2.4);
       }
     });
-    if (this.knows('bench')) consider({ kind: 'bench', id: 0, label: 'Workbench', x: WORKBENCH.x, y: this.phys.floor(WORKBENCH.x, WORKBENCH.z) + 1.4, z: WORKBENCH.z }, 2.8);
+    if (this.knows('bench')) consider({ kind: 'bench', id: 0, label: 'Workbench', x: WORKBENCH.x, y: this.phys.floor(WORKBENCH.x, WORKBENCH.z) + 1.4, z: WORKBENCH.z }, BENCH_REACH);
     if (this.knows('sleep')) consider({ kind: 'door', id: 0, label: 'Front door', x: DOOR.x, y: this.phys.floor(DOOR.x, DOOR.z) + 1.4, z: DOOR.z }, 2.6);
     for (const g of Object.keys(GATES) as GateId[]) {
       if (s.gates[g] || !this.knows('gates')) continue;
@@ -1653,7 +1847,7 @@ export class Sim {
         for (const k of ['pen', 'garden', 'silo'] as const) if (this.buildKnown(k)) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Blow food in to plant' : 'Stores four kinds' });
       } else if (pad.kind === 'pen') {
         for (const u of PEN_UPS) if (!pad.ups.includes(u.id) && this.upKnown(u.id)) out.push({ id: `pen:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
-        if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Hopper: ${pad.feeder.n}` : 'Hopper empty', price: null, ok: false, note: 'Blow food in at the top' });
+        if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Feeder: ${pad.feeder.n}` : 'Feeder empty', price: null, ok: false, note: 'Blow food in at the top' });
       } else if (pad.kind === 'garden') {
         if (this.upKnown('garden')) for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id)) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
         out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then blow in something new' : 'Blow food in to plant it' });
@@ -1790,6 +1984,7 @@ export class Sim {
     d.tame = tame;
     d.homeX = x;
     d.homeZ = z;
+    d.pen = this.phys.penAt(x, z);
     this.s.downies.push(d);
     return d;
   }

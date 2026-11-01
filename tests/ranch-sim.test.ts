@@ -2,8 +2,8 @@
 // shedding, gardens, the Exchange, builds, gates, nettlebacks, silos,
 // feeders, the chute, sleep, the journal and the save.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CAPS, HOUR, KIND } from '../src/games/ranch/defs';
-import { Sim, GARDEN_SRC, padSpots, type Aim, type Controls } from '../src/games/ranch/sim';
+import { CAPS, HOUR, KIND, NEGLECT_HOURS, PEN_HUNGER } from '../src/games/ranch/defs';
+import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
 import { deserialize, serialize, newItem } from '../src/games/ranch/state';
 import { GATES, PADS } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
@@ -119,19 +119,25 @@ describe('the canister', () => {
 });
 
 describe('downies', () => {
-  it('get hungry over about three game hours, slower with company', () => {
+  it('get hungry over about three game hours in the open, a third as fast in a pen, slower with company', () => {
     const sim = quiet();
+    const out = sim.spawn('clover', -8, 30);
+    out.hunger = 0;
     pen(sim, 1);
     const a = sim.spawn('clover', PADS[1].x, PADS[1].z);
     a.hunger = 0;
     run(sim, 1.5 * HOUR);
-    expect(a.hunger).toBeGreaterThan(0.45);
-    expect(a.hunger).toBeLessThan(0.56);
+    expect(out.hunger).toBeGreaterThan(0.45);
+    expect(out.hunger).toBeLessThan(0.56);
+    // In a pen: hungry (0.5) after about 4.5 game hours, not 1.5.
+    expect(a.hunger).toBeGreaterThan(0.15);
+    expect(a.hunger).toBeLessThan(0.19);
+    expect(PEN_HUNGER).toBeCloseTo(1 / 3, 5);
     const b = sim.spawn('clover', PADS[1].x + 1, PADS[1].z);
     a.hunger = 0;
     b.hunger = 0;
     run(sim, 1.5 * HOUR);
-    expect(a.hunger).toBeLessThan(0.45);
+    expect(a.hunger).toBeLessThan(0.15);
   });
 
   it('eat what they eat, and shed two down for a favourite', () => {
@@ -167,7 +173,7 @@ describe('downies', () => {
     expect(sim.s.items.filter((i) => !i.gone && i.type === 'tuft-thistle').length).toBe(2);
   });
 
-  it('do not shed when frazzled (starving), and frazzle when crowded', () => {
+  it('shed even when starving; fright and crowding still frazzle', () => {
     const sim = quiet();
     pen(sim, 1, ['high']);
     const at = PADS[1];
@@ -176,7 +182,15 @@ describe('downies', () => {
     sim.drop('cloverhead', at.x + 0.4, at.z);
     run(sim, 8);
     expect(sim.s.stats.fed).toBe(1);
-    expect(sim.s.items.filter((i) => !i.gone && i.type.startsWith('tuft')).length).toBe(0);
+    expect(d.mood).not.toBe('frazzled');
+    expect(sim.s.items.filter((i) => !i.gone && i.type.startsWith('tuft')).length).toBe(2);
+    // Frightened (a pest close by): frazzled.
+    for (const it of sim.s.items) it.gone = true;
+    const f = sim.spawn('clover', at.x - 1, at.z);
+    f.hunger = 0.8;
+    f.fright = 99;
+    run(sim, 0.1);
+    expect(f.mood).toBe('frazzled');
     for (let i = 0; i < 11; i++) sim.spawn('clover', at.x + ((i % 4) - 1.5), at.z + (Math.floor(i / 4) - 1));
     run(sim, 2);
     expect(sim.s.downies.filter((q) => q.pen === 1 && q.mood === 'frazzled').length).toBeGreaterThan(10);
@@ -201,17 +215,19 @@ describe('downies', () => {
 });
 
 describe('gardens', () => {
-  it('grow five every two game hours; a sprinkler is half again as fast; rich soil gives eight', () => {
+  it('grow five every five game hours; a sprinkler is half again as fast; rich soil gives eight', () => {
     const sim = quiet();
     const g = sim.s.pads[0];
     g.grow = 0;
     const count = () => sim.s.items.filter((i) => !i.gone && i.src === GARDEN_SRC).length;
-    run(sim, 2 * HOUR + 1);
+    run(sim, 5 * HOUR - 2);
+    expect(count()).toBe(0);
+    run(sim, 3);
     expect(count()).toBe(5);
     sim.s.items = [];
     g.grow = 0;
     g.ups = ['sprinkler', 'soil'];
-    run(sim, (2 * HOUR) / 1.5 + 1);
+    run(sim, (5 * HOUR) / 1.5 + 1);
     expect(count()).toBe(8);
   });
 
@@ -232,7 +248,7 @@ describe('gardens', () => {
 });
 
 describe('the Exchange', () => {
-  it('drifts prices within a quarter and drops 1.5% per tuft sold today', () => {
+  it('drifts prices within a quarter; each sale today takes a little off, never below the floor', () => {
     const sim = quiet();
     for (let d = 0; d < 20; d++) {
       sim.sleep();
@@ -244,7 +260,23 @@ describe('the Exchange', () => {
     sim.s.market.mult.clover = 1;
     expect(sim.price('clover')).toBe(KIND.clover.value);
     sim.s.market.sold.clover = 40;
-    expect(sim.price('clover')).toBe(Math.round(8 * Math.pow(0.985, 40)));
+    expect(sim.price('clover')).toBe(Math.round(KIND.clover.value * Math.pow(1 - SATURATION, 40)));
+    sim.s.market.sold.clover = 5000;
+    expect(sim.price('clover')).toBe(Math.round(KIND.clover.value * SAT_FLOOR));
+  });
+
+  it('has no hard cap on a day of selling: more downies, more coins (it used to stop near 533 for clover)', () => {
+    const sim = quiet();
+    sim.s.market.mult.clover = 1;
+    let total = 0;
+    for (let i = 0; i < 300; i++) {
+      total += sim.price('clover');
+      sim.s.market.sold.clover++;
+    }
+    // Three hundred clover fluff in a day, about what a full ranch of clover downies makes.
+    expect(total).toBeGreaterThan(2400);
+    const first100 = Array.from({ length: 100 }, (_, i) => Math.max(SAT_FLOOR, Math.pow(1 - SATURATION, i))).reduce((a, b) => a + b, 0);
+    expect(first100 / 100).toBeGreaterThan(0.8);
   });
 
   it('buys down puffed into the crate and sends anything else back', () => {
@@ -478,5 +510,273 @@ describe('the sell crate', () => {
     // Clover heads chosen: no promise of a sale.
     sim.s.slots[0].t = 'cloverhead';
     expect(sim.aimTarget(aimAt(sim, CX, fl + 0.75, CZ))).not.toBe('sell');
+  });
+});
+
+// ---------------------------------------------------------------- the playtest's findings
+
+const tufts = (sim: Sim) => sim.s.items.filter((i) => !i.gone && i.type.startsWith('tuft')).length;
+/** Aim from the player at a point, with the muzzle a little ahead of the eye. */
+function aimFrom(sim: Sim, x: number, y: number, z: number): Aim {
+  return aimAt(sim, x, y, z);
+}
+function stand(sim: Sim, x: number, z: number): void {
+  const p = sim.s.player;
+  p.x = x;
+  p.z = z;
+  p.y = sim.phys.floor(x, z);
+  p.vx = p.vz = p.vy = 0;
+}
+
+describe('starving downies keep working', () => {
+  it('two starving penned downies with a stocked feeder both eat within 20 s, and shed', () => seeds(4, () => {
+    const sim = quiet();
+    pen(sim, 1, ['feeder']);
+    sim.s.pads[1].feeder = { t: 'cloverhead', n: 10 };
+    const at = PADS[1];
+    const a = sim.spawn('clover', at.x - 2.6, at.z - 0.5);
+    const b = sim.spawn('clover', at.x + 2.4, at.z + 1.5);
+    a.hunger = b.hunger = 1;
+    a.starveT = b.starveT = 1;
+    run(sim, 20);
+    expect(sim.s.stats.fed).toBeGreaterThanOrEqual(2);
+    expect(a.hunger).toBeLessThan(0.2);
+    expect(b.hunger).toBeLessThan(0.2);
+    expect(tufts(sim)).toBeGreaterThanOrEqual(4);
+    expect(a.pen).toBe(1);
+    expect(b.pen).toBe(1);
+  }));
+
+  it('six starving penned downies with a feeder kept stocked all stay in the pen for ten minutes', () => seeds(3, () => {
+    const sim = quiet();
+    pen(sim, 1, ['feeder']);
+    const at = PADS[1];
+    const six = Array.from({ length: 6 }, (_, k) => sim.spawn('clover', at.x + Math.cos(k) * 2.5, at.z + Math.sin(k) * 2.5));
+    for (const d of six) d.hunger = 1;
+    let out = 0;
+    for (let t = 0; t < 600; t += 10) {
+      // The player keeps the feeder topped up; daytime throughout (no pests).
+      sim.s.pads[1].feeder = { t: 'cloverhead', n: 40 };
+      sim.s.hour = 10;
+      run(sim, 10);
+      out = Math.max(out, six.filter((d) => d.gone || sim.phys.penAt(d.x, d.z) !== 1).length);
+    }
+    expect(out).toBe(0);
+    expect(sim.s.stats.fed).toBeGreaterThanOrEqual(12);
+  }));
+
+  it('a calm, fed downy never crosses a low fence', () => seeds(5, () => {
+    const sim = quiet();
+    pen(sim, 1, ['feeder']);
+    sim.s.pads[1].feeder = { t: 'cloverhead', n: 40 };
+    const d = sim.spawn('clover', PADS[1].x, PADS[1].z);
+    d.hunger = 0;
+    let left = false;
+    for (let t = 0; t < 900 && !left; t += 1) {
+      // Daytime throughout: at night pests frighten downies over a low fence (the hedge's job).
+      sim.s.hour = 10;
+      run(sim, 1);
+      left = sim.phys.penAt(d.x, d.z) !== 1;
+    }
+    expect(left).toBe(false);
+  }));
+
+  it('only long neglect lets a penned downy out: not before six minutes without food, but within a quarter hour', () => seeds(4, () => {
+    const sim = quiet();
+    pen(sim, 1);
+    const d = sim.spawn('clover', PADS[1].x, PADS[1].z);
+    d.hunger = 0;
+    let outAt = -1;
+    for (let t = 0; t < 900 && outAt < 0; t += 1) {
+      sim.s.hour = 10;
+      run(sim, 1);
+      if (sim.phys.penAt(d.x, d.z) !== 1) outAt = t;
+    }
+    // Starving after 4.5 game hours in a pen, restless after NEGLECT_HOURS more.
+    expect(outAt).toBeGreaterThan(360);
+    expect(outAt).toBeLessThan(900);
+    expect(NEGLECT_HOURS).toBeGreaterThanOrEqual(3);
+  }));
+
+  it('a starving downy heads straight for a clover head it can see (3.6 m off) and eats it, faster than a merely hungry one', () => {
+    const times: Record<string, number[]> = { starving: [], hungry: [] };
+    seeds(5, () => {
+      for (const kind of ['starving', 'hungry'] as const) {
+        const sim = quiet();
+        const d = sim.spawn('clover', -2, 30);
+        d.hunger = kind === 'starving' ? 1 : 0.6;
+        run(sim, 0.5);
+        const food = sim.drop('cloverhead', d.x + 3.6, d.z);
+        const d0 = Math.hypot(food.x - d.x, food.z - d.z);
+        let worst = 0;
+        let ate = -1;
+        // A hop already in the air when the food lands cannot turn; from its next landing on, never away.
+        let landed = d.grounded;
+        let from = d0;
+        for (let t = 0; t < 30 && ate < 0; t += 1 / 30) {
+          sim.update(1 / 30, idle, aimAt(sim, sim.s.player.x, sim.s.player.y + 1.6, sim.s.player.z - 5));
+          const dd = Math.hypot(food.x - d.x, food.z - d.z);
+          if (!landed && d.grounded) {
+            landed = true;
+            from = dd;
+          }
+          if (food.gone) ate = t;
+          else if (landed) worst = Math.max(worst, dd - from);
+        }
+        expect(ate, kind).toBeGreaterThan(0);
+        expect(ate, kind).toBeLessThan(kind === 'starving' ? 6 : 10);
+        // Never away from it.
+        expect(worst, kind).toBeLessThan(0.3);
+        times[kind].push(ate);
+        if (kind === 'starving') expect(tufts(sim)).toBe(0);
+        run(sim, 2);
+        if (kind === 'starving') expect(tufts(sim)).toBe(2);
+      }
+    });
+    const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+    expect(mean(times.starving)).toBeLessThan(mean(times.hungry));
+  });
+});
+
+describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
+  it('pulling fluff with fluff chosen leaves a downy beside it alone, unless the crosshair is on the downy', () => {
+    const sim = quiet();
+    stand(sim, 0, 30);
+    sim.s.slots[0] = { t: 'tuft-clover', n: 3 };
+    sim.s.sel = 0;
+    const d = sim.spawn('clover', 0.9, 26.8);
+    run(sim, 1);
+    const fluff = newItem(sim.s, 'tuft-clover', -0.4, sim.phys.floor(-0.4, 27) + 0.12, 27);
+    fluff.grounded = true;
+    sim.s.items.push(fluff);
+    // The downy sits well inside the old 25 degree cone round the fluff.
+    run(sim, 2, { ...idle, draw: true }, aimFrom(sim, fluff.x, fluff.y, fluff.z));
+    expect(fluff.gone).toBe(true);
+    expect(sim.s.slots[0].n).toBe(4);
+    expect(d.gone).toBe(false);
+    // On the downy: it comes (yours come at once).
+    run(sim, 2, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
+    expect(d.gone).toBe(true);
+  });
+
+  it('a wild downy digs in for about a second of steady Pull, and slips loose when the aim leaves it', () => seeds(4, () => {
+    const sim = quiet();
+    stand(sim, 0, -16);
+    const d = sim.spawn('clover', 0, -21.6, false);
+    d.hunger = 0.2;
+    run(sim, 0.5);
+    const pullFor = (secs: number) => {
+      for (let t = 0; t < secs && !d.gone; t += 1 / 30) sim.update(1 / 30, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
+    };
+    pullFor(0.6);
+    expect(d.gone).toBe(false);
+    expect(d.tug).toBeGreaterThan(0.4);
+    // Looked away: the tug fades and it hops off.
+    run(sim, 1.2, idle);
+    expect(d.tug).toBe(0);
+    let t = 0;
+    while (!d.gone && t < 4) {
+      sim.update(1 / 30, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
+      t += 1 / 30;
+    }
+    expect(d.gone).toBe(true);
+    expect(t).toBeGreaterThan(0.8);
+    expect(t).toBeLessThan(2.2);
+    expect(sim.s.slots.some((q) => q.t === 'clover')).toBe(true);
+  }));
+
+  it('wild downies notice you close by and hop away; yours do not', () => seeds(4, () => {
+    const sim = quiet();
+    stand(sim, 0, -16);
+    const wild = sim.spawn('clover', 0, -19, false);
+    const mine = sim.spawn('clover', 3, -16, true);
+    wild.hunger = mine.hunger = 0.2;
+    const w0 = Math.hypot(wild.x, wild.z + 16);
+    const m0 = Math.hypot(mine.x, mine.z + 16);
+    run(sim, 5);
+    expect(Math.hypot(wild.x, wild.z + 16) - w0).toBeGreaterThan(1.5);
+    expect(Math.abs(Math.hypot(mine.x - 0, mine.z + 16) - m0)).toBeLessThan(3);
+  }));
+
+  it('tips a whole window out on the ground in front of you', () => {
+    const sim = quiet();
+    stand(sim, 0, 30);
+    for (let i = 0; i < 9; i++) sim.stow('cloverhead');
+    sim.stow('clover');
+    const aim = aimFrom(sim, 0, sim.s.player.y + 1.2, 25);
+    expect(sim.empty(0, aim)).toBe(9);
+    expect(sim.s.slots[0]).toMatchObject({ t: null, n: 0 });
+    run(sim, 1.5, idle, aim);
+    const heads = sim.s.items.filter((i) => !i.gone && i.type === 'cloverhead');
+    expect(heads.length).toBe(9);
+    for (const h of heads) {
+      expect(h.z).toBeLessThan(30);
+      expect(Math.hypot(h.x, h.z - 30)).toBeLessThan(2.6);
+    }
+    expect(sim.events.some((e) => e.t === 'empty')).toBe(true);
+    // A downy window too: it hops out, still yours.
+    expect(sim.empty(1, aim)).toBe(1);
+    expect(sim.s.downies.find((q) => !q.gone)?.tame).toBe(true);
+    expect(sim.empty(1, aim)).toBe(0);
+  });
+});
+
+describe('selling: what you blew in, and whole turns of the loop', () => {
+  const CX = -6.5;
+  const CZ = 36.5;
+  const sells = (evs: Ev[]) => evs.filter((e): e is Extract<Ev, { t: 'sell' }> => e.t === 'sell');
+
+  it('fluff the crate draws in from beside it is sold but is not a blow of yours', () => {
+    const sim = quiet();
+    const d = sim.spawn('clover', CX + 1.6, CZ - 1.4);
+    d.hunger = 0.8;
+    sim.drop('cloverhead', CX + 1.9, CZ - 1.4);
+    const evs: Ev[] = [];
+    for (let t = 0; t < 10; t += 1 / 30) {
+      sim.update(1 / 30, idle, aimAt(sim, sim.s.player.x, sim.s.player.y + 1.6, sim.s.player.z - 5));
+      evs.push(...sim.events);
+      sim.events.length = 0;
+    }
+    const sold = sells(evs);
+    expect(sold.length).toBe(2);
+    expect(sold.every((e) => !e.blown && !e.cycle)).toBe(true);
+  });
+
+  it('a meal you gave, its fluff pulled up and blown in, closes the loop once', () => {
+    const sim = quiet();
+    const d = sim.spawn('clover', 8, 32);
+    d.hunger = 0.8;
+    const food = sim.drop('cloverhead', 8.4, 32);
+    food.blown = true;
+    const evs: Ev[] = [];
+    const go = (secs: number, c: Controls = idle, a?: Aim) => {
+      for (let t = 0; t < secs; t += 1 / 30) {
+        sim.update(1 / 30, c, a ?? aimAt(sim, sim.s.player.x, sim.s.player.y + 1.6, sim.s.player.z - 5));
+        evs.push(...sim.events);
+        sim.events.length = 0;
+      }
+    };
+    go(6);
+    const ate = evs.find((e): e is Extract<Ev, { t: 'eat' }> => e.t === 'eat');
+    expect(ate?.you).toBe(true);
+    const shed = sim.s.items.filter((i) => !i.gone && i.type === 'tuft-clover');
+    expect(shed.length).toBe(2);
+    expect(shed.every((i) => i.feed > 0 && i.by === d.id)).toBe(true);
+    // Pulled up into the jar: the window remembers the meal.
+    for (const it of shed) {
+      expect(sim.stow(it.type, it.feed)).toBe(true);
+      it.gone = true;
+    }
+    stand(sim, CX + 1, CZ - 5);
+    sim.s.sel = sim.s.slots.findIndex((q) => q.t === 'tuft-clover');
+    const aim = aimFrom(sim, CX, sim.phys.floor(CX, CZ) + 0.75, CZ);
+    sim.puff(aim);
+    go(3, idle, aim);
+    sim.puff(aim);
+    go(3, idle, aim);
+    const sold = sells(evs);
+    expect(sold.length).toBe(2);
+    expect(sold.every((e) => e.blown)).toBe(true);
+    expect(sold.filter((e) => e.cycle).length).toBe(1);
   });
 });

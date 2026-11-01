@@ -41,7 +41,7 @@ import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
 import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from './sim';
 import { capacity, deserialize, serialize, summary, type RanchState } from './state';
-import { DOOR, GATES, PADS, PEN_R, POND, STREAM, VENTS, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
+import { DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
 import './ranch.css';
 
 const EYE = 1.6;
@@ -82,8 +82,11 @@ export class Ranch {
   private say: Say = { dev: 'mouse', locked: false, lockAvailable: false };
   private stuckT = 0;
   private lastSale = 0;
-  /** A goal page waiting to follow the one on screen (the next goal after a done one). */
-  private nextGoalT = 0;
+  /** J hides the calm goal line until the next lesson or goal. */
+  private goalHidden = false;
+  private goalShown = '';
+  /** Counts down to the darkest moment of the sleep fade, when you are turned to face the yard. */
+  private wakeT = 0;
   readonly input: Input;
   private canvas: HTMLCanvasElement;
   private board: { ctx: CanvasRenderingContext2D; tex: CanvasTexture; key: string };
@@ -204,6 +207,8 @@ export class Ranch {
     this.hud.onResume = () => this.closePause();
     this.hud.onGames = () => ctx.openSwitcher();
     this.hud.onSlot = (i) => this.selectSlot(i);
+    this.hud.onEmpty = (i) => this.emptySlot(i);
+    this.hud.onSlotDrag = (id, x, y) => this.input.adoptDrag(id, x, y);
     this.hud.onCycle = () => this.cycleSlot();
     this.hud.snapCoins(this.sim.s.coins);
 
@@ -318,7 +323,7 @@ export class Ranch {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     const touch = this.isTouch();
-    this.vm.resize(w / h, this.fov, touch);
+    this.vm.resize(w / h, this.fov, touch, h);
     const px = (h * dpr) / (2 * Math.tan(((FOV / 2) * Math.PI) / 180));
     this.fluffPx.value = px;
     this.fx.setPx(px);
@@ -371,7 +376,7 @@ export class Ranch {
     this.hud.el.classList.toggle('rh-touch', touch);
     if (touch !== this.wasTouch) {
       this.wasTouch = touch;
-      this.vm.resize(this.w / this.h, this.fov, touch);
+      this.vm.resize(this.w / this.h, this.fov, touch, this.h);
     }
 
     // The pause page.
@@ -415,16 +420,17 @@ export class Ranch {
     if (this.lookAccum > 0.4) this.doneHint('look');
     const knows = (w: string) => this.sim.knows(w);
 
-    // Slots, once the lesson about them has come.
+    // Slots, once the lesson about them has come. Holding the switch key tips a window out.
     if (!this.menu && knows('slots')) {
       if (f.slotDirect >= 0 && f.slotDirect < s.slots.length) this.selectSlot(f.slotDirect);
       if (f.slotDelta) this.selectSlot((s.sel + f.slotDelta + s.slots.length * 4) % s.slots.length);
+      if (f.empty !== -1) this.emptySlot(f.empty === -2 ? s.sel : f.empty);
     }
 
     // A tap near one of the bellows' windows picks that slot (the nearest).
     if (f.tapped && !this.menu && knows('slots')) {
       let best = -1;
-      let bd = 22;
+      let bd = 26;
       for (let i = 0; i < s.slots.length; i++) {
         const w = this.vm.windowScreen(i, this.tmp);
         const d = w ? Math.hypot(w.x * this.w - f.tapX, w.y * this.h - f.tapY) : 1e9;
@@ -470,6 +476,11 @@ export class Ranch {
     } else this.stuckT = 0;
     if (this.walked > 0.8) this.doneHint('move');
     if (!this.frozen) this.sim.update(dt, c, this.aim);
+    // Waking: at the darkest moment of the fade, turn to face the yard rather than the door.
+    if (this.wakeT > 0) {
+      this.wakeT -= dt;
+      if (this.wakeT <= 0) this.faceYard();
+    }
     if (this.menu && Math.hypot(p.x - this.menu.x, p.z - this.menu.z) > 3.2) this.closeMenu();
     this.handleEvents();
     this.lessonTick(dt);
@@ -508,7 +519,7 @@ export class Ranch {
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();
-      this.vm.resize(this.w / this.h, this.fov, this.isTouch());
+      this.vm.resize(this.w / this.h, this.fov, this.isTouch(), this.h);
     }
     this.camera.updateMatrixWorld();
     // Aim and the muzzle in the world.
@@ -656,9 +667,17 @@ export class Ranch {
       case 'full': {
         this.cue('ranch.full');
         const room = this.sim.accept(e.thing) < 0;
-        this.hud.note(room && s.slots.every((q) => q.t) && !s.slots.some((q) => q.t === e.thing) ? 'No slot free for another kind.' : 'That slot is full.');
+        const none = room && s.slots.every((q) => q.t) && !s.slots.some((q) => q.t === e.thing);
+        // Once windows are known, say how to make room: tip one out.
+        const how = !this.sim.knows('slots') ? '' : this.isTouch() ? ' Hold a window to empty it.' : this.device() === 'pad' ? ' Hold LB to empty one.' : ' Hold Q to empty one.';
+        this.hud.note(none ? `No window free.${how}` : `That window is full.${how}`, how ? 3.2 : 2.2);
         break;
       }
+      case 'empty':
+        this.cue('ranch.puff', undefined, undefined, undefined, 0.5, 0.7);
+        this.vm.puffKick(false);
+        this.hud.note(`Tipped out ${e.n} ${thingName(e.thing, e.n)}.`);
+        break;
       case 'puff':
         this.cue('ranch.puff', undefined, undefined, undefined, e.thing ? 0.9 : 0.55, e.thing ? 1 : 1.25);
         this.vm.puffKick(!!e.thing);
@@ -776,6 +795,7 @@ export class Ranch {
       case 'sleep':
         this.cue('ranch.sleep');
         this.hud.dim();
+        this.wakeT = 0.45;
         this.save();
         break;
       case 'zone':
@@ -786,23 +806,28 @@ export class Ranch {
     }
   }
 
-  /** One goal at a time: the one just done (then the next, a moment later), or the next on its own. */
-  private showGoals(done: GoalId | null): void {
-    const lines: PageLine[] = [];
-    let title = 'Next';
-    if (done) {
-      const g = GOALS.find((q) => q.id === done)!;
-      lines.push({ text: g.text, done: true, fresh: true });
-      title = `Paid ${g.reward} coins`;
-      this.nextGoalT = 3.4;
-    } else {
-      const next = this.sim.openGoals(1)[0];
-      if (!next) return;
-      lines.push({ text: next.text, done: false, fresh: false });
-      this.nextGoalT = 0;
-    }
+  /** A goal just done, struck, for a moment; then the journal goes back to the next one (see lessonTick). */
+  private showGoals(done: GoalId): void {
+    const g = GOALS.find((q) => q.id === done)!;
+    const lines: PageLine[] = [{ text: g.text, done: true, fresh: true }];
+    this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(title, lines, done ? 3.4 : 5);
+    this.hud.showPage(`Paid ${g.reward} coins`, lines, 3.4);
+  }
+
+  /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do. */
+  private goalLine(): string {
+    return this.sim.openGoals(1)[0]?.text ?? '';
+  }
+
+  /** Turn to face the yard (the crate and the pens), level, as you wake. */
+  private faceYard(): void {
+    const p = this.sim.s.player;
+    const tx = (EXCHANGE.x + PADS[1].x) / 2;
+    const tz = (EXCHANGE.z + PADS[1].z) / 2;
+    p.yaw = Math.atan2(-(tx - p.x), -(tz - p.z));
+    p.pitch = -0.06;
+    this.turn = null;
   }
 
   // ------------------------------------------------------------ lessons
@@ -824,10 +849,13 @@ export class Ranch {
       this.cue('ranch.slot', undefined, undefined, undefined, 0.7, 1.3);
     }
     this.hud.setLesson(v.line, v.done);
-    if (this.nextGoalT > 0 && !v.line) {
-      this.nextGoalT -= dt;
-      if (this.nextGoalT <= 0) this.showGoals(null);
+    // No lesson up: the next journal goal, calmly, on the same page (J hides it until something changes).
+    const goal = v.line ? '' : this.goalLine();
+    if (goal !== this.goalShown) {
+      this.goalShown = goal;
+      this.goalHidden = false;
     }
+    this.hud.setGoal(this.goalHidden ? '' : goal);
   }
 
   private prevLessonDone = '';
@@ -847,6 +875,15 @@ export class Ranch {
     this.selectSlot((s.sel + 1) % s.slots.length);
   }
 
+  /** Tip a whole window out on the ground in front of you. */
+  emptySlot(i: number): void {
+    if (this.menu || !this.sim.knows('slots')) return;
+    if (this.sim.empty(i, this.aim) > 0) {
+      this.tutor.add(this.sim.s, 'empty');
+      this.handleEvents();
+    }
+  }
+
   selectSlot(i: number): void {
     const s = this.sim.s;
     if (i < 0 || i >= s.slots.length || i === s.sel) return;
@@ -858,7 +895,7 @@ export class Ranch {
 
   // ------------------------------------------------------------ menus
 
-  private railFor(it: Interactable): Rail {
+  private railFor(it: Interactable, n: number): Rail {
     const p = this.sim.phys;
     if (it.kind === 'pad' || it.kind === 'silo') {
       const sp = padSpots(it.id as number);
@@ -866,8 +903,20 @@ export class Ranch {
       return sp.ls > 0 ? { x: sp.post.x + 0.22, y, z: sp.post.z + 0.09, ax: 1, az: 0, ry: 0 } : { x: sp.post.x + 3.42, y, z: sp.post.z - 0.09, ax: -1, az: 0, ry: Math.PI };
     }
     if (it.kind === 'bench') {
-      const r = this.props.tagRails.bench;
-      return { x: r.x, y: r.y, z: r.z + 2.0, ax: 0, az: -1, ry: Math.PI / 2 };
+      // The tags hang just in front of the bench and turn to face you, wherever along the lane you stand.
+      const pl = this.sim.s.player;
+      let dx = pl.x - WORKBENCH.x;
+      let dz = pl.z - WORKBENCH.z;
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l;
+      dz /= l;
+      const ry = Math.atan2(dx, dz);
+      const ax = Math.cos(ry);
+      const az = -Math.sin(ry);
+      const half = ((n - 1) * 0.37) / 2 + 0.4;
+      const cx = WORKBENCH.x + dx * 0.7;
+      const cz = WORKBENCH.z + dz * 0.7;
+      return { x: cx - ax * half, y: this.props.tagRails.bench.y - 0.05, z: cz - az * half, ax, az, ry };
     }
     if (it.kind === 'door') {
       const y = p.floor((PORCH.x0 + PORCH.x1) / 2, (PORCH.z0 + PORCH.z1) / 2) + 2.35;
@@ -882,7 +931,7 @@ export class Ranch {
     const opts = this.sim.menu(it);
     this.doneHint('use');
     if (!opts.length) return;
-    const rail = this.railFor(it);
+    const rail = this.railFor(it, opts.length);
     this.tags.show(rail, opts);
     const p = this.sim.s.player;
     this.menu = { it, rail, x: p.x, z: p.z, closeT: 0 };
@@ -986,7 +1035,7 @@ export class Ranch {
     const ampm = h < 12 ? 'am' : 'pm';
     const h12 = h % 12 === 0 ? 12 : h % 12;
     const when = this.sim.knows('clock') ? `Day ${s.day}, ${h12}:${String(m).padStart(2, '0')} ${ampm}` : `Day ${s.day}`;
-    this.hud.showPause(when, s.goals, this.tutor.line, this.tutor.notes(s), this.controlsLine());
+    this.hud.showPause(when, s.goals, this.tutor.line || (this.tutor.busy ? '' : this.goalLine()), this.tutor.notes(s), this.controlsLine());
     this.save();
   }
 
@@ -998,19 +1047,19 @@ export class Ranch {
     if (dev === 'touch') {
       out.push('Left thumb walks, the right side looks.');
       if (k('draw')) out.push(k('puff') ? 'Hold Pull to bring things in, tap Blow to send them out.' : 'Hold Pull to bring things in.');
-      if (k('slots')) out.push('Tap a window to switch what you blow.');
+      if (k('slots')) out.push('Tap a window to switch what you blow, hold one to empty it.');
       if (k('jump')) out.push('Jump hops.');
       if (k('pads')) out.push('The hand uses what is in front of you.');
     } else if (dev === 'pad') {
       out.push('Left stick walks, right stick looks.');
       if (k('draw')) out.push(k('puff') ? 'LT pulls, RT blows.' : 'LT pulls.');
-      if (k('slots')) out.push('LB and RB switch kinds.');
+      if (k('slots')) out.push('LB and RB switch kinds; hold one to empty the chosen window.');
       out.push('A jumps.');
       if (k('pads')) out.push('X uses what is in front of you.');
     } else {
       out.push('WASD walks, the mouse looks, Shift runs.');
       if (k('draw')) out.push(k('puff') ? 'Hold right click to pull, click to blow.' : 'Hold right click to pull.');
-      if (k('slots')) out.push('Q or the wheel switch kinds.');
+      if (k('slots')) out.push('Q or the wheel switch kinds; hold Q to empty the chosen window.');
       out.push('Space jumps.');
       if (k('pads')) out.push('E uses what is in front of you.');
     }
@@ -1089,11 +1138,12 @@ export class Ranch {
     bb.y0 *= this.h;
     bb.y1 *= this.h;
     hud.placeSlots(this.spots, showSlots && !this.paused, bb, this.paused || this.menu ? -1 : this.tutor.mark.slot);
-    // J brings up the next goal, unless a lesson has the page.
-    if (f.journal && !hud.lessonUp) {
-      if (hud.pageUp) hud.hidePage();
-      else this.showGoals(null);
-    }
+    // J puts the goal line away (or back), unless a lesson has the page.
+    if (f.journal && !hud.lessonUp) this.goalHidden = !this.goalHidden;
+    // A wild downy digging in: the crosshair fills as it tires.
+    let tug = 0;
+    for (const d of s.downies) if (d.held) tug = Math.max(tug, d.tug / Math.max(0.01, this.sim.tugNeed(d)));
+    hud.setTug(tug);
     hud.update(dt);
   }
 

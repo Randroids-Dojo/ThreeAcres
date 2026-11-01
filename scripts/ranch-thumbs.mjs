@@ -1,7 +1,10 @@
 // Thumb room under touch, at the Pixel 8 Pro's viewport (412 by 838, DPR 2.625):
 // looking works from the middle and lower right, buttons win over the bellows,
 // the stick works where it overlaps the bellows, the bellows still changes slot,
-// and the journal page never blocks the stick. Real touch events through CDP.
+// and the journal page never blocks the stick. Every slot window's tap target
+// is at least 44 px and overlaps no other target or button (with four windows
+// and with the fifth), and a long press on a window tips it out while a tap
+// only picks it. Real touch events through CDP.
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -73,6 +76,71 @@ check('tapping the bellows changes slot', s1.slot !== s0.slot, `${s0.slot} to ${
 // Every slot window takes its own tap, including those on the stick's side: a lesson may say to tap any of them.
 const covered = await p.evaluate(reachScan, '.rh-slotbtn, .rt-btn');
 check('every slot window and button takes a tap', covered.length === 0, covered.map((q) => `${q.control} under ${q.under} at ${q.at}`).join(' | '));
+// Thumb-sized windows: every target at least 44 px, none over another or over a button.
+const targets = () => p.evaluate(() => [...document.querySelectorAll('.rh-slotbtn, .rt-btn')].filter((e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0).map((e) => { const r = e.getBoundingClientRect(); return { cls: e.className.replace(/ ?(down|holding|show)/g, ''), l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; }));
+const overlaps = (rs) => {
+  const out = [];
+  for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) {
+    const a = rs[i];
+    const c = rs[j];
+    if (!/slotbtn/.test(a.cls) && !/slotbtn/.test(c.cls)) continue;
+    const w = Math.min(a.r, c.r) - Math.max(a.l, c.l);
+    const h = Math.min(a.b, c.b) - Math.max(a.t, c.t);
+    if (w > 0 && h > 0) out.push(`${a.cls}@${Math.round(a.l)},${Math.round(a.t)} x ${c.cls}@${Math.round(c.l)},${Math.round(c.t)} (${Math.round(w)}x${Math.round(h)})`);
+  }
+  return out;
+};
+for (const n of [4, 5]) {
+  if (n === 5) {
+    await p.evaluate(() => window.ranch.sim.s.slots.push({ t: null, n: 0 }));
+    await p.waitForTimeout(300);
+  }
+  const rs = await targets();
+  const slots = rs.filter((q) => /slotbtn/.test(q.cls));
+  check(`${n} windows: every window target is at least 44 px`, slots.length === n && slots.every((q) => q.w >= 44 && q.h >= 44), slots.map((q) => `${Math.round(q.w)}x${Math.round(q.h)}`).join(' '));
+  const ov = overlaps(rs);
+  check(`${n} windows: no window target overlaps another, or Blow, Pull, Jump or pause`, ov.length === 0, ov.join(' | '));
+  const cov = await p.evaluate(reachScan, '.rh-slotbtn, .rt-btn');
+  check(`${n} windows: every window and button takes a tap at five points across it`, cov.length === 0, cov.map((q) => `${q.control} under ${q.under} at ${q.at}`).join(' | '));
+}
+await p.evaluate(() => { const s = window.ranch.sim.s; s.slots.length = 4; s.sel = 0; });
+await p.waitForTimeout(300);
+// A tap picks a window; a long press tips it out on the ground in front of you.
+await p.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (const q of s.slots) { q.t = null; q.n = 0; } for (let i = 0; i < 5; i++) sim.stow('cloverhead'); for (let i = 0; i < 3; i++) sim.stow('sweetroot'); s.sel = 0; });
+await p.waitForTimeout(200);
+const w1 = await p.evaluate(() => window.ranch.slotScreen(1));
+await touch('touchStart', [[w1.x, w1.y, 6]]);
+await p.waitForTimeout(90);
+await touch('touchEnd', []);
+await p.waitForTimeout(250);
+const tapState = await p.evaluate(() => { const s = window.ranch.sim.s; return { sel: s.sel, n: s.slots[1].n }; });
+check('a tap on a window picks it and leaves it full', tapState.sel === 1 && tapState.n === 3, JSON.stringify(tapState));
+const w0 = await p.evaluate(() => window.ranch.slotScreen(0));
+const onGround0 = await p.evaluate(() => window.ranch.sim.s.items.filter((i) => !i.gone && i.type === 'cloverhead').length);
+await touch('touchStart', [[w0.x, w0.y, 7]]);
+await p.waitForTimeout(300);
+const ringShown = await p.evaluate(() => document.querySelectorAll('.rh-slotbtn.holding').length === 1);
+await p.waitForTimeout(600);
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+const held = await p.evaluate(() => { const s = window.ranch.sim.s; return { n: s.slots[0].n, ground: s.items.filter((i) => !i.gone && i.type === 'cloverhead').length }; });
+check('holding a window shows a ring filling, then tips the window out in front of you', ringShown && held.n === 0 && held.ground - onGround0 === 5, `ring ${ringShown}, left ${held.n}, on the ground +${held.ground - onGround0}`);
+// A thumb that lands on a window and moves meant to walk: it walks, and nothing tips out.
+await p.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 4; i++) sim.stow('cloverhead'); });
+const wl = await p.evaluate(() => window.ranch.slotScreen(0));
+const g0 = await S();
+const n0 = await p.evaluate(() => window.ranch.sim.s.slots[0].n);
+await touch('touchStart', [[wl.x, wl.y, 8]]);
+for (let i = 1; i <= 30; i++) {
+  await touch('touchMove', [[wl.x, wl.y - Math.min(i, 8) * 7, 8]]);
+  await p.waitForTimeout(30);
+}
+await touch('touchEnd', []);
+await p.waitForTimeout(200);
+const g1 = await S();
+const n1 = await p.evaluate(() => window.ranch.sim.s.slots[0].n);
+await p.evaluate(() => { const r = window.ranch; const pl = r.sim.s.player; pl.x = -15.5; pl.z = 37.2; pl.y = r.sim.phys.floor(pl.x, pl.z); pl.yaw = -0.55; });
+check('a drag that starts on a window walks, and tips nothing out', Math.hypot(g1.x - g0.x, g1.z - g0.z) > 0.5 && n1 === n0 && n0 > 0, `moved ${Math.hypot(g1.x - g0.x, g1.z - g0.z).toFixed(2)} m, window ${n0} -> ${n1}`);
 // With the journal up, the stick still answers.
 await p.evaluate(() => window.ranch.hud.showPage('Day 1', [{ text: 'Catch a clover downy.', done: false }, { text: 'Build a pen and blow a downy in.', done: false }], 30));
 await p.waitForTimeout(700);

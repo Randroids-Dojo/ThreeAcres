@@ -55,8 +55,8 @@ for (const [row, z] of [
 export const RANCH_GATE = { x: 0, z: RANCH_Z };
 export const GATE_SIGN = { x: 2.6, z: 19.4 };
 export const GATES = {
-  ridge: { x: RIDGE_X, z: -10, cost: 600, name: 'Ember Ridge' },
-  hollow: { x: HOLLOW_X, z: -24, cost: 1500, name: 'Brook Hollow' },
+  ridge: { x: RIDGE_X, z: -10, cost: 500, name: 'Ember Ridge' },
+  hollow: { x: HOLLOW_X, z: -24, cost: 1200, name: 'Brook Hollow' },
 } as const;
 export type GateId = keyof typeof GATES;
 export const GATE_HALF = 1.7;

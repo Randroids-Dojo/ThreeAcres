@@ -44,6 +44,8 @@ export interface PageLine {
 }
 
 export class Hud {
+  /** Seconds a window must be held to tip it out. */
+  static readonly HOLD_EMPTY = 0.55;
   readonly el = el('div', 'rh');
   private cross = el('div', 'rh-cross');
   private count = el('div', 'rh-count');
@@ -82,13 +84,23 @@ export class Hud {
   /** The lesson line on the page, if one is up. */
   private lessonLine = '';
   private lessonDone = false;
+  /** With no lesson up, the next goal sits on the page instead; what it is, and what is showing. */
+  private goalWant = '';
+  private goalShown = '';
+  /** A window held down: which, since when (a long press tips it out). */
+  private slotHold: { i: number; id: number; t: number; fired: boolean; x: number; y: number } | null = null;
   onResume: () => void = () => {};
   onGames: () => void = () => {};
   onSlot: (i: number) => void = () => {};
+  /** A long press on a window: tip it out. */
+  onEmpty: (i: number) => void = () => {};
+  /** A press on a window that turned into a drag: walk or look with it instead (pointer id, where it began). */
+  onSlotDrag: (id: number, x: number, y: number) => void = () => {};
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
+    this.tugRing = this.cross.querySelector('.x-tug')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
     this.arcDot = this.arc.querySelector('.sun')!;
     this.arcMoon = this.arc.querySelector('.moon')!;
@@ -99,12 +111,37 @@ export class Hud {
     this.click.textContent = 'Click to look around';
     for (let i = 0; i < 5; i++) {
       const b = el('button', 'rh-slotbtn');
-      b.setAttribute('aria-label', `Slot ${i + 1}`);
+      b.setAttribute('aria-label', `Window ${i + 1}. Tap to choose, hold to empty`);
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        try {
+          b.setPointerCapture(e.pointerId);
+        } catch {
+          // Synthetic pointers.
+        }
         this.onSlot(i);
+        // Held on: after a moment the window tips out (the ring fills while you hold).
+        this.slotHold = { i, id: e.pointerId, t: 0, fired: false, x: e.clientX, y: e.clientY };
+        b.classList.add('holding');
       });
+      // A thumb that lands on a window and moves meant to walk (or look): hand it over, and tip nothing out.
+      b.addEventListener('pointermove', (e) => {
+        const h = this.slotHold;
+        if (!h || h.id !== e.pointerId || h.fired || Math.hypot(e.clientX - h.x, e.clientY - h.y) < 10) return;
+        this.slotHold = null;
+        b.classList.remove('holding');
+        this.onSlotDrag(e.pointerId, h.x, h.y);
+      });
+      const release = (e: PointerEvent) => {
+        if (this.slotHold?.id !== e.pointerId) return;
+        this.slotHold = null;
+        b.classList.remove('holding');
+      };
+      b.addEventListener('pointerup', release);
+      b.addEventListener('pointercancel', release);
+      b.addEventListener('lostpointercapture', release);
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
       this.slotBtns.push(b);
     }
     this.bellowsBtn.setAttribute('aria-label', 'Next window');
@@ -220,9 +257,11 @@ export class Hud {
       if (this.lessonLine) {
         this.lessonLine = '';
         this.hidePage();
+        this.showGoal();
       }
       return;
     }
+    this.goalShown = '';
     if (line !== this.lessonLine) {
       // A new lesson slides in as a new page; the same lesson reworded (another device) just changes.
       const fresh = !this.lessonLine || this.lessonDone || !this.pageUp;
@@ -252,6 +291,51 @@ export class Hud {
     return !!this.lessonLine;
   }
 
+  /**
+   * With no lesson up, the next goal sits on the journal page: one calm line,
+   * the same page. A goal just done (a timed page) has the page first. '' puts it away.
+   */
+  setGoal(line: string): void {
+    this.goalWant = line;
+    if (this.lessonLine || this.pageT > 0) return;
+    this.showGoal();
+  }
+
+  private showGoal(): void {
+    const line = this.goalWant;
+    if (this.lessonLine || this.pageT > 0) return;
+    if (!line) {
+      if (this.goalShown) {
+        this.goalShown = '';
+        this.hidePage();
+      }
+      return;
+    }
+    if (line === this.goalShown && this.pageUp) return;
+    const fresh = !this.pageUp;
+    this.goalShown = line;
+    this.pageBody.innerHTML = `<ul><li>${BOX}<span>${line}</span></li></ul>`;
+    this.page.classList.add('lesson', 'goal');
+    this.page.classList.remove('note');
+    if (fresh) {
+      this.page.classList.remove('up');
+      void this.page.offsetWidth;
+    }
+    this.page.classList.add('up');
+    this.pageUp = true;
+  }
+
+  /** A wild downy digging in against the pull: a ring round the crosshair fills as it tires (0 hides it). */
+  setTug(k: number): void {
+    const v = k > 0.02 ? Math.min(1, k) : 0;
+    if (Math.abs(v - this.tugShown) < 0.01) return;
+    this.tugShown = v;
+    this.cross.classList.toggle('tug', v > 0);
+    this.tugRing.style.strokeDashoffset = `${(1 - v) * 81.7}`;
+  }
+  private tugShown = 0;
+  private tugRing!: SVGCircleElement;
+
   showZone(name: string): void {
     setText(this.zone, name);
     this.zone.classList.add('on');
@@ -272,7 +356,8 @@ export class Hud {
       .join('');
     this.pageBody.innerHTML = `<h4>${title}</h4><ul>${rows}</ul>`;
     this.lessonLine = '';
-    this.page.classList.remove('up', 'lesson');
+    this.goalShown = '';
+    this.page.classList.remove('up', 'lesson', 'goal');
     void this.page.offsetWidth;
     this.page.classList.add('up');
     this.pageUp = true;
@@ -283,6 +368,7 @@ export class Hud {
     this.page.classList.remove('up');
     this.pageUp = false;
     this.pageT = 0;
+    this.goalShown = '';
   }
 
   /** The pause page: the whole journal (done goals struck), what the lessons taught so far, and the controls learned. */
@@ -326,10 +412,18 @@ export class Hud {
     const ps = point >= 0 ? spots[point] : null;
     this.slotPoint.classList.toggle('on', !!ps);
     if (ps) this.slotPoint.style.transform = `translate(${ps.x.toFixed(0)}px, ${ps.y.toFixed(0)}px)`;
-    const a = spots[0];
-    const b2 = spots[1];
-    const pitch = a && b2 ? Math.hypot(b2.x - a.x, b2.y - a.y) : 44;
-    const size = Math.max(16, Math.min(44, pitch));
+    // Each window's target is as big as the spacing allows, never under 44 px on a spread layout
+    // (the bellows spreads its windows at least 48 px apart under touch).
+    let pitch = 1e9;
+    for (let i = 0; i < spots.length; i++) {
+      for (let j = i + 1; j < spots.length; j++) {
+        const p = spots[i];
+        const q = spots[j];
+        if (p && q) pitch = Math.min(pitch, Math.max(Math.abs(q.x - p.x), Math.abs(q.y - p.y)));
+      }
+    }
+    if (pitch === 1e9) pitch = 44;
+    const size = Math.max(16, Math.min(52, pitch - 2));
     this.slotBtns.forEach((b, i) => {
       const s = spots[i];
       if (!s || !show) {
@@ -351,13 +445,30 @@ export class Hud {
   }
 
   update(dt: number): void {
+    // A window held long enough tips out, once per press.
+    const h = this.slotHold;
+    if (h && !h.fired) {
+      h.t += dt;
+      if (h.t >= Hud.HOLD_EMPTY) {
+        h.fired = true;
+        this.slotBtns[h.i]?.classList.remove('holding');
+        this.onEmpty(h.i);
+      }
+    }
     if (this.sayT > 0) {
       this.sayT -= dt;
       if (this.sayT <= 0) this.say.classList.remove('on');
     }
     if (this.pageT > 0 && !this.lessonLine) {
       this.pageT -= dt;
-      if (this.pageT <= 0) this.hidePage();
+      if (this.pageT <= 0) {
+        // A goal waiting takes the page straight over; otherwise it goes down.
+        this.pageT = 0;
+        if (this.goalWant) {
+          this.goalShown = '';
+          this.showGoal();
+        } else this.hidePage();
+      }
     }
     if (this.zoneT > 0) {
       this.zoneT -= dt;

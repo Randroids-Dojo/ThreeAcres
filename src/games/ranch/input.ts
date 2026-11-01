@@ -18,6 +18,8 @@ export interface Frame {
   interact: boolean;
   slotDelta: number;
   slotDirect: number;
+  /** A window to tip out (the switch key held): its index, -2 for the chosen one, -1 for none. */
+  empty: number;
   pause: boolean;
   journal: boolean;
   confirm: boolean;
@@ -33,6 +35,8 @@ export interface Frame {
 
 const STICK_R = 52;
 const DEAD = 0.16;
+/** Seconds the switch key must be held to tip a window out; a shorter press switches. */
+const HOLD_EMPTY = 0.55;
 
 function buzz(ms: number): void {
   try {
@@ -74,6 +78,7 @@ export class Input {
     interact: false,
     slotDelta: 0,
     slotDirect: -1,
+    empty: -1,
     pause: false,
     journal: false,
     confirm: false,
@@ -84,7 +89,13 @@ export class Input {
     tapped: false,
     looked: false,
   };
-  private ev = { jump: false, puff: false, interact: false, slot: 0, direct: -1, pause: false, journal: false, confirm: false, lookX: 0, lookY: 0, tapped: false, tapX: 0, tapY: 0, looked: false };
+  private ev = { jump: false, puff: false, interact: false, slot: 0, direct: -1, empty: -1, pause: false, journal: false, confirm: false, lookX: 0, lookY: 0, tapped: false, tapX: 0, tapY: 0, looked: false };
+  /**
+   * Switch keys held down. A number key picks its window at once and tips it
+   * out if held; Q and R (and LB and RB) switch when let go quickly, and tip
+   * the chosen window out if held.
+   */
+  private holds = new Map<string, { t0: number; slot: number; dir: number; fired: boolean }>();
   private mouseL = false;
   private mouseR = false;
   private mouseM = false;
@@ -179,7 +190,7 @@ export class Input {
     this.btn = {
       draw: mk('rt-draw', ICONS.draw, 'Pull', 'Pull. Hold to bring things in'),
       puff: mk('rt-puff', ICONS.puff, 'Blow', 'Blow. Tap or hold to send things out'),
-      jump: mk('rt-jump', ICONS.jump, '', 'Jump'),
+      jump: mk('rt-jump', ICONS.jump, 'Jump', 'Jump'),
       act: mk('rt-act', ICONS.hand, '', 'Use'),
       pause: mk('rt-pause', ICONS.pause, '', 'Pause'),
     };
@@ -208,11 +219,13 @@ export class Input {
     this.keys.add(c);
     if (c === 'Space') this.ev.jump = true;
     if (c === 'KeyE') this.ev.interact = true;
-    if (c === 'KeyQ') this.ev.slot -= 1;
-    if (c === 'KeyR') this.ev.slot += 1;
+    if (c === 'KeyQ' || c === 'KeyR') this.holds.set(c, { t0: performance.now(), slot: -2, dir: c === 'KeyQ' ? -1 : 1, fired: false });
     if (c.startsWith('Digit')) {
       const n = Number(c.slice(5));
-      if (n >= 1 && n <= 6) this.ev.direct = n - 1;
+      if (n >= 1 && n <= 6) {
+        this.ev.direct = n - 1;
+        this.holds.set(c, { t0: performance.now(), slot: n - 1, dir: 0, fired: false });
+      }
     }
     if (c === 'Escape' || c === 'KeyP') this.ev.pause = true;
     if (c === 'KeyJ') this.ev.journal = true;
@@ -221,7 +234,26 @@ export class Input {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    this.letGo(e.code);
   };
+
+  /** A switch key let go: a quick press of Q or R switches (a long one already tipped the window out). */
+  private letGo(code: string): void {
+    const h = this.holds.get(code);
+    if (!h) return;
+    this.holds.delete(code);
+    if (!h.fired && h.dir !== 0) this.ev.slot += h.dir;
+  }
+
+  /** Any switch key held long enough tips its window out, once per press. */
+  private checkHolds(f: Frame): void {
+    const now = performance.now();
+    for (const h of this.holds.values()) {
+      if (h.fired || now - h.t0 < HOLD_EMPTY * 1000) continue;
+      h.fired = true;
+      f.empty = h.slot;
+    }
+  }
 
   // ------------------------------------------------------------ mouse
 
@@ -399,6 +431,33 @@ export class Input {
 
   private stickTap = { x: 0, y: 0, t: 0, moved: 0 };
 
+  /**
+   * A press that began on something small (a slot window) and turned into a
+   * drag: the stick takes it if it began on the stick's side, the look area if
+   * on the look side, as if the thumb had landed there.
+   */
+  adoptDrag(id: number, x: number, y: number): void {
+    if (!this.enabled) return;
+    const inside = (e: HTMLElement) => {
+      const r = e.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    if (inside(this.stickZone) && this.stickId === null) {
+      this.stickId = id;
+      capture(this.stickZone, id);
+      this.origin = { x, y };
+      this.stickTap = { x, y, t: 0, moved: 99 };
+      this.place();
+      this.base.classList.add('on');
+      this.knob.style.transform = '';
+    } else if (inside(this.lookZone) && this.lookId === null) {
+      this.lookId = id;
+      capture(this.lookZone, id);
+      this.lookLast = { x, y };
+      this.lookStart = { x, y, t: 0, moved: 99 };
+    }
+  }
+
   private place(): void {
     const z = this.stickZone.getBoundingClientRect();
     this.base.style.left = `${this.origin.x - z.left}px`;
@@ -523,8 +582,19 @@ export class Input {
     if ((gp.buttons[7]?.value ?? 0) > 0.3) f.puff = true;
     if ((gp.buttons[7]?.value ?? 0) > 0.3 && !this.padPrev[7]) f.puffPressed = true;
     if (edge(2)) f.interact = true;
-    if (edge(4)) f.slotDelta -= 1;
-    if (edge(5)) f.slotDelta += 1;
+    // LB and RB: a quick press switches, a long one tips the chosen window out.
+    for (const [i, dir] of [
+      [4, -1],
+      [5, 1],
+    ] as const) {
+      const key = `Pad${i}`;
+      if (edge(i)) this.holds.set(key, { t0: performance.now(), slot: -2, dir, fired: false });
+      if (!b(i) && this.padPrev[i]) {
+        const h = this.holds.get(key);
+        this.holds.delete(key);
+        if (h && !h.fired) f.slotDelta += dir;
+      }
+    }
     if (edge(9)) f.pause = true;
     if (edge(8)) f.journal = true;
     for (let i = 0; i < gp.buttons.length; i++) this.padPrev[i] = i === 7 ? (gp.buttons[7]?.value ?? 0) > 0.3 : b(i);
@@ -553,6 +623,7 @@ export class Input {
     f.interact = this.ev.interact;
     f.slotDelta = this.ev.slot;
     f.slotDirect = this.ev.direct;
+    f.empty = this.ev.empty;
     f.pause = this.ev.pause;
     f.journal = this.ev.journal;
     f.confirm = this.ev.confirm;
@@ -563,12 +634,14 @@ export class Input {
     f.tapY = this.ev.tapY;
     f.looked = this.ev.looked;
     this.pollPad(f);
+    this.checkHolds(f);
     f.moveX = clamp(f.moveX, -1, 1);
     f.moveZ = clamp(f.moveZ, -1, 1);
     const e = this.ev;
     e.jump = e.puff = e.interact = e.pause = e.journal = e.confirm = e.tapped = e.looked = false;
     e.slot = 0;
     e.direct = -1;
+    e.empty = -1;
     e.lookX = e.lookY = 0;
     return f;
   }
@@ -576,12 +649,14 @@ export class Input {
   /** Let go of everything (pause, blur, switching games): no stuck input. */
   reset(): void {
     this.keys.clear();
+    this.holds.clear();
     this.mouseL = this.mouseR = this.mouseM = false;
     this.resetTouch();
     const e = this.ev;
     e.jump = e.puff = e.interact = e.pause = e.journal = e.confirm = e.tapped = e.looked = false;
     e.slot = 0;
     e.direct = -1;
+    e.empty = -1;
     e.lookX = e.lookY = 0;
   }
 

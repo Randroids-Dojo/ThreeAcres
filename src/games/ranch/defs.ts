@@ -29,10 +29,10 @@ export interface KindInfo {
 }
 
 export const KIND: Record<DownyKind, KindInfo> = {
-  clover: { name: 'clover downy', plural: 'clover downies', body: 0xb3d07c, belly: 0xf3ecd0, accent: 0x5e9a3e, favourite: 'cloverhead', eats: 'greens', value: 8, hop: 0.55 },
-  ember: { name: 'ember downy', plural: 'ember downies', body: 0xf0a060, belly: 0xffdcaa, accent: 0xe0663a, favourite: 'sweetroot', eats: 'roots', value: 14, hop: 0.5 },
-  brook: { name: 'brook downy', plural: 'brook downies', body: 0x78a4e4, belly: 0xd6e4f8, accent: 0x4a78c4, favourite: 'dewberry', eats: 'fruit', value: 18, hop: 0.6 },
-  thistle: { name: 'thistle downy', plural: 'thistle downies', body: 0xa486d4, belly: 0xe2d6f0, accent: 0x6e4c9e, favourite: 'any', eats: 'any', value: 40, hop: 1.6 },
+  clover: { name: 'clover downy', plural: 'clover downies', body: 0xb3d07c, belly: 0xf3ecd0, accent: 0x5e9a3e, favourite: 'cloverhead', eats: 'greens', value: 12, hop: 0.55 },
+  ember: { name: 'ember downy', plural: 'ember downies', body: 0xf0a060, belly: 0xffdcaa, accent: 0xe0663a, favourite: 'sweetroot', eats: 'roots', value: 20, hop: 0.5 },
+  brook: { name: 'brook downy', plural: 'brook downies', body: 0x78a4e4, belly: 0xd6e4f8, accent: 0x4a78c4, favourite: 'dewberry', eats: 'fruit', value: 26, hop: 0.6 },
+  thistle: { name: 'thistle downy', plural: 'thistle downies', body: 0xa486d4, belly: 0xe2d6f0, accent: 0x6e4c9e, favourite: 'any', eats: 'any', value: 60, hop: 1.6 },
 };
 
 export const FOOD_INFO: Record<Food, { name: string; plural: string; color: number }> = {
@@ -88,6 +88,10 @@ export function favourite(k: DownyKind, f: Food): boolean {
 export const HOUR = 30;
 /** Hunger per game hour: empty to starving in about three. */
 export const HUNGER_RATE = 1 / 3;
+/** Hunger runs this much slower for a downy in a pen (sheltered, settled). */
+export const PEN_HUNGER = 1 / 3;
+/** Game hours a downy can stay starving before it gets restless enough to hop a low fence. */
+export const NEGLECT_HOURS = 4;
 
 // ---------------------------------------------------------------- builds
 
@@ -101,14 +105,14 @@ export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] 
   { id: 'high', name: 'High fence', cost: 200, line: 'Keeps jumpers in' },
   { id: 'feeder', name: 'Feeder', cost: 300, line: 'Drops food when they are hungry' },
   { id: 'trough', name: 'Trough', cost: 150, line: 'Brook downies shed more' },
-  { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps nettlebacks out' },
+  { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps pests out' },
   { id: 'chute', name: 'Fluff chute', cost: 400, line: 'Catches shed fluff in a box' },
 ];
 export const GARDEN_UPS: { id: GardenUp; name: string; cost: number; line: string }[] = [
   { id: 'sprinkler', name: 'Sprinkler', cost: 250, line: 'Grows half again as fast' },
   { id: 'soil', name: 'Rich soil', cost: 300, line: 'Eight to a crop, not five' },
 ];
-export const GARDEN_HOURS = 2;
+export const GARDEN_HOURS = 5;
 export const SILO_KINDS = 4;
 export const SILO_CAP = 50;
 export const FEEDER_CAP = 40;

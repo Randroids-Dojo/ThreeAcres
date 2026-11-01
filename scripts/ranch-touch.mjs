@@ -110,7 +110,16 @@ await page.waitForTimeout(150);
 check('tapping a window on the bellows picks that slot', (await S(page)).sel === want, `sel ${(await S(page)).sel}, want ${want} at ${JSON.stringify(win)}`);
 await shot('05-slots');
 // Tapping the bellows' body flicks to the next slot that holds something.
-const body = await page.evaluate(() => { const b = window.ranch.vm.bodyBox({ x0: 0, y0: 0, x1: 0, y1: 0 }); return { x: ((b.x0 + b.x1) / 2) * window.innerWidth, y: (b.y0 * 0.3 + b.y1 * 0.7) * window.innerHeight }; });
+// (Under touch the windows' own targets cover part of the body: tap a spot that is the body itself.)
+const body = await page.evaluate(() => {
+  const b = window.ranch.vm.bodyBox({ x0: 0, y0: 0, x1: 0, y1: 0 });
+  for (const fy of [0.3, 0.2, 0.4, 0.5, 0.6, 0.7]) for (const fx of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+    const x = (b.x0 + (b.x1 - b.x0) * fx) * innerWidth;
+    const y = (b.y0 + (b.y1 - b.y0) * fy) * innerHeight;
+    if (document.elementFromPoint(x, y)?.classList.contains('rh-bellows')) return { x, y };
+  }
+  return { x: ((b.x0 + b.x1) / 2) * innerWidth, y: b.y0 * innerHeight + 4 };
+});
 const selBefore = (await S(page)).sel;
 await tap(body.x, body.y, 24);
 await page.waitForTimeout(150);

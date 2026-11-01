@@ -91,8 +91,14 @@ export class Viewmodel {
   private sun = new DirectionalLight(0xffffff, 2);
   private windows: InstancedMesh;
   private windowSpots: Vector3[] = [];
+  /** Window radius in the bellows' own units: small on a desk, a thumb's width apart on a phone. */
+  private windowR = 0.0125;
+  /** Two rows of windows (a tall phone): the chosen one wears a bigger, brighter rim instead of the pointer. */
+  private grid = false;
+  private rimSel = -1;
+  private plate: Mesh;
   private pointer: Mesh;
-  private rims: Mesh;
+  private rims: InstancedMesh;
   private contents: Record<string, InstancedMesh> = {};
   private dialTex: CanvasTexture;
   private dialCtx: CanvasRenderingContext2D;
@@ -110,6 +116,7 @@ export class Viewmodel {
   private shown = 0;
   private needleAngle = 0;
   private selX = 0;
+  private selY = -0.012;
   baseX = 0.27;
   private scale = 0.86;
   baseY = -0.27;
@@ -143,6 +150,7 @@ export class Viewmodel {
     const handle = (y: number, parent: Object3D, off: number) => {
       const h = new Mesh(merge([part(at(new CylinderGeometry(0.012, 0.014, 0.12, 8), 0, y, 0.19 + off, Math.PI / 2), 0x6a4430), part(at(new SphereGeometry(0.018, 8, 6), 0, y, 0.255 + off), 0x6a4430)]), wood);
       parent.add(h);
+      this.grips.push(h);
     };
     handle(0.01, topBoard, 0);
     handle(-0.035, botBoard, 0.03);
@@ -230,21 +238,20 @@ export class Viewmodel {
     needlePivot.rotation.x = -0.35;
     needlePivot.add(this.needle);
     topBoard.add(needlePivot);
-    // Gauge plate: a brass strip across the back of the bottom board with one window per slot.
-    const plate = new Mesh(part(at(new BoxGeometry(0.17, 0.034, 0.006), 0, -0.012, 0.172, -0.2), 0xb08a3a), brass);
-    botBoard.add(plate);
-    this.windows = new InstancedMesh(new CircleGeometry(0.0125, 14), new MeshLambertMaterial({ color: 0xffffff, emissive: 0x24201c }), 5);
+    // Gauge plate: a brass strip across the back of the bottom board with one window per slot
+    // (laid out by layoutWindows: a row on a desk, spread to a thumb's width on a touch screen).
+    this.plate = new Mesh(part(new BoxGeometry(1, 1, 0.006), 0xb08a3a), brass);
+    this.plate.rotation.x = -0.2;
+    botBoard.add(this.plate);
+    this.windows = new InstancedMesh(new CircleGeometry(1, 16), new MeshLambertMaterial({ color: 0xffffff, emissive: 0x24201c }), 5);
     this.windows.frustumCulled = false;
     botBoard.add(this.windows);
     for (let i = 0; i < 5; i++) this.windows.setColorAt(i, _c.setRGB(1, 1, 1));
-    const rims: BufferGeometry[] = [];
-    for (let i = 0; i < 5; i++) {
-      const x = (i - 2) * 0.031;
-      this.windowSpots.push(new Vector3(x, -0.012, 0.1755));
-      rims.push(part(at(new TorusGeometry(0.0135, 0.0025, 5, 14), x, -0.012, 0.1755, -0.2), 0x8a6a28));
-    }
-    this.rims = new Mesh(merge(rims), brass);
+    for (let i = 0; i < 5; i++) this.windowSpots.push(new Vector3((i - 2) * 0.031, -0.012, 0.1755));
+    this.rims = new InstancedMesh(part(new TorusGeometry(1, 0.19, 5, 16), 0x8a6a28), brass, 5);
+    this.rims.frustumCulled = false;
     botBoard.add(this.rims);
+    this.layoutWindows(0.031, false);
     this.pointer = new Mesh(part(at(new BoxGeometry(0.008, 0.012, 0.004), 0, 0.012, 0), 0x6a3a1e), new MeshLambertMaterial({ vertexColors: true, emissive: 0x2a1408 }));
     this.pointer.position.set(0, 0.0, 0.176);
     this.pointer.rotation.x = -0.2;
@@ -253,8 +260,58 @@ export class Viewmodel {
     this.rig.scale.setScalar(this.scale);
   }
 
-  /** Fit the bellows to the screen: on narrow screens it tucks in. */
-  resize(aspect: number, fov: number, touch: boolean): void {
+  /**
+   * Places the slot windows. spacing: centre to centre in the bellows' units.
+   * grid: two rows (a tall phone), else one row. The plate grows to hold them.
+   */
+  private layoutWindows(spacing: number, grid: boolean): void {
+    const r = grid || spacing > 0.04 ? spacing * 0.36 : 0.0125;
+    this.windowR = r;
+    this.grid = grid;
+    this.rimSel = -1;
+    const y0 = -0.012;
+    // On a tall phone: two rows of two, between the stick and the Blow button (the grips
+    // move over to the right so they never cross a window); a fifth window sits above them. Rows are spaced a little wider than columns because
+    // the tilted plate foreshortens them on screen.
+    const row = 1.0;
+    const gx = -0.03;
+    const z0 = 0.1755;
+    for (const g of this.grips) g.position.x = grid ? Viewmodel.GRIP_X : 0;
+    const spots = grid
+      ? [
+          [gx - 0.5, 0.5 * row],
+          [gx + 0.5, 0.5 * row],
+          [gx - 0.5, -0.5 * row],
+          [gx + 0.5, -0.5 * row],
+          [gx, 1.5 * row],
+        ]
+      : [0, 1, 2, 3, 4].map((i) => [i - 2, 0]);
+    spots.forEach(([cx, cy], i) => {
+      // Rows step down the tilted plate.
+      this.windowSpots[i].set(cx * spacing, y0 + cy * spacing * Math.cos(0.2), z0 - cy * spacing * Math.sin(0.2));
+      this.placeRim(i, false);
+    });
+    const w = grid ? spacing + 2.5 * r : 4 * spacing + 2.6 * r;
+    const h = grid ? row * spacing + 2.5 * r : 0.034 + Math.max(0, 2.6 * r - 0.034);
+    this.plate.scale.set(w, h, 1);
+    this.plate.position.set(grid ? gx * spacing : 0, y0, z0 - 0.0035);
+  }
+
+  /** Where the grips sit across the back of the boards with two rows of windows: right of them. */
+  static readonly GRIP_X = 0.08;
+  private grips: Mesh[] = [];
+
+  private placeRim(i: number, chosen: boolean): void {
+    _q.setFromAxisAngle(_v.set(1, 0, 0), -0.2);
+    _m.compose(this.windowSpots[i], _q, _s.setScalar(this.windowR * (chosen ? 1.22 : 1.08)));
+    this.rims.setMatrixAt(i, _m);
+    this.rims.setColorAt(i, _c.setRGB(chosen ? 1.5 : 1, chosen ? 1.35 : 1, chosen ? 0.9 : 1));
+    this.rims.instanceMatrix.needsUpdate = true;
+    if (this.rims.instanceColor) this.rims.instanceColor.needsUpdate = true;
+  }
+
+  /** Fit the bellows to the screen: on narrow screens it tucks in. hCss: the view's height in CSS px. */
+  resize(aspect: number, fov: number, touch: boolean, hCss = 800): void {
     this.camera.aspect = aspect;
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
@@ -268,6 +325,12 @@ export class Viewmodel {
     this.baseY = portrait ? -0.255 : -0.235;
     this.baseZ = -0.6;
     this.rig.scale.setScalar(this.scale);
+    // Under touch every window must take a thumb: spread them at least 48 px apart on screen
+    // (two rows on a tall phone, where a row of four that wide would run under the buttons).
+    const depth = -this.baseZ - 0.17 * this.scale;
+    const pxPerUnit = (this.scale * (hCss / 2)) / Math.tan(((fov / 2) * Math.PI) / 180) / depth;
+    const spacing = touch ? Math.max(0.031, 48 / pxPerUnit) : 0.031;
+    this.layoutWindows(spacing, touch && portrait);
   }
 
   private paintDial(cap: number): void {
@@ -329,7 +392,7 @@ export class Viewmodel {
     this.shown = damp(this.shown, o.hidden ? 0 : 1, this.shown < 0.5 && !o.hidden ? 5 : 10, dt);
     this.rig.visible = this.shown > 0.01;
     // The slot windows arrive with the lesson that needs them.
-    this.windows.visible = this.rims.visible = this.pointer.visible = o.windows;
+    this.windows.visible = this.rims.visible = this.pointer.visible = this.plate.visible = o.windows;
     // Sway: the bellows lags behind your look a little.
     const sw = o.reduced ? 0.4 : 1;
     this.swayX = damp(this.swayX - o.dyaw * 0.16 * sw, 0, 9, dt);
@@ -392,7 +455,7 @@ export class Viewmodel {
         continue;
       }
       _q.setFromAxisAngle(_v.set(1, 0, 0), -0.2);
-      _m.compose(p, _q, _s.set(1, 1, 1));
+      _m.compose(p, _q, _s.setScalar(this.windowR));
       this.windows.setMatrixAt(i, _m);
       if (s.t) {
         const lvl = 0.35 + 0.65 * (s.n / o.cap);
@@ -400,12 +463,23 @@ export class Viewmodel {
       } else _c.setRGB(0.12, 0.13, 0.17);
       this.windows.setColorAt(i, _c);
     }
-    this.windows.count = Math.max(4, o.slots.length);
+    this.windows.count = this.rims.count = Math.max(4, o.slots.length);
     this.windows.instanceMatrix.needsUpdate = true;
     if (this.windows.instanceColor) this.windows.instanceColor.needsUpdate = true;
-    this.selX = damp(this.selX, this.windowSpots[o.sel]?.x ?? 0, 18, dt);
+    const sp = this.windowSpots[o.sel] ?? this.windowSpots[0];
+    this.selX = damp(this.selX, sp.x, 18, dt);
+    this.selY = damp(this.selY, sp.y, 18, dt);
     this.pointer.position.x = this.selX;
-    this.pointer.position.y = 0.006 + Math.sin(t * 4) * 0.0008;
+    this.pointer.position.y = this.selY + this.windowR + 0.006 + Math.sin(t * 4) * 0.0008;
+    this.pointer.position.z = sp.z + 0.0005;
+    if (this.grid) {
+      this.pointer.visible = false;
+      if (this.rimSel !== o.sel) {
+        if (this.rimSel >= 0) this.placeRim(this.rimSel, false);
+        this.placeRim(o.sel, true);
+        this.rimSel = o.sel;
+      }
+    }
     // Light the bellows like the world around it.
     this.sun.position.copy(o.sunDir);
     this.sun.color.copy(o.sunColor);
