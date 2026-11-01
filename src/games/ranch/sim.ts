@@ -25,8 +25,10 @@ import {
   NEGLECT_HOURS,
   ORDER_BY,
   ORDER_POST,
+  PEN_DOZE,
   PEN_HUNGER,
   PEN_MAX,
+  PEN_PATIENT,
   KINDS,
   KIND_TUFT,
   PEN_UPS,
@@ -37,12 +39,12 @@ import {
   eats,
   favourite,
   RARE_NAME,
-  SPOOK_NOTE,
   fmtCoins,
   isDowny,
   isFood,
   isTuft,
   thingName,
+  wantedFood,
   type BenchUp,
   type DownyKind,
   type Food,
@@ -52,7 +54,6 @@ import {
   type Order,
   type PadKind,
   type PenUp,
-  type Spook,
   type Thing,
   type Tuft,
 } from './defs';
@@ -123,12 +124,15 @@ export type Ev =
   | { t: 'deny'; why: string }
   | { t: 'plant'; pad: number; food: Food }
   | { t: 'crop'; pad: number }
-  | { t: 'store'; x: number; y: number; z: number; where: 'feeder' | 'silo'; pad: number }
+  /** Something went into a feeder or silo (auto: a garden's crop, by its feed run or its full bed, not you). */
+  | { t: 'store'; x: number; y: number; z: number; where: 'feeder' | 'silo'; pad: number; auto?: boolean }
   /** A downy of yours hopped out of its pen. */
   | { t: 'stray'; x: number; y: number; z: number; pen: number }
   /** A downy came down inside a pen (blown in, or hopped back). */
   | { t: 'penned'; pen: number }
   | { t: 'first'; kind: DownyKind }
+  /** The board's rare one heard you coming, unlured, and bolted. */
+  | { t: 'heard'; x: number; y: number; z: number; kind: DownyKind }
   /** A wild downy broke free of the pull and got away (dove: into the water). */
   | { t: 'escape'; x: number; y: number; z: number; kind: DownyKind; dove: boolean }
   /** An order moved: posted (an offer on the board), taken, counted towards (got of n), filled (bonus: what filling paid, or a live order's whole sum), or missed at dusk. */
@@ -250,7 +254,8 @@ export const SAT_FLOOR = 0.6;
  * dash: how fast it hops sideways (m/s), up: how high. give: how far off its body the
  * crosshair may be and still hold it (m; yours and the porch downy keep 0.3).
  * - Clover: quick sideways hops; it only gets away if you let the pull go.
- * - Ember: darts, a fast low leap every half second or so; lose it and it is off.
+ * - Ember: darts, a fast low leap every half second or so; lose it and it is off. Little give (0.13 m; it
+ *   was 0.17, and the sixth playtest's careless thumb caught 10 embers of 10), so it wants a steady thumb.
  * - Brook: slippery (little give), it slips off towards the pond and into the water if you are slow.
  * - Thistle: bolts when it notices you (faster than you walk, slower than you run),
  *   and needs a quick tug before it breaks free.
@@ -259,7 +264,7 @@ export const SAT_FLOOR = 0.6;
  */
 export const CATCH: Record<DownyKind, { need: number; limit: number; jink: [number, number]; dash: [number, number]; up: number; give: number; fade: number }> = {
   clover: { need: 1.0, limit: 0, jink: [0.3, 0.55], dash: [2.6, 3.6], up: 1.3, give: 0.2, fade: 1.5 },
-  ember: { need: 1.0, limit: 0, jink: [0.4, 0.65], dash: [4.4, 5.8], up: 1.2, give: 0.17, fade: 1.05 },
+  ember: { need: 1.0, limit: 0, jink: [0.4, 0.65], dash: [4.4, 5.8], up: 1.2, give: 0.13, fade: 1.05 },
   brook: { need: 1.0, limit: 3.2, jink: [0.3, 0.5], dash: [3.6, 4.6], up: 1.0, give: 0.15, fade: 1.5 },
   thistle: { need: 0.7, limit: 2.1, jink: [0.12, 0.28], dash: [2.0, 2.8], up: 2.0, give: 0.35, fade: 1.5 },
 };
@@ -296,20 +301,27 @@ export const PRESS_LOOK = 4;
  */
 export const GATHER = { speed: 0.9, after: 0.6, inset: 0.85 };
 /**
- * The board's rare downy: what it hears. Shy of running, it hears running feet
- * from far off and bolts, but lets a walker come close; shy of the bellows, a
- * pull held from further off than `pullNear` makes it bolt, so you creep in.
+ * The board's rare downy is a hunt (the sixth playtest's top fun change; its
+ * "shy of running" one let a walker within 5 m, nearer than a plain clover's 9).
+ * Unlured, it hears a walker from `walk` metres and a runner from `run` (a plain
+ * downy: 9 and 12) and bolts for `bolt` seconds, then drifts back to where it
+ * was seen. It smells its favourite food lying within `smell` metres and goes
+ * to it: lured (going to the food, eating it, and `calm` seconds after) it lets
+ * a walker within `nearWalk` metres and a runner within `nearRun`. Pulled at
+ * unlured, it slips the pull in `slip` seconds.
  */
-export const RARE_SPOOK: Record<Spook, { walk: number; run: number; pullFar: number; pullNear: number }> = {
-  run: { walk: 5, run: 22, pullFar: 0, pullNear: 0 },
-  pull: { walk: 4, run: 12, pullFar: 14, pullNear: 4.5 },
-};
-/** Seconds a spooked rare downy bolts for. */
-export const RARE_BOLT = 3;
+export const RARE_WARY = { walk: 13, run: 20, smell: 12, calm: 9, nearWalk: 3, nearRun: 6, bolt: 3, slip: 1.2 };
+/** A rare one fights the pull harder than its kind: this much longer to bring in, with this share of its kind's give. */
+export const RARE_FIGHT = { need: 1.2, give: 0.9 };
+/** Within this many metres of it the rare one is found, and an arrow comes on over it (before that, only the clue). */
+export const RARE_SEEN = 24;
+/** Its coins: this share of the day's trip, so never more than about the trip's (the sixth playtest's paid 3.8 times it). */
+export const RARE_PAY = 0.75;
+/** An empty Blow still pushes a puff of air: it sends a pest within this many metres in front of you rolling. */
+export const AIR_REACH = 5;
 
-/** A trip for live downies pays about this much more than the plain fluff order beside it; the rare one this much more. */
+/** A trip for live downies pays about this much more than the plain fluff order beside it. */
 export const LIVE_OVER = 1.25;
-export const RARE_OVER = 1.35;
 
 /** A downy's record in the jar for one that came in without one (an older save, a test): as they used to come out. */
 const NO_REC: DownRec = { h: 0.35, c: 0 };
@@ -377,6 +389,37 @@ export function gatherSpot(i: number, id = 2): { x: number; z: number } {
   const r = PEN_R - GATHER.inset;
   const along = ((id % 5) - 2) * 0.3;
   return { x: p.x + dx * r - dz * along, z: p.z + dz * r + dx * along };
+}
+
+/**
+ * Where a downy that got out of pen i waits: just outside the fence on the
+ * lane side, by the post (its gate), spread along the rail by its id.
+ */
+export function strayWait(i: number, id = 0): { x: number; z: number } {
+  const p = PADS[i];
+  let dx = p.px - p.x;
+  let dz = p.pz - p.z;
+  const l = Math.hypot(dx, dz) || 1;
+  dx /= l;
+  dz /= l;
+  const r = PEN_R + 1.3;
+  const along = ((id % 5) - 2) * 0.55;
+  return { x: p.x + dx * r - dz * along, z: p.z + dz * r + dx * along };
+}
+
+/**
+ * Seconds a wild one fights the pull before it breaks free (0: only if the pull lapses). The board's rare one,
+ * pulled at unlured, bolts out of the pull in `RARE_WARY.slip` seconds: it is to be lured, not chased.
+ */
+export function fightLimit(d: Downy): number {
+  const lim = CATCH[d.kind].limit;
+  if (!d.rare || d.tame || d.keep || d.calm > 0 || d.eatT > 0) return lim;
+  return lim > 0 ? Math.min(lim, RARE_WARY.slip) : RARE_WARY.slip;
+}
+
+/** A rare wild one lured by its favourite food: going to it, eating it, or a while after. Then it lets you near. */
+export function rareLured(d: Downy): boolean {
+  return d.calm > 0 || d.eatT > 0 || (!!d.target && !d.target.gone && d.target.drawn === 0);
 }
 
 /** The fluff window's kinds, oldest first, one per fluff (a window set up without them holds n of its kind). */
@@ -815,7 +858,9 @@ export class Sim {
     if (!slot.t || !isDowny(slot.t) || slot.n <= 0) return null;
     const downs = downsOf(slot);
     const k = slot.t;
-    for (let i = downs.length - 1; i >= 0; i--) if (downs[i].rare && this.wantsDowny(k, downs[i].c, true)) return downs[i];
+    // The board's rare one, caught today, first: its order wants it in a pen.
+    const rare = this.s.orders.some((o) => o.state === 'open' && o.rare && o.kind === k && o.got < o.n);
+    for (let i = downs.length - 1; i >= 0; i--) if (rare && downs[i].rare && downs[i].c === this.s.day) return downs[i];
     for (let i = downs.length - 1; i >= 0; i--) if (this.wantsDowny(k, downs[i].c, !!downs[i].rare)) return downs[i];
     return downs[downs.length - 1];
   }
@@ -938,8 +983,10 @@ export class Sim {
             const wildOne = !d.tame && !d.keep;
             if (d.tug === 0 && !d.tame) this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
             if (wildOne && d.strain <= 0) {
-              // The fight starts: it starts fighting at once, in its own way (its next jink comes soon).
+              // The fight starts: it starts fighting at once, in its own way (its next jink comes soon). A rare one
+              // lured when it starts stays lured through it.
               d.strain = 1e-4;
+              if (d.rare && rareLured(d)) d.calm = Math.max(d.calm, need * 3);
               const j = CATCH[d.kind].jink;
               d.hopT = Math.min(d.hopT, j[0] + this.rand() * (j[1] - j[0]) * 0.5);
             }
@@ -1162,7 +1209,7 @@ export class Sim {
       // Your penned downies come only when aimed at directly (no give for thumbs); one already tugging keeps a little more give.
       const inPen = d.tame && d.pen >= 0;
       // A wild one's give is its kind's (a brook is slippery); yours and the porch downy keep the thumb's give.
-      const give = !d.tame && !d.keep ? CATCH[d.kind].give : 0.3;
+      const give = !d.tame && !d.keep ? CATCH[d.kind].give * (d.rare ? RARE_FIGHT.give : 1) : 0.3;
       let tol = inPen ? Math.max(Math.atan2(d.r, dist), 0.035) : Math.max(Math.atan2(d.r + give, dist), 0.07 * (give / 0.3));
       if (d.tug > 0) tol *= 1.3;
       if (ang / tol < bs) {
@@ -1197,7 +1244,7 @@ export class Sim {
   tugNeed(d: Downy): number {
     if (d.tame) return d.pen >= 0 ? PEN_TUG : 0;
     if (d.keep) return 0.35;
-    return CATCH[d.kind].need * (d.wary > 0 ? ESCAPE.waryNeed : 1);
+    return CATCH[d.kind].need * (d.wary > 0 ? ESCAPE.waryNeed : 1) * (d.rare ? RARE_FIGHT.need : 1);
   }
 
   /**
@@ -1269,6 +1316,7 @@ export class Sim {
     d.noPull = GOT_AWAY;
     d.alert = true;
     d.target = null;
+    d.calm = 0;
     let a = Math.atan2(d.z - p.z, d.x - p.x) + (this.rand() - 0.5) * 0.7;
     let sp = 4.6;
     const pond = Math.hypot(d.x - POND.x, d.z - POND.z);
@@ -1308,9 +1356,26 @@ export class Sim {
     const slot = s.slots[s.sel];
     const p = s.player;
     if (!slot.t || slot.n <= 0) {
-      // Nothing aboard: an empty blow still shoves light things about, and says why nothing came out.
+      // Nothing aboard: an empty blow still pushes a puff of air. It sends a pest in front of you rolling (the
+      // sixth playtest's empty Blow at a pest 3.5 m off did nothing but say "Nothing in the jar."), shoves light
+      // things about, and says why nothing came out if it moved no pest.
       this.emit({ t: 'puff', thing: null });
-      if (pressed) this.emit({ t: 'deny', why: 'Nothing in the jar.' });
+      let shooed = false;
+      for (const n of s.nettles) {
+        if (n.gone || n.mode === 'roll') continue;
+        const dx = n.x - aim.ex;
+        const dy = n.y + 0.25 - aim.ey;
+        const dz = n.z - aim.ez;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > AIR_REACH || (dx * aim.dx + dy * aim.dy + dz * aim.dz) / (d || 1) < 0.8) continue;
+        const hl = Math.hypot(dx, dz) || 1;
+        n.mode = 'roll';
+        n.vx = (dx / hl) * 6;
+        n.vz = (dz / hl) * 6;
+        this.emit({ t: 'nettlehit', x: n.x, y: n.y, z: n.z });
+        shooed = true;
+      }
+      if (pressed && !shooed) this.emit({ t: 'deny', why: 'Nothing in the jar.' });
       for (const it of s.items) {
         if (it.gone) continue;
         const dx = it.x - aim.ex;
@@ -1444,17 +1509,24 @@ export class Sim {
 
   private penCounts: number[] = [0, 0, 0, 0, 0, 0];
   private penKinds: number[][] = PADS.map(() => [0, 0, 0, 0]);
+  /** A rare one of yours is in this pen: everyone in it sheds one more fluff a meal. */
+  private penRare: boolean[] = PADS.map(() => false);
+  /** Night: penned downies doze, and their hunger runs slower. */
+  private dozing = false;
 
   private updateDownies(dt: number): void {
     const s = this.s;
     const ds = s.downies;
     this.penCounts.fill(0);
+    this.penRare.fill(false);
     for (const row of this.penKinds) row.fill(0);
     for (const d of ds) {
       if (d.gone || d.pen < 0) continue;
       this.penCounts[d.pen]++;
       this.penKinds[d.pen][KINDS.indexOf(d.kind)]++;
+      if (d.rare && d.tame) this.penRare[d.pen] = true;
     }
+    this.dozing = s.hour >= 21 || s.hour < 5;
     const p = s.player;
     const running = Math.hypot(p.vx, p.vz) > 5.5;
     // While the clock is held for the lessons, your downies' hunger waits with it (penned, loose or on the porch),
@@ -1497,7 +1569,10 @@ export class Sim {
     const kindIdx = KINDS.indexOf(d.kind);
     const company = d.pen >= 0 && this.penKinds[d.pen][kindIdx] > 1;
     // Penned downies settle: their hunger runs a third as fast as out in the open.
-    const rate = (HUNGER_RATE / HOUR) * (wild ? 0.5 : 1) * (d.pen >= 0 ? PEN_HUNGER : 1) * (company ? 0.85 : 1);
+    let rate = (HUNGER_RATE / HOUR) * (wild ? 0.5 : 1) * (d.pen >= 0 ? PEN_HUNGER : 1) * (company ? 0.85 : 1);
+    // A penned one already hungry waits patiently, and at night it dozes: the same meals by day, but a day away
+    // or a night with no feeder no longer starves a pen (the sixth playtest's clovers woke starving after one night).
+    if (d.pen >= 0 && !wild) rate *= (d.hunger >= 0.5 ? PEN_PATIENT : 1) * (this.dozing ? PEN_DOZE : 1);
     const yours = d.tame || d.keep;
     if (!(this.hungerWaits && yours)) d.hunger = Math.min(wild ? 0.7 : 1, d.hunger + rate * dt);
     if (yours && d.hunger > this.hungerCap) d.hunger = this.hungerCap;
@@ -1520,7 +1595,7 @@ export class Sim {
       // One with a time (a brook, a thistle) breaks free when its time runs out, shown on the tug ring; one
       // without (a clover, an ember) when the pull lapses once it was a third of the way in. (The fifth
       // playtest's careless thumb lost all ten brooks to a lapse, each into the pond.)
-      const lim = CATCH[d.kind].limit;
+      const lim = fightLimit(d);
       if ((lim > 0 && d.strain >= lim) || (lim <= 0 && d.tug <= 0 && d.peak >= SHAKE_LOOSE)) this.escape(d);
       else if (d.tug <= 0) {
         d.strain = 0;
@@ -1538,16 +1613,26 @@ export class Sim {
     const pd0 = Math.hypot(d.x - px, d.z - pz);
     const thistle = d.kind === 'thistle';
     let alert = wild && !d.keep && d.drawn === 0 && !d.held && pd0 < (running || thistle || d.wary > 0 ? NOTICE_RUN : NOTICE) && Math.abs(d.y - s.player.y) < (thistle ? 9 : 3);
-    // The board's rare one hears in its own way: shy of running, it hears running feet from far off but lets a
-    // walker come close; shy of the bellows, a pull held from further off than a few metres sends it off.
-    if (wild && d.rare && d.spook) {
-      const sp = RARE_SPOOK[d.spook];
-      alert = d.drawn === 0 && !d.held && pd0 < (d.wary > 0 ? NOTICE_RUN : running ? sp.run : sp.walk) && Math.abs(d.y - s.player.y) < 3;
-      const spooked = (d.spook === 'run' && running && alert) || (d.spook === 'pull' && this.drawing && d.drawn === 0 && !d.held && pd0 < sp.pullFar && pd0 > sp.pullNear);
-      if (spooked && d.bolt <= 0) {
-        d.bolt = RARE_BOLT;
-        if (d.alert) this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
+    // The board's rare one is warier than any: unlured it hears a walker from 13 m (a plain downy, 9) and bolts.
+    // Lured by its favourite food (going to it, eating it, and a while after) it lets you near.
+    if (wild && d.rare) {
+      if (d.calm > 0) d.calm -= dt;
+      const lured = rareLured(d);
+      // Found: once you have been close, the arrow stays on it (fetching food for it does not lose it again).
+      if (pd0 < RARE_SEEN) {
+        const o = s.orders.find((q) => q.state === 'open' && q.rare && q.kind === d.kind);
+        if (o?.rare && !o.rare.seen) o.rare.seen = true;
       }
+      const w = RARE_WARY;
+      alert = d.drawn === 0 && !d.held && pd0 < (lured ? (running ? w.nearRun : w.nearWalk) : running || d.wary > 0 ? w.run : w.walk) && Math.abs(d.y - s.player.y) < 4;
+      if (alert && d.bolt <= 0 && !d.alert) {
+        d.bolt = w.bolt;
+        d.calm = 0;
+        d.target = null;
+        this.emit({ t: 'heard', x: d.x, y: d.y, z: d.z, kind: d.kind });
+      }
+      // Unlured, it keeps bolting while it hears you, faster than you run: chasing it does not work, luring does.
+      if (alert && !lured) d.bolt = Math.max(d.bolt, 0.6);
       // Spooked, it runs until its bolt is spent, however far off you are.
       if (d.bolt > 0 && d.drawn === 0 && !d.held) alert = true;
     }
@@ -1612,9 +1697,9 @@ export class Sim {
             return;
           }
         }
-        // Blown at the crate for an order that wants another (one caught today, or the rare one): say so.
+        // Blown at the crate for an order that wants another (one caught today), or the rare one (it goes in a pen): say so.
         if (d.flyT >= 0 && d.tame && !forCrate && Math.hypot(d.x - CRATE_X, d.z - CRATE_Z) < PULL_R + 0.8) {
-          const why = this.staleNote(d.kind);
+          const why = this.staleNote(d.kind, d.rare);
           if (why) this.emit({ t: 'deny', why });
         }
         d.flyT = -1;
@@ -1644,6 +1729,8 @@ export class Sim {
           d.strayFrom = -1;
           if (was < 0) this.emit({ t: 'penned', pen });
           this.complete('pen');
+          // The board's rare one, caught today, blown into a pen: it fills the order, and stays.
+          if (d.rare && was < 0) this.rarePenned(d, pen);
         }
       }
     }
@@ -1674,7 +1761,9 @@ export class Sim {
     }
     // Hungry or starving, it looks for food it can see, unless something has
     // frightened it or it is busy getting away from you.
-    if (d.hunger > 0.5 && d.eatT <= 0 && d.fright <= 0 && !alert) {
+    // The rare wild one goes to its favourite food whenever it smells some, hungry or not: that is how it is lured.
+    const lure = wild && d.rare;
+    if ((d.hunger > 0.5 || lure) && d.eatT <= 0 && d.fright <= 0 && !alert) {
       const had = !!d.target && !d.target.gone;
       if (!d.target || d.target.gone || d.target.drawn > 0 || this.rand() < dt * 0.5) d.target = this.findFood(d);
       // Just spotted it: no more slow hungry bouncing, off it goes.
@@ -1783,8 +1872,9 @@ export class Sim {
       }
       tx = d.x + Math.cos(a) * far;
       tz = d.z + Math.sin(a) * far;
-      // A bolting wild one settles where it fled to, rather than hopping back past you to where it was.
-      if (d.bolt > 0 && !d.tame) {
+      // A bolting wild one settles where it fled to, rather than hopping back past you to where it was
+      // (the board's rare one drifts back to where it was seen, so the clue stays true).
+      if (d.bolt > 0 && !d.tame && !d.rare) {
         d.homeX = tx;
         d.homeZ = tz;
       }
@@ -1805,9 +1895,27 @@ export class Sim {
       tz = p.z + Math.sin(a) * rr;
     } else if (!d.tame) {
       const a = r() * Math.PI * 2;
-      const rr = Math.sqrt(r()) * (d.keep ? 3 : 6);
+      const rr = Math.sqrt(r()) * (d.keep ? 3 : d.rare ? 3.5 : 6);
       tx = d.homeX + Math.cos(a) * rr;
       tz = d.homeZ + Math.sin(a) * rr;
+    } else if (d.strayFrom >= 0 && this.s.pads[d.strayFrom]?.kind === 'pen') {
+      // One of yours out of its pen waits by the pen's gate, beside the post, rather than wandering off into the
+      // meadow (the sixth playtest's day of trips left 15 of 19 loose).
+      const w = strayWait(d.strayFrom, d.id);
+      const pc = PADS[d.strayFrom];
+      // Round the pen, not into its fence: from the far side it works its way round towards the gate.
+      const ad = Math.atan2(d.z - pc.z, d.x - pc.x);
+      const off = angleTo(ad, Math.atan2(w.z - pc.z, w.x - pc.x));
+      const a = r() * Math.PI * 2;
+      const near = Math.hypot(w.x - d.x, w.z - d.z) < 1.5;
+      if (Math.abs(off) > 0.7) {
+        const step = ad + Math.sign(off) * 0.7;
+        tx = pc.x + Math.cos(step) * (PEN_R + 1.4);
+        tz = pc.z + Math.sin(step) * (PEN_R + 1.4);
+      } else {
+        tx = near ? w.x + Math.cos(a) * 0.8 : w.x;
+        tz = near ? w.z + Math.sin(a) * 0.8 : w.z;
+      }
     } else {
       const a = r() * Math.PI * 2;
       tx = d.x + Math.cos(a) * 2.5;
@@ -1821,8 +1929,10 @@ export class Sim {
       tx = d.x + (ax / l) * 4;
       tz = d.z + (az / l) * 4;
     }
-    // Frightened, crowded or long neglected, with no food to go to: quick hops anywhere (inside the fence, if only frightened).
-    if (fraz && !toFood && !flee) {
+    // Frightened, crowded or long neglected, with no food to go to: quick hops anywhere (inside the fence, if only
+    // frightened). One that is out of its pen keeps to its gate.
+    const waiting = d.tame && d.pen < 0 && d.strayFrom >= 0;
+    if (fraz && !toFood && !flee && !waiting) {
       if (scaredIn) {
         const p = PADS[d.pen];
         const a = r() * Math.PI * 2;
@@ -1847,10 +1957,10 @@ export class Sim {
     // Bolting (a thistle that has noticed you, or one that just got away): long, flat, fast leaps.
     const bolting = flee && d.bolt > 0;
     // Only a crowded or long-neglected downy hops high enough to clear a low fence, and never on its way to food.
-    const h = bolting ? 0.9 : d.kind === 'thistle' ? base * (fraz ? 1.3 : 1) : toFood || flee || scaredIn ? base : fraz ? base * 2.3 : hungry ? base * 0.72 : base;
+    const h = bolting ? 0.9 : d.kind === 'thistle' ? base * (fraz ? 1.3 : 1) : toFood || flee || scaredIn || waiting ? base : fraz ? base * 2.3 : hungry ? base * 0.72 : base;
     const vy = Math.sqrt(2 * G_DOWNY * h);
     const air = (2 * vy) / G_DOWNY;
-    const cap = bolting ? (d.kind === 'thistle' ? BOLT_SPEED * 1.6 : 4) : toFood ? (starving ? 2.4 : 1.9) : flee ? 2.2 : scaredIn ? 2.4 : fraz || d.kind === 'thistle' ? 2.8 : 1.8;
+    const cap = bolting ? (d.kind === 'thistle' || (d.rare && !d.tame) ? BOLT_SPEED * 1.6 : 4) : toFood ? (starving ? 2.4 : 1.9) : flee ? 2.2 : scaredIn ? 2.4 : fraz || d.kind === 'thistle' ? 2.8 : 1.8;
     const hs = Math.min(dist / air, cap);
     d.vx = dx * hs;
     d.vz = dz * hs;
@@ -1863,11 +1973,16 @@ export class Sim {
     if (d.mood === 'content' && r() < 0.2) this.emit({ t: 'chirp', x: d.x, y: d.y, z: d.z, kind: d.kind });
   }
 
+
   private findFood(d: Downy): Item | null {
     let best: Item | null = null;
-    let bd = 10;
+    // The rare wild one smells its favourite food from further off, and only that.
+    const lure = d.rare && !d.tame;
+    const fav = wantedFood(d.kind);
+    let bd = lure ? RARE_WARY.smell : 10;
     for (const it of this.s.items) {
-      if (it.gone || it.drawn > 0 || !isFood(it.type) || !eats(d.kind, it.type)) continue;
+      // (Only food you blew or tipped out lures it: what grows wild about its spot does not.)
+      if (it.gone || it.drawn > 0 || !isFood(it.type) || !eats(d.kind, it.type) || (lure && (it.type !== fav || !it.blown))) continue;
       // Food still flying from a blow is not food yet; food just dropping (a feeder, a crop) is.
       if (!it.grounded && !it.rest && it.flyT >= 0) continue;
       // Penned downies only see food inside their pen.
@@ -1891,6 +2006,8 @@ export class Sim {
     d.starveT = 0;
     d.sinceFed = 0;
     s.stats.fed++;
+    // The rare wild one, lured: it eats, then lets you near for a while.
+    if (d.rare && !d.tame) d.calm = RARE_WARY.calm;
     const fav = favourite(d.kind, food);
     // However hungry it was, a meal makes fluff. Only fright and a crowded pen stop it, and only a downy
     // you keep makes any: a wild one's meal makes none, so sweeping the meadow is no way to get rich.
@@ -1898,6 +2015,8 @@ export class Sim {
     if (d.fright <= 0 && !crowded && (d.tame || d.keep)) {
       let n = fav ? 2 : 1;
       if (d.kind === 'brook' && d.pen >= 0 && s.pads[d.pen].ups.includes('trough')) n++;
+      // A rare one of yours in the pen: everyone in it sheds one more, for good (the hunt's lasting reward).
+      if (d.pen >= 0 && this.penRare[d.pen]) n++;
       d.shedQ = n;
       d.shedT = 0.75;
     }
@@ -2370,9 +2489,12 @@ export class Sim {
       }
       const ox = n.x;
       const oz = n.z;
+      const sp0 = Math.hypot(n.vx, n.vz);
       n.x += n.vx * dt;
       n.z += n.vz * dt;
-      const blocked = this.phys.collide(n, ox, oz, 'nettle');
+      // Blocked only when it got well short of where it was going: brushing along a wall is not being blocked (a
+      // pest touching a wall took every step for a new detour along it, and slid along the wall into a corner).
+      const blocked = this.phys.collide(n, ox, oz, 'nettle') && Math.hypot(n.x - ox, n.z - oz) < sp0 * dt * 0.6;
       if (blocked && n.mode !== 'roll') {
         // Blocked again mid-step: try the other side.
         if ((n.detourT ?? 0) > 0) n.detourSide = -(n.detourSide ?? 1);
@@ -2391,6 +2513,25 @@ export class Sim {
         if ((n.mode === 'leave' || n.mode === 'flee') && Math.hypot(n.x - p.x, n.z - p.z) > 8) n.gone = true;
         else if (n.mode === 'roam') n.modeT = 0;
       }
+      // A roaming pest that has got nowhere for a while (sliding along a fence into a corner: the sixth playtest's
+      // sat in the ranch's north-east corner for over a game hour) heads off somewhere else, out of the corner.
+      // (wT counts up to the check; after giving up on a spot it counts up from below zero, treats ignored meanwhile.)
+      if (n.mode === 'roam') {
+        n.wT = (n.wT ?? 0) + dt;
+        if (n.wx === undefined || n.wz === undefined || n.wT <= dt) {
+          if (n.wT >= 0 && n.wT <= dt) {
+            n.wx = n.x;
+            n.wz = n.z;
+          }
+        }
+        if (n.wT >= 6) {
+          const got = Math.hypot(n.x - (n.wx ?? n.x), n.z - (n.wz ?? n.z));
+          n.wx = n.x;
+          n.wz = n.z;
+          n.wT = 0;
+          if (got < 1.5 && Math.hypot(n.tx - n.x, n.tz - n.z) > 1.2) this.unstick(n);
+        }
+      } else n.wT = 0;
       n.y = this.phys.floor(n.x, n.z);
       // Frighten downies that can see it; eat down lying about.
       for (const d of s.downies) {
@@ -2420,14 +2561,37 @@ export class Sim {
     this.danger = clamp(Math.max(danger, fraz > 0 ? 0.35 : 0), 0, 1);
   }
 
+  /** A roaming pest stuck in a corner: somewhere else to go, back towards the open middle of the ranch, and a few steps that way first. */
+  private unstick(n: Nettle): void {
+    const s = this.s;
+    const open = s.pads.map((p, i) => ({ p, i })).filter(({ p }) => p.kind === 'pen' && !p.ups.includes('hedge'));
+    // A pen further from here than the corner it is in, or the lane between the rows.
+    const far = open.filter(({ i }) => Math.hypot(PADS[i].x - n.x, PADS[i].z - n.z) > 8);
+    if (far.length) {
+      const at = PADS[far[Math.floor(this.rand() * far.length) % far.length].i];
+      n.tx = at.x + (this.rand() - 0.5) * 3;
+      n.tz = at.z + (this.rand() - 0.5) * 3;
+    } else {
+      n.tx = 6 + this.rand() * 16;
+      n.tz = 33 + this.rand() * 4;
+    }
+    n.modeT = 10 + this.rand() * 6;
+    n.detourYaw = Math.atan2(n.tx - n.x, n.tz - n.z);
+    n.detourT = 1.5;
+    // Treats are ignored for a while (one beyond a fence held it there), and the check starts over after that.
+    n.wT = -12;
+  }
+
   private nettleAim(n: Nettle): void {
     const s = this.s;
-    // Down on the ground nearby is a treat.
+    // Down on the ground nearby is a treat, if it can get there: not beyond the valley's walls, and not while it
+    // has given up on one it could not reach.
     let best = 8;
     let tx = NaN;
     let tz = NaN;
     for (const it of s.items) {
-      if (it.gone || !isTuft(it.type) || !it.grounded) continue;
+      if ((n.wT ?? 0) < 0 || it.gone || !isTuft(it.type) || !it.grounded) continue;
+      if (it.x > HOLLOW_X !== n.x > HOLLOW_X || it.x < RIDGE_X !== n.x < RIDGE_X) continue;
       const d = Math.hypot(it.x - n.x, it.z - n.z);
       if (d < best) {
         best = d;
@@ -2501,7 +2665,7 @@ export class Sim {
             fd.n += add;
             yieldN -= add;
             const h = padSpots(run).hopper;
-            this.emit({ t: 'store', x: h.x, y: this.phys.floor(h.x, h.z) + h.y, z: h.z, where: 'feeder', pad: run });
+            this.emit({ t: 'store', x: h.x, y: this.phys.floor(h.x, h.z) + h.y, z: h.z, where: 'feeder', pad: run, auto: true });
             if (yieldN <= 0) {
               p.grow = 0;
               this.emit({ t: 'crop', pad: i });
@@ -2522,6 +2686,19 @@ export class Sim {
               s.items.push(it);
             }
             this.emit({ t: 'crop', pad: i });
+          } else {
+            // The bed is full: a pen with a feeder beside it on the row takes the crop (a garden fills a feeder
+            // over time; the sixth playtest's garden banked 12 against a feeder of 60). A feed run sends it all.
+            const next = this.runTarget(i);
+            if (next >= 0) {
+              const fd = s.pads[next].feeder;
+              fd.t = p.crop;
+              fd.n = Math.min(FEEDER_CAP, fd.n + yieldN);
+              p.grow = 0;
+              const h = padSpots(next).hopper;
+              this.emit({ t: 'store', x: h.x, y: this.phys.floor(h.x, h.z) + h.y, z: h.z, where: 'feeder', pad: next, auto: true });
+              this.emit({ t: 'crop', pad: i });
+            }
           }
         }
       } else if (p.kind === 'pen' && p.ups.includes('feeder')) {
@@ -2725,25 +2902,48 @@ export class Sim {
   }
 
   /**
-   * The open live order a downy of this kind would go to: one caught today
-   * (the fifth playtest filled its live orders from its own pens, so the trip
-   * out could be skipped), or for the board's rare order, the rare one.
+   * The open live order a downy of this kind would go to at the crate: one
+   * caught today (the fifth playtest filled its live orders from its own pens,
+   * so the trip out could be skipped). The board's rare one goes in a pen, not
+   * the crate (see rarePenned).
    */
-  private liveFor(k: DownyKind, caught: number, rare: boolean): Order | undefined {
+  private liveFor(k: DownyKind, caught: number, _rare = false): Order | undefined {
     const s = this.s;
-    return s.orders.find((q) => q.state === 'open' && q.live && q.kind === k && q.got < q.n && (q.rare ? rare : caught === s.day));
+    return s.orders.find((q) => q.state === 'open' && q.live && !q.rare && q.kind === k && q.got < q.n && caught === s.day);
   }
 
-  /** Is there an open live order a downy of this kind (caught on that day, rare or not) would go to? */
+  /** Is there an open live order a downy of this kind (caught on that day) would go to at the crate? */
   wantsDowny(k: DownyKind, caught = this.s.day, rare = false): boolean {
     return !!this.liveFor(k, caught, rare);
   }
 
-  /** Why the crate would not take a downy of this kind for today's order, or '' if no open order wants the kind. */
-  staleNote(k: DownyKind): string {
-    const o = this.s.orders.find((q) => q.state === 'open' && q.live && q.kind === k && q.got < q.n);
-    if (!o) return '';
-    return o.rare ? `The order wants the ${RARE_NAME[k]}.` : 'The order wants one caught today.';
+  /** Why the crate would not take a downy blown at it for today's order, or '' if no open order wants the kind. */
+  staleNote(k: DownyKind, rare = false): string {
+    if (rare && this.s.orders.some((q) => q.state === 'open' && q.rare && q.kind === k && q.got < q.n)) return 'Blow it into a pen. It stays.';
+    const o = this.s.orders.find((q) => q.state === 'open' && q.live && !q.rare && q.kind === k && q.got < q.n);
+    return o ? 'The order wants one caught today.' : '';
+  }
+
+  /**
+   * The board's rare one, caught today, comes down in one of your pens: it
+   * fills the order and pays its coins (capped at about the trip's), and stays,
+   * its pen shedding more for good (the sixth playtest's paid 2,680 coins in
+   * the crate and was gone).
+   */
+  private rarePenned(d: Downy, pen: number): void {
+    const s = this.s;
+    if (d.caught !== s.day) return;
+    const o = s.orders.find((q) => q.state === 'open' && q.rare && q.kind === d.kind && q.got < q.n);
+    if (!o) return;
+    o.got = 1;
+    o.paid = o.pay;
+    s.coins += o.pay;
+    s.earned += o.pay;
+    s.stats.live = (s.stats.live ?? 0) + 1;
+    const at = PADS[pen];
+    this.emit({ t: 'deliver', x: d.x, y: d.y, z: d.z, kind: d.kind, coins: o.pay, rare: true });
+    this.fill(o);
+    this.emit({ t: 'order', kind: d.kind, live: true, got: 1, n: 1, state: 'filled', bonus: o.pay, x: at.x, z: at.z, rare: true });
   }
 
   /**
@@ -2752,7 +2952,7 @@ export class Sim {
    * time left, 1 down to 0; -1 for one with no time limit.
    */
   tugLeft(d: Downy): number {
-    const lim = CATCH[d.kind].limit;
+    const lim = fightLimit(d);
     if (d.tame || d.keep || lim <= 0 || d.strain <= 0) return -1;
     return clamp(1 - d.strain / lim, 0, 1);
   }
@@ -2931,24 +3131,27 @@ export class Sim {
         out.push({ kind: lk, live: true, n, got: 0, paid: 0, mult: 2, pay: LIVE_EACH[lk], state: 'offer' });
       }
     }
-    // The rare one (the fifth playtest's top fun change): one sought-after wild downy, seen at a landmark and shy
-    // of one thing, paying more than the other orders, gone at dusk. The offers differ in kind, not size: a day at
-    // home tending, a trip for downies caught today, or a hunt (the fifth playtest's second fluff order of another
-    // kind was the first again in other numbers: 360, 380 and 363).
+    // The rare one, a hunt (the sixth playtest's top fun change): one sought-after wild downy, seen at a landmark,
+    // warier than any other and lured with its favourite food. Penned, it stays and its pen sheds more for good;
+    // its coins are three quarters of the day's trip, never more (the sixth playtest's paid 3.8 times the trip).
+    // The offers differ in kind, not size: a day at home tending, a trip for downies caught today, or a hunt.
     if (left >= 4) {
       const open = this.liveKinds();
       const live = out.find((o) => o.live);
       const rk = this.pickWeighted(open, (k) => (1 + this.stale(k, 'rare')) * (live && k === live.kind && open.length > 1 ? 0.3 : 1));
       const spots = SIGHTINGS.map((q, i) => ({ q, i })).filter((o) => o.q.kind === rk);
       if (rk && spots.length) {
-        const spot = spots[Math.floor(this.rand() * spots.length) % spots.length].i;
-        const spook: Spook = this.rand() < 0.5 ? 'run' : 'pull';
-        // More than the fluff order pays (by a third or so), a little more than the trip for downies (it is one
-        // catch, but a hunt: one downy, where it was seen, shy of something).
-        const fl = out.find((o) => !o.live);
-        const best = Math.max(fl ? fl.pay * RARE_OVER : 0, live ? live.n * live.pay * 1.05 : 0);
-        const pay = Math.max(LIVE_EACH[rk] * 3, Math.round(best / 5) * 5);
-        out.push({ kind: rk, live: true, n: 1, got: 0, paid: 0, mult: 2, pay, state: 'offer', rare: { spot, spook } });
+        // Never where it was seen the morning before, and a place not seen lately more often (the sixth playtest's
+        // came up at the same landmark two mornings running, twice).
+        const ago = (i: number) => {
+          for (let j = s.orderLog.length - 1; j >= 0; j--) if (s.orderLog[j].rare && s.orderLog[j].spot === i) return s.day - s.orderLog[j].day;
+          return 6;
+        };
+        const at = this.pickWeighted(spots, (o) => (ago(o.i) <= 1 ? 0 : Math.min(6, ago(o.i)))) ?? spots[Math.floor(this.rand() * spots.length) % spots.length];
+        // Three quarters of the trip's, never less than one downy of its kind would fetch, never more than the trip.
+        const trip = live ? live.n * live.pay : LIVE_EACH[rk] * 3;
+        const pay = Math.min(trip, Math.max(LIVE_EACH[rk], Math.round((trip * RARE_PAY) / 5) * 5));
+        out.push({ kind: rk, live: true, n: 1, got: 0, paid: 0, mult: 2, pay, state: 'offer', rare: { spot: at.i } });
       }
     }
     return out;
@@ -2962,15 +3165,18 @@ export class Sim {
     const s = this.s;
     if (!force && (s.orderDay >= s.day || s.hour < ORDER_POST[0] || s.hour >= ORDER_POST[1])) return;
     s.orderDay = s.day;
-    s.orders = this.offerOrders();
-    this.logOffers();
+    // An order still open from yesterday (the first order runs to the next dusk) stays beside the new offers.
+    const kept = s.orders.filter((o) => o.state === 'open' && (o.until ?? 0) >= s.day);
+    const fresh = this.offerOrders();
+    s.orders = [...kept, ...fresh];
+    this.logOffers(fresh);
   }
 
   /** Remember what the board offered today (it asks for what it has not asked for lately), and say so. */
-  private logOffers(): void {
+  private logOffers(list: Order[]): void {
     const s = this.s;
-    for (const o of s.orders) {
-      s.orderLog.push({ kind: o.kind, live: !!o.live, day: s.day, ...(o.rare ? { rare: true } : {}) });
+    for (const o of list) {
+      s.orderLog.push({ kind: o.kind, live: !!o.live, day: s.day, ...(o.rare ? { rare: true, spot: o.rare.spot } : {}) });
       this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: 0, n: o.n, state: 'posted', bonus: 0, x: CRATE_X, z: CRATE_Z });
     }
     if (s.orderLog.length > 16) s.orderLog.splice(0, s.orderLog.length - 16);
@@ -2979,17 +3185,19 @@ export class Sim {
   /**
    * The first order, as soon as the loop lesson ends (the fourth playtest's
    * came the next dawn, twenty real minutes on, while the journal asked for
-   * one): four fluff of the kind you keep most, if there is time before dusk.
+   * one): four fluff of the kind you keep most. It runs until the next day's
+   * dusk (the sixth playtest's was taken at 17:38, the garden and dusk lessons
+   * took the page, and it lapsed at 19:00, 40 real seconds later).
    */
   private postFirst(): void {
     const s = this.s;
-    if (s.hour >= 17.5 || s.hour < ORDER_POST[0]) return;
     const kept = this.kept();
     const k = KINDS.reduce((a, b) => (kept[b] > kept[a] ? b : a), 'clover' as DownyKind);
     if (kept[k] <= 0) return;
     s.orderDay = s.day;
-    s.orders = [{ kind: k, n: 4, got: 0, paid: 0, mult: 2, pay: 4 * this.price(k), state: 'offer' }];
-    this.logOffers();
+    // Posted after midnight (a late loop), it is the morning's: it runs to that dusk and the next.
+    s.orders = [{ kind: k, n: 4, got: 0, paid: 0, mult: 2, pay: 4 * this.price(k), state: 'offer', until: s.day + 1 }];
+    this.logOffers(s.orders);
   }
 
   /**
@@ -2999,9 +3207,11 @@ export class Sim {
   takeOrder(i: number): boolean {
     const s = this.s;
     const o = this.offers()[i];
-    if (!o || s.hour >= ORDER_BY) return false;
+    if (!o || (s.hour >= ORDER_BY && (o.until ?? s.day) <= s.day)) return false;
     o.state = 'open';
-    s.orders = [o];
+    o.until ??= s.day;
+    // The others on offer are wiped off; an order still open from yesterday stays.
+    s.orders = s.orders.filter((q) => q === o || q.state === 'open');
     if (o.rare) this.spawnRare(o);
     this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: 0, n: o.n, state: 'taken', bonus: 0, x: CRATE_X, z: CRATE_Z });
     return true;
@@ -3032,7 +3242,6 @@ export class Sim {
     d.homeZ = sp.z;
     d.hunger = 0.2;
     d.rare = true;
-    d.spook = o.rare.spook;
     s.downies.push(d);
     return d;
   }
@@ -3046,12 +3255,13 @@ export class Sim {
    * The words for an offer on its tag: what it wants, and what the order pays
    * (a fluff order on top of its fluff's sales, so "168 more" beside a trip's
    * "165" no longer reads as the same money; the fifth playtest misread it).
+   * The rare one's says where it was seen, what it pays, and that it stays.
    */
   offerTag(o: Order): { title: string; note: string } {
     const name = KIND[o.kind].name.replace(' downy', '');
     if (o.rare) {
       const r = RARE_NAME[o.kind];
-      return { title: `${r[0].toUpperCase()}${r.slice(1)} downy`, note: `By ${SIGHTINGS[o.rare.spot].name}, ${SPOOK_NOTE[o.rare.spook]}. Pays ${fmtCoins(o.pay)}` };
+      return { title: `${r[0].toUpperCase()}${r.slice(1)} downy`, note: `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
     }
     if (o.live) return { title: `${o.n} ${name} downies`, note: `Caught today. Pays ${fmtCoins(o.n * o.pay)}` };
     return { title: `${o.n} ${name} fluff`, note: `Pays ${fmtCoins(o.pay)} on top of sales` };
@@ -3063,14 +3273,20 @@ export class Sim {
     if (!this.knows('orders')) return;
     if (s.orderDay === 0) this.postFirst();
     this.postOrders();
+    // An order goes at dusk on its last day: the day it was posted (the first order, the next day).
+    const over = (o: Order) => {
+      const until = o.until ?? s.orderDay;
+      return s.day > until || (s.day === until && s.hour >= ORDER_BY);
+    };
+    for (const o of s.orders) {
+      if (o.state !== 'open' || !over(o)) continue;
+      o.state = 'missed';
+      this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: o.got, n: o.n, state: 'missed', bonus: 0, x: CRATE_X, z: CRATE_Z });
+    }
     if (s.hour >= ORDER_BY || s.hour < ORDER_POST[0]) {
-      for (const o of s.orders) {
-        if (o.state !== 'open') continue;
-        o.state = 'missed';
-        this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: o.got, n: o.n, state: 'missed', bonus: 0, x: CRATE_X, z: CRATE_Z });
-      }
-      // Offers nobody took go with the day, and so does the rare one, if it was not caught.
-      if (s.orders.some((o) => o.state === 'offer')) s.orders = s.orders.filter((o) => o.state !== 'offer');
+      // Offers nobody took go with their day, and so does the rare one, if it was not caught.
+      const going = (o: Order) => o.state === 'offer' && over(o);
+      if (s.orders.some(going)) s.orders = s.orders.filter((o) => !going(o));
       for (const d of s.downies) if (!d.gone && d.rare && !d.tame) d.gone = true;
     }
   }

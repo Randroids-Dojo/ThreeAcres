@@ -5,6 +5,10 @@
 // a little from the frame before the blow. A run with no blow measures the
 // drift of clouds and seed fluff, and a control replays the old puff (12 big,
 // growing, half-opaque wisps) so the scan is shown to see a cloud at all.
+// Round 6: a pest sent rolling threw up a cream cloud (the building dust) that
+// hid it after one blow at 3.5 m. With the sim held still (&freeze), a pest
+// 3.5 m off at 11 pm and at noon: the share of its screen box that changes in
+// the half second after the hit's effect, against a replay of the old dust.
 //   node scripts/ranch-blow-cloud.mjs [url]      (or RANCH_URL)
 import { launch, openRanch, frames, checker } from './ranch-lib.mjs';
 
@@ -94,6 +98,85 @@ check('the sky alone barely changes', still.peak < 0.03, `${(still.peak * 100).t
 check('a blow now hides at most a fifth of the aim area', now.peak <= 0.2, `${(now.peak * 100).toFixed(0)}% (old ${(old.peak * 100).toFixed(0)}%)`);
 check('and never for long', now.long <= 0.1, `${now.long.toFixed(2)} s over 20% (old ${old.long.toFixed(2)} s)`);
 check('no console errors', problems.length === 0, problems.slice(0, 3).join(' | '));
+
+// A pest hit: what the game draws when one is sent rolling, over the pest's own box.
+const pest = await openRanch(b, { width: 412, height: 915, dpr: 2, touch: true, query: 'touch&freeze' });
+const pp = pest.page;
+await pp.evaluate(() => {
+  window.__hit = { on: false, ref: null, cover: [], box: null };
+  window.ranch.debug.afterFrame = (gl) => {
+    const c = window.__hit;
+    if (!c.on || !c.box) return;
+    const k = gl.drawingBufferWidth / innerWidth;
+    const q = c.box;
+    const x0 = Math.max(0, Math.round(q.x0 * k));
+    const x1 = Math.min(gl.drawingBufferWidth, Math.round(q.x1 * k));
+    const y0 = Math.max(0, Math.round(gl.drawingBufferHeight - q.y1 * k));
+    const y1 = Math.min(gl.drawingBufferHeight, Math.round(gl.drawingBufferHeight - q.y0 * k));
+    const w = x1 - x0;
+    const h = y1 - y0;
+    const buf = new Uint8Array(w * h * 4);
+    gl.readPixels(x0, y0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    if (!c.ref) {
+      c.ref = buf.slice();
+      return;
+    }
+    let n = 0;
+    for (let i = 0; i < buf.length; i += 4) if (Math.abs(buf[i] - c.ref[i]) + Math.abs(buf[i + 1] - c.ref[i + 1]) + Math.abs(buf[i + 2] - c.ref[i + 2]) > 30) n++;
+    c.cover.push({ t: performance.now(), f: n / (w * h) });
+  };
+});
+async function hit(hour, how) {
+  await pp.evaluate((hour) => {
+    const r = window.ranch;
+    const sim = r.sim;
+    const s = sim.s;
+    s.hour = hour;
+    s.downies = s.downies.filter((d) => d.keep);
+    s.items = s.items.filter((i) => i.rest);
+    const p = s.player;
+    p.x = -8;
+    p.z = -10;
+    p.y = sim.phys.floor(p.x, p.z);
+    const nx = -8;
+    const nz = -13.5;
+    const ny = sim.phys.floor(nx, nz);
+    s.nettles = [{ id: 9001, x: nx, y: ny, z: nz, vx: 0, vy: 0, vz: 0, r: 0.35, grounded: true, yaw: 0, mode: 'roam', modeT: 99, tx: nx, tz: nz, bristle: 0, roll: 0, gone: false, snuffT: 99 }];
+    r.aimAt(nx, ny + 0.4, nz);
+  }, hour);
+  await frames(pp, 40);
+  await pp.evaluate(() => {
+    const r = window.ranch;
+    const n = r.sim.s.nettles[0];
+    const pts = [[n.x - 0.4, n.y + 0.02], [n.x + 0.4, n.y + 0.02], [n.x + 0.4, n.y + 0.55], [n.x - 0.4, n.y + 0.55]].map(([x, y]) => r.project(x, y, n.z + 0.3));
+    window.__hit.box = { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
+    Object.assign(window.__hit, { on: true, ref: null, cover: [] });
+  });
+  await frames(pp, 2);
+  const t0 = await pp.evaluate((how) => {
+    const r = window.ranch;
+    const n = r.sim.s.nettles[0];
+    // The game's own handling of a hit (its sound and its puff), or a replay of the old cream dust (the control).
+    if (how === 'game') r.sim.events.push({ t: 'nettlehit', x: n.x, y: n.y, z: n.z });
+    else if (how === 'old') r.fx.dust(n.x, n.y, n.z, 0.3);
+    return performance.now();
+  }, how);
+  await frames(pp, 45);
+  const cover = await pp.evaluate((t0) => {
+    const c = window.__hit;
+    c.on = false;
+    return c.cover.filter((q) => q.t >= t0 && q.t <= t0 + 500).map((q) => q.f);
+  }, t0);
+  const peak = Math.max(...cover);
+  const mean = cover.reduce((a, q) => a + q, 0) / Math.max(1, cover.length);
+  console.log(`   a pest hit at ${hour}:00, ${how === 'game' ? 'as the game draws it' : how === 'old' ? 'the old dust (control)' : 'nothing (grass and fluff drifting)'}: peak ${(peak * 100).toFixed(1)}% of its box changed, mean ${(mean * 100).toFixed(1)}% over 0.5 s`);
+  return { peak, mean };
+}
+const hits = {};
+for (const hour of [23, 12]) for (const how of ['none', 'old', 'game']) hits[`${hour}-${how}`] = await hit(hour, how);
+check('the scan sees a cloud over a pest: the old dust hides much of it (control)', hits['23-old'].peak > 0.3 && hits['12-old'].peak > 0.3, `${(hits['23-old'].peak * 100).toFixed(0)}% at night, ${(hits['12-old'].peak * 100).toFixed(0)}% by day`);
+check('a pest sent rolling stays in sight: its hit changes at most 15% of its box, night or day (the old dust 60% or more)', hits['23-game'].peak <= 0.15 && hits['12-game'].peak <= 0.15, `${(hits['23-game'].peak * 100).toFixed(1)}% at night, ${(hits['12-game'].peak * 100).toFixed(1)}% by day; still ${(hits['23-none'].peak * 100).toFixed(1)}% and ${(hits['12-none'].peak * 100).toFixed(1)}%`);
+check('no console errors (pest page)', pest.problems.length === 0, pest.problems.slice(0, 3).join(' | '));
 await b.close();
 console.log(failed() ? `BLOW CLOUD FAILED (${failed()})` : 'BLOW CLOUD OK');
 process.exit(failed() ? 1 : 0);

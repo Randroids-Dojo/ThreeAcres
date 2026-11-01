@@ -343,20 +343,21 @@ const boardTags = await page.evaluate(() => {
   return opts.map((o) => ({ id: o.id, title: o.title, note: o.note, fit: r.tagLayout(o.title, o.price, o.note).fits }));
 });
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
-check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+, shy of (running|the bellows)\. Pays [\d,]+)$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
-// Every rare downy's tag fits, wherever it was seen and whatever spooks it.
+// Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
+check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, and stays)$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Every rare downy's tag fits, wherever it was seen, at the most it can pay (three quarters of a five-brook trip).
 const rareTags = await page.evaluate(() => {
   const r = window.ranch;
   const out = [];
   r.sim.s.gates.ridge = r.sim.s.gates.hollow = true;
-  for (let spot = 0; spot < 7; spot++) for (const spook of ['run', 'pull']) {
+  for (let spot = 0; spot < 7; spot++) {
     const kind = ['clover', 'clover', 'clover', 'ember', 'ember', 'brook', 'brook'][spot];
-    const tg = r.sim.offerTag({ kind, live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 1240, state: 'offer', rare: { spot, spook } });
+    const tg = r.sim.offerTag({ kind, live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 525, state: 'offer', rare: { spot } });
     out.push({ ...tg, fit: r.tagLayout(tg.title, null, tg.note).fits });
   }
   return out;
 });
-check("every rare downy's tag fits: its name, where it was seen, what spooks it and its pay", rareTags.every((t) => t.fit), JSON.stringify(rareTags.filter((t) => !t.fit)));
+check("every rare downy's tag fits: its name, where it was seen, its pay and that it stays", rareTags.length === 7 && rareTags.every((t) => t.fit), JSON.stringify(rareTags.filter((t) => !t.fit)));
 await b.close();
 
 // =================================================================== tags on the phone, played with real touch

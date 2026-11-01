@@ -3,7 +3,7 @@
 // moment, catching, can't be failed"), as tests on the render-free sim and
 // tutor. Each test here fails on the code the tester played (proved on a
 // `git archive` copy of that commit).
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BUILD_COST, FEEDER_CAP, GOALS, HOUR, PEN_MAX, type DownyKind } from '../src/games/ranch/defs';
 import { Tutor, allLines, goalSpot, goalText, orderLines, type Say } from '../src/games/ranch/lessons';
 import { ESCAPE, Sim, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
@@ -11,6 +11,9 @@ import { newItem } from '../src/games/ranch/state';
 import { BOARD, GATES, PADS, PEN_R, POND, RIDGE_TOP } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
 import { CAREFUL, CARELESS, catchRate } from '../scripts/ranch-catch';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {
@@ -508,13 +511,13 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
 
 describe('P2: leaving the ranch is fine once you have invested, and the gardens keep up', () => {
   it('a feed run sends a garden\'s crop into the next pen\'s feeder: a pen of six left alone for ten minutes stays fed and in', () => seeds(2, () => {
-    const away = (run: boolean) => {
+    const away = (run: boolean, crop = true) => {
       const sim = quiet(6);
       // (No pests: this is about food. The clock runs.)
       sim.teaching = true;
       sim.s.learn = ['time'];
       const s = sim.s;
-      s.pads[0].crop = 'cloverhead';
+      s.pads[0].crop = crop ? 'cloverhead' : null;
       s.pads[0].grow = 0;
       s.pads[0].ups = run ? ['run'] : [];
       pen(sim, 1, ['feeder']);
@@ -536,9 +539,12 @@ describe('P2: leaving the ranch is fine once you have invested, and the gardens 
     expect(yes.stored).toBeGreaterThan(5);
     expect(yes.out).toBe(false);
     expect(yes.fraz).toBe(false);
-    // The control: the same pen with its garden but no feed run starves and goes over the fence.
-    const no = away(false);
+    // The control: the same pen with no food growing beside it starves and goes over the fence. (Round 6: a bare
+    // garden with its bed full now tips its crop into the feeder next door too, so the old control, a garden without
+    // a feed run, keeps the pen in.)
+    const no = away(false, false);
     expect(no.out).toBe(true);
+    expect(away(false).out).toBe(false);
     expect(FEEDER_CAP).toBeGreaterThanOrEqual(60);
   }));
 

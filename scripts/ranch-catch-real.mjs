@@ -19,7 +19,9 @@
 import { launch, openRanch, touchSession } from './ranch-lib.mjs';
 
 const tries = Number(process.argv[2]) || 6;
-const kinds = (process.argv[3] || 'clover,ember,brook,thistle').split(',');
+// rare-clover, rare-ember, rare-brook: the board's rare one, lured (it has just eaten the food you blew near it,
+// so it lets you walk in to 4 m; the fight is what is measured).
+const kinds = (process.argv[3] || 'clover,ember,brook,thistle,rare-clover,rare-ember').split(',');
 const THUMBS = {
   careless: { lag: 180, gain: 0.55, wobble: 6, run: false },
   careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true },
@@ -45,9 +47,11 @@ const draw = await page.evaluate(() => {
   return [r.x + r.width / 2, r.y + r.height / 2];
 });
 
-async function chase(kind, thumb, seed) {
-  // A fresh wild downy of the kind at one of its homes, 12 m off on a dry side; nothing else wild.
-  const setup = await page.evaluate(([kind, seed]) => {
+async function chase(which, thumb, seed) {
+  const rare = which.startsWith('rare-');
+  const kind = rare ? which.slice(5) : which;
+  // A fresh wild downy of the kind at one of its homes, 12 m off on a dry side (a lured rare one 8 m); nothing else wild.
+  const setup = await page.evaluate(([kind, seed, rare]) => {
     const r = window.ranch;
     const sim = r.sim;
     const s = sim.s;
@@ -64,9 +68,13 @@ async function chase(kind, thumb, seed) {
     const H = homes[kind][seed % homes[kind].length];
     const d = sim.spawn(kind, H[0], H[1], false);
     d.hunger = 0.2;
+    if (rare) {
+      d.rare = true;
+      d.calm = 9;
+    }
     const p = s.player;
     let a = seed * 2.399;
-    const start = kind === 'thistle' ? 16 : 12;
+    const start = rare ? 8 : kind === 'thistle' ? 16 : 12;
     for (let k = 0; k < 40; k++, a += 0.77) {
       p.x = H[0] + Math.cos(a) * start;
       p.z = H[1] + Math.sin(a) * start;
@@ -77,7 +85,7 @@ async function chase(kind, thumb, seed) {
     p.vx = p.vz = p.vy = 0;
     r.aimAt(d.x, d.y + 0.25, d.z);
     return { id: d.id };
-  }, [kind, seed]);
+  }, [kind, seed, rare]);
   let lx = 300;
   let ly = 430;
   let fid = 41;
@@ -147,7 +155,7 @@ async function chase(kind, thumb, seed) {
       ly = 450;
       fid++;
     }
-    if (walking && dist < 5.5) walking = false;
+    if (walking && dist < (rare ? 4 : 5.5)) walking = false;
     else if (!walking && dist > 7.6) {
       walking = true;
       walkTicks = 0;

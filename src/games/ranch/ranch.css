@@ -11,7 +11,7 @@
 .rh .gone, .rt .rt-btn.gone { display: none !important; }
 
 /* crosshair and count */
-.rh-cross { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; color: #fbf6ea; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.7)); }
+.rh-cross { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; color: #fbf6ea; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.7)); }
 .rh-cross g { display: none; }
 .rh-cross[data-s='idle'] .x-idle, .rh-cross:not([data-s]) .x-idle { display: inline; }
 .rh-cross[data-s='target'] .x-target { display: inline; }
@@ -36,12 +36,18 @@
 .rh-cross.tug .x-tug { display: inline; }
 .rh-cross.tug { animation: none; }
 /* One that breaks free if you are slow (a brook diving for the pond): an outer ring of the time left, shrinking, warmer near the end. */
-.rh-cross .x-left { display: none; stroke: #a9c8f2; opacity: 0.85; transition: stroke-dashoffset 0.08s linear; }
+/* The time ring sits on a dark ink track the whole way round, so the pale arc reads on grass and the
+   track shows how much time it started with (the sixth playtest's pale ring was lost on green). */
+.rh-cross .x-ink { display: none; stroke: rgba(22, 18, 38, 0.6); }
+.rh-cross.tug.timed .x-ink { display: inline; }
+.rh-cross .x-left { display: none; stroke: #b9d4f6; transition: stroke-dashoffset 0.08s linear; }
 .rh-cross.tug.timed .x-left { display: inline; }
 .rh-cross.tug.timed.late .x-left { stroke: #ffc49a; }
 /* The count by the crosshair sits on a soft ink backing, so it never runs into words in the world ("Sell²fluff", "by du14sk"). */
 .rh-count { position: absolute; left: calc(50% + 16px); top: calc(50% + 10px); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 14px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 9px; background: rgba(36, 30, 52, 0.62); text-shadow: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rh-count:empty { display: none; }
+/* Clear of the time ring while one shows (it touched the ring), and moved off the sell crate's sign. */
+.rh-cross.tug.timed + .rh-count { left: calc(50% + 22px); top: calc(50% + 17px); }
 .rh-count.named { font-style: italic; font-weight: 500; }
 .rh-count.full { color: #ffd9a8; }
 
@@ -68,9 +74,10 @@
 .rh-edge svg { width: 100%; height: 100%; display: block; }
 
 /* the field journal: a torn page that slides up from the bottom left */
-.rh-page { pointer-events: none; position: absolute; left: max(18px, 4vw); bottom: calc(-10px + var(--safe-b)); width: min(300px, calc(100% - 120px)); padding: 26px 18px 22px 30px; color: #2b3354;
+/* It sits a little above the bottom edge, rotation and all (the sixth playtest's desktop page ran 13 px off it). */
+.rh-page { pointer-events: none; position: absolute; left: max(18px, 4vw); bottom: calc(18px + var(--safe-b)); width: min(300px, calc(100% - 120px)); padding: 26px 18px 22px 30px; color: #2b3354;
   background: #f4ecd6;
-  transform: translateY(110%) rotate(-2.2deg); transform-origin: 20% 100%; visibility: hidden; transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.1), visibility 0s linear 0.55s; }
+  transform: translateY(calc(100% + 40px)) rotate(-2.2deg); transform-origin: 20% 100%; visibility: hidden; transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.1), visibility 0s linear 0.55s; }
 .rh-page::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 1.5px; background: rgba(196, 92, 80, 0.45); }
 .rh-page.up { transform: translateY(0) rotate(-2.2deg); visibility: visible; transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.1), visibility 0s; }
 .rh-page h4, .rh-pause h4 { margin: 0 0 6px; font-family: var(--serif); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-style: italic; font-weight: 600; font-size: 15px; letter-spacing: 0.02em; color: #8a4a3a; }
@@ -202,3 +209,6 @@
   /* The zone's name comes up below the journal page, not behind it. */
   .rh-zone { top: calc(204px + var(--safe-t)); font-size: 24px; }
 }
+/* A plain line of news on the journal page (no box: a fact is not a task), its words under the lines above. */
+.rh-page li.plain { padding-left: 26px; }
+@media (max-aspect-ratio: 4/5) { .rh-page li.plain { padding-left: 20px; } }

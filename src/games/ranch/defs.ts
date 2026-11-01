@@ -90,6 +90,15 @@ export const HOUR = 30;
 export const HUNGER_RATE = 1 / 3;
 /** Hunger runs this much slower for a downy in a pen (sheltered, settled). */
 export const PEN_HUNGER = 1 / 3;
+/**
+ * A penned downy that is already hungry waits patiently: past half hungry its
+ * hunger runs at this share again, and at night (it dozes) at this share too.
+ * So a pen goes hungry as often as before (the same meals and fluff by day),
+ * but a day away or a night with no feeder no longer starves it (the sixth
+ * playtest's three clovers woke starving after one night, one over the fence).
+ */
+export const PEN_PATIENT = 0.5;
+export const PEN_DOZE = 0.5;
 /** Game hours a downy can stay starving before it gets restless enough to hop a low fence. */
 export const NEGLECT_HOURS = 4;
 
@@ -108,7 +117,9 @@ export const BUILD_COST: Record<Exclude<PadKind, 'empty'>, number> = { pen: 200,
 export const BUILD_NAME: Record<Exclude<PadKind, 'empty'>, string> = { pen: 'Pen', garden: 'Garden', silo: 'Silo' };
 export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] = [
   { id: 'high', name: 'High fence', cost: 200, line: 'Keeps thistles in' },
-  { id: 'feeder', name: 'Feeder', cost: 300, line: 'Feeds hungry downies' },
+  // Affordable before the first night (it was 300: the sixth playtest's garden had left 88 coins, and the
+  // first night with no feeder woke all three clovers starving, one over the fence).
+  { id: 'feeder', name: 'Feeder', cost: 150, line: 'Feeds hungry downies' },
   { id: 'trough', name: 'Trough', cost: 150, line: 'Brook downies shed more' },
   { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps pests out' },
   { id: 'chute', name: 'Fluff chute', cost: 400, line: 'Gathers fluff in a box' },
@@ -126,7 +137,12 @@ export const GARDEN_UPS: { id: GardenUp; name: string; cost: number; line: strin
 export const GARDEN_HOURS = 1.5;
 export const GARDEN_YIELD = 2;
 export const GARDEN_YIELD_SOIL = 3;
-/** A garden stops growing once this much lies on its bed (it banks food while you are away). */
+/**
+ * A garden stops growing once this much lies on its bed (it banks food while
+ * you are away). With its bed full, a garden beside a pen with a feeder tips
+ * its next crops into that feeder, so a garden fills a feeder over time (the
+ * sixth playtest: a garden banked 12, a feeder holds 60).
+ */
 export const GARDEN_PILE = 12;
 export const SILO_KINDS = 4;
 export const SILO_CAP = 50;
@@ -238,21 +254,24 @@ export interface Order {
   /** offer: on the board, to take or leave; open: taken, today's order. */
   state: 'offer' | 'open' | 'filled' | 'missed';
   /**
-   * The morning's rare downy (the fifth playtest's top fun change): one
+   * The morning's rare downy, a hunt (the sixth playtest's top fun change): one
    * sought-after wild downy, seen at a landmark (`SIGHTINGS[spot]` in
-   * world.ts), shy of one thing. A live order for one, paying more than the
-   * fluff order; it comes when taken and is gone at dusk.
+   * world.ts), warier than any other, lured with its favourite food. Penned,
+   * it fills the order and stays: its pen sheds more for good. Its coins are
+   * capped at about the trip's (the sixth playtest's paid 2,680 against a 700
+   * trip). It comes when taken and is gone at dusk.
    */
-  rare?: { spot: number; spook: Spook };
+  rare?: { spot: number; seen?: boolean };
+  /**
+   * The last day it may be filled, at dusk (the day it was posted if not set).
+   * The first order runs to the next day's dusk: the sixth playtest's was taken
+   * at 17:38, lessons took the page, and it lapsed 40 real seconds later.
+   */
+  until?: number;
 }
-
-/** What spooks the board's rare downy: running feet, or the bellows' pull from further off than a few metres. */
-export type Spook = 'run' | 'pull';
 
 /** The rare downy of each kind, by its colour: "Gold clover downy". */
 export const RARE_NAME: Record<DownyKind, string> = { clover: 'gold clover', ember: 'rose ember', brook: 'silver brook', thistle: 'pale thistle' };
-/** What the board says spooks it. */
-export const SPOOK_NOTE: Record<Spook, string> = { run: 'shy of running', pull: 'shy of the bellows' };
 
 /** Orders close at dusk. */
 export const ORDER_BY = 19;

@@ -2,13 +2,16 @@
 // tutor. Each P0 and P1 finding has a test here that fails on the code the
 // tester played (new modules are imported inside the tests, so the rest of
 // the file still runs against that older code).
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HOUR } from '../src/games/ranch/defs';
 import { Tutor, allLines, teachAll, type Say } from '../src/games/ranch/lessons';
 import { Sim, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { PADS, PEN_R } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {

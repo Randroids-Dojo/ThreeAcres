@@ -9,7 +9,7 @@
 // crate's own sale (Sim.sellFluff), so they count towards the day's orders,
 // and filling one pays its bonus.
 //   npx tsx scripts/ranch-balance.ts
-import { BUILD_COST, FEEDER_CAP, GARDEN_YIELD, GARDEN_YIELD_SOIL, GOALS, HOUR, KIND, ORDER_BY, TUFT_KIND, isFood, isTuft, type DownyKind, type Food } from '../src/games/ranch/defs';
+import { BUILD_COST, FEEDER_CAP, PEN_UPS, GARDEN_YIELD, GARDEN_YIELD_SOIL, GOALS, HOUR, KIND, ORDER_BY, TUFT_KIND, isFood, isTuft, type DownyKind, type Food } from '../src/games/ranch/defs';
 import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { rng } from '../src/games/ranch/noise';
@@ -310,6 +310,12 @@ console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close 
   const leave = (setup: Setup, minutes: number, seed: number) => {
     const sim = build(setup, seed);
     const s = sim.s;
+    // With no garden listed, no garden at all (the starter garden's full bed would tip its crop into the feeder).
+    if (!setup.gardens.length) {
+      s.pads[0].kind = 'empty';
+      s.pads[0].crop = null;
+      sim.phys.setPads(s.pads);
+    }
     // No pests (this is about food: a hedge keeps them off); the clock runs.
     sim.teaching = true;
     s.learn = ['time'];
@@ -335,6 +341,9 @@ console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close 
   const a = leave({ name: 'Neglect', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [], every: 0, fullFeeders: true }, 60, 9);
   console.log(`Neglect: a pen of 6 clover, the feeder filled once (${FEEDER_CAP}), nobody tending it`);
   console.log(`   feeder empty after ${m(a.empty)}, first downy out after ${m(a.first)}, all out after ${m(a.all)}`);
+  // Round 6: the starter garden beside it, no feed run, the feeder filled once with a jar's worth: its full bed tips its crop in.
+  const a2 = leave({ name: 'Bare', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 0 }, 60, 9);
+  console.log(`   the same pen beside the bare starter garden (no feed run; its full bed tips its crop into the feeder), the feeder empty at the start: first downy out after ${m(a2.first)}, most frazzled at once ${a2.fraz}, hungriest ${a2.peak.toFixed(2)}`);
   const b = leave({ name: 'Run', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run'] }], every: 0 }, 60, 9);
   console.log(`   the same pen beside the starter garden with a feed run (feeder empty at the start): first downy out after ${m(b.first)}, most frazzled at once ${b.fraz}, hungriest ${b.peak.toFixed(2)}`);
   const c = leave({ name: 'Trip', pens: [{ pad: 1, kind: 'clover', n: 8, ups: ['feeder'] }, { pad: 4, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run', 'sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['run', 'sprinkler'] }], every: 0, fullFeeders: true }, 10, 4);
@@ -348,9 +357,10 @@ console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close 
   const start = 180;
   const a = avgs[0].coins;
   const b = avgs[1].coins;
-  const toRidge = (GATES.ridge.cost + 300 + 250 - start) / a;
+  const feederCost = PEN_UPS.find((u) => u.id === 'feeder')!.cost;
+  const toRidge = (GATES.ridge.cost + feederCost + 250 - start) / a;
   const reward = GOALS.find((g) => g.id === 'ridge')!.reward;
-  console.log(`Gates: with about ${start} coins after the lessons, the feeder (300) and a sprinkler (250) bought on the way,`);
+  console.log(`Gates: with about ${start} coins after the lessons, the feeder (${feederCost}) and a sprinkler (250) bought on the way,`);
   console.log(`   Ember Ridge (${GATES.ridge.cost}) takes about ${toRidge.toFixed(1)} days on the starter pen; Brook Hollow (${GATES.hollow.cost}) about ${(GATES.hollow.cost / ((b + avgs[4].coins) / 2)).toFixed(1)} more days between the sprinkler and the ember setups.`);
   console.log(`   Opening the ridge with just the ${GATES.ridge.cost} coins leaves its reward, ${reward}, against a pen at ${BUILD_COST.pen}: the first ember pen is ${reward >= BUILD_COST.pen ? 'affordable at once' : 'not affordable'} (it was 180 against 250).`);
 }

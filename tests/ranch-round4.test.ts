@@ -6,7 +6,7 @@
 // first thistle, and the cheaper fixes. 19 of its 20 fail on the code the
 // tester played (proved on a `git archive` copy of that commit); the 20th is
 // a control (the crate takes no downy without a live order, then and now).
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CAPS, FLUFF_ROOM, KIND_TUFT, LIVE_EACH, journalGoals, type DownyKind } from '../src/games/ranch/defs';
 import { Tutor, goalText, orderLines, type Say } from '../src/games/ranch/lessons';
 import { TagChoice } from '../src/games/ranch/menu';
@@ -14,6 +14,9 @@ import { Sim, padSpots, type Aim, type Controls, type Ev } from '../src/games/ra
 import { deserialize, newItem, serialize } from '../src/games/ranch/state';
 import { BOARD, EXCHANGE, PADS, POND } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {

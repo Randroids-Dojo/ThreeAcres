@@ -1,12 +1,15 @@
 // Thistledown's rules, run without rendering: the canister, hunger and
 // shedding, gardens, the Exchange, builds, gates, nettlebacks, silos,
 // feeders, the chute, sleep, the journal and the save.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CAPS, HOUR, KIND, NEGLECT_HOURS, PEN_HUNGER } from '../src/games/ranch/defs';
 import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
 import { deserialize, serialize, newItem } from '../src/games/ranch/state';
 import { GATES, PADS } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 // Seeded randomness, so every run is the same.
 const realRandom = Math.random;

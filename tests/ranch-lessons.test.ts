@@ -1,13 +1,16 @@
 // Thistledown's lessons, run on the render-free sim: one thing at a time, in
 // order, nothing in the world before its lesson, urgent lessons taking over,
 // lines short enough to read at a glance, and returning saves not taught twice.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GOALS } from '../src/games/ranch/defs';
 import { FARM_CYCLES, FEATURES, LESSON_IDS, Tutor, allLines, creditLessons, teachAll, type Say } from '../src/games/ranch/lessons';
 import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
 import { deserialize, newItem, serialize } from '../src/games/ranch/state';
 import { PADS } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {

@@ -9,10 +9,10 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { GARDEN_HOURS, GOALS, ORDER_BY, PEN_MAX, RARE_NAME, SPOOK_NOTE, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
-import { NOTICE_RUN, padSpots, type Ev } from './sim';
+import { FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
+import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
-import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
+import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
 
 export type Dev = 'touch' | 'mouse' | 'pad';
 
@@ -287,9 +287,9 @@ const liveOrder = (s: RanchState) => s.orders.find((o) => o.state === 'open' && 
 /** Today's rare order, open and not yet filled. */
 export const rareOrder = (s: RanchState): Order | null => s.orders.find((o) => o.state === 'open' && o.rare && o.got < o.n) ?? null;
 
-/** A downy aboard that an order wants: one of its kind caught today (or, for the rare order, the rare one). */
+/** A downy aboard that an order wants: one of its kind caught today (or, for the rare order, the rare one caught today). */
 function wantedAboard(s: RanchState, o: Order): boolean {
-  return s.slots.some((q) => q.t === o.kind && q.n > 0 && (q.downs ?? []).some((d) => (o.rare ? !!d.rare : d.c === s.day)));
+  return s.slots.some((q) => q.t === o.kind && q.n > 0 && (q.downs ?? []).some((d) => d.c === s.day && (!o.rare || !!d.rare)));
 }
 
 /** A live order: catch a downy of its kind, or blow the one aboard (caught today) into the crate. */
@@ -298,38 +298,96 @@ function liveStep(s: RanchState): 'catch' | 'blow' {
   return o && wantedAboard(s, o) ? 'blow' : 'catch';
 }
 
-/** The rare order: go to where it was seen (far), close in on it the way it allows (near), or blow it into the crate. */
-function rareStep(s: RanchState): 'find' | 'near' | 'blow' {
+/** The board's rare one, wild and out where it was seen. */
+const rareWild = (s: RanchState) => s.downies.find((q) => !q.gone && q.rare && !q.tame) ?? null;
+
+/**
+ * The rare hunt, where it stands: find it from the clue (no arrow until you are
+ * close), fetch its favourite food, blow some near it to lure it, walk up and
+ * pull it in while it is lured, then blow it into a pen.
+ */
+export function rareStep(s: RanchState): 'find' | 'fetch' | 'lure' | 'pull' | 'pen' {
   const o = rareOrder(s);
-  if (o && wantedAboard(s, o)) return 'blow';
-  const d = s.downies.find((q) => !q.gone && q.rare && !q.tame);
-  return d && dist(s, d.x, d.z) < 24 ? 'near' : 'find';
+  if (o && wantedAboard(s, o)) return 'pen';
+  const d = rareWild(s);
+  if (!d || (!o?.rare?.seen && dist(s, d.x, d.z) > RARE_SEEN)) return 'find';
+  if (rareLured(d)) return 'pull';
+  return carrying(s, (t) => t === wantedFood(d.kind)) ? 'lure' : 'fetch';
 }
 
 /** "the gold clover", for the rare order's lines. */
 const rareName = (o: Order) => `the ${RARE_NAME[o.kind]}`;
+const foods = (o: Order) => FOOD_INFO[wantedFood(o.kind)].plural;
 
 const RARE = {
   find: (o: Order) => `Find ${rareName(o)} by ${SIGHTINGS[o.rare!.spot].name}.`,
-  run: 'Walk up to it. Running scares it off.',
-  pull: (q: Say) => (q.dev === 'touch' ? 'Get close before you hold Pull.' : q.dev === 'pad' ? 'Get close before you hold LT.' : 'Get close before you hold right click.'),
-  blow: 'Blow the downy into the sell crate.',
+  fetch: (o: Order) => `Bring ${foods(o)} to lure it.`,
+  lure: (o: Order) => `Blow ${foods(o)} near it.`,
+  pull: (q: Say) => (q.dev === 'touch' ? 'Walk up and hold Pull on it.' : q.dev === 'pad' ? 'Walk up and hold LT on it.' : 'Walk up and hold right click on it.'),
+  pen: (o: Order) => `Blow ${rareName(o)} into a pen.`,
 };
 
-/** The rare order's marks: where it was seen, the downy itself once near, or the crate (a chevron over its window if another is chosen). */
+/** The rare hunt's line now. */
+function rareLine(s: RanchState, o: Order, q: Say): string {
+  const step = rareStep(s);
+  return step === 'find' ? RARE.find(o) : step === 'fetch' ? RARE.fetch(o) : step === 'lure' ? RARE.lure(o) : step === 'pull' ? RARE.pull(q) : RARE.pen(o);
+}
+
+/** Where a food grows: the nearest garden growing it, or wild patch of it. */
+function foodSpot(s: RanchState, f: Food): { x: number; z: number } | null {
+  const spots: { x: number; z: number }[] = [];
+  s.pads.forEach((p, i) => p.kind === 'garden' && p.crop === f && spots.push(PADS[i]));
+  for (const p of f === 'cloverhead' ? CLOVER_PATCHES : f === 'dewberry' ? BERRY_BUSHES : ROOT_PATCHES) spots.push(p);
+  let best: { x: number; z: number } | null = null;
+  let bd = 1e9;
+  for (const p of spots) {
+    const d = dist(s, p.x, p.z);
+    if (d < bd) {
+      bd = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
+ * The rare hunt's marks. Finding it, only a clue: the way to its part of the
+ * valley (the ranch gate, its zone's gate), and no arrow inside it until you
+ * are close (the sixth playtest's waited under an arrow, so it was no hunt).
+ * Close, the arrow is on the downy; fetching food, on where it grows; aboard,
+ * on a pen with room (a chevron over its window if another is chosen).
+ */
 function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
   const o = rareOrder(s);
   if (!o?.rare) return false;
-  if (rareStep(s) === 'blow') {
+  const step = rareStep(s);
+  if (step === 'pen') {
     if (s.slots[s.sel]?.t !== o.kind) m.slot = s.slots.findIndex((q) => q.t === o.kind && q.n > 0);
-    arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
-    ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+    const i = penWithRoom(s);
+    if (i < 0) return false;
+    const p = PADS[i];
+    arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
+    ring(m, p.x, p.z, PEN_R);
     return true;
   }
-  const d = s.downies.find((q) => !q.gone && q.rare && !q.tame);
-  if (d && dist(s, d.x, d.z) < 30) return onDowny(m, d);
-  const sp = SIGHTINGS[o.rare.spot];
-  return arrow(m, sp.x, floor(sp.x, sp.z) + 3.2, sp.z);
+  const d = rareWild(s);
+  if (step === 'find') {
+    const sp = SIGHTINGS[o.rare.spot];
+    const here = zoneAt(s.player.x, s.player.z);
+    if (here === zoneAt(sp.x, sp.z)) return false;
+    return wayTo(s, m, o.kind, floor);
+  }
+  if (step === 'fetch') {
+    // Its food, where it grows nearest; on the downy again once you are back with some.
+    const f = foodSpot(s, wantedFood(o.kind));
+    if (!f) return onDowny(m, d);
+    return arrow(m, f.x, floor(f.x, f.z) + 2.2, f.z);
+  }
+  if (step === 'lure') {
+    const f = wantedFood(o.kind);
+    if (s.slots[s.sel]?.t !== f) m.slot = s.slots.findIndex((q) => q.t === f && q.n > 0);
+  }
+  return onDowny(m, d);
 }
 
 const LIVE = {
@@ -458,6 +516,9 @@ export function fullNote(dev: Dev, noneFree: boolean, windowsKnown: boolean): st
   const how = !windowsKnown ? '' : dev === 'touch' ? ' Hold one to empty it.' : dev === 'pad' ? ' Hold LB to empty one.' : ' Hold Q to empty one.';
   return noneFree ? `No window free.${how}` : `Window full.${how}`;
 }
+
+/** What a feeder costs: its lesson comes as soon as you can pay. */
+const FEEDER_COST = PEN_UPS.find((u) => u.id === 'feeder')!.cost;
 
 /** Steps for the plot lessons: what to tap or press at the post, and which tag to take. */
 const plotLine = (q: Say, tag: string) => `${q.dev === 'touch' ? 'Tap Post' : q.dev === 'pad' ? 'Press X' : 'Press E'} at an empty plot, then ${tag}.`;
@@ -800,8 +861,8 @@ const LESSONS: Lesson[] = [
     note: 'Live orders want downies caught today. Blow them into the sell crate.',
   },
   {
-    // The board's rare downy, the first time one is taken: go where it was seen, close in the way it allows (it
-    // is shy of running, or of the bellows), then blow it into the sell crate.
+    // The board's rare downy, the first time one is taken: a hunt. Find it from the clue, lure it with its
+    // favourite food, walk up and pull it in while it is lured, then blow it into a pen, where it stays.
     id: 'rare',
     after: ['order'],
     unlocks: [],
@@ -809,15 +870,17 @@ const LESSONS: Lesson[] = [
     ready: (s) => !!rareOrder(s),
     text: (q, s) => {
       const o = s ? rareOrder(s) : null;
-      if (!s || !o?.rare) return RARE.blow;
-      const step = rareStep(s);
-      return step === 'blow' ? RARE.blow : step === 'near' ? (o.rare.spook === 'run' ? RARE.run : RARE.pull(q)) : RARE.find(o);
+      if (!s || !o?.rare) return RARE.pull(q);
+      return rareLine(s, o, q);
     },
-    also: (q) => [RARE.run, RARE.pull(q), ...SIGHTINGS.map((sp, i) => RARE.find({ kind: sp.kind, n: 1, got: 0, paid: 0, mult: 2, pay: 0, state: 'open', live: true, rare: { spot: i, spook: 'run' } }))],
+    also: (q) => {
+      const any = (i: number): Order => ({ kind: SIGHTINGS[i].kind, n: 1, got: 0, paid: 0, mult: 2, pay: 0, state: 'open', live: true, rare: { spot: i } });
+      return [RARE.pull(q), ...SIGHTINGS.flatMap((_sp, i) => [RARE.find(any(i)), RARE.fetch(any(i)), RARE.lure(any(i)), RARE.pen(any(i))])];
+    },
     done: (_s, n) => n('order:rare') >= 1,
     lapse: (s) => !rareOrder(s),
     mark: rareMark,
-    note: 'Each morning a rare downy is seen somewhere. It pays well.',
+    note: 'A rare downy is warier. Lure it with food.',
   },
   {
     id: 'jump',
@@ -892,6 +955,57 @@ const LESSONS: Lesson[] = [
     note: 'Spiky pests roam at night and eat loose fluff. A hedge keeps them out.',
   },
   {
+    // The feeder, before the garden and before the first night, as soon as you can pay for it (the sixth
+    // playtest's garden lesson left 88 coins, the feeder cost 300, and the first night woke the pen starving).
+    id: 'ups',
+    after: ['farm'],
+    unlocks: ['up:feeder'],
+    tag: 'pen:feeder',
+    ready: (s) => s.coins >= FEEDER_COST && s.pads.some((p) => p.kind === 'pen'),
+    text: () => 'Buy a feeder at the pen post.',
+    done: (_s, n) => n('upgrade') >= 1,
+    mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'pen'), floor, false),
+    note: 'Pen posts sell upgrades as you need them.',
+  },
+  {
+    // A feeder bought is no use empty: fill it, the hopper marked (the playtest's sat empty for a day and a half).
+    id: 'feeder',
+    after: ['ups'],
+    unlocks: [],
+    ready: (s) => feederPad(s) >= 0,
+    text: (q, s) => {
+      const step = s ? feederStep(s) : 'fill';
+      return step === 'fill' ? FEEDER.fill : step === 'choose' ? FEEDER.choose(q) : FEEDER.pull(s ? feederFood(s, feederPad(s)) : 'cloverhead');
+    },
+    also: (q) => [FEEDER.choose(q), FEEDER.pull('cloverhead'), FEEDER.pull('sweetroot')],
+    // Food you blew in (a garden beside the pen may tip its crop in by itself; that does not teach it).
+    done: (_s, n) => n('feeder:fill') >= 1,
+    each: (s) => {
+      if (feederStep(s) === 'pull') ripen(s, feederFood(s, feederPad(s)));
+    },
+    mark: (s, m, floor) => {
+      const i = feederPad(s);
+      if (i < 0) return false;
+      const step = feederStep(s);
+      const f = feederFood(s, i);
+      if (step === 'choose') {
+        m.slot = s.slots.findIndex((q) => q.t === f && q.n > 0);
+        return false;
+      }
+      if (step === 'pull') {
+        const g = gardenFor(s, f);
+        arrow(m, PADS[g].x, floor(PADS[g].x, PADS[g].z) + 2.2, PADS[g].z);
+        ring(m, PADS[g].x, PADS[g].z, 3.1);
+        return true;
+      }
+      const h = padSpots(i).hopper;
+      arrow(m, h.x, floor(h.x, h.z) + h.y + 1.0, h.z);
+      ring(m, h.x, h.z, 0.9);
+      return true;
+    },
+    note: 'A feeder drops food when its downies are hungry.',
+  },
+  {
     id: 'garden',
     after: ['meadow'],
     unlocks: ['garden'],
@@ -917,54 +1031,6 @@ const LESSONS: Lesson[] = [
       return true;
     },
     note: 'Blow food onto a bare garden bed to plant it.',
-  },
-  {
-    id: 'ups',
-    after: ['penin', 'meadow'],
-    unlocks: ['up:feeder'],
-    tag: 'pen:feeder',
-    ready: (s) => s.coins >= 300 && s.pads.some((p) => p.kind === 'pen'),
-    text: () => 'Buy a feeder at the pen post.',
-    done: (_s, n) => n('upgrade') >= 1,
-    mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'pen'), floor, false),
-    note: 'Pen posts sell upgrades as you need them.',
-  },
-  {
-    // A feeder bought is no use empty: fill it, the hopper marked (the playtest's sat empty for a day and a half).
-    id: 'feeder',
-    after: ['ups'],
-    unlocks: [],
-    ready: (s) => feederPad(s) >= 0,
-    text: (q, s) => {
-      const step = s ? feederStep(s) : 'fill';
-      return step === 'fill' ? FEEDER.fill : step === 'choose' ? FEEDER.choose(q) : FEEDER.pull(s ? feederFood(s, feederPad(s)) : 'cloverhead');
-    },
-    also: (q) => [FEEDER.choose(q), FEEDER.pull('cloverhead'), FEEDER.pull('sweetroot')],
-    done: (s, n) => n('feeder:fill') >= 1 || s.pads.some((p) => p.kind === 'pen' && p.feeder.n > 0),
-    each: (s) => {
-      if (feederStep(s) === 'pull') ripen(s, feederFood(s, feederPad(s)));
-    },
-    mark: (s, m, floor) => {
-      const i = feederPad(s);
-      if (i < 0) return false;
-      const step = feederStep(s);
-      const f = feederFood(s, i);
-      if (step === 'choose') {
-        m.slot = s.slots.findIndex((q) => q.t === f && q.n > 0);
-        return false;
-      }
-      if (step === 'pull') {
-        const g = gardenFor(s, f);
-        arrow(m, PADS[g].x, floor(PADS[g].x, PADS[g].z) + 2.2, PADS[g].z);
-        ring(m, PADS[g].x, PADS[g].z, 3.1);
-        return true;
-      }
-      const h = padSpots(i).hopper;
-      arrow(m, h.x, floor(h.x, h.z) + h.y + 1.0, h.z);
-      ring(m, h.x, h.z, 0.9);
-      return true;
-    },
-    note: 'A feeder drops food when its downies are hungry.',
   },
   {
     // After the ridge gate: the jar at 400 coins spent the gate's savings while the journal counted towards 500.
@@ -1189,7 +1255,8 @@ export class Tutor {
         else if (e.what !== 'clear') this.add(s, 'upgrade');
         break;
       case 'store':
-        if (e.where === 'feeder') this.add(s, 'feeder:fill');
+        // Food you put in (not a garden's crop tipping in by itself).
+        if (e.where === 'feeder' && !e.auto) this.add(s, 'feeder:fill');
         break;
       case 'penned':
         this.add(s, 'penned');
@@ -1396,23 +1463,39 @@ export function orderSpot(s: RanchState, m: Mark, floor: Floor): boolean {
 
 const KIND_WORD: Record<string, string> = { clover: 'Clover', ember: 'Ember', brook: 'Brook', thistle: 'Thistle' };
 
+/** The open orders (today's, and the first order while it runs to the next dusk), each as its tally or the hunt's step. */
+function openLines(s: RanchState, say: Say): string[] {
+  return s.orders
+    .filter((o) => o.state === 'open' && o.got < o.n)
+    .map((o) => (o.rare ? rareLine(s, o, say) : o.live ? `${KIND_WORD[o.kind]} downies, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff, ${o.got} of ${o.n}.`));
+}
+
 /**
  * The day's orders for the journal page, with their tally ("Ember fluff, 2 of
- * 6."): the open ones; once all are filled, a line saying so until dusk. A
- * missed day says nothing. Empty before the first order.
+ * 6."): the open ones (the rare hunt as its step: "Find the gold clover by the
+ * old oak."), and offers waiting at the board; once all are filled, a line
+ * saying so until dusk. A missed day says nothing. Empty before the first order.
  */
-export function orderLines(s: RanchState): string[] {
-  if (!s.orders.length || s.orderDay !== s.day) return [];
-  // Offers waiting: take one at the board.
-  if (s.orders.some((o) => o.state === 'offer')) return ['Orders wait on the price board.'];
-  const open = s.orders.filter((o) => o.state === 'open');
-  // The rare one: where it was seen and what spooks it, then the crate once it is aboard.
-  const rare = open.find((o) => o.rare);
-  if (rare?.rare) return rareStep(s) === 'blow' ? [`Blow ${rareName(rare)} into the sell crate.`] : [RARE.find(rare), `It is ${SPOOK_NOTE[rare.rare.spook]}.`];
-  if (open.length) return open.map((o) => (o.live ? `${KIND_WORD[o.kind]} downies, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff, ${o.got} of ${o.n}.`));
-  if (s.hour < ORDER_BY && s.orders.every((o) => o.state === 'filled')) return ['Order filled. New ones come at dawn.'];
+export function orderLines(s: RanchState, say: Say = TOUCH): string[] {
+  if (!s.orders.length) return [];
+  const open = openLines(s, say);
+  // Offers waiting: take one at the board (under an order still open from yesterday).
+  if (s.orderDay === s.day && s.orders.some((o) => o.state === 'offer')) return [...open, 'Orders wait on the price board.'];
+  if (open.length) return open;
+  if (s.orderDay === s.day && s.hour < ORDER_BY && s.orders.every((o) => o.state === 'filled')) return ['Order filled. New ones come at dawn.'];
   return [];
 }
+
+/**
+ * The open orders' tallies, kept on the page under any lesson line while they
+ * are open (the sixth playtest's first order lost the page to the garden and
+ * dusk lessons within a second of being taken). Not the lesson's own line.
+ */
+export function orderTally(s: RanchState, say: Say, line: string): string[] {
+  return openLines(s, say).filter((t) => t !== line);
+}
+
+const TOUCH: Say = { dev: 'touch', locked: false, lockAvailable: false };
 
 /** Mark lessons finished, with what they bring in, and everything they come after. */
 function credit(s: RanchState, ids: string[]): void {
@@ -1463,6 +1546,7 @@ export function creditLessons(s: RanchState): void {
   else if (s.hour >= 18.3) ids.push('dusk');
   if (gardens >= 2 || s.goals.includes('plant')) ids.push('garden', 'plant');
   if (s.pads.some((p) => p.ups.length > 0 || p.kind === 'silo') || s.goals.includes('feeder')) ids.push('ups');
+  if (s.pads.some((p) => p.kind === 'pen' && p.ups.includes('feeder') && p.feeder.n > 0)) ids.push('feeder');
   if (Object.values(s.up).some((v) => v > 0)) ids.push('bench');
   if (s.gates.ridge || s.gates.hollow) ids.push('gates');
   if (s.stats.sold >= 10 && ids.includes('meadow')) ids.push('farm');

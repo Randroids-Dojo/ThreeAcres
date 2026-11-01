@@ -9,7 +9,7 @@
 // Every test here fails on the code the tester played (proved on a `git
 // archive` copy of that commit); modules that commit lacked are imported
 // inside the tests that need them, so each fails on its own.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { HOUR, LIVE_EACH, type DownyKind } from '../src/games/ranch/defs';
 import { LESSON_IDS, Tutor, allLines, goalText, orderLines, type Say } from '../src/games/ranch/lessons';
@@ -18,6 +18,9 @@ import { deserialize, newItem, serialize } from '../src/games/ranch/state';
 import { EXCHANGE, PADS, PEN_R, POND, waterAt, zoneAt } from '../src/games/ranch/world';
 import * as world from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {
@@ -302,9 +305,10 @@ describe('P1: clover is the gentle first catch, running is taught, a brook shows
 // ---------------------------------------------------------------- P1 3: the morning's rare downy
 
 describe("P1: each morning the board posts one rare wild downy", () => {
-  it('the board names it and a place, says what spooks it, pays more than the fluff order, and the offers differ in kind', () => {
+  // (Round 6 made the rare one a hunt: no spook, lured with food, penned for good, its coins capped at the trip's.
+  // Its spook test went; these two are brought to round 6's rules, and tests/ranch-round6.test.ts holds the rest.)
+  it('the board names it and a place, and the offers differ in kind', () => {
     let seen = 0;
-    const spooks = new Set<string>();
     const places = new Set<string>();
     for (let day = 2; day < 22; day++) {
       const sim = morning(day);
@@ -319,31 +323,23 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       // Three kinds of day, not one in three sizes: a day of tending, a trip for downies caught today, a hunt.
       expect(offers.filter((o) => !o.live).length).toBeLessThanOrEqual(1);
       expect(offers.filter((o) => o.live && !o.rare).length).toBeLessThanOrEqual(1);
-      const fl = offers.find((o) => !o.live);
-      if (fl) expect(r.pay).toBeGreaterThan(fl.pay);
-      const live = offers.find((o) => o.live && !o.rare);
-      if (live) expect(r.pay).toBeGreaterThan(live.n * live.pay);
       const tag = sim.offerTag(r);
       expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook) downy$/);
-      expect(tag.note).toMatch(/^By the [a-z ]+, shy of (running|the bellows)\. Pays [\d,]+$/);
-      spooks.add(r.rare!.spook);
-      places.add(tag.note.split(',')[0]);
+      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, and stays$/);
+      places.add(tag.note.split('.')[0]);
     }
     expect(seen).toBe(20);
-    expect(spooks.size).toBe(2);
     expect(places.size).toBeGreaterThanOrEqual(4);
   });
 
-  it('taken, it waits by the landmark; caught and blown into the sell crate, it pays and fills the order', () => {
-    let done = 0;
-    for (let seed = 1; seed < 30 && done < 2; seed++) {
+  it('taken, it waits by the landmark, and the journal names it and the place', () => {
+    for (let seed = 1; seed < 4; seed++) {
       Math.random = rng(seed);
       const sim = morning(3, false);
       const s = sim.s;
       sim.postOrders(true);
       const i = sim.offers().findIndex((o) => o.rare);
       const offer = sim.offers()[i];
-      // Never a fresh ordinary clover for it: the order wants the rare one.
       expect(sim.takeOrder(i)).toBe(true);
       const d = sim.rareWild()!;
       expect(d).toBeTruthy();
@@ -351,53 +347,6 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       const spot = world.SIGHTINGS[offer.rare!.spot];
       expect(Math.hypot(d.x - spot.x, d.z - spot.z)).toBeLessThan(3);
       expect(orderLines(s)[0]).toBe(`Find the gold clover by ${spot.name}.`);
-      if (!catchIt(sim, d.id, offer.rare!.spook === 'pull' ? 3 : 4)) continue;
-      done++;
-      expect(orderLines(s)).toEqual(['Blow the gold clover into the sell crate.']);
-      s.sel = s.slots.findIndex((q) => q.t === 'clover');
-      const c0 = s.coins;
-      const evs: Ev[] = [];
-      blowAtCrate(sim, evs);
-      const paid = evs.filter((e): e is Extract<Ev, { t: 'deliver' }> => e.t === 'deliver');
-      expect(paid.length).toBe(1);
-      expect(paid[0].coins).toBe(offer.pay);
-      expect(s.orders[0].state).toBe('filled');
-      expect(s.coins - c0).toBeGreaterThanOrEqual(offer.pay);
-    }
-    expect(done).toBe(2);
-  });
-
-  it("each kind of rare one is spooked its own way: running feet from far off, or a pull from further than a few metres", () => {
-    // Shy of running: a walker comes close, a runner sends it off from 20 m.
-    for (const spook of ['run', 'pull'] as const) {
-      const sim = morning(3, false);
-      sim.s.orders = [{ kind: 'clover', live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 300, state: 'offer', rare: { spot: 0, spook } }];
-      sim.takeOrder(0);
-      const d = sim.rareWild()!;
-      d.hopT = 99;
-      const sp = world.SIGHTINGS[0];
-      if (spook === 'run') {
-        stand(sim, sp.x, sp.z + 6.5);
-        run(sim, 0.5, idle, aimAt(sim, d.x, d.y, d.z));
-        expect(d.alert).toBe(false);
-        stand(sim, sp.x, sp.z + 19);
-        sim.s.player.vz = -7.4;
-        sim.update(1 / 30, { ...idle, moveZ: 1, sprint: true }, aimAt(sim, d.x, d.y, d.z));
-        run(sim, 0.2, { ...idle, moveZ: 1, sprint: true });
-        expect(d.bolt).toBeGreaterThan(0);
-      } else {
-        // Shy of the bellows: a pull held at 8 m sends it off; one from 3.5 m does not.
-        stand(sim, d.x, d.z + 8);
-        run(sim, 0.3, { ...idle, draw: true }, aimAt(sim, d.x, d.y, d.z + 3));
-        expect(d.bolt).toBeGreaterThan(0);
-        const sim2 = morning(3, false);
-        sim2.s.orders = [{ kind: 'clover', live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 300, state: 'offer', rare: { spot: 0, spook } }];
-        sim2.takeOrder(0);
-        const d2 = sim2.rareWild()!;
-        stand(sim2, d2.x, d2.z + 3.5);
-        run(sim2, 0.3, { ...idle, draw: true }, aimAt(sim2, d2.x + 2, d2.y, d2.z));
-        expect(d2.bolt).toBe(0);
-      }
     }
   });
 

@@ -5,6 +5,7 @@
 // stretches; things being drawn tumble and shrink into the muzzle.
 
 import {
+  AdditiveBlending,
   BufferGeometry,
   Color,
   ConeGeometry,
@@ -34,6 +35,7 @@ import { U, fluff, matte } from './mat';
 
 const _m = new Matrix4();
 const _m2 = new Matrix4();
+const _m3 = new Matrix4();
 const _q = new Quaternion();
 const _e = new Euler();
 const _v = new Vector3();
@@ -284,6 +286,45 @@ function nettleSpikes(): G {
   return merge(parts);
 }
 
+// ---------------------------------------------------------------- a pest's eye glow
+
+/**
+ * A soft warm glow round a nettleback's lit eyes at night, facing the view and
+ * kept about fifteen CSS px across however far off it is (`GLOW`), so a pest
+ * 20 m off reads as a warm ember, not the dark speck the sixth playtest saw.
+ * Up close (under about 8 m) it fades out: the lit eyes read on their own.
+ * The instance matrix carries where and how big; the quad turns to the camera
+ * in the vertex shader.
+ */
+const GLOW_VERT = /* glsl */ `
+varying vec2 vUv;
+varying float vFar;
+void main() {
+  vUv = uv;
+  vec4 c = modelViewMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
+  float s = length( instanceMatrix[0].xyz );
+  // Up close its lit eyes read on their own: the glow comes in from about 8 m out and is whole by 14.
+  vFar = smoothstep( 0.19, 0.34, s );
+  c.xy += position.xy * s;
+  // A little towards the view (more from further off), so its own snout and a ripple of ground do not cut it.
+  c.z += 0.06 + 0.012 * max( -c.z, 0.0 );
+  gl_Position = projectionMatrix * c;
+}
+`;
+const GLOW_FRAG = /* glsl */ `
+uniform float uNight;
+varying vec2 vUv;
+varying float vFar;
+void main() {
+  float d = length( vUv - 0.5 ) * 2.0;
+  float a = ( smoothstep( 1.0, 0.2, d ) * 0.45 + smoothstep( 0.5, 0.05, d ) * 0.9 ) * clamp( uNight, 0.0, 1.0 ) * vFar;
+  if ( !( a > 0.002 ) ) discard;
+  gl_FragColor = vec4( 1.0, 0.74, 0.38, a );
+}
+`;
+/** The glow's size: this share of its distance (m), between these (m). About 15 CSS px across from 10 m out on a phone. */
+export const GLOW = { per: 0.024, min: 0.18, max: 0.9 };
+
 // ---------------------------------------------------------------- blob shadows
 
 const SHADOW_VERT = /* glsl */ `
@@ -325,6 +366,7 @@ export class CreatureView {
   private nBody: InstancedMesh;
   private nSpikes: InstancedMesh;
   private nEyes: InstancedMesh;
+  private nGlow: InstancedMesh;
   /** For checks: a nettleback's night look (its lit eyes and moonlit rim) on or off. */
   nettleGlow = true;
   private shadows: InstancedMesh;
@@ -395,6 +437,12 @@ export class CreatureView {
     }
     this.nBody.name = 'nettle';
     this.nSpikes.name = 'nettle-spikes';
+    this.nGlow = new InstancedMesh(new PlaneGeometry(1, 1), new ShaderMaterial({ vertexShader: GLOW_VERT, fragmentShader: GLOW_FRAG, uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: AdditiveBlending }), 8);
+    this.nGlow.count = 0;
+    this.nGlow.frustumCulled = false;
+    this.nGlow.renderOrder = 2;
+    this.nGlow.name = 'nettle-glow';
+    this.root.add(this.nGlow);
     const sg = new PlaneGeometry(1, 1);
     sg.rotateX(-Math.PI / 2);
     this.shadows = new InstancedMesh(sg, new ShaderMaterial({ vertexShader: SHADOW_VERT, fragmentShader: SHADOW_FRAG, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), CAP + ITEM_CAP + 8);
@@ -545,6 +593,10 @@ export class CreatureView {
       if (q.mode === 'roll') _m.multiply(_m2.makeTranslation(0, -0.2, 0));
       this.nBody.setMatrixAt(nn, _m);
       this.nEyes.setMatrixAt(nn, _m);
+      // The eyes' glow, between them, a steady size on screen however far off.
+      const far = Math.hypot(q.x - muzzle.x, q.y - muzzle.y, q.z - muzzle.z);
+      const g = clamp(far * GLOW.per, GLOW.min, GLOW.max);
+      this.nGlow.setMatrixAt(nn, _m2.makeTranslation(0, 0.235, 0.39).premultiply(_m).multiply(_m3.makeScale(g, g, g)));
       const b = 1 + q.bristle * 0.35;
       _m.multiply(_m2.makeScale(b, b, b));
       this.nSpikes.setMatrixAt(nn, _m);
@@ -557,6 +609,9 @@ export class CreatureView {
       m.instanceMatrix.needsUpdate = true;
     }
     this.nEyes.visible = nn > 0 && this.nettleGlow;
+    this.nGlow.count = nn;
+    this.nGlow.visible = nn > 0 && this.nettleGlow;
+    this.nGlow.instanceMatrix.needsUpdate = true;
     NETTLE_RIM.value.w = this.nettleGlow ? 0.85 : 0;
     this.shadows.count = this.shadowN;
     this.shadows.visible = this.shadowN > 0;

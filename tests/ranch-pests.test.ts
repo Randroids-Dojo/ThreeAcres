@@ -3,10 +3,13 @@
 // leaving and fleeing pests never turned aside, and the fence opens only at
 // the gate. They now head for the gate when the fence is between them and
 // where they are going, and step sideways along anything in the way.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
 import { RANCH_Z } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
+
+// Long sims (game days, ten real minutes) run well over the default 5 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
 
 const realRandom = Math.random;
 beforeEach(() => {

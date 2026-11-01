@@ -18,6 +18,10 @@
 // From the fourth: the morning's offers say so on the journal ("Orders wait on
 // the price board."), the order taken shows its tally, and the count by the
 // crosshair sits on its own ink backing (it ran into world words: "Sell²fluff").
+// From the sixth: the time ring reads on grass (a pale arc on an ink track,
+// measured from a screenshot) and the count keeps clear of it; the count steps
+// off the sell crate's sign from 2 to 6 m ("Sell fl2ff"); the desktop journal
+// page, three lines on it, sits inside the window (it ran 13 px off the bottom).
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -260,7 +264,7 @@ const oz = await p.evaluate(() => { const a = document.querySelector('.rh-zone')
 check("with the order and the goal up, the zone's name still sits clear of the journal page", oz.clear, JSON.stringify(oz));
 await p.screenshot({ path: '/tmp/ranch-thumbs-orders.png' });
 // The order lesson's page (when the first order is posted): clear of the pause button and the coins too.
-await p.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount['order:taken'] = 0; r.sim.postOrders(true); const pl = s.player; pl.x = 0; pl.z = 30; pl.y = r.sim.phys.floor(0, 30); });
+await p.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount['order:taken'] = 0; s.orders = []; r.sim.postOrders(true); const pl = s.player; pl.x = 0; pl.z = 30; pl.y = r.sim.phys.floor(0, 30); });
 await p.waitForTimeout(800);
 const ol = await p.evaluate(() => { const rect = (sel) => { const q = document.querySelector(sel).getBoundingClientRect(); return { l: q.left, t: q.top, r: q.right, b: q.bottom }; }; return { line: window.ranch.seen().line, page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins') }; });
 check("the order lesson's line is up, its page clear of the pause button and the coins", ol.line === 'Take an order at the price board.' && apart(ol.page, ol.pause) && apart(ol.page, ol.coins) && ol.page.b < 838 * 0.32, JSON.stringify(ol));
@@ -303,6 +307,9 @@ await p.evaluate(() => {
   s.gates.hollow = true;
   r.sim.phys.gates = { ...s.gates };
   for (const q of s.slots) { q.t = null; q.n = 0; }
+  // Something in the jar, so the count by the crosshair is up beside the ring.
+  s.slots[0] = { t: 'cloverhead', n: 6 };
+  s.sel = 0;
   const pl = s.player; pl.x = 39; pl.z = 4; pl.y = r.sim.phys.floor(39, 4);
   const d = r.sim.spawn('brook', 43, 4, false);
   d.hunger = 0.2;
@@ -313,15 +320,74 @@ await p.evaluate(() => {
 await p.waitForTimeout(200);
 await touch('touchStart', [[pullBtn.x, pullBtn.y, 24]]);
 const ring = [];
+let ringGeo = null;
+let ringShot = null;
 for (let i = 0; i < 14; i++) {
   await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
   await p.waitForTimeout(60);
   ring.push(await p.evaluate(() => { const c = document.querySelector('.rh-cross'); const l = c.querySelector('.x-left'); return { ...window.ranch.hud.tugState(), shown: c.classList.contains('timed') && getComputedStyle(l).display !== 'none', dash: parseFloat(l.style.strokeDashoffset || '0') }; }));
+  // Mid-pull: how big the ring is, how far the count keeps from it, and a shot to read its contrast from.
+  if (i === 6 && ring[ring.length - 1].left >= 0) {
+    ringGeo = await p.evaluate(() => {
+      const c = document.querySelector('.rh-cross').getBoundingClientRect();
+      const left = document.querySelector('.rh-cross .x-left');
+      const ink = document.querySelector('.rh-cross .x-ink');
+      const n = document.querySelector('.rh-count').getBoundingClientRect();
+      const cx = c.left + c.width / 2;
+      const cy = c.top + c.height / 2;
+      const sw = parseFloat(getComputedStyle(left).strokeWidth) || 2;
+      const iw = ink && getComputedStyle(ink).display !== 'none' ? parseFloat(getComputedStyle(ink).strokeWidth) || 0 : 0;
+      // The box leaves the stroke out: its middle is the stroke's middle; the outer edge adds the wider stroke's half.
+      const r0 = left.getBoundingClientRect().width / 2;
+      const R = r0 + Math.max(sw, iw) / 2;
+      const nx = Math.max(n.left, Math.min(cx, n.right));
+      const ny = Math.max(n.top, Math.min(cy, n.bottom));
+      return { cx, cy, r0, sw, across: 2 * R, gap: Math.hypot(nx - cx, ny - cy) - R, count: document.querySelector('.rh-count').textContent, left: window.ranch.hud.tugState().left };
+    });
+    ringShot = await p.screenshot();
+  }
 }
 await touch('touchEnd', []);
 await p.waitForTimeout(400);
 const timed = ring.filter((q) => q.shown && q.left >= 0);
 check("a brook digging in shows its time left on the tug ring, shrinking as you pull", timed.length >= 5 && timed[timed.length - 1].left < timed[0].left - 0.1 && timed[timed.length - 1].dash > timed[0].dash, JSON.stringify(timed.map((q) => q.left.toFixed(2))));
+// Round 6: the time ring was a pale blue ring 37 px across on green grass, the count touching it. Read back from the
+// shot along the drawn arc: the pale stroke against what lies just outside it (its ink track; grass before), and
+// against the grass beyond. WCAG contrast of the median luminances.
+let ringRead = null;
+if (ringGeo && ringShot) {
+  ringRead = await p.evaluate(async ([b64, g, dpr]) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const x2 = c.getContext('2d');
+    x2.drawImage(img, 0, 0);
+    const d = x2.getImageData(0, 0, c.width, c.height).data;
+    const lin = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    const med = (r) => {
+      const ls = [];
+      for (let k = 0; k < 360 * g.left * 0.9; k += 2) {
+        const a = ((k - 90) * Math.PI) / 180;
+        const x = Math.round((g.cx + Math.cos(a) * r) * dpr);
+        const y = Math.round((g.cy + Math.sin(a) * r) * dpr);
+        const i = (y * c.width + x) * 4;
+        ls.push(0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]));
+      }
+      ls.sort((a, b) => a - b);
+      return ls[Math.floor(ls.length / 2)];
+    };
+    const ct = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const ring = med(g.r0);
+    const edge = med(g.r0 + g.sw / 2 + 1.1);
+    const grass = med(g.across / 2 + 4);
+    return { edge: +ct(ring, edge).toFixed(2), grass: +ct(ring, grass).toFixed(2) };
+  }, [ringShot.toString('base64'), ringGeo, 2.625]);
+}
+check('the time ring reads on grass: 40 px or more across, its pale arc 6:1 or more against what is just outside it (it was 37 px and 2.6:1, grass behind it)', !!ringRead && ringGeo.across >= 40 && ringRead.edge >= 6, JSON.stringify({ ...ringGeo, ...ringRead }));
+check('the count by the crosshair keeps 3 px or more clear of the time ring (it touched it, 0.4 px)', !!ringGeo && ringGeo.count !== '' && ringGeo.gap >= 3, JSON.stringify(ringGeo));
 // A clover has no time: no outer ring.
 await p.evaluate(() => {
   const r = window.ranch;
@@ -383,6 +449,65 @@ const cb = await p.evaluate(() => {
   return { text: e.textContent, alpha: m ? Number(m[4] ?? 1) : 0, w: r.width, h: r.height, x: r.left, y: r.top, pad: parseFloat(cs.paddingLeft) };
 });
 check('the count by the crosshair sits on an ink backing (alpha 0.5 or more) with room round its number', cb.text !== '' && cb.alpha >= 0.5 && cb.pad >= 5 && cb.h >= 16, JSON.stringify(cb));
+// Round 6: the count by the crosshair covered the sell crate's sign ("Sell fl2ff"). From the lane, 2 to 6 m off,
+// every aim that shows the sell mark: the count's box against the sign plate's box on screen (the plate as
+// props.ts sets it: 1 by 0.25 m, 0.62 m up the crate's lane side).
+const signRows = [];
+for (const dist of [2, 3, 4, 5, 6]) {
+  signRows.push(await p.evaluate(async (dist) => {
+    const r = window.ranch;
+    const sim = r.sim;
+    const s = sim.s;
+    s.hour = 11;
+    for (const q of s.slots) { q.t = null; q.n = 0; }
+    s.slots[0] = { t: 'tuft-clover', n: 7, mix: Array(7).fill('tuft-clover') };
+    s.sel = 0;
+    const EX = -6.5;
+    const EZ = 36.5;
+    const pl = s.player;
+    pl.x = EX;
+    pl.z = EZ - 0.7 - dist;
+    pl.y = sim.phys.floor(pl.x, pl.z);
+    pl.vx = pl.vz = 0;
+    const y0 = sim.phys.floor(EX, EZ);
+    const frame = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+    let sells = 0;
+    let over = 0;
+    for (let dx = -0.3; dx <= 0.31; dx += 0.3) for (let y = 0; y <= 2.4; y += 0.08) {
+      r.aimAt(EX + dx, y0 + y, EZ);
+      await frame();
+      if (document.querySelector('.rh-cross').dataset.s !== 'sell') continue;
+      sells++;
+      const pts = [[-0.5, -0.125], [0.5, -0.125], [0.5, 0.125], [-0.5, 0.125]].map(([a, b]) => r.project(EX + a, y0 + 0.62 + b, EZ - 0.775)).filter(Boolean);
+      const n = document.querySelector('.rh-count').getBoundingClientRect();
+      const ox = Math.min(n.right, Math.max(...pts.map((q) => q.x))) - Math.max(n.left, Math.min(...pts.map((q) => q.x)));
+      const oy = Math.min(n.bottom, Math.max(...pts.map((q) => q.y))) - Math.max(n.top, Math.min(...pts.map((q) => q.y)));
+      if (ox > 0 && oy > 0) over++;
+    }
+    for (const q of s.slots) { q.t = null; q.n = 0; }
+    return { dist, sells, over };
+  }, dist));
+}
+check('from 2 to 6 m, with the sell mark up, the count never lies over the crate\'s sign (it covered it on 17 to 21 aims of 90)', signRows.every((q) => q.sells >= 20 && q.over === 0), JSON.stringify(signRows));
+// Round 6: the desktop journal page ran 13 px off the bottom of the window. With three lines on it, at 1280 by
+// 800 and 1440 by 900, its box (rotation and all) sits inside the window with 8 px or more to spare.
+const deskRows = [];
+for (const [w, h] of [[1280, 800], [1440, 900]]) {
+  const dctx = await b.newContext({ viewport: { width: w, height: h } });
+  const dp = await dctx.newPage();
+  await dp.goto(`${base}/?game=ranch&fresh&taught`);
+  await dp.waitForFunction(() => window.ranch && window.ranch.frames > 8, null, { timeout: 30000 });
+  await dp.evaluate(() => {
+    const hud = window.ranch.hud;
+    const set = hud.setGoal.bind(hud);
+    const lines = ['Pull clover heads from the garden.', 'Clover fluff, 2 of 4.', 'Find the gold clover by the old oak.'].map((text) => ({ text, done: false }));
+    hud.setGoal = () => set(lines);
+  });
+  await dp.waitForTimeout(1000);
+  deskRows.push(await dp.evaluate(() => { const e = document.querySelector('.rh-page'); const r = e.getBoundingClientRect(); return { w: innerWidth, h: innerHeight, up: e.classList.contains('up'), lines: e.querySelectorAll('li').length, l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) }; }));
+  await dctx.close();
+}
+check('desktop: the journal page with three lines sits inside the window, 8 px or more from every edge (it ran 13 px off the bottom)', deskRows.every((q) => q.up && q.lines === 3 && q.l >= 8 && q.t >= 8 && q.r <= q.w - 8 && q.b <= q.h - 8), JSON.stringify(deskRows));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 const failed = results.filter((r) => !r).length;

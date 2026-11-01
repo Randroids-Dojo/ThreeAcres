@@ -322,6 +322,19 @@ export class Fx {
     }
   }
 
+  /**
+   * A pest sent rolling: a few small, faint puffs at its feet that spread out and
+   * thin fast, so it stays in sight (the sixth playtest's cream cloud, the
+   * building dust, hid one after a single blow at 3.5 m).
+   */
+  scuff(x: number, y: number, z: number): void {
+    const n = this.reduced ? 3 : 6;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.8;
+      this.spawn(x + Math.cos(a) * 0.38, y + 0.05, z + Math.sin(a) * 0.38, Math.cos(a) * 1.3, 0.2 + Math.random() * 0.3, Math.sin(a) * 1.3, 0.3 + Math.random() * 0.15, 0.05, 0.1, 0xcdbf9f, 0.3, 0, 2.5);
+    }
+  }
+
   /** Coins hop out of the crate. */
   coinPop(x: number, y: number, z: number, n: number): void {
     for (let k = 0; k < n; k++) {

@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import type { DownyKind } from '../src/games/ranch/defs';
 import { isDowny } from '../src/games/ranch/defs';
 import { rng } from '../src/games/ranch/noise';
-import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
+import { RARE_WARY, Sim, type Aim, type Controls } from '../src/games/ranch/sim';
 import { MAXX, MAXZ, MINX, MINZ, POND, RIDGE_TOP, VENTS, waterAt, zoneAt } from '../src/games/ranch/world';
 
 export interface Thumb {
@@ -98,8 +98,12 @@ export interface Try {
   near: number;
 }
 
-/** One try at a wild downy of a kind with a thumb, starting `start` m off from a dry side picked by the seed. */
-export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = kind === 'thistle' ? 16 : 12): Try {
+/**
+ * One try at a wild downy of a kind with a thumb, starting `start` m off from a dry side picked by the seed.
+ * rare: the board's rare one instead, lured (it has just eaten the food you blew near it, so it lets you come
+ * in: the fight is what is measured) or not (it hears you coming and bolts).
+ */
+export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = kind === 'thistle' ? 16 : 12, rare: '' | 'lured' | 'wary' = ''): Try {
   const realRandom = Math.random;
   Math.random = rng(seed);
   try {
@@ -114,6 +118,10 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     const h = home(kind, seed);
     const d = sim.spawn(kind, h.x, h.z, false);
     d.hunger = 0.2;
+    if (rare) {
+      d.rare = true;
+      if (rare === 'lured') d.calm = RARE_WARY.calm;
+    }
     const p = s.player;
     // A side to come from: dry land in the downy's own zone, inside the valley.
     for (let k = 0; k < 40; k++) {
@@ -172,8 +180,8 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       const dist = Math.hypot(d.x - p.x, d.z - p.z);
       closest = Math.min(closest, dist);
       if (d.drawn <= 0) near = Math.min(near, dist);
-      // Walk (or run) in until 5.5 m off, again past 7.6 m; hold Pull within 7.6 m.
-      if (walking && dist < 5.5) walking = false;
+      // Walk (or run) in until 5.5 m off (a lured rare one lets you nearer: 4 m), again past 7.6 m; hold Pull within 7.6 m.
+      if (walking && dist < (rare === 'lured' ? 4 : 5.5)) walking = false;
       else if (!walking && dist > 7.6) walking = true;
       const c: Controls = { moveX: 0, moveZ: walking ? 0.73 : 0, sprint: thumb.run && kind === 'thistle' && walking, jump: false, jumpPressed: false, draw: dist < 7.6, puff: false, puffPressed: false };
       const cp = Math.cos(pitch);
@@ -197,14 +205,14 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
 }
 
 /** Share of tries caught, for a kind and a thumb. */
-export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1): { rate: number; secs: number; escaped: number; food: number; under: number } {
+export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1, rare: '' | 'lured' | 'wary' = ''): { rate: number; secs: number; escaped: number; food: number; under: number } {
   let n = 0;
   let secs = 0;
   let esc = 0;
   let food = 0;
   let under = 0;
   for (let k = 0; k < tries; k++) {
-    const r = tryCatch(kind, thumb, seed0 + k * 7919);
+    const r = rare ? tryCatch(kind, thumb, seed0 + k * 7919, rare === 'lured' ? 8 : 12, rare) : tryCatch(kind, thumb, seed0 + k * 7919);
     if (r.caught) {
       n++;
       secs += r.secs;
@@ -266,6 +274,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const b = catchRate(kind, CAREFUL, tries);
     const pct = (v: number) => `${Math.round(v * 100)}%`.padStart(4);
     console.log(`   ${kind.padEnd(8)}  ${pct(a.rate)}      (${a.secs.toFixed(1)} s, ${pct(a.escaped)}, ${pct(a.food)})       ${pct(b.rate)}     (${b.secs.toFixed(1)} s, ${pct(b.escaped)}, ${pct(b.food)})       ${String(Math.round((b.rate - a.rate) * 100)).padStart(3)} pts  ${pct((a.under + b.under) / 2)}`);
+  }
+  // The board's rare one (round 6: a hunt). Lured (it has just eaten the food you blew near it), from 8 m: it
+  // fights harder than its kind. Not lured, walking in from 12 m: it hears you and bolts.
+  for (const kind of ['clover', 'ember', 'brook'] as DownyKind[]) {
+    const pct = (v: number) => `${Math.round(v * 100)}%`.padStart(4);
+    const a = catchRate(kind, CARELESS, tries, 1, 'lured');
+    const b = catchRate(kind, CAREFUL, tries, 1, 'lured');
+    const w = catchRate(kind, CAREFUL, Math.max(10, tries >> 2), 1, 'wary');
+    console.log(`   rare ${kind.padEnd(7)} lured: careless ${pct(a.rate)} (${a.secs.toFixed(1)} s), careful ${pct(b.rate)} (${b.secs.toFixed(1)} s); not lured, careful: ${pct(w.rate)}`);
   }
   // Closing on a clover that has seen you, walking against running (taught now: the running lesson in the meadow).
   for (const run of [false, true]) {

@@ -53,6 +53,8 @@ export interface PageLine {
   done: boolean;
   /** Draw the strike and tick now (it was just done). */
   fresh: boolean;
+  /** A plain line of news, with no box to tick (a fact is not a task). */
+  plain?: boolean;
 }
 
 export class Hud {
@@ -115,7 +117,7 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/><circle class="x-left" r="17.5" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="110" stroke-dashoffset="0" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-24 -24 48 48"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/><circle class="x-ink" r="20" fill="none" stroke-width="5.4"/><circle class="x-left" r="20" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="125.7" stroke-dashoffset="0" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
     this.leftRing = this.cross.querySelector('.x-left')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
@@ -182,6 +184,23 @@ export class Hud {
     this.crossState = s;
     this.cross.dataset.s = s;
   }
+
+  /**
+   * Keep the count off world words under the crosshair (the sell crate's sign read "Sell fl2ff"): their box in
+   * CSS px from the crosshair's middle (all 0 for none). The count goes above the crosshair, or above or below
+   * the words, whichever is nearest its usual place and clear of them.
+   */
+  keepCountOff(top: number, bottom: number, left: number, right: number): void {
+    const w = (this.count.textContent?.length ?? 0) * 8 + 14;
+    // Clear sideways (or no words at all): its usual place. Else above the crosshair, else above the words, else below.
+    let dy = 10;
+    if (bottom > top && right > 16 && left < 16 + w && 7 < bottom && 31 > top) dy = -34 > bottom || -10 < top ? -31 : top - 24 >= -150 ? top - 24 : bottom + 4;
+    dy = Math.round(dy);
+    if (dy === this.countDy) return;
+    this.countDy = dy;
+    this.count.style.top = dy === 10 ? '' : `calc(50% + ${dy}px)`;
+  }
+  private countDy = 10;
 
   /** The count beside the crosshair: a number, with the kind's name briefly after it changes. */
   setCount(n: number, name: string, cap: number): void {
@@ -275,23 +294,33 @@ export class Hud {
     if (on) this.edge.style.transform = `translate(${x!.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${a.toFixed(3)}rad)`;
   }
 
-  /** The current lesson on the journal page: one line that stays until done, then ticks. '' takes it down. */
-  setLesson(line: string, done: boolean): void {
+  /**
+   * The current lesson on the journal page: one line that stays until done,
+   * then ticks. '' takes it down. under: calm lines kept under it (an open
+   * order's tally: the sixth playtest's first order lost the page to two
+   * lessons in a second); over: calm lines that lead it (an order or hunt in
+   * hand over the stray line, which hid the hunt's step).
+   */
+  setLesson(line: string, done: boolean, under: string[] = [], over: string[] = []): void {
     if (!line) {
       if (this.lessonLine) {
         this.lessonLine = '';
+        this.lessonExtra = '';
         this.hidePage();
         this.showGoal();
       }
       return;
     }
     this.goalShown = '';
-    if (line !== this.lessonLine) {
-      // A new lesson slides in as a new page; the same lesson reworded (another device) just changes.
-      const fresh = !this.lessonLine || this.lessonDone || !this.pageUp;
+    const extra = `${over.join('|')}#${under.join('|')}`;
+    if (line !== this.lessonLine || extra !== this.lessonExtra) {
+      // A new lesson slides in as a new page; the same lesson reworded (another device), or its order lines moving, just changes.
+      const fresh = line !== this.lessonLine && (!this.lessonLine || this.lessonDone || !this.pageUp);
       this.lessonLine = line;
       this.lessonDone = done;
-      this.pageBody.innerHTML = `<ul><li class="${done ? 'done now' : ''}">${BOX}<span>${line}</span></li></ul>`;
+      this.lessonExtra = extra;
+      const calm = (t: string) => `<li class="calm">${BOX}<span>${t}</span></li>`;
+      this.pageBody.innerHTML = `<ul>${over.map(calm).join('')}<li class="lesson-line ${done ? 'done now' : ''}">${BOX}<span>${line}</span></li>${under.map(calm).join('')}</ul>`;
       this.page.classList.add('lesson');
       this.page.classList.remove('note');
       if (fresh) {
@@ -305,9 +334,18 @@ export class Hud {
     }
     if (done !== this.lessonDone) {
       this.lessonDone = done;
-      const li = this.pageBody.querySelector('li');
+      const li = this.pageBody.querySelector('li.lesson-line');
       li?.classList.toggle('done', done);
       li?.classList.toggle('now', done);
+    }
+  }
+  private lessonExtra = '';
+
+  /** Take a note down early if it still says this (it no longer applies: something came aboard). */
+  clearNote(text: string): void {
+    if (this.sayT > 0 && this.say.textContent === text) {
+      this.sayT = 0;
+      this.say.classList.remove('on');
     }
   }
 
@@ -368,7 +406,7 @@ export class Hud {
     this.cross.classList.toggle('timed', l >= 0);
     this.cross.classList.toggle('late', l >= 0 && l < 0.35);
     this.tugRing.style.strokeDashoffset = `${(1 - v) * 81.7}`;
-    if (l >= 0) this.leftRing.style.strokeDashoffset = `${(1 - l) * 110}`;
+    if (l >= 0) this.leftRing.style.strokeDashoffset = `${(1 - l) * 125.7}`;
   }
   private tugShown = 0;
   private leftShown = -1;
@@ -394,11 +432,12 @@ export class Hud {
     const rows = lines
       .map(
         (l) =>
-          `<li class="${l.done ? 'done' : ''} ${l.fresh ? 'fresh' : ''}">${BOX}<span>${l.text}</span></li>`,
+          `<li class="${l.done ? 'done' : ''} ${l.fresh ? 'fresh' : ''} ${l.plain ? 'plain' : ''}">${l.plain ? '' : BOX}<span>${l.text}</span></li>`,
       )
       .join('');
     this.pageBody.innerHTML = `<h4>${title}</h4><ul>${rows}</ul>`;
     this.lessonLine = '';
+    this.lessonExtra = '';
     this.goalShown = '';
     this.page.classList.remove('up', 'lesson', 'goal');
     void this.page.offsetWidth;

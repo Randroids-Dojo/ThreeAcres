@@ -24,7 +24,7 @@ import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, type Frame } from './input';
-import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, teachAll, type Say } from './lessons';
+import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
 import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
@@ -43,7 +43,7 @@ import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
 import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from './sim';
 import { capacity, deserialize, serialize, slotCap, summary, type RanchState, type Slot } from './state';
-import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
+import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, zoneAt, type GateId } from './world';
 import './ranch.css';
 
 const EYE = 1.6;
@@ -712,6 +712,8 @@ export class Ranch {
     switch (e.t) {
       case 'suck': {
         const big = isDowny(e.thing);
+        // Something aboard: "Nothing in the jar." no longer holds (the sixth playtest's stayed up over 19 fluff).
+        this.hud.clearNote('Nothing in the jar.');
         this.cue('ranch.suck', undefined, undefined, undefined, big ? 0.9 : 0.7, big ? 0.75 : isFood(e.thing) ? 1 : 1.3);
         this.fx.gulp(a.mx, a.my, a.mz, thingColor(e.thing));
         this.vm.gulp();
@@ -794,7 +796,7 @@ export class Ranch {
         break;
       case 'nettlehit':
         this.cue('ranch.nettlehit', e.x, e.y, e.z);
-        this.fx.dust(e.x, e.y, e.z, 0.3);
+        this.fx.scuff(e.x, e.y, e.z);
         break;
       case 'splash':
         this.cue('ranch.splash', e.x, e.y, e.z);
@@ -859,6 +861,10 @@ export class Ranch {
       case 'zone':
         this.hud.showZone(ZONE_NAMES[e.zone]);
         break;
+      case 'heard':
+        // The rare one heard you coming, unlured, and bolted.
+        this.hud.note('It heard you. Lure it from further off.', 2.6);
+        break;
       case 'escape':
         // It broke free: say so plainly (a brook into the pond, the rest off and away).
         this.hud.note(e.dove ? 'It slipped into the water.' : 'It got away.', 1.8);
@@ -872,7 +878,8 @@ export class Ranch {
           this.lastSale = e.bonus;
           // While a lesson is up, the page belongs to it: this page waits for it to tick and go.
           const word = e.rare ? `${RARE_NAME[e.kind].replace(/^./, (c) => c.toUpperCase())} downy` : `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} ${e.live ? 'downies' : 'fluff'}`;
-          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${word}, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
+          // The rare one stays: say what it does for its pen, as news, not a task.
+          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${word}, ${e.n} of ${e.n}.`, done: true, fresh: true }, ...(e.rare ? [{ text: 'It stays. Its pen sheds more.', done: false, fresh: false, plain: true }] : [])]);
         } else if (e.state === 'missed') this.hud.note('Dusk. The order went unfilled.', 3);
         break;
       }
@@ -961,13 +968,22 @@ export class Ranch {
       this.prevLessonDone = v.id;
       this.cue('ranch.slot', undefined, undefined, undefined, 0.7, 1.3);
     }
-    this.hud.setLesson(v.line, v.done);
+    // An open order's tally stays on the page under any lesson line (the sixth playtest's first order lost the page
+    // to the garden and dusk lessons within a second of being taken). The stray line goes under an order or hunt in
+    // hand rather than over it, and the arrow stays on the order's spot (the playtest's hid the hunt's step).
+    const tally = v.line ? orderTally(s, say, v.line) : [];
+    const lead = v.id === 'stray' && !v.done && tally.length > 0;
+    this.hud.setLesson(v.line, v.done, lead ? [] : tally, lead ? tally : []);
+    if (lead) {
+      if (orderSpot(s, this.tutor.mark, this.floor)) this.tutor.mark.on = true;
+      else if (zoneAt(s.player.x, s.player.z) !== 'ranch') this.tutor.mark.on = false;
+    }
     // A page of something just done that waited for the lesson to go.
     if (!v.line) this.flushPage();
     // No lesson up: the day's orders with their tally, then the next journal goal, calmly, on the same page
     // (J hides them until something changes).
     const goal = v.line ? '' : this.goalLine();
-    const orders = v.line ? [] : orderLines(s);
+    const orders = v.line ? [] : orderLines(s, say);
     const key = [...orders, goal].join('|');
     if (key !== this.goalShown) {
       // A new goal, or the rare order's next step: its edge chevron shows again for a few seconds.
@@ -1389,6 +1405,8 @@ export class Ranch {
     // While tags hang, the count by the crosshair steps aside (it lay over a tag's words).
     const counted = slot.t && !this.menu;
     hud.setCount(counted ? slot.n : 0, counted ? slotName(slot) : '', slotCap(s, slot));
+    if (counted && this.crossTarget === 'sell') this.countOffSign();
+    else hud.keepCountOff(0, 0, 0, 0);
     hud.setCoins(s.coins, dt);
     hud.setHour(s.hour);
     // Use prompt: the key glyph shows until you have used something once.
@@ -1599,6 +1617,26 @@ export class Ranch {
   slotScreen(i: number): { x: number; y: number } | null {
     const v = this.vm.windowScreen(i, this.tmp);
     return v ? { x: v.x * this.w, y: v.y * this.h } : null;
+  }
+
+  /** The count by the crosshair steps off the sell crate's "Sell fluff" plate (it read "Sell fl2ff"); the plate as props.ts sets it. */
+  private countOffSign(): void {
+    const y = heightAt(EXCHANGE.x, EXCHANGE.z) + 0.62;
+    let t = Infinity;
+    let b = -Infinity;
+    let l = Infinity;
+    let r = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const v = this.tmp.set(EXCHANGE.x + (k & 1 ? 0.5 : -0.5), y + (k & 2 ? 0.125 : -0.125), EXCHANGE.z - 0.775).project(this.camera);
+      if (v.z > 1) return this.hud.keepCountOff(0, 0, 0, 0);
+      const sx = (v.x * this.w) / 2;
+      const sy = (-v.y * this.h) / 2;
+      t = Math.min(t, sy);
+      b = Math.max(b, sy);
+      l = Math.min(l, sx);
+      r = Math.max(r, sx);
+    }
+    this.hud.keepCountOff(t, b, l, r);
   }
 
   /** Project a world point to CSS px (null if behind). */

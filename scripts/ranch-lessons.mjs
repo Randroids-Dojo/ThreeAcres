@@ -78,9 +78,12 @@ const WATCH = () => {
       gateTags: seen.gateTags,
       marker: seen.marker,
       edge: vis('.rh-edge.on'),
-      page: page.classList.contains('up') ? page.textContent.trim() : '',
+      // The lesson's own line when one is up (an open order's tally sits under it, round 6), else the page's words.
+      page: page.classList.contains('up') ? (page.querySelector('li.lesson-line span')?.textContent ?? page.textContent.trim()) : '',
     };
   };
+  // The calm lines on the page with a lesson's line (an open order's tally, or the order leading the stray line).
+  window.__calm = () => [...document.querySelectorAll('.rh-page.up li.calm span')].map((e) => e.textContent);
   window.__taps = [];
   window.__zero = null;
   window.addEventListener('pointerdown', (e) => { if (!window.__zero && e.clientX === 0 && e.clientY === 0) window.__zero = `${window.ranch.seen().lesson} ${window.__lastStep ?? ''} ${e.pointerType} ${e.screenX},${e.screenY} ${e.pageX}`; }, true);
@@ -608,7 +611,7 @@ function only(ui, allowed) {
 
   // ---- 9c. the loop's end, before dusk: three whole turns of the loop finish it (plain sales do not count), and
   // all the while the afternoon has held at half past four.
-  await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 150; for (const d of s.downies) d.hunger = 0; });
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 100; for (const d of s.downies) d.hunger = 0; });
   check('phone: through the loop lesson the clock still holds at half past four', await page.evaluate(() => { const r = window.ranch; return r.seen().lesson === 'farm' && Math.abs(r.sim.s.hour - 16.5) < 0.01 && r.sim.s.day === 1; }), await k.why());
   await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.sell = (s.learnCount.sell ?? 0) + 6; s.learnCount['sell:blown'] = (s.learnCount['sell:blown'] ?? 0) + 6; });
   await page.waitForTimeout(600);
@@ -652,6 +655,51 @@ function only(ui, allowed) {
   const tally = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), goal: window.ranch.sim.openGoals(1)[0]?.text, o: window.ranch.sim.s.orders[0] }));
   check('phone: with no lesson up, the journal shows the order\'s tally ("Clover fluff, 1 of N.") and the next goal', tally.lesson === '' && tally.page[0] === `Clover fluff, ${tally.o.got} of ${tally.o.n}.` && tally.o.got >= 1 && tally.page.includes(tally.goal), JSON.stringify(tally));
   await k.shot('phone-14b-goal');
+  // ---- Round 6: the feeder before the first night (the sixth playtest's garden lesson left 88 coins against a 300
+  // feeder, and the first night woke the pen starving). At its price, 150, with a pen, its lesson comes before the
+  // garden and before dusk; the open order's tally stays on the page under the lesson's line.
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 150; });
+  check('phone: 150 coins and a pen bring the feeder lesson, before the garden and before dusk', await k.lessonOn('ups', 4000), await k.why());
+  u = await k.ui();
+  const feederEarly = await page.evaluate(() => ({ hour: window.ranch.sim.s.hour, o: window.ranch.sim.s.orders[0], calm: window.__calm() }));
+  check('phone: "Buy a feeder at the pen post.", the order\'s tally kept under it ("Clover fluff, 1 of 4.")', u.page === 'Buy a feeder at the pen post.' && feederEarly.calm.length === 1 && feederEarly.calm[0] === `Clover fluff, ${feederEarly.o.got} of ${feederEarly.o.n}.` && feederEarly.hour < 18.3, `${u.page} ${JSON.stringify(feederEarly.calm)} ${feederEarly.hour.toFixed(2)}`);
+  await k.shot('phone-14b2-feeder-tally');
+  await k.place(14.8 + 1.2, 31.8 + 2.2, 14.8 + 0.4, 5.6, 31.8);
+  await frames(page, 6);
+  const act4 = await centre('.rt-act');
+  if (act4) { await tap(act4[0], act4[1], 22); await page.waitForTimeout(700); }
+  const opts3 = await page.evaluate(() => window.ranch.menuOptions());
+  check('phone: the pen post offers only what matters yet: the feeder', opts3.join() === 'pen:feeder', opts3.join());
+  pick = await chosen();
+  check('phone: the Feeder tag comes down chosen (the lesson teaches it)', pick.id === 'pen:feeder' && pick.label === 'Buy', JSON.stringify(pick));
+  await k.shot('phone-16-ups');
+  await tapTag('pen:feeder');
+  check('phone: fitting a feeder ends the upgrades lesson', await k.finished('ups'));
+  // ---- the new feeder: filled in its own lesson, the hopper marked (the playtest's sat empty a day and a half)
+  check('phone: a lesson to fill the feeder comes next', await k.lessonOn('feeder', 4000));
+  await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 3; i++) sim.stow('cloverhead'); });
+  const headSlot = await k.slotOf('cloverhead');
+  if ((await k.st()).sel !== headSlot) {
+    await page.waitForTimeout(400);
+    u = await k.ui();
+    check("phone: clover heads aboard but not chosen: the line says to choose the food's window", u.page === "Tap the food's window to choose it.", u.page);
+    await tapWindow(headSlot);
+  }
+  await page.waitForTimeout(400);
+  u = await k.ui();
+  const hop = await page.evaluate(() => { const m = window.ranch.tutor.mark; return { on: m.on, x: m.x, y: m.y, z: m.z, r: m.r }; });
+  check('phone: "Blow food into the feeder.", the arrow on the hopper', u.page === 'Blow food into the feeder.' && hop.on && Math.abs(hop.x - 20.17) < 0.2 && Math.abs(hop.z - 29.54) < 0.2, `${u.page} ${JSON.stringify(hop)}`);
+  await k.place(21.2, 34, hop.x, hop.y - 0.75, hop.z);
+  await frames(page, 3);
+  await k.shot('phone-16b-feeder');
+  await press('.rt-puff', 90, 33);
+  check('phone: blowing a clover head into the hopper fills the feeder and ends the lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:feeder'), null, 4000), JSON.stringify(await page.evaluate(() => window.ranch.sim.s.pads[1].feeder)));
+  check('phone: all that before dusk (the feeder is in before the first night)', await page.evaluate(() => window.ranch.sim.s.hour < 18.3 && window.ranch.sim.s.day === 1), await k.why());
+  // Back at the crate with the rest of the order's fluff, the fluff window chosen.
+  const fluffSlot2 = await k.slotOf('tuft');
+  if ((await k.st()).sel !== fluffSlot2) await tapWindow(fluffSlot2);
+  await k.place(-6.5, 32.8, -6.5, 5.7, 36.5);
+  await frames(page, 3);
   // Fill it: the rest of its fluff into the crate. Filling pays the order's fluff again, and the page says "Earned".
   // (Few coins first, so no lesson comes up with them and takes the page.)
   await page.evaluate(() => (window.ranch.sim.s.coins = 10));
@@ -764,38 +812,6 @@ function only(ui, allowed) {
   await frames(page, 3);
   await press('.rt-puff', 90, 21);
   check('phone: puffing food onto the bed ends the plant lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:plant'), null, 4000));
-  await page.evaluate(() => (window.ranch.sim.s.coins = 340));
-  check('phone: 300 coins and a pen bring the upgrades lesson', await k.lessonOn('ups', 4000));
-  await k.place(14.8 + 1.2, 31.8 + 2.2, 14.8 + 0.4, 5.6, 31.8);
-  await frames(page, 6);
-  const act4 = await centre('.rt-act');
-  if (act4) { await tap(act4[0], act4[1], 22); await page.waitForTimeout(700); }
-  const opts3 = await page.evaluate(() => window.ranch.menuOptions());
-  check('phone: the pen post offers only what matters yet: the feeder, and the hedge after a night', opts3.join() === 'pen:feeder,pen:hedge', opts3.join());
-  pick = await chosen();
-  check('phone: the Feeder tag comes down chosen (the lesson teaches it), the Hedge not', pick.id === 'pen:feeder' && pick.label === 'Buy', JSON.stringify(pick));
-  await k.shot('phone-16-ups');
-  await tapTag('pen:feeder');
-  check('phone: fitting a feeder ends the upgrades lesson', await k.finished('ups'));
-  // ---- the new feeder: filled in its own lesson, the hopper marked (the playtest's sat empty a day and a half)
-  check('phone: a lesson to fill the feeder comes next', await k.lessonOn('feeder', 4000));
-  await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 3; i++) sim.stow('cloverhead'); });
-  const headSlot = await k.slotOf('cloverhead');
-  if ((await k.st()).sel !== headSlot) {
-    await page.waitForTimeout(400);
-    u = await k.ui();
-    check("phone: clover heads aboard but not chosen: the line says to choose the food's window", u.page === "Tap the food's window to choose it.", u.page);
-    await tapWindow(headSlot);
-  }
-  await page.waitForTimeout(400);
-  u = await k.ui();
-  const hop = await page.evaluate(() => { const m = window.ranch.tutor.mark; return { on: m.on, x: m.x, y: m.y, z: m.z, r: m.r }; });
-  check('phone: "Blow food into the feeder.", the arrow on the hopper', u.page === 'Blow food into the feeder.' && hop.on && Math.abs(hop.x - 20.17) < 0.2 && Math.abs(hop.z - 29.54) < 0.2, `${u.page} ${JSON.stringify(hop)}`);
-  await k.place(21.2, 34, hop.x, hop.y - 0.75, hop.z);
-  await frames(page, 3);
-  await k.shot('phone-16b-feeder');
-  await press('.rt-puff', 90, 33);
-  check('phone: blowing a clover head into the hopper fills the feeder and ends the lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:feeder'), null, 4000), JSON.stringify(await page.evaluate(() => window.ranch.sim.s.pads[1].feeder)));
   // ---- a gate goal counts the coins and points at the gate (it was a dead end)
   await page.evaluate(() => { const s = window.ranch.sim.s; for (const g of ['sell', 'plant', 'order']) if (!s.goals.includes(g)) s.goals.push(g); s.coins = 288; });
   // (A goal just done shows its "Earned" page first, once the feeder's line has ticked and gone.)
@@ -878,52 +894,110 @@ function only(ui, allowed) {
   await k.shot('phone-18c-thistle-clue');
   await page.evaluate(() => (window.ranch.sim.s.hour = 11));
 
-  // ---- Round 5: the morning's rare downy, taught the first time it is taken: its tag at the board (where it was
-  // seen, what spooks it, what it pays), "Find the gold clover by the old oak." with an arrow over the landmark,
-  // the spook's line once near, caught for real, then blown into the sell crate.
-  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.hour = 8; for (const q of s.slots) { q.t = null; q.n = 0; } for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; r.sim.postOrders(true); });
+  // ---- Round 6: the morning's rare downy is a hunt, taught the first time it is taken: its tag at the board (where it
+  // was seen, what it pays, that it stays), "Find the gold clover by the old oak." with no arrow over the landmark
+  // (only the way to its part of the valley), found close by, lured with its food blown near it for real, pulled in
+  // for real while it is lured, then blown into a pen, where it fills the order and stays.
+  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.hour = 8; for (const q of s.slots) { q.t = null; q.n = 0; } for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; s.orders = []; r.sim.postOrders(true); });
   await k.place(-4.2, 34.6, -4.2, 5.2, 37.6);
   await frames(page, 6);
   const actR = await centre('.rt-act.show');
   if (actR) { await tap(actR[0], actR[1], 37); await page.waitForTimeout(900); }
-  const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /downy$/.test(o.title) && /^By the /.test(o.note)); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`) }; });
-  check("phone: the board's tags offer a fluff order, a trip for downies caught today and the rare one, each saying what it pays", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /on top of sales$/.test(t)) && rareTag.all.some((t) => /Caught today\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook) downy$/.test(rareTag.title) && /^By the [a-z ]+, shy of (running|the bellows)\. Pays [\d,]+$/.test(rareTag.note), JSON.stringify(rareTag));
+  const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /downy$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
+  const rarePay = Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
+  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and that it stays", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /on top of sales$/.test(t)) && rareTag.all.some((t) => /Caught today\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook) downy$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, and stays$/.test(rareTag.note), JSON.stringify(rareTag));
+  check("phone: the rare one's coins are no more than the trip's (the playtest's 2,680 was 3.8 times it)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
   await k.shot('phone-18d-rare-tags');
   if (rareTag) await takeTag(rareTag.id);
   check('phone: taking the rare one brings its lesson', await k.lessonOn('rare', 4000), await k.why());
   u = await k.ui();
-  const rareFar = await page.evaluate(() => { const r = window.ranch; const d = r.sim.rareWild(); const m = r.tutor.mark; return d && { at: m.on ? Math.hypot(m.x - d.homeX, m.z - d.homeZ) : -1, spook: d.spook, kind: d.kind, far: Math.hypot(d.x - r.sim.s.player.x, d.z - r.sim.s.player.z) }; });
-  check('phone: "Find the gold clover by the old oak." (its kind and where), the arrow over the landmark', !!rareFar && /^Find the (gold clover|rose ember|silver brook) by the [a-z ]+\.$/.test(u.page) && rareFar.at >= 0 && rareFar.at < 0.6, `${u.page} ${JSON.stringify(rareFar)}`);
-  // Near it: the line says how to close in, the way it allows.
+  const rareFar = await page.evaluate(() => { const r = window.ranch; const d = r.sim.rareWild(); const m = r.tutor.mark; return d && { onSpot: m.on && Math.hypot(m.x - d.homeX, m.z - d.homeZ) < 4, gate: m.on ? Math.hypot(m.x - 0, m.z - 18) : -1, kind: d.kind, far: Math.hypot(d.x - r.sim.s.player.x, d.z - r.sim.s.player.z) }; });
+  check('phone: "Find the gold clover by the old oak." (its kind and where), no arrow over the landmark, only the way out of the ranch', !!rareFar && /^Find the (gold clover|rose ember|silver brook) by the [a-z ]+\.$/.test(u.page) && !rareFar.onSpot && rareFar.gate >= 0 && rareFar.gate < 1, `${u.page} ${JSON.stringify(rareFar)}`);
+  const rk = rareFar?.kind ?? 'clover';
+  const food = rk === 'clover' ? 'cloverhead' : rk === 'ember' ? 'sweetroot' : 'dewberry';
+  const foodWord = rk === 'clover' ? 'clover heads' : rk === 'ember' ? 'sweetroots' : 'dewberries';
+  // In its part of the valley, 35 m off: the clue only, no arrow at all.
   let rd = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; });
-  await k.place(rd.x + 9, rd.z + 3, rd.x, rd.y + 0.25, rd.z);
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.gates.ridge = s.gates.hollow = true; window.ranch.sim.phys.gates = { ...s.gates }; });
+  const spot35 = await page.evaluate(([x, z]) => { const sim = window.ranch.sim; const { zoneAt } = { zoneAt: (px, pz) => (pz > 18 ? 'ranch' : px < -36 ? 'ridge' : px > 36 ? 'hollow' : 'meadow') }; const home = zoneAt(x, z); for (let a = 0; a < 6.28; a += 0.3) { const px = x + Math.cos(a) * 35; const pz = z + Math.sin(a) * 35; if (zoneAt(px, pz) === home && px > -76 && px < 76 && pz > -56 && pz < 56 && sim.phys.floor(px, pz) > -0.6) return [px, pz]; } return [x, z + 30]; }, [rd.x, rd.z]);
+  await k.place(spot35[0], spot35[1], rd.x, rd.y + 0.25, rd.z);
+  await page.waitForTimeout(600);
+  u = await k.ui();
+  const clueOnly = await page.evaluate(() => !window.ranch.tutor.mark.on);
+  check('phone: in its own part of the valley, far off: the clue line and no arrow', /^Find the /.test(u.page) && clueOnly, `${u.page} ${clueOnly}`);
+  await k.shot('phone-18e-rare-clue');
+  // Close (18 m): found. With none of its food aboard, the line says to bring some.
+  await k.place(rd.x + 18, rd.z, rd.x, rd.y + 0.25, rd.z);
   await page.waitForTimeout(700);
   u = await k.ui();
-  const nearLine = rareFar?.spook === 'run' ? 'Walk up to it. Running scares it off.' : 'Get close before you hold Pull.';
+  check(`phone: found close by, with none of its food aboard: "Bring ${foodWord} to lure it."`, u.page === `Bring ${foodWord} to lure it.`, u.page);
+  await page.evaluate((f) => { const sim = window.ranch.sim; for (let i = 0; i < 8; i++) sim.stow(f); }, food);
+  const foodWin = await k.slotOf(food);
+  if (foodWin >= 0 && (await k.st()).sel !== foodWin) await tapWindow(foodWin);
+  await page.waitForTimeout(500);
+  u = await k.ui();
   const onRare = await page.evaluate(() => { const r = window.ranch; const d = r.sim.rareWild(); const m = r.tutor.mark; return !!d && m.on && Math.hypot(m.x - d.x, m.z - d.z) < 0.6; });
-  check('phone: near it, the line says how to close in the way it allows, the arrow on the downy', u.page === nearLine && onRare, `${u.page} ${onRare}`);
-  await k.shot('phone-18e-rare-near');
-  let caughtRare = false;
-  for (let tries = 0; tries < 3 && !caughtRare; tries++) {
+  check(`phone: with ${foodWord} aboard: "Blow ${foodWord} near it.", the arrow on the downy`, u.page === `Blow ${foodWord} near it.` && onRare, `${u.page} ${onRare}`);
+  await k.shot('phone-18f-rare-lure');
+  // Walking straight up to it unlured sends it off: it is warier than a plain downy.
+  // (Measured in the sim tests; here the lure is played for real.) Blow its food so it lands short of it, from 14 m.
+  let lured = false;
+  for (let tries = 0; tries < 4 && !lured; tries++) {
     rd = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; });
     if (!rd) break;
-    await k.place(rd.x + 2.6, rd.z + 1.6, rd.x, rd.y + 0.25, rd.z);
-    await press('.rt-draw', 3200, 38, async () => { const q = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; }); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
+    await k.place(rd.x + 14, rd.z, rd.x + 5, rd.y + 3.2, rd.z);
+    await frames(page, 3);
+    await press('.rt-puff', 90, 40 + tries);
+    lured = await k.waitFor(() => { const d = window.ranch.sim.rareWild(); return !!d && (d.calm > 0 || d.eatT > 0 || (!!d.target && !d.target.gone)); }, null, 5000);
+  }
+  check('phone: its food blown near it for real, it comes to eat it (lured)', lured, await k.why());
+  await page.waitForTimeout(300);
+  u = await k.ui();
+  check('phone: lured, the line says to walk up and hold Pull', u.page === 'Walk up and hold Pull on it.', u.page);
+  let caughtRare = false;
+  for (let tries = 0; tries < 4 && !caughtRare; tries++) {
+    rd = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z, lured: d.calm > 0 || d.eatT > 0 }; });
+    if (!rd) break;
+    // Got away and no longer lured: lure it again (some food just short of it), then come in.
+    if (!rd.lured) {
+      await k.place(rd.x + 13, rd.z, rd.x + 4, rd.y + 3, rd.z);
+      await frames(page, 3);
+      await press('.rt-puff', 90, 50 + tries);
+      await k.waitFor(() => { const d = window.ranch.sim.rareWild(); return !!d && (d.calm > 0 || d.eatT > 0); }, null, 5000);
+      rd = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; });
+      if (!rd) break;
+    }
+    await k.place(rd.x + 3.4, rd.z + 1.2, rd.x, rd.y + 0.25, rd.z);
+    await press('.rt-draw', 3600, 38, async () => { const q = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; }); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
     caughtRare = await page.evaluate(() => window.ranch.sim.s.slots.some((q) => (q.downs ?? []).some((d) => d.rare)));
   }
-  check('phone: pulled for real, the rare one comes into the jar', caughtRare, await k.why());
+  check('phone: pulled for real while it is lured, the rare one comes into the jar', caughtRare, await k.why());
   await page.waitForTimeout(500);
-  check('phone: aboard, the line says to blow it into the sell crate', (await k.ui()).page === 'Blow the downy into the sell crate.', (await k.ui()).page);
-  const rk = rareFar?.kind ?? 'clover';
+  u = await k.ui();
+  const rareName = rk === 'clover' ? 'gold clover' : rk === 'ember' ? 'rose ember' : 'silver brook';
+  const onPen = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on && Math.hypot(m.x - 17, m.z - 26.5) < 0.6; });
+  check(`phone: aboard, "Blow the ${rareName} into a pen.", the arrow on the pen`, u.page === `Blow the ${rareName} into a pen.` && onPen, `${u.page} ${onPen}`);
   const rs = await k.slotOf(rk);
   if (rs >= 0 && (await k.st()).sel !== rs) await tapWindow(rs);
-  await k.place(-6.5, 32.8, -6.5, 5.7, 36.5);
-  await frames(page, 3);
+  // (The pen has a high fence by now: aim until the crosshair says the blow would land in the pen.)
+  let penAim = '';
+  for (const [z, y] of [[34.5, 6.6], [35.5, 7.4], [36.5, 8.2], [37.5, 9]]) {
+    await k.place(17, z, 17, y, 26.5);
+    await frames(page, 4);
+    penAim = await page.evaluate(() => document.querySelector('.rh-cross').dataset.s);
+    if (penAim === 'pen') break;
+  }
+  check('phone: aimed at the pen with the rare one chosen, the crosshair says it would land in the pen', penAim === 'pen', penAim);
   const c0r = (await k.st()).coins;
   await press('.rt-puff', 90, 39);
-  check('phone: blown into the sell crate, the rare one fills the order and pays, and its lesson ticks', await k.waitFor(() => { const s = window.ranch.sim.s; return s.orders[0]?.state === 'filled' && s.learn.includes('lesson:rare'); }, null, 5000), await k.why());
-  check('phone: it paid what its tag said', (await k.st()).coins - c0r >= Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, '')), `${c0r} to ${(await k.st()).coins}`);
-  await k.shot('phone-18f-rare-sold');
+  check('phone: blown into the pen, the rare one fills the order, and its lesson ticks', await k.waitFor(() => { const s = window.ranch.sim.s; return s.orders.some((o) => o.rare && o.state === 'filled') && s.learn.includes('lesson:rare'); }, null, 6000), await k.why());
+  check('phone: it paid what its tag said', (await k.st()).coins - c0r >= rarePay, `${c0r} to ${(await k.st()).coins}`);
+  const stays = await page.evaluate(() => window.ranch.sim.s.downies.some((d) => !d.gone && d.rare && d.tame && d.pen === 1));
+  check('phone: and it stays, in the pen', stays);
+  const earnedRare = await k.waitFor(() => { const pg = document.querySelector('.rh-page.up'); return !!pg && /^Earned/.test(pg.querySelector('h4')?.textContent ?? '') && [...pg.querySelectorAll('li.plain span')].some((e) => e.textContent === 'It stays. Its pen sheds more.'); }, null, 5000);
+  check('phone: the page says what it earned, and, as news with no box to tick, "It stays. Its pen sheds more."', earnedRare, await page.evaluate(() => document.querySelector('.rh-page')?.textContent));
+  await k.shot('phone-18g-rare-penned');
+  await page.evaluate(() => { for (const q of window.ranch.sim.s.slots) { q.t = null; q.n = 0; } });
 
   // A long press on a window tips it out on the ground in front of you (real touch).
   await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 6; i++) sim.stow('sweetroot'); });
