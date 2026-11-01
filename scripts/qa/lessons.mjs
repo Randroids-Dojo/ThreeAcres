@@ -171,7 +171,13 @@ check('the crow out of view: a chevron at the edge points towards it', pt.on && 
 await shot('8-crow');
 // Walk closer, not yet at it: the chevron moves over the crow.
 await p.evaluate((t) => { const f = window.sunup.state.actors[0]; Object.assign(f, { x: t.x + 3.5, y: t.y - 0.5, task: null, path: [] }); }, target);
-await frames(20);
+// The camera eases after the farmer: wait until it has the crow well in view.
+for (let i = 0; i < 40; i++) {
+  await frames(5);
+  const c = await crowAt();
+  if (c && c.x > 60 && c.x < 352) break;
+}
+await frames(5);
 pt = await pointer();
 ca = await crowAt();
 check('the crow in view: the chevron bobs just over it', pt.on && pt.over && ca && Math.abs(pt.x - ca.x) < 12 && ca.y - pt.y > 10 && ca.y - pt.y < 50, JSON.stringify({ pt, ca }));
