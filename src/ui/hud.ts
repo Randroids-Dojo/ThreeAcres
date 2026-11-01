@@ -62,7 +62,8 @@ export class Hud {
   private buildOpen = false;
   private lastDeny = { text: '', t: 0 };
   private foldedGoals = false;
-  private aimVerb: { verb: Verb | null; ok: boolean } | null = null;
+  /** What acting would do now: a verb from the tool, or a word of its own (the notice board). */
+  private aimVerb: { verb: Verb | null; ok: boolean; label?: string; icon?: IconId } | null = null;
 
   constructor(private host: HudHost) {
     this.touch = new TouchControls({
@@ -401,7 +402,9 @@ export class Hud {
               : describe(s, aim.x, aim.y, r);
     toggle(this.info, 'empty', !html || this.seedOpen || this.buildOpen);
     if (html) setHtml(this.info, html);
-    this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };
+    // Acting at the notice board opens it, so the button says so.
+    if (prop === 'board' && this.knows(s, 'board')) this.aimVerb = { verb: null, ok: true, label: 'Read', icon: 'board' };
+    else this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };
   }
 
   // ------------------------------------------------------------ events

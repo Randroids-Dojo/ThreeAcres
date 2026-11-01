@@ -16,7 +16,7 @@ export interface TouchHost {
   input: Input;
   state(): WorldState;
   /** What the act button would do right now. */
-  aimVerb(): { verb: Verb | null; ok: boolean } | null;
+  aimVerb(): { verb: Verb | null; ok: boolean; label?: string; icon?: IconId } | null;
   cycleTool(): void;
   toolIcon(): IconId;
   toolName(): string;
@@ -97,8 +97,8 @@ export class TouchControls {
     if (!show || !walk) return;
     const aim = this.host.aimVerb();
     const verb = aim?.verb ?? null;
-    setHtml(this.act.firstElementChild!, icon(verb ? VERB_ICON[verb] : 'hands'));
-    setText(this.act.lastElementChild!, verb ? (verb === 'tend' ? 'Bugs' : verb === 'scare' ? 'Shoo' : VERB_NAMES[verb]) : '');
+    setHtml(this.act.firstElementChild!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : 'hands')));
+    setText(this.act.lastElementChild!, aim?.label ?? (verb ? (verb === 'tend' ? 'Bugs' : verb === 'scare' ? 'Shoo' : VERB_NAMES[verb]) : ''));
     toggle(this.act, 'no', !(aim && aim.ok));
     setHtml(this.tool.firstElementChild!, icon(this.host.toolIcon()));
     setText(this.tool.lastElementChild!, this.host.toolName());

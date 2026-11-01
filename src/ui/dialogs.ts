@@ -31,6 +31,7 @@ export class Dialogs {
   open = false;
   /** Season cards must be answered; they cannot be closed by tapping outside. */
   private sticky = false;
+  private pressedScrim = false;
   private kind = '';
   private tab: Tab = 'fields';
 
@@ -41,8 +42,13 @@ export class Dialogs {
     close.onclick = () => this.close();
     head.append(this.title, close);
     this.root.append(head, this.body);
+    // Close on a press that began on the backdrop. A tap that opened the board
+    // (on the act button) ends with a click over the new backdrop; that one must not close it.
+    this.scrim.onpointerdown = () => (this.pressedScrim = true);
     this.scrim.onclick = () => {
-      if (!this.sticky) this.close();
+      const began = this.pressedScrim;
+      this.pressedScrim = false;
+      if (began && !this.sticky) this.close();
     };
   }
 
@@ -50,6 +56,7 @@ export class Dialogs {
     this.title.textContent = title;
     this.kind = kind;
     this.sticky = sticky;
+    this.pressedScrim = false;
     this.open = true;
     toggle(this.root, 'on', true);
     toggle(this.scrim, 'on', true);

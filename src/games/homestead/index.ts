@@ -40,6 +40,11 @@ export const game: GameModule = {
     }
     const s = usable(state) ? state : fresh();
     s.rules = { ...HOMESTEAD_RULES, camera: s.rules?.camera ?? 'close' };
+    // Sunup is worked alone: farm hands from a save of the old crew mode have gone home.
+    if (s.actors.some((a) => a.role === 'hand')) {
+      s.actors = s.actors.filter((a) => a.role === 'farmer');
+      s.jobs = [];
+    }
     // Saves from before the can and the smith.
     s.water ??= 12;
     s.tools ??= { can: 0, hoe: 0 };

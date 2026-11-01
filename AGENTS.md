@@ -32,7 +32,7 @@ Workbench: `/?dev=2d`, `/?dev=3d`, `/?dev=both`, `/?dev=audio`.
 Checks (dev server running; `npx vite --config scripts/lead-vite.config.ts` serves :5247 without hot reload):
 
 ```bash
-node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport); a real tap picks every seed
+node scripts/qa/touch.mjs [url]        # touch controls with real touch events (phone viewport); a real tap picks every seed; the act button lights with its word wherever acting would do something (board, well) and the tap does it
 node scripts/qa/overlap.mjs [url]      # Sunup: no two HUD pieces overlap in any state, phone and desktop; no ruled line through words; every visible button takes a tap
 node scripts/qa/lessons.mjs [url]      # Sunup's lessons: one feature at a time, nothing on screen before its lesson
 node scripts/ranch-thumbs.mjs [url]    # Thistledown thumb room at the Pixel's viewport: look, buttons, stick, bellows, journal; every slot window takes a tap

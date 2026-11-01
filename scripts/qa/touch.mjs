@@ -78,6 +78,56 @@ await touch('touchEnd', []);
 await p.waitForTimeout(100);
 check('a touch brings them back', await visible('.tb-act'));
 
+// The round button lights up, with the word for it, wherever acting would do
+// something, and a real tap does that thing: the notice board opens, the well
+// fills the can with the hands in hand. Where nothing would happen it is dim.
+await p.evaluate(() => {
+  for (const what of ['can', 'board', 'requests']) window.sunup.input.push({ type: 'unlock', what });
+  window.sunup.hud.pickTool('hands');
+});
+await p.waitForTimeout(200);
+// (A tap on the farm aims at that tile for a moment; clear it so the button reads the tile the farmer faces.)
+const standAt = (x, y, facing) => p.evaluate(([x, y, facing]) => {
+  window.sunup.walkAim = null;
+  const f = window.sunup.state.actors[0];
+  Object.assign(f, { x: x + 0.5, y: y + 0.5, facing, angle: { n: -Math.PI / 2, s: Math.PI / 2, e: 0, w: Math.PI }[facing], task: null, path: [], moving: false });
+}, [x, y, facing]);
+const actButton = () => p.evaluate(() => {
+  const b = document.querySelector('.tb-act');
+  return { lit: !b.classList.contains('no'), word: b.querySelector('.tb-t')?.textContent ?? '' };
+});
+const tapAct = async () => {
+  const [x, y] = await p.evaluate(() => { const r = document.querySelector('.tb-act').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await touch('touchStart', [[x, y, 9]]);
+  await touch('touchEnd', []);
+  await p.waitForTimeout(400);
+};
+await standAt(8, 3, 'n');
+await p.waitForTimeout(250);
+let ab = await actButton();
+check('at the notice board the button is lit and says Read', ab.lit && ab.word === 'Read', JSON.stringify(ab));
+await tapAct();
+check('a tap at the board opens it, and it stays open (the tap does not close it again)', await p.evaluate(() => window.sunup.dialogs.open));
+// A tap on the backdrop, away from the board, still closes it.
+const backdrop = await p.evaluate(() => { const r = document.querySelector('.dialog').getBoundingClientRect(); return [Math.max(12, r.left / 2), Math.max(r.top / 2, 80)]; });
+await touch('touchStart', [[backdrop[0], backdrop[1], 10]]);
+await touch('touchEnd', []);
+await p.waitForTimeout(350);
+check('a tap on the backdrop closes the board', !(await p.evaluate(() => window.sunup.dialogs.open)));
+await p.evaluate(() => window.sunup.dialogs.close(true));
+await p.waitForTimeout(250);
+await p.evaluate(() => { window.sunup.state.water = 1; });
+await standAt(11, 3, 'n');
+await p.waitForTimeout(250);
+ab = await actButton();
+check('at the well, hands in hand, the button is lit and says Fill the can', ab.lit && ab.word === 'Fill the can', JSON.stringify(ab));
+await tapAct();
+check('a tap at the well fills the can', (await p.evaluate(() => window.sunup.state.water)) > 1);
+await standAt(6, 3, 'e');
+await p.waitForTimeout(250);
+ab = await actButton();
+check('facing the bare yard, the button is dim and says nothing', !ab.lit && ab.word === '', JSON.stringify(ab));
+
 // The seed picker opens over the left half of the screen, where the walk
 // stick's capture zone is. A real tap on every seed must pick that seed.
 await p.evaluate(() => {
@@ -107,6 +157,17 @@ for (const sd of [...seeds].reverse()) {
 check('a tap picks every seed in the picker, the stick side too', seeds.length >= 2 && picked.length === seeds.length, `${picked.length} of ${seeds.length}: ${picked.join(', ')}`);
 await p.evaluate(() => window.sunup.hud.pickTool('hands'));
 
+// A save from the old crew mode brings a farm hand along; Sunup is worked alone, so the hand has gone home on load.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  const f = s.actors[0];
+  s.actors.push({ ...f, id: 9999, role: 'hand', name: 'Ada', tint: 0, away: false, task: null, path: [], job: null });
+  window.sunup.save();
+});
+await p.goto(`${base}/?game=homestead`);
+await p.waitForFunction(() => window.sunup && window.sunup.frames > 10, null, { timeout: 30000 });
+const roles = await p.evaluate(() => window.sunup.state.actors.map((a) => a.role).join(','));
+check('a farm hand from an old crew save is gone after loading', roles === 'farmer', roles);
 await p.screenshot({ path: '/tmp/acres-touch-walk.png' });
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

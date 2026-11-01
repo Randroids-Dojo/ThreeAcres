@@ -20,3 +20,21 @@ describe('Sunup lesson lines', () => {
     for (const l of lines) expect(l, l).not.toMatch(/\b(sow|sown|till|tilled|pulls?|the hand)\b/i);
   });
 });
+
+describe('Sunup acting where it would do something', () => {
+  it('fills the can at the well whatever is in hand, once the can is yours', async () => {
+    const { resolve } = await import('../src/sim/actions');
+    const s = world('sunup');
+    s.water = 1;
+    s.learn = [];
+    // Before the can lesson, hands at the well do nothing.
+    expect(resolve(s, 'hands', 11, 2).verb).not.toBe('refill');
+    s.learn.push('can');
+    const r = resolve(s, 'hands', 11, 2);
+    expect(r.verb).toBe('refill');
+    expect(r.ok).toBe(true);
+    // A full can says so.
+    s.water = 99;
+    expect(resolve(s, 'seeds', 11, 2).ok).toBe(false);
+  });
+});

@@ -43,8 +43,10 @@ function buildCheck(s: WorldState, kind: BuildKind): Resolved {
 
 /** What `tool` would do at (x, y), and whether it can. */
 export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Resolved {
-  // The can fills at the well or from the pond.
-  if (tool === 'can' && inMap(x, y) && (s.tiles[idx(x, y)] === 'water' || propAt(x, y)?.kind === 'well')) {
+  // The can fills at the well or from the pond: with the can in hand, or in
+  // Sunup with anything in hand once the can is yours (it is on your belt).
+  const canInHand = tool === 'can' || (homestead(s) && (s.learn ?? []).includes('can'));
+  if (canInHand && inMap(x, y) && (s.tiles[idx(x, y)] === 'water' || propAt(x, y)?.kind === 'well')) {
     if (s.water >= CAN_WATER[s.tools.can]) return NO('refill', 'The can is full');
     return { verb: 'refill', ok: true, reason: '' };
   }
