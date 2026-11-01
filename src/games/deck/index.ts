@@ -23,6 +23,8 @@ export interface DeckDebug {
   pieces(): Piece[];
   /** Every string painted on a card face. */
   faceText(id: string, up?: boolean): string[];
+  /** A card face as an image URL, for checks that read its picture (works on any build). */
+  faceUrl(id: string, up?: boolean): string;
   /** What the board previews for the held card. */
   preview(): unknown;
   /** Take up hand card i and play it on a plot (and a second plot for the trowel). */
@@ -89,6 +91,7 @@ export const game: GameModule = {
       lesson: () => (t.line ? { ...t.line } : null),
       pieces: () => [...t.tutor.learn.seen],
       faceText: (id, up = false) => faceText(id as never, up),
+      faceUrl: (id, up = false) => faceUrl(id as never, up),
       preview: () => (t.board.preview ? JSON.parse(JSON.stringify(t.board.preview)) : null),
       play: (i, plot, to) => {
         const c = t.run.hand[i];

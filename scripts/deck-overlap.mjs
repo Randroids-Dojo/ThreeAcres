@@ -608,7 +608,7 @@ async function run(label, viewport, touch) {
       if (label !== 'phone') return;
       const q = await p.evaluate(async () => {
         const out = {};
-        const { faceUrl } = await import('/src/games/deck/view/faces.ts');
+        const faceUrl = (id, up) => window.deck.faceUrl(id, up);
         for (const id of ['garlic', 'ladybirds', 'scarecrow']) {
           const img = new Image();
           img.src = faceUrl(id, false);
