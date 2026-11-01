@@ -25,6 +25,8 @@ export interface ScoreOpts {
   roll: boolean;
   /** Nights from tonight the harvest falls on (previews): pests still on the crop then halve its pay. */
   night?: number;
+  /** Its place in that night's harvests, from 1 (previews: Market Day doubles every fifth). The night itself counts as it goes. */
+  n?: number;
 }
 
 /** Scoops a harvest puts back: one when the crop is pulled up, and every pick of a strawberry. */
@@ -62,9 +64,10 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   if (o.shears) chips.push({ label: 'shears', icon: 'shears', op: 'x', v: 2 });
 
   if (kind === 'carrot') for (const j of near('radish')) mult.push({ label: 'a radish next to it', icon: 'radish', op: '+', v: 1, from: j });
-  // The Root Cellar makes the root combo scale with the patch: each radish or carrot beside a radish or carrot gives it +1 bloom.
+  // The Root Cellar pairs the roots: a radish beside a carrot (or a carrot beside a radish) gets +1 bloom for each, up to +2.
+  // It used to count every root beside a root, uncapped, and a carrot ringed by radishes on a bare plot won every run.
   if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) {
-    for (const j of nb) if (snap.crops[j]?.kind === 'radish' || snap.crops[j]?.kind === 'carrot') mult.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 1, from: j });
+    for (const j of near(kind === 'radish' ? 'carrot' : 'radish').slice(0, TUNING.cellarCap)) mult.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 1, from: j });
   }
   // A sunflower faces the crop below it (the plate's foot, where the sun is) and blooms it.
   let bees = 0;
@@ -88,7 +91,7 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   for (const j of near('chili')) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: 1.5, from: j });
   // Pests still on the crop the night it is pulled halve its pay.
   if (crop.pest > (o.night ?? 0)) mult.push({ label: 'pests', icon: 'pest', op: 'x', v: TUNING.pestPay });
-  const n = s.dayHarvests + 1;
+  const n = o.n ?? s.dayHarvests + 1;
   if (s.pages.includes('market') && n % 5 === 0) mult.push({ label: 'market day', icon: 'market', op: 'x', v: 2 });
   let golden = false;
   if (o.roll && s.pages.includes('clover') && rand(s) < 1 / 8) {

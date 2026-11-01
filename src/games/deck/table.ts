@@ -15,6 +15,8 @@ import {
   costOf,
   endDay,
   energyMax,
+  giveUp,
+  marketTonight,
   moveTargets,
   newMeta,
   newRun,
@@ -95,6 +97,8 @@ const SHOWN = 0.87;
 
 /** What the second tap does, said on the first: "Tap again to water." */
 const AIM_VERB: Partial<Record<CardId, string>> = { can: 'water', compost: 'lay it', fertiliser: 'feed it', shears: 'cut it', scarecrow: 'set it up', beehive: 'set it up' };
+/** Seeds whose name is a plural: "The beans are pulled before the sunflower ripens." */
+const PLURAL: readonly CardId[] = ['beans'];
 export function ladder(n: number): number {
   return PENTA[n % 5] * Math.pow(2, Math.floor(n / 5) * 0.5);
 }
@@ -309,6 +313,25 @@ export class Table {
     this.afterSync();
   }
 
+  /**
+   * Give the run up: it ends the way a missed quota does, so its seasons count for the catalogue and its best
+   * harvest and coins for the record, and the almanac's entry for it follows. (It used to start a new run and
+   * record nothing.)
+   */
+  giveUp(): void {
+    if (this.run.phase === 'over') return;
+    this.seq?.finish();
+    this.seq = null;
+    this.settle();
+    this.held = null;
+    this.aimed = null;
+    if (!giveUp(this.run)) return;
+    recordRun(this.meta, this.run, UNLOCK_ORDER);
+    this.save();
+    this.syncAll();
+    this.sheets.entry();
+  }
+
   /** Bring every piece in and mark every lesson done: a returning player's table. */
   learnAll(): void {
     this.tutor = new Tutor(learnedAll());
@@ -442,7 +465,7 @@ export class Table {
     const sheet = this.sheets.open && this.sheets.kind !== 'stall';
     const quiet = this.busy || sheet || this.sheets.detailOpen || (this.sheets.open && this.sheets.kind === 'stall');
     const held = this.held ? (this.cardOf(this.held.uid) ?? null) : null;
-    const { line, unlocked } = this.tutor.update(this.run, this.device(), held, dt, quiet);
+    const { line, unlocked } = this.tutor.update(this.run, this.device(), held, dt, quiet, this.aimed !== null);
     if (unlocked.length) {
       this.applyPieces(unlocked);
       this.renderAll();
@@ -544,6 +567,7 @@ export class Table {
     };
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     let boardBox: { x: number; y: number; w: number; h: number };
+    const P = Math.round(Math.max(300, Math.min(380, W * 0.28)));
     if (!wide) {
       const top = safeT + 8;
       this.cardW = Math.round(Math.min(112, Math.max(84, Math.min(W * 0.255, H * 0.118))));
@@ -563,7 +587,6 @@ export class Table {
       place(this.bench, 6, benchY, W - 12, benchH);
       this.handRect = { x: 0, y: handY, w: W, h: handH + safeB };
     } else {
-      const P = Math.round(Math.max(300, Math.min(380, W * 0.28)));
       const sx = W - P - 18;
       this.cardW = Math.round(Math.min(150, Math.max(76, H * 0.17)));
       this.cardH = Math.round(this.cardW * 1.4);
@@ -586,6 +609,21 @@ export class Table {
     place(this.handEl, this.handRect.x, this.handRect.y, this.handRect.w, this.handRect.h);
     this.placeHint();
     this.board.layout(boardBox.w, boardBox.h, dpr, this.run?.cols ?? 4, this.run?.rows ?? 4, !wide || H < 600);
+    // The desktop stall's goods: as large as the screen's height lets every stall state fit (1.45 at 800 px).
+    this.el.style.setProperty('--sbk', String(Math.max(1, Math.min(1.7, 1 + (H - 700) / 220))));
+    if (wide) {
+      // A card's close-up under the pointer goes in the bare table right of the plate, clear of the scoops (it used
+      // to stand over them); with no room there, at the top of the side panel, above the lesson strip.
+      const right = boardBox.x + this.board.px0 + this.board.pw + 10;
+      const room = W - P - 18 - 10 - right;
+      const box = room >= 150 ? { x: right, y: 12, w: Math.min(230, room), h: this.handRect.y - 20 } : { x: W - P - 18, y: 12, w: P, h: this.hintBox.y - 20 };
+      const st = this.el.style;
+      st.setProperty('--sb-dx', `${Math.round(box.x)}px`);
+      st.setProperty('--sb-dy', `${Math.round(box.y)}px`);
+      st.setProperty('--sb-dw', `${Math.round(box.w)}px`);
+      st.setProperty('--sb-dh', `${Math.round(box.h)}px`);
+      this.detailBox = box;
+    }
     if (this.run) this.board.setSeason(this.run.season, (this.run.year - 1) * 4 + this.run.season + 1);
     const pr = this.peg.getBoundingClientRect();
     const pw = Math.round(pr.width || W - 20);
@@ -612,7 +650,8 @@ export class Table {
     const s = this.run;
     const season = SEASON_NAMES[s.season];
     this.ledSeason.textContent = `${season[0].toUpperCase()}${season.slice(1)}, year ${s.year}`;
-    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'At the stall' : 'Run over';
+    // The season's last night still reads as its sixth day while it plays (it used to say "At the stall" over the harvest).
+    this.ledDay.textContent = s.phase === 'day' || this.busy ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'At the stall' : 'Run over';
     this.ledTally.innerHTML = `<b>${Math.round(this.shownEarned)}</b> of ${s.quota}`;
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
@@ -848,10 +887,13 @@ export class Table {
       let rot = off * (n > 4 ? 1.8 : 3.2);
       let sc = 1;
       if (held) {
+        const rest = y;
         // On a phone the bench sits right above the hand: lift a little, so the scoops stay in sight.
         y -= this.layout === 'phone' ? ch * 0.06 : ch * 0.3;
         rot = 0;
         sc = this.layout === 'phone' ? 1.04 : 1.1;
+        // On the desktop the lifted card stops under the plate's caption (it used to cover it).
+        if (this.layout === 'wide') y = Math.min(rest - 6, Math.max(y, this.captionFloor() - R.y + ch * (sc - 1)));
       } else if (hov) {
         y -= ch * 0.14;
         rot *= 0.4;
@@ -863,6 +905,15 @@ export class Table {
       c.el.dataset.key = String(i + 1);
     });
     this.cue();
+  }
+
+  /** Where a card's close-up under the pointer goes on the desktop, in table coordinates (for checks). */
+  detailBox = { x: 0, y: 0, w: 0, h: 0 };
+
+  /** The lowest point of the plate's caption, in table coordinates, with a little air under it. */
+  private captionFloor(): number {
+    const cap = this.board.captionBox();
+    return (parseFloat(this.boardWrap.style.top) || 0) + cap.y + cap.h + 4;
   }
 
   // ---------------------------------------------------------------- frame
@@ -901,6 +952,7 @@ export class Table {
       if (this.shakeT === 0) this.tableEl.style.transform = '';
     }
     this.board.tonight = this.busy ? [] : this.shown.map((_, i) => ripeTonight(this.run, i));
+    this.board.market = this.busy || this.run.phase !== 'day' ? [] : marketTonight(this.run);
     this.board.boost = this.busy ? [] : this.run.plots.map((p) => p.boost);
     this.board.crow = !this.busy && this.run.phase === 'day' && this.run.crow;
     const nk = this.board.night.toFixed(3);
@@ -956,7 +1008,8 @@ export class Table {
           this.hover = i;
           this.updateHighlight();
           this.ctx.audio.cue('deck.hover', { gain: 0.6 });
-          this.say(`Tap again to ${AIM_VERB[card.id] ?? 'play it'}.`, i);
+          // The first lesson says what the second tap does itself; otherwise a note by the plot.
+          if (this.line?.id !== 'sow') this.say(`Tap again to ${CARDS[card.id].type === 'seed' ? 'plant it' : (AIM_VERB[card.id] ?? 'play it')}.`, i);
         } else if (i !== null) this.tryPlay(i);
       } else if (i !== null) {
         this.cursor = i;
@@ -969,10 +1022,14 @@ export class Table {
     });
   }
 
-  /** Tools and objects that go on one plot: on touch they aim on the first tap and play on the second. Seeds plant at once. */
+  /**
+   * Seeds, tools and objects that go on one plot: on touch they aim on the first tap and play on the second, so a
+   * finger sees what a mouse resting on the plot sees (the seed's score there, its neighbours' gains) before it
+   * commits. Seeds used to plant on the first tap, and their preview showed only while dragged.
+   */
   private aimFirst(card: Card): boolean {
     const t = CARDS[card.id].target;
-    return CARDS[card.id].type !== 'seed' && t !== 'board' && t !== 'move';
+    return t !== 'board' && t !== 'move';
   }
 
   private cardOf(uid: number): Card | undefined {
@@ -1036,7 +1093,7 @@ export class Table {
     const def = CARDS[card.id];
     const aim = this.aimAt();
     const marks: PreviewMark[] = [];
-    let total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null = null;
+    let total: { plot: number; yield: number; bloom: number; score: number; late?: boolean; never?: boolean } | null = null;
     if (def.target === 'board') {
       marks.push(...(previewPlay(s, idx, null)?.marks ?? []));
     } else if (def.target === 'move') {
@@ -1052,19 +1109,40 @@ export class Table {
           else if (p.harvest) total = { plot: aim, ...p.harvest };
         }
       } else if (def.type === 'seed') {
-        for (const i of valid) for (const m of previewPlay(s, idx, i)?.marks ?? []) if (m.plot === i) marks.push(m);
+        // Each plot the seed could go on shows what sowing it there gains: its own bonus, or, for a seed that gives
+        // to its neighbours (beans, chili, a sunflower), what they would gain, added up. Beans used to show nothing.
+        for (const i of valid) {
+          const ms = previewPlay(s, idx, i)?.marks ?? [];
+          const own = ms.find((m) => m.plot === i && (m.yield || m.bloom || Math.abs(m.times - 1) > 1e-6 || m.lost));
+          if (own) {
+            marks.push(own);
+            continue;
+          }
+          const sum: PreviewMark = { plot: i, yield: 0, bloom: 0, times: 1, nights: 0 };
+          for (const m of ms) {
+            if (m.plot === i) continue;
+            sum.yield += m.yield;
+            sum.bloom += m.bloom;
+            sum.times = Math.max(sum.times, m.times);
+          }
+          if (sum.yield || sum.bloom || sum.times > 1 + 1e-6) marks.push(sum);
+        }
       }
     }
-    // Why a greyed bonus won't pay, for the plot being aimed at; and a plain word when a card would do nothing.
+    const valid = def.target === 'board' || (aim !== null && (def.target === 'move' ? this.held!.from !== null && moveTargets(s, idx, this.held!.from).includes(aim) : targetsFor(s, idx).includes(aim)));
+    // Why a greyed bonus won't pay, said only under a plot the card can go on; and a plain word when a card would do nothing.
     let reason: { plot: number; text: string } | null = null;
-    if (aim !== null) {
+    if (aim !== null && valid) {
       const l = marks.find((m) => m.lost);
-      if (l?.lost) reason = { plot: aim, text: this.lostWhy(l.plot, l.lost.why, l.lost.from) };
+      if (total?.never) reason = { plot: aim, text: 'Too late to ripen before the end.' };
+      else if (l?.lost) reason = { plot: aim, text: this.lostWhy(l.plot, l.lost.why, l.lost.from) };
       else if (total?.late) reason = { plot: aim, text: 'Ripens next season.' };
     }
     let none: { plot: number | null; text: string } | null = null;
     if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: 'No effect now.' };
-    b.preview = { marks, total, bloom: this.seen('bloom'), reason, none };
+    // What the play would change about tonight: crops it brings in get tonight's moon, and Market Day's stamp moves.
+    const after = def.target === 'board' ? previewPlay(s, idx, null) : valid && aim !== null ? (def.target === 'move' ? previewPlay(s, idx, this.held!.from!, aim) : previewPlay(s, idx, aim)) : null;
+    b.preview = { marks, total, bloom: this.seen('bloom'), reason, none, tonight: after?.tonight ?? [], market: after ? after.market : marketTonight(s) };
   }
 
   /** "The radish is pulled before the carrot ripens." The held seed stands in for whichever of the two is not on the plot yet. */
@@ -1076,7 +1154,7 @@ export class Table {
     const taker = kind(plot);
     const giver = kind(from);
     if (!taker || !giver) return 'Its neighbour is pulled first.';
-    return `The ${CARDS[giver].name.toLowerCase()} is pulled before the ${CARDS[taker].name.toLowerCase()} ripens.`;
+    return `The ${CARDS[giver].name.toLowerCase()} ${PLURAL.includes(giver) ? 'are' : 'is'} pulled before the ${CARDS[taker].name.toLowerCase()} ${PLURAL.includes(taker) ? 'ripen' : 'ripens'}.`;
   }
 
   private areaOf(card: Card, i: number): number[] {
@@ -1548,14 +1626,21 @@ export class Table {
     const bedR = ox + b.bx + b.T * b.cols;
     let x = ox + b.bx + (b.T * b.cols) / 2;
     // The note hangs from its top-centre point upward (translate -50%, -100%): `y` is its bottom edge.
-    let y = oy + b.captionBaseline + 6;
+    // A note about the whole table goes in the lesson strip when no lesson is up (it used to sit on the plate's
+    // caption, whose words showed round it in pieces); with a lesson up, just inside the bed's top edge.
+    const strip = this.hintBox;
+    let y = oy + b.by + h + 6;
+    if (plot === null && !this.hint.classList.contains('on')) {
+      x = strip.x + strip.w / 2;
+      y = strip.y + strip.h / 2 + h / 2;
+    }
     if (plot !== null) {
       const c = b.centre(plot);
       x = ox + c.x;
       y = Math.max(oy + c.y - b.T * 0.7, oy + b.by + h + 4);
     }
     // Inside the bed's width where it fits, so the numbers down the side stay clear too.
-    if (w <= bedR - bedL) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
+    if (w <= bedR - bedL && (plot !== null || this.hint.classList.contains('on'))) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
     x = Math.max(w / 2 + 4, Math.min(this.W - w / 2 - 4, x));
     n.style.left = `${Math.round(x)}px`;
     n.style.top = `${Math.round(Math.max(60 + h, y))}px`;
@@ -1567,21 +1652,28 @@ export class Table {
   }
   private noteTimer = 0;
 
-  /** Read a plot: what stands there, what it will pay and when ("C4: carrot pays 15 in 2 nights."), in eight words at most. */
+  /**
+   * Read a plot: what stands there, what it will pay and when ("C4: carrot pays 15 in 2 nights."), in eight words
+   * at most, scored like the previews (Market Day too). It names the plot only where the plate shows its row
+   * numbers: the phone's plate has the letters alone, and the note sits by the plot anyway.
+   */
   plotLine(i: number): string {
     const p = this.run.plots[i];
-    const at = `${'ABCDE'[i % this.run.cols]}${Math.floor(i / this.run.cols) + 1}`;
+    const numbered = this.board.keyBoxes().some((b) => /\d/.test(b.text));
+    const at = numbered ? `${'ABCDE'[i % this.run.cols]}${Math.floor(i / this.run.cols) + 1}: ` : '';
+    const say = (rest: string) => (at ? `${at}${rest}` : `${rest[0].toUpperCase()}${rest.slice(1)}`);
     if (p.crop) {
       const c = p.crop;
       const name = CARDS[c.kind].name.toLowerCase();
       const next = nextPick(this.run, i);
-      if (!next) return `${at}: ${name}.`;
+      if (!next) return say(`${name}.`);
+      if (next.never) return say(`${name}, too late to ripen.`);
       const n = next.ripeIn;
-      const when = next.late ? 'next season' : n <= 0 ? 'tonight' : `in ${n} ${n === 1 ? 'night' : 'nights'}`;
-      return `${at}: ${name}${c.pest ? ', pests,' : ''} pays ${next.score} ${when}.`;
+      const when = next.late ? 'next season' : n <= 0 ? 'tonight' : n === 1 ? 'tomorrow night' : `in ${n} nights`;
+      return say(`${name}${c.pest ? ', pests,' : ''} pays ${next.score} ${when}.`);
     }
-    if (p.obj) return `${at}: ${CARDS[p.obj].name.toLowerCase()}.`;
-    return `${at}: bare soil.`;
+    if (p.obj) return say(`${CARDS[p.obj].name.toLowerCase()}.`);
+    return say('bare soil.');
   }
 
   private inspect(i: number): void {
@@ -1614,7 +1706,7 @@ export class Table {
     this.tutor.count('night');
     this.tutor.count('harvest', harvests.length);
     this.tutor.count('crow', ev.filter((e) => e.t === 'crow').length);
-    if (ev.some((e) => e.t === 'seasonEnd' && e.cleared)) this.tutor.count('stall');
+    if (ev.some((e) => e.t === 'shop')) this.tutor.count('stall');
     this.save();
     this.ctx.audio.cue('deck.endday');
     this.shown = before;
@@ -1823,7 +1915,8 @@ export class Table {
       this.seq = null;
       if (seasonEnd) {
         this.sheets.close();
-        if (seasonEnd.cleared) this.sheets.stall(seasonEnd);
+        // A season met opens the stall; the last winter met, or a season missed, ends the run with its entry.
+        if (this.run.phase === 'shop') this.sheets.stall(seasonEnd);
         else this.sheets.entry();
       }
       this.renderAll();

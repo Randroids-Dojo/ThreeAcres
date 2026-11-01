@@ -28,6 +28,10 @@
 //     on the phone and the desktop and compared
 //   - ending the day within a moment of a play shows the morning's board or
 //     tomorrow's hand during the night (sampled 0.35 s and 0.5 s in)
+//   - round 4: on touch a seed's first tap on a plot does not preview it there (or plants it), the second does not
+//     plant it, or the preview differs from a mouse hovering that plot (a radish, beans); held beans mark no plot
+//     where their +2 would land; the can's preview does not give the crop it brings in tonight its moon; giving up
+//     from the almanac does not end the run with its entry, count its seasons and keep its best harvest
 // Screens go to /tmp/deck-lessons/; the step-by-step table to steps-*.json.
 // node scripts/deck-lessons.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -106,6 +110,11 @@ async function session(label, viewport, touch) {
     }, i);
   const handIndex = (id) => p.evaluate((id) => window.deck.state().hand.findIndex((c) => c.id === id), id);
   const plotPoint = (i) => p.evaluate((i) => { const r = window.deck.rects().plots[i]; return [r.left + r.width / 2, r.top + r.height * 0.6]; }, i);
+  /** Sow the held seed on a plot: a click on the desktop; on touch the first tap aims (round 4) and the second plants. */
+  const sow = async (i) => {
+    await tap(...(await plotPoint(i)));
+    if (touch) await tap(...(await plotPoint(i)));
+  };
   const center = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, sel);
   const idle = () => p.waitForFunction(() => !window.deck.busy(), null, { timeout: 30000 });
   /** Mean luminance of the middle of a hand card's face, from a screenshot: an unaffordable card is dimmed. */
@@ -231,6 +240,13 @@ async function session(label, viewport, touch) {
     t = await step('day 1, radish taken up');
     check(`${label}: the line moves on to the plot`, /plot/i.test(t.line), t.line);
     await shot('2-held');
+    // Round 4: on touch a seed aims on the first tap and shows what it would pay there; the second tap plants it.
+    await tap(...(await plotPoint(5)));
+    const aim = await p.evaluate(() => ({ pv: window.deck.preview(), hand: window.deck.state().hand.length, crop: !!window.deck.state().plots[5].crop }));
+    t = await step('day 1, radish aimed');
+    await shot('2b-aimed');
+    check(`${label}: the first tap on a plot previews the seed there and plants nothing`, aim.pv?.total?.plot === 5 && aim.pv.total.score === 2 && aim.hand === 2 && !aim.crop, JSON.stringify({ total: aim.pv?.total, hand: aim.hand, crop: aim.crop }));
+    check(`${label}: and the line says to tap again`, /again/i.test(t.line), t.line);
     await tap(...(await plotPoint(5)));
     await wait(500);
   }
@@ -271,7 +287,7 @@ async function session(label, viewport, touch) {
   await tap(...(await cardPoint(await handIndex('carrot'))));
   t = await step('day 2, carrot taken up');
   check(`${label}: the next note says what missing it means`, /run ends/i.test(t.line), t.line);
-  await tap(...(await plotPoint(5)));
+  await sow(5);
   await wait(500);
   await tap(...(await cardPoint(await handIndex('radish'))));
   t = await step('day 2, radish taken up');
@@ -314,12 +330,12 @@ async function session(label, viewport, touch) {
     check(`${label}: hovering shows the total, and the carrot's +1 bloom greyed: the radish goes first`, pv?.total?.score === 4 && pv.marks.some((m) => m.plot === 5 && m.bloom === 0 && m.lost?.bloom === 1 && m.lost?.why === 'gone') && /pulled before the carrot ripens/.test(pv.reason?.text ?? ''), JSON.stringify(pv));
     await shot('7b-hover-preview');
     await p.mouse.click(...(await plotPoint(6)));
-  } else await tap(...(await plotPoint(6)));
+  } else await sow(6);
   await wait(500);
   t = await step('day 2, radish beside the carrot');
   check(`${label}: the companion lesson ends when the radish is beside it`, t.done.includes('companion'), t.done.join());
   await tap(...(await cardPoint(0)));
-  await tap(...(await plotPoint(15)));
+  await sow(15);
   await wait(500);
   if (touch) await tap(...(await center('.sb-lantern')));
   else await p.mouse.click(...(await center('.sb-lantern')));
@@ -354,7 +370,7 @@ async function session(label, viewport, touch) {
   await wait(500);
   if (touch) {
     await tap(...(await cardPoint(await handIndex('radish'))));
-    await tap(...(await plotPoint(1)));
+    await sow(1);
   } else {
     await p.keyboard.press(`Digit${(await handIndex('radish')) + 1}`);
     for (const k of ['ArrowUp']) await p.keyboard.press(k);
@@ -372,7 +388,7 @@ async function session(label, viewport, touch) {
     const plot = await p.evaluate(() => window.deck.state().plots.findIndex((q, i) => i > 8 && !q.crop && !q.obj));
     if (touch) {
       await tap(...(await cardPoint(hi)));
-      await tap(...(await plotPoint(plot)));
+      await sow(plot);
     } else {
       await p.keyboard.press(`Digit${hi + 1}`);
       await p.evaluate((plot) => (window.deck.table.cursor = plot), plot);
@@ -447,7 +463,7 @@ async function session(label, viewport, touch) {
   check(`${label}: the two scoops the beans would use lift, the rest stay`, used.length === 2 && scoopsHeld.every((s, k) => (s.use ? lifted[k] > 4 : Math.abs(lifted[k]) < 1)), `lifted by ${lifted.join(', ')} px`);
   {
     const plot = await p.evaluate(() => window.deck.state().plots.findIndex((q) => !q.crop && !q.obj));
-    if (touch) await tap(...(await plotPoint(plot)));
+    if (touch) await sow(plot);
     else {
       await p.evaluate((plot) => (window.deck.table.cursor = plot), plot);
       await p.keyboard.press('Enter');
@@ -592,8 +608,8 @@ async function session(label, viewport, touch) {
       if (sug.plot === null) await tap(...(await plotPoint(6)));
       else {
         await tap(...(await plotPoint(sug.plot)));
-        // A finger aims a tool on one plot with the first tap and plays it with the second.
-        const aimed = touch && (await p.evaluate((uid) => { const c = window.deck.state().hand.find((x) => x.uid === uid); return !!c && !['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili', 'rain', 'sun', 'storm', 'ladybirds', 'trowel'].includes(c.id); }, uid));
+        // A finger aims a seed, a tool or an object on one plot with the first tap and plays it with the second.
+        const aimed = touch && (await p.evaluate((uid) => { const c = window.deck.state().hand.find((x) => x.uid === uid); return !!c && !['rain', 'sun', 'storm', 'ladybirds', 'trowel'].includes(c.id); }, uid));
         if (aimed) await tap(...(await plotPoint(sug.plot)));
         if (sug.to !== undefined && sug.to !== null) await tap(...(await plotPoint(sug.to)));
       }
@@ -755,11 +771,18 @@ async function p1(label, viewport, touch) {
       return [r.left + r.width * 0.3, r.top + r.height * 0.35];
     }, id);
   const plotAt = (i) => p.evaluate((i) => { const r = window.deck.rects().plots[i]; return [r.left + r.width / 2, r.top + r.height * 0.55]; }, i);
-  const look = () => p.evaluate(() => { const t = window.deck.table; const pv = window.deck.preview(); return { marks: pv?.marks ?? null, total: pv?.total ?? null, area: [...t.board.hl.area].sort((a, b) => a - b), water: t.board.hl.water, hover: t.board.hl.hover, hand: t.run.hand.map((c) => c.id) }; });
-  for (const [tool, plot] of [['can', 5], ['compost', 6]]) {
+  const look = () => p.evaluate(() => { const t = window.deck.table; const pv = window.deck.preview(); return { marks: pv?.marks ?? null, total: pv?.total ?? null, tonight: pv?.tonight ?? null, area: [...t.board.hl.area].sort((a, b) => a - b), water: t.board.hl.water, hover: t.board.hl.hover, hand: t.run.hand.map((c) => c.id) }; });
+  // Round 4: seeds aim then plant on touch like the tools (a radish beside the carrot, beans above it); the can's
+  // preview gives the carrot it brings in tonight its moon; held beans mark the plots where their +2 would land.
+  for (const [tool, plot] of [['can', 5], ['compost', 6], ['radish', 4], ['beans', 1]]) {
     await setup([tool, 'radish']);
     await wait(300);
     await tap(...(await cardAt(tool)));
+    if (tool === 'beans') {
+      const held = await look();
+      check(`${label}: beans in hand mark the plots where their +2 would land`, !!held.marks?.some((m) => [1, 4, 9].includes(m.plot) && m.yield >= 2), JSON.stringify(held.marks));
+    }
+    const count = (h) => h.filter((x) => x === tool).length;
     if (touch) await tap(...(await plotAt(plot)));
     else {
       await p.mouse.move(...(await plotAt(plot)));
@@ -767,13 +790,17 @@ async function p1(label, viewport, touch) {
     }
     const seen = await look();
     await p.screenshot({ path: `${out}/p1-${label}-${tool}-aimed.png` });
-    aimSeen[`${tool}:${label}`] = JSON.stringify({ marks: seen.marks, total: seen.total, area: seen.area, water: seen.water });
-    const want = tool === 'can' ? seen.marks?.some((m) => m.plot === 5 && m.nights >= 1) && seen.area.join() === '4,5,6,7' && seen.water : seen.marks?.some((m) => m.plot === 6 && m.yield === 6);
+    aimSeen[`${tool}:${label}`] = JSON.stringify({ marks: seen.marks, total: seen.total, tonight: seen.tonight, area: seen.area, water: seen.water });
+    const want =
+      tool === 'can' ? seen.marks?.some((m) => m.plot === 5 && m.nights >= 1) && seen.area.join() === '4,5,6,7' && seen.water && seen.tonight?.includes(5)
+      : tool === 'compost' ? seen.marks?.some((m) => m.plot === 6 && m.yield === 6)
+      : tool === 'radish' ? seen.total?.plot === 4 && seen.total.score > 0
+      : seen.total?.plot === 1 && seen.marks?.some((m) => m.plot === 5 && m.yield === 2);
     check(`${label}: a ${tool} ${touch ? 'tapped once on' : 'hovered over'} a plot shows its preview there${touch ? ' and is not played yet' : ''}`, !!want && seen.hover === plot && seen.hand.includes(tool), JSON.stringify(seen));
     if (touch) {
       await tap(...(await plotAt(plot)));
       const after = await look();
-      check(`${label}: the second tap plays the ${tool}`, !after.hand.includes(tool), after.hand.join());
+      check(`${label}: the second tap plays the ${tool}`, count(after.hand) === count(seen.hand) - 1, after.hand.join());
     }
   }
   // Play, then end the day at once: the night must show the board and hand as they were at dusk.
@@ -781,6 +808,7 @@ async function p1(label, viewport, touch) {
   await wait(300);
   await tap(...(await cardAt('radish')));
   await tap(...(await plotAt(10)));
+  if (touch) await tap(...(await plotAt(10)));
   const dusk = await p.evaluate(() => {
     const t = window.deck.table;
     const plots = t.run.plots.map((q) => q.crop?.uid ?? 0);
@@ -847,14 +875,75 @@ async function returning() {
   await ctx.close();
 }
 
+/**
+ * Round 4: giving up from the almanac, by real touch, ends the run the way a missed quota does: the entry follows,
+ * the seasons met count for the catalogue and the best harvest is kept (it used to start a new run, recording nothing).
+ */
+async function giveUpFlow() {
+  const ctx = await b.newContext({ viewport: { width: 412, height: 838 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+  const p = await ctx.newPage();
+  const cdp = await ctx.newCDPSession(p);
+  const tap = async (x, y) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 8, radiusX: 6, radiusY: 6, force: 1 }] });
+    await p.waitForTimeout(45);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await p.waitForTimeout(250);
+  };
+  const at = (sel, text) => p.evaluate(([sel, text]) => { const e = [...document.querySelectorAll(sel)].find((x) => !text || x.textContent.includes(text)); if (!e) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, [sel, text]);
+  await p.goto(`${base}/?game=deck&fresh`);
+  await p.waitForFunction(() => window.deck && window.deck.frames() > 5, null, { timeout: 20000 });
+  await tap(200, 40);
+  // Two seasons met with a good harvest, then two days into the third.
+  const before = await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    d.seed(515);
+    d.learnAll();
+    for (let k = 0; k < 2; k++) {
+      while (d.state().phase === 'day') {
+        d.state().earned = 99999;
+        d.endDay();
+        d.skip();
+        await w(30);
+      }
+      d.shop.leave();
+      await w(60);
+    }
+    d.state().stats.bestHarvest = 180;
+    d.state().stats.bestKind = 'carrot';
+    d.endDay();
+    d.skip();
+    await w(60);
+    const m = d.table.meta;
+    return { runs: m.runs, seasons: m.seasons ?? 0, best: m.best.harvest, met: d.state().stats.seasonsCleared, day: d.state().day };
+  });
+  await tap(...(await at('.sb-book')));
+  await tap(...(await at('.sb-toc-row', 'Give up')));
+  const armed = await p.evaluate(() => [...document.querySelectorAll('.sb-toc-row')].map((x) => x.textContent).find((x) => /Give up/.test(x)) ?? '');
+  await tap(...(await at('.sb-toc-row', 'Give up')));
+  await p.waitForTimeout(400);
+  const after = await p.evaluate(() => {
+    const m = window.deck.table.meta;
+    return { kind: window.deck.table.sheets.kind, phase: window.deck.state().phase, runs: m.runs, seasons: m.seasons ?? 0, best: m.best.harvest, text: document.querySelector('.sb-entry')?.textContent ?? '' };
+  });
+  await p.screenshot({ path: `${out}/give-up-entry.png` });
+  check('giving up asks for a second tap first', /tap again/.test(armed), armed);
+  check('giving up ends the run with its entry, saying so', after.kind === 'entry' && after.phase === 'over' && new RegExp(`Given up on day ${before.day}`).test(after.text), `${after.kind}, ${after.phase}: "${after.text.slice(0, 160)}"`);
+  check('a given-up run is recorded: its seasons count and its best harvest is kept', after.runs === before.runs + 1 && after.seasons === before.seasons + before.met && after.best >= 180, JSON.stringify({ before, after: { ...after, text: undefined } }));
+  await ctx.close();
+}
+
 if (!process.env.P1_ONLY) {
   await session('phone', { width: 412, height: 838 }, true);
   await session('desk', { width: 1280, height: 800 }, false);
 }
 await p1('phone', { width: 412, height: 838 }, true);
 await p1('desk', { width: 1280, height: 800 }, false);
-for (const tool of ['can', 'compost']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
-if (!process.env.P1_ONLY) await returning();
+for (const tool of ['can', 'compost', 'radish', 'beans']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
+if (!process.env.P1_ONLY) {
+  await returning();
+  await giveUpFlow();
+}
 await b.close();
 console.log(failed ? `LESSONS FAILED (${failed})` : 'LESSONS OK', `shots in ${out}`);
 process.exit(failed ? 1 : 0);

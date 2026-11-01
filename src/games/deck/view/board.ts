@@ -19,14 +19,21 @@ export type PreviewMark = Mark;
 
 export interface Preview {
   marks: PreviewMark[];
-  /** A seed on the plot under the finger: what it would score there (late: it is pulled next season, the plot carrying over). */
-  total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null;
+  /**
+   * A seed on the plot under the finger: what it would score there (late: it is pulled next season, the plot
+   * carrying over; never: it ripens after the run's last night, so no slip, only the reason).
+   */
+  total: { plot: number; yield: number; bloom: number; score: number; late?: boolean; never?: boolean } | null;
   /** Bloom has been introduced: show bloom with the total. */
   bloom: boolean;
   /** Why a greyed bonus won't pay, said under the aimed plot: "The radish is pulled before the carrot ripens." */
   reason: { plot: number; text: string } | null;
   /** A short line under the aimed plot when the card would do nothing there. */
   none: { plot: number | null; text: string } | null;
+  /** Plots whose crop the play would bring in tonight: they get tonight's moon, ringed. */
+  tonight: number[];
+  /** With Market Day kept: where its x2 stamp would fall tonight after the play. */
+  market: number[];
 }
 
 export interface CropAnim {
@@ -120,6 +127,8 @@ export class Board {
   hl: Highlight = { valid: [], hover: null, area: [], water: false, deny: false, cursor: null, all: false };
   /** Plots whose crop will be pulled tonight. */
   tonight: boolean[] = [];
+  /** With Market Day kept: the plots whose harvest tonight is a fifth (tenth, fifteenth), stamped x2. */
+  market: number[] = [];
   /** Extra nights each plot grows tonight (the watering can). */
   boost: number[] = [];
   /** What the held card would do, or null. */
@@ -425,6 +434,7 @@ export class Board {
   draw(plots: readonly Plot[], dt: number): void {
     this.frames++;
     this.stakes = [];
+    this.stamps = [];
     this.warm(plots);
     const { ctx, dpr, T } = this;
     const key = `${this.season}|${this.plate}|${this.cols}|${this.rows}|${this.T}|${this.botM}|${this.ruleInk}`;
@@ -443,33 +453,51 @@ export class Board {
 
     this.drawHighlights(plots);
 
-    // Crops and objects, back row first so tall ones overlap the row above.
+    // The soil's washes first: a passing splash, and the sickly wash of pests.
     for (let i = 0; i < plots.length; i++) {
-      const p = plots[i];
-      const b = this.base(i);
-      const shake = i === this.shakePlot && this.shakeT > 0 ? Math.sin(this.shakeT * 60) * this.shakeT * 14 : 0;
+      const c = this.centre(i);
       if (this.splash[i] > 0) {
         ctx.fillStyle = `rgba(180, 215, 240, ${this.splash[i] * 0.35})`;
-        const c = this.centre(i);
         ctx.fillRect(c.x - T / 2 + 2, c.y - T / 2 + 2, T - 4, T - 4);
       }
-      if (p.crop?.pest) {
+      if (plots[i].crop?.pest) {
         // A sickly wash on the soil, so a pested plot reads from across the table.
-        const c = this.centre(i);
         ctx.fillStyle = 'rgba(196, 168, 40, 0.3)';
         ctx.fillRect(c.x - T / 2 + 2, c.y - T / 2 + 2, T - 4, T - 4);
       }
-      if (p.obj) {
-        const s = p.obj === 'scarecrow'
-          ? this.sprite('scarecrow', -0.6, -1.15, 0.6, 0.25, (g, px) => {
-              g.scale(0.92, 0.92);
-              paintScarecrow(g, this.pal, px / 0.92);
-            })
-          : this.sprite('beehive', -0.6, -1.0, 0.6, 0.25, (g, px) => paintHiveOnPlot(g, px, this.pal.ink));
-        ctx.drawImage(s.c, b.x + s.x0 * T + shake, b.y + s.y0 * T, s.w * T, s.h * T);
-      }
-      if (p.crop) this.drawCrop(p.crop, i, b.x + shake, b.y);
     }
+
+    // Crops and objects. Each is drawn inside its own plot; what a tall one (a bean pole, a sunflower, corn, a
+    // scarecrow's hat) reaches above its plot is drawn first, behind everything, and faded where the plot above
+    // holds something, so the crop above is always on top. Tall crops used to be painted over the row above: a
+    // young sunflower at B3 disappeared behind a bean pole, and column C read as one vine from row 1 to row 3.
+    // A crop being scored (lifted and glowing), taken by a crow or flattened is drawn whole, on top of the rest.
+    const loose = (c: Crop | null) => {
+      const a = c ? this.anims.get(c.uid) : undefined;
+      return !!a && (a.glow > 0.01 || a.lift > 0.1 || Math.abs(a.tilt) > 0.01);
+    };
+    const taken = (i: number) => i >= 0 && i < plots.length && (!!plots[i].crop || !!plots[i].obj);
+    for (const part of ['over', 'in'] as const) {
+      for (let i = 0; i < plots.length; i++) {
+        const p = plots[i];
+        if (!p.obj && (!p.crop || loose(p.crop))) continue;
+        const col = i % this.cols;
+        const row = Math.floor(i / this.cols);
+        const x0 = this.bx + col * T;
+        const top = this.by + row * T;
+        const bands = part === 'in' ? [{ y: top, h: T, a: 1 }] : [1, 2].map((k) => ({ y: top - k * T - (k === 2 ? T : 0), h: k === 2 ? 2 * T : T, a: row - k >= 0 && taken(i - k * this.cols) ? OVERHANG_FADE : 1 }));
+        for (const band of bands) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x0, band.y, T, band.h);
+          ctx.clip();
+          ctx.globalAlpha = band.a;
+          this.drawPlot(p, i, part);
+          ctx.restore();
+        }
+      }
+    }
+    for (let i = 0; i < plots.length; i++) if (plots[i].crop && loose(plots[i].crop)) this.drawCrop(plots[i].crop!, i, this.base(i).x, this.base(i).y, 'all');
 
     // Watered plots: a drop in the corner while they wait for tonight's extra night.
     for (let i = 0; i < plots.length; i++) {
@@ -478,13 +506,18 @@ export class Board {
       this.drop(ctr.x - T * 0.36, ctr.y + T * 0.34, T * 0.07);
     }
 
-    // Ripe-tonight moons and pests on top: a pested crop gets a badge with the nights it pays half.
+    // Ripe-tonight moons and pests on top: a pested crop gets a badge with the nights it pays half. A held card that
+    // would bring a crop in tonight gives it the moon now, ringed; Market Day stamps the crops tonight's harvest
+    // reaches fifth (where the stamp would move to, while a card is aimed).
     const day = this.night < 0.05;
+    const comes = day && this.preview ? this.preview.tonight : [];
+    const market = day ? (this.preview ? this.preview.market : this.market) : [];
     for (let i = 0; i < plots.length; i++) {
       const c = plots[i].crop;
       if (!c) continue;
       const ctr = this.centre(i);
-      if (this.tonight[i] && day) this.moon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085);
+      if ((this.tonight[i] || comes.includes(i)) && day) this.moon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085, comes.includes(i) && !this.tonight[i]);
+      if (market.includes(i)) this.marketStamp(ctr.x + T * 0.36 - T * 0.12, ctr.y + T * 0.36);
       if (c.pest) {
         const a = this.anims.get(c.uid);
         const s = this.sprite(`pest:${c.uid % 5}`, -0.44, -0.8, 0.44, 0.1, (g, px) => paintPests(g, px, 40 + (c.uid % 5)));
@@ -696,7 +729,7 @@ export class Board {
         if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
       }
     }
-    const t = pv.total;
+    const t = pv.total && !pv.total.never ? pv.total : null;
     let under = -1;
     if (t) {
       const c = this.centre(t.plot);
@@ -751,7 +784,29 @@ export class Board {
     }
   }
 
-  private drawCrop(c: Crop, i: number, x: number, y: number): void {
+  /** A plot's object and crop, or the part of them above the plot (over) or inside it (in); the caller clips. */
+  private drawPlot(p: Plot, i: number, part: 'over' | 'in'): void {
+    const { ctx, T } = this;
+    const b = this.base(i);
+    const shake = i === this.shakePlot && this.shakeT > 0 ? Math.sin(this.shakeT * 60) * this.shakeT * 14 : 0;
+    if (p.obj) {
+      const s = p.obj === 'scarecrow'
+        ? this.sprite('scarecrow', -0.6, -1.15, 0.6, 0.25, (g, px) => {
+            g.scale(0.92, 0.92);
+            paintScarecrow(g, this.pal, px / 0.92);
+          })
+        : this.sprite('beehive', -0.6, -1.0, 0.6, 0.25, (g, px) => paintHiveOnPlot(g, px, this.pal.ink));
+      ctx.drawImage(s.c, b.x + s.x0 * T + shake, b.y + s.y0 * T, s.w * T, s.h * T);
+    }
+    if (p.crop) this.drawCrop(p.crop, i, b.x + shake, b.y, part);
+  }
+
+  /** Checks only: the plot rect a crop is kept inside, CSS px from the canvas top left. */
+  plotRect(i: number): { x: number; y: number; w: number; h: number } {
+    return { x: this.bx + (i % this.cols) * this.T, y: this.by + Math.floor(i / this.cols) * this.T, w: this.T, h: this.T };
+  }
+
+  private drawCrop(c: Crop, i: number, x: number, y: number, part: 'over' | 'in' | 'all'): void {
     const { ctx, T } = this;
     const a = this.anims.get(c.uid);
     const stage = a?.stage ?? stageOf(c);
@@ -761,7 +816,7 @@ export class Board {
     const alpha = a?.alpha ?? 1;
     if (alpha <= 0.01) return;
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha *= alpha;
     ctx.translate(x, y - lift);
     if (a?.tilt) ctx.rotate(a.tilt);
     if (sc !== 1) ctx.scale(sc, sc);
@@ -775,7 +830,7 @@ export class Board {
     ctx.drawImage(s.c, s.x0 * T, s.y0 * T, s.w * T, s.h * T);
     ctx.restore();
     // Select stock: a plant label on a stake by the crop, stamped with a red star (the face's red stamp, at plot size).
-    if (c.up && alpha > 0.5) this.selectStake(x - T * 0.34, y - lift);
+    if (c.up && alpha > 0.5 && part !== 'over') this.selectStake(x - T * 0.34, y - lift);
   }
 
   /** The label staked by an improved crop: a cream tag with a red ring and star, at least 14 px across. */
@@ -814,8 +869,43 @@ export class Board {
   /** Select stakes painted this frame, for checks. */
   stakes: { x: number; y: number; w: number; h: number }[] = [];
 
-  private moon(x: number, y: number, r: number): void {
+  /** Market Day's stamp: a red-ringed x2 to the left of the crop's moon, on the harvest it doubles tonight. */
+  private marketStamp(x: number, y: number): void {
+    const { ctx, T } = this;
+    const size = Math.max(10, Math.round(T * 0.13));
+    const text = '×2';
+    const w = numWidth(ctx, text, size) + 8;
+    const h = size + 5;
+    ctx.save();
+    ctx.translate(x - w, y - h / 2);
+    ctx.rotate(-0.06);
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 3);
+    ctx.fillStyle = '#fbf1d8';
+    ctx.fill();
+    ctx.strokeStyle = BLOOM;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    num(ctx, text, 4, h / 2, size, BLOOM);
+    ctx.restore();
+    this.stamps.push({ x: x - w, y: y - h / 2, w, h });
+  }
+
+  /** Market stamps painted this frame, for checks. */
+  stamps: { x: number; y: number; w: number; h: number }[] = [];
+
+  private moon(x: number, y: number, r: number, fresh = false): void {
     const { ctx } = this;
+    if (fresh) {
+      // Brought in tonight by the held card: a ring round the moon.
+      ctx.beginPath();
+      ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(246, 238, 210, 0.85)';
+      ctx.fill();
+      ctx.strokeStyle = '#3a4a78';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = '#f6eed2';
@@ -957,6 +1047,8 @@ export class Board {
 
 
 const FRAME_M = 9;
+/** How much of a tall crop shows where it reaches up behind a plot that holds a crop or an object. */
+const OVERHANG_FADE = 0.28;
 
 function frameW(T: number): number {
   return Math.max(5, T * 0.09);

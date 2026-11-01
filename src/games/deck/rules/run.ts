@@ -2,14 +2,14 @@
 // plays cards for energy, and End day resolves the night. Every function here
 // mutates the run and returns what happened as events.
 
-import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT } from './cards';
-import { bySeason, emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, nextSeason, quotaFor, TUNING } from './board';
+import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT, UNLOCK_ORDER } from './cards';
+import { bySeason, emptyPlot, energyMax, handSize, isEmpty, isFinal, isRipe, neighbours, nextSeason, quotaFor, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, Shop } from './types';
 
 export function newMeta(): Meta {
-  return { v: 1, unlocked: [], runs: 0, seasons: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 } };
+  return { v: 1, unlocked: [], runs: 0, seasons: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 }, wins: 0, bestWin: 0 };
 }
 
 /**
@@ -376,8 +376,15 @@ function seasonEnd(s: RunState, ev: Ev[]): void {
   s.hand = [];
   s.discard = [];
   s.tonight = [];
-  if (cleared) {
-    s.stats.seasonsCleared++;
+  if (cleared || (TUNING.noEnd && !isFinal(s))) {
+    if (cleared) s.stats.seasonsCleared++;
+    if (isFinal(s)) {
+      // The last winter is met: the run is won, and ends here.
+      s.phase = 'over';
+      s.end = { year: s.year, season: s.season, earned: s.earned, quota: s.quota, unlocked: [], recorded: false, won: true };
+      ev.push({ t: 'over', end: s.end });
+      return;
+    }
     s.phase = 'shop';
     s.shop = makeShop(s);
     ev.push({ t: 'shop' });
@@ -386,6 +393,32 @@ function seasonEnd(s: RunState, ev: Ev[]): void {
     s.end = { year: s.year, season: s.season, earned: s.earned, quota: s.quota, unlocked: [], recorded: false };
     ev.push({ t: 'over', end: s.end });
   }
+}
+
+/**
+ * Give the run up: it ends the way a missed quota does, so its seasons count for
+ * the catalogue, its best harvest and coins for the record, and the almanac's
+ * entry follows. Mid-season, the season so far goes in the log as not met. (It
+ * used to start a new run with nothing recorded: two runs of 13 and 8 seasons
+ * left the count at 4 and the best harvest at 108, not 180.)
+ */
+export function giveUp(s: RunState): Ev[] | null {
+  if (s.phase === 'over') return null;
+  const ev: Ev[] = [];
+  const day = s.phase === 'day' ? s.day : 0;
+  if (s.phase === 'day') {
+    s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared: false });
+    s.draw = [...s.draw, ...s.hand, ...s.discard];
+    s.hand = [];
+    s.discard = [];
+    s.tonight = [];
+  }
+  const last = s.stats.log[s.stats.log.length - 1];
+  s.phase = 'over';
+  s.shop = null;
+  s.end = { year: s.year, season: s.season, earned: last?.earned ?? s.earned, quota: last?.quota ?? s.quota, unlocked: [], recorded: false, gaveUp: true, day };
+  ev.push({ t: 'over', end: s.end });
+  return ev;
 }
 
 // ---------------------------------------------------------------- the shop
@@ -413,38 +446,54 @@ function rollRarity(s: RunState): Rarity {
   return 'common';
 }
 
-/** Answers to a hazard the merchant keeps in stock until the deck holds this many. */
-export const ANSWERS_HELD = 2;
+/**
+ * Answers to a hazard the merchant keeps in stock until the deck holds this many:
+ * one scarecrow (it stands on the plot for the rest of the run), two cards for
+ * pests (one ladybird card seldom came to hand on the night it was needed).
+ */
+export const ANSWERS_HELD = { crows: 1, pests: 2 };
 
 /**
- * Cards that answer a hazard, while the deck holds fewer than two of them: a
- * scarecrow for crows; ladybirds or garlic for pests. Stocked once the hazard
- * has shown, and before the first season that can bring it, so the first crow
- * can be met. (The stall used to stop at one answer, and one ladybird card
- * seldom came to hand on the night it was needed.)
+ * Cards that answer a hazard the player cannot yet meet: a scarecrow for crows;
+ * ladybirds or garlic for pests. Wanted once the hazard has shown, and before
+ * the first season that can bring it, so the first crow can be met; not once
+ * the deck holds enough of them.
  */
 export function hazardAnswers(s: RunState): CardId[][] {
   const held = (ids: CardId[]) => allCards(s).filter((c) => ids.includes(c.id)).length;
   // The stall opens between seasons: the season it leads to is the one to get ready for.
   const ahead = s.phase === 'shop' ? nextSeason(s) : s;
   const out: CardId[][] = [];
-  if ((s.stats.crows > 0 || bySeason(TUNING.crowChance, ahead) > 0) && held(['scarecrow']) < ANSWERS_HELD) out.push(['scarecrow']);
-  if ((s.stats.pests > 0 || bySeason(TUNING.pestChance, ahead) > 0) && held(['ladybirds', 'garlic']) < ANSWERS_HELD) out.push(['ladybirds', 'garlic']);
+  if ((s.stats.crows > 0 || bySeason(TUNING.crowChance, ahead) > 0) && held(['scarecrow']) < ANSWERS_HELD.crows) out.push(['scarecrow']);
+  if ((s.stats.pests > 0 || bySeason(TUNING.pestChance, ahead) > 0) && held(['ladybirds', 'garlic']) < ANSWERS_HELD.pests) out.push(['ladybirds', 'garlic']);
   return out.map((o) => o.filter((c) => s.pool.includes(c))).filter((o) => o.length > 0);
 }
 
 /**
- * The goods on the tray: always at least one seed, one uncommon or rarer, and
- * an answer to any hazard the player cannot yet meet; the rest at random by
- * rarity.
+ * The goods on the tray: always at least one seed and one uncommon or rarer; on
+ * a stall's first tray, one slot at most for a hazard's answer; the rest at
+ * random by rarity, cards the last tray showed only when nothing else is left.
+ * The fourth playtest found a scarecrow at all four stalls of a run and on five
+ * of five fresh stock rolls, since every hazard took a slot of its own and
+ * fresh stock forced them again.
  */
-function rollCards(s: RunState): CardId[] {
+function rollCards(s: RunState, fresh = false): CardId[] {
   const out: CardId[] = [];
+  const last = s.lastTray ?? [];
   const add = (opts: CardId[]) => {
     const free = opts.filter((c) => !out.includes(c));
-    if (free.length) out.push(pick(s, free));
+    const pool = free.filter((c) => !last.includes(c)).length ? free.filter((c) => !last.includes(c)) : free;
+    if (pool.length) out.push(pick(s, pool));
   };
-  for (const answer of hazardAnswers(s)) add(answer);
+  if (!fresh) {
+    const answers = hazardAnswers(s);
+    // A hazard coming for the first time wins the one slot (the stall before autumn stocks the scarecrow); else one
+    // already met, at random. An earlier stall offered the other.
+    const coming = answers.filter((a) => (a.includes('scarecrow') ? s.stats.crows === 0 : s.stats.pests === 0));
+    const met = answers.filter((a) => !coming.includes(a));
+    const first = coming[0] ?? (met.length ? pick(s, met) : undefined);
+    if (first) add(first);
+  }
   if (!out.some(isSeed)) {
     const rarity = rollRarity(s);
     const seeds = s.pool.filter(isSeed);
@@ -457,8 +506,9 @@ function rollCards(s: RunState): CardId[] {
     let opts = s.pool.filter((c) => CARDS[c].rarity === rarity && !out.includes(c));
     if (!opts.length) opts = s.pool.filter((c) => !out.includes(c));
     if (!opts.length) break;
-    out.push(pick(s, opts));
+    add(opts);
   }
+  s.lastTray = [...out];
   return shuffle(s, out);
 }
 
@@ -585,7 +635,8 @@ export function reroll(s: RunState): Ev[] | null {
   s.coins -= sh.reroll;
   sh.reroll += TUNING.rerollStep;
   sh.rerolls++;
-  sh.cards = rollCards(s).map((card) => ({ card, price: cardPrice(s, card), sold: false }));
+  // Fresh stock is new cards: it does not force a hazard's answer again.
+  sh.cards = rollCards(s, true).map((card) => ({ card, price: cardPrice(s, card), sold: false }));
   return [{ t: 'reroll' }];
 }
 
@@ -595,9 +646,25 @@ export function leaveShop(s: RunState): Ev[] | null {
   if (s.season === 3) {
     s.year++;
     s.season = 0;
+    newStock(s, ev);
   } else s.season = (s.season + 1) as Season;
   startSeason(s, ev);
   return ev;
+}
+
+/**
+ * A new year: the merchant brings cards the catalogue does not hold yet, drawn
+ * at random, for this run only, so a first run's stalls are not the same
+ * fourteen cards from summer of year 1 to the last winter, and no two runs
+ * carry the same ones. Unlocked cards (by seasons met) are the catalogue for
+ * good; these go back to the locked list when the run ends.
+ */
+function newStock(s: RunState, ev: Ev[]): void {
+  const locked = UNLOCK_ORDER.filter((c) => !s.pool.includes(c));
+  const cards = shuffle(s, locked).slice(0, TUNING.newStock);
+  if (!cards.length) return;
+  s.pool.push(...cards);
+  ev.push({ t: 'stock', cards });
 }
 
 // ---------------------------------------------------------------- meta
@@ -618,13 +685,21 @@ export function seasonsToNext(meta: Meta): number {
   return next === undefined ? 0 : next - seasonsMet(meta);
 }
 
-/** Record a finished run once: its seasons add to the count across runs, cards unlock by that count, and the best record updates. */
+/**
+ * Record a finished run once, however it ended (a missed quota, given up, or won):
+ * its seasons add to the count across runs, cards unlock by that count, the best
+ * record updates, and a won run counts among the wins.
+ */
 export function recordRun(meta: Meta, s: RunState, order: readonly CardId[]): CardId[] {
   if (s.phase !== 'over' || !s.end || s.end.recorded) return s.end?.unlocked ?? [];
   meta.seasons = seasonsMet(meta) + s.stats.seasonsCleared;
   const fresh = unlocksFor(meta.seasons, order).filter((c) => !meta.unlocked.includes(c));
   meta.unlocked.push(...fresh);
   meta.runs++;
+  if (s.end.won) {
+    meta.wins = (meta.wins ?? 0) + 1;
+    meta.bestWin = Math.max(meta.bestWin ?? 0, s.stats.totalEarned);
+  }
   const b = meta.best;
   if (s.stats.seasonsCleared > b.seasons) {
     b.seasons = s.stats.seasonsCleared;

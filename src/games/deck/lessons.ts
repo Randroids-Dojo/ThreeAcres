@@ -32,6 +32,8 @@ export interface View {
   s: RunState;
   dev: Dev;
   held: Card | null;
+  /** On touch, the held card is aimed at a plot and waits for its second tap. */
+  aimed: boolean;
   learn: Learn;
   n(k: string): number;
   /** Seconds the current lesson has been on screen. */
@@ -90,6 +92,7 @@ const LESSONS: Lesson[] = [
     where: 'table',
     ready: (v) => v.s.phase === 'day' && v.s.hand.some((c) => CARDS[c.id].type === 'seed') && anyEmpty(v.s),
     text: (v) => {
+      if (v.held && CARDS[v.held.id].type === 'seed' && v.aimed) return 'Tap the plot again to plant.';
       if (v.held && CARDS[v.held.id].type === 'seed') return v.dev === 'key' ? 'Pick a plot with the arrows, then Enter.' : `${tap(v)} a plot to plant it.`;
       const seed = v.s.hand.find((c) => CARDS[c.id].type === 'seed' && affordable(v, c));
       if (!seed) return 'Plant a seed.';
@@ -247,16 +250,27 @@ const LESSONS: Lesson[] = [
     done: (v) => v.n('detail') > v.n('at:newcard:detail') || nightPassed(v, 'newcard'),
   },
   {
+    // First what pests cost, then (next) the answer: the first pest lesson used to name garlic before saying it.
     id: 'pests',
     after: ['scoops'],
     unlocks: [],
     where: 'table',
     ready: (v) => v.s.phase === 'day' && v.s.plots.some((p) => p.crop?.pest),
-    // Only a card the player owns is named.
-    text: (v) =>
-      toHand(v.s, 'ladybirds') ? 'Clear the pests with ladybirds.' : toHand(v.s, 'garlic') ? 'Garlic keeps pests off its neighbours.' : `Pests halve that crop's pay for ${WORDS[TUNING.pestNights] ?? TUNING.pestNights} nights.`,
+    text: () => `Pests halve that crop's pay for ${WORDS[TUNING.pestNights] ?? TUNING.pestNights} nights.`,
     point: () => 'board',
     done: (v) => nightPassed(v, 'pests'),
+    passive: 5,
+  },
+  {
+    id: 'pestfix',
+    after: ['pests'],
+    unlocks: [],
+    where: 'table',
+    // Only a card the player can still bring out is named.
+    ready: (v) => v.s.phase === 'day' && v.s.plots.some((p) => p.crop?.pest) && (toHand(v.s, 'ladybirds') || toHand(v.s, 'garlic')),
+    text: (v) => (toHand(v.s, 'ladybirds') ? 'Clear the pests with ladybirds.' : 'Garlic keeps pests off its neighbours.'),
+    point: () => 'board',
+    done: (v) => nightPassed(v, 'pestfix'),
     passive: 6,
   },
   {
@@ -370,9 +384,9 @@ export class Tutor {
    * `quiet` is true while the night runs or a sheet covers the table: nothing
    * starts and passive lessons do not count down.
    */
-  update(s: RunState, dev: Dev, held: Card | null, dt: number, quiet: boolean): { line: Line | null; unlocked: Piece[] } {
+  update(s: RunState, dev: Dev, held: Card | null, dt: number, quiet: boolean, aimed = false): { line: Line | null; unlocked: Piece[] } {
     const unlocked: Piece[] = [];
-    const view: View = { s, dev, held, learn: this.learn, n: (k) => this.n(k), shown: this.shown };
+    const view: View = { s, dev, held, aimed, learn: this.learn, n: (k) => this.n(k), shown: this.shown };
     if (this.active) {
       const l = this.active;
       const onStall = l.where === 'stall';

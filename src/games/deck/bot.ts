@@ -21,6 +21,7 @@ import {
   CARDS,
   cloneRun,
   endDay,
+  isFinal,
   leaveShop,
   moveTargets,
   newRun,
@@ -89,7 +90,8 @@ function evaluate(s: RunState, sample: number): number {
   night(c, NONE);
   // Crops pulled up tonight put scoops on tomorrow's bench: the next day's plays.
   let v = c.earned - start + scoopWorth(s, c.saved);
-  const nights = TUNING.days - s.day + CARRY;
+  // The run's last winter carries nothing over: the run ends with it.
+  const nights = TUNING.days - s.day + (isFinal(s) ? 0 : CARRY);
   // Roll forward as if nothing goes wrong.
   c.year = 1;
   c.season = 0;

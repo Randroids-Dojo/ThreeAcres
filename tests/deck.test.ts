@@ -39,6 +39,9 @@ import {
   TUNING,
   UNLOCK_ORDER,
   upgradeCard,
+  giveUp,
+  hazardAnswers,
+  marketTonight,
   type CardId,
   type Ev,
   type Harvest,
@@ -249,7 +252,7 @@ describe('the night', () => {
     expect(s.plots[0].crop?.kind).toBe('beans');
   });
 
-  it('a sunflower blooms only the crop below it; beehives add bloom; Busy Bees is one x2, however many bees', () => {
+  it('a sunflower blooms only the crop below it; beehives add bloom; Busy Bees is one x1.5, however many bees', () => {
     // A sunflower on A1: the lettuce beside it (B1) gets its tall +4 but no bloom; the one below it (A2) gets +2 bloom.
     const s = table(['sunflower', 'lettuce', 'lettuce', 'beehive']);
     play(s, 'sunflower', 0);
@@ -263,7 +266,7 @@ describe('the night', () => {
     expect(beside.multTotal).toBe(1);
     expect(below.multTotal).toBe(3);
     expect(below.score).toBe(24);
-    // A beehive's 3 by 3 adds +1 each; with Busy Bees a crop with bees about gets one x2, not one per bee.
+    // A beehive's 3 by 3 adds +1 each; with Busy Bees a crop with bees about gets one x1.5 (round 4: it was x2), not one per bee.
     const t = table(['sunflower', 'lettuce', 'beehive', 'beehive']);
     t.pages.push('bees');
     play(t, 'sunflower', 0);
@@ -273,8 +276,8 @@ describe('the night', () => {
     t.plots[4].crop!.age = 2;
     const l = harvests(endDay(t))[0];
     expect(l.mult.filter((st) => st.icon === 'bees')).toHaveLength(1);
-    // 1 + 2 (sunflower) + 1 + 1 (two hives), then x2 once.
-    expect(l.multTotal).toBe(10);
+    // 1 + 2 (sunflower) + 1 + 1 (two hives), then x1.5 once.
+    expect(l.multTotal).toBe(7.5);
   });
 
   it('a chili gives its neighbours x1.5 bloom, not the crop pulled after it', () => {
@@ -418,7 +421,7 @@ describe('hazards', () => {
     play(s, 'carrot', 0);
     // Ripe in two nights; one night of pests leaves after tonight: it will pay in full.
     s.plots[0].crop!.pest = 1;
-    expect(nextPick(s, 0)).toEqual({ score: 5, ripeIn: 1, late: false });
+    expect(nextPick(s, 0)).toEqual({ score: 5, ripeIn: 1, late: false, never: false });
     // Ripe tonight with two nights of pests on: half, rounded.
     s.plots[0].crop!.age = 1;
     s.plots[0].crop!.pest = 2;
@@ -491,36 +494,15 @@ describe('seasons and the shop', () => {
 
   it('every stall stocks a seed, and an answer to a hazard the player has met but cannot meet', () => {
     for (let seed = 1; seed <= 40; seed++) {
+      // Pests have landed and the player has no ladybirds or garlic: the stall's tray has one.
       const { s } = newRun(seed, null);
       s.earned = s.quota;
+      s.stats.pests = 1;
+      s.draw = s.draw.filter((c) => c.id !== 'ladybirds' && c.id !== 'garlic');
       toSeasonEnd(s);
       expect(s.shop!.cards.some((c) => CARDS[c.card].type === 'seed')).toBe(true);
-      // Pests have landed and the player has no ladybirds or garlic: the next stall has one.
-      s.stats.pests = 1;
-      s.stats.crows = 1;
-      s.coins = 1000;
-      reroll(s);
       const ids = s.shop!.cards.map((c) => c.card);
       expect(ids.includes('ladybirds') || ids.includes('garlic')).toBe(true);
-      expect(ids).toContain('scarecrow');
-      // One answer is not enough: the merchant keeps stocking one while the deck holds fewer than two.
-      s.draw.push({ uid: 5000, id: 'scarecrow', up: false });
-      s.draw.push({ uid: 5001, id: 'ladybirds', up: false });
-      reroll(s);
-      s.coins = 1000;
-      const again = s.shop!.cards.map((c) => c.card);
-      expect(again.includes('ladybirds') || again.includes('garlic')).toBe(true);
-      expect(again).toContain('scarecrow');
-      // Two of each, and they are no longer held back.
-      s.draw.push({ uid: 5002, id: 'scarecrow', up: false });
-      s.draw.push({ uid: 5003, id: 'garlic', up: false });
-      let scarecrows = 0;
-      for (let k = 0; k < 10; k++) {
-        reroll(s);
-        s.coins = 1000;
-        if (s.shop!.cards.some((c) => c.card === 'scarecrow')) scarecrows++;
-      }
-      expect(scarecrows).toBeLessThan(10);
     }
   });
 
@@ -551,18 +533,22 @@ describe('seasons and the shop', () => {
     expect(prices[3]).toBe(prices[0] * 8);
   });
 
-  it('only shops from the unlocked pool', () => {
+  it('only shops from the unlocked pool, and the stock a new year brings', () => {
     const { s } = newRun(9, null);
     for (let k = 0; k < 30; k++) {
       s.earned = s.quota;
       toSeasonEnd(s);
+      // The run ends at the last winter.
+      if (s.phase === 'over') break;
       for (const c of s.shop!.cards) expect(s.pool).toContain(c.card);
       s.coins = 100;
       reroll(s);
       for (const c of s.shop!.cards) expect(s.pool).toContain(c.card);
       leaveShop(s);
     }
-    expect(s.pool).not.toContain('pumpkin');
+    expect(s.end?.won).toBe(true);
+    // Years 2 and 3 brought two cards each, for this run; the rest of the catalogue stays locked.
+    expect(s.pool.filter((c) => UNLOCK_ORDER.includes(c))).toHaveLength(4);
   });
 });
 
@@ -815,17 +801,26 @@ describe('lessons that fit the moment', () => {
     expect(weatherHelps(t, 'rain')).toBe(true);
   });
 
-  it('hazard lessons only name a card the player owns, and the crow comes up at dawn', () => {
+  it('hazard lessons say what pests cost first, then name only a card the player owns; the crow comes up at dawn', () => {
     const s = table(['radish'], { season: 1 });
     s.plots[3].crop = { uid: 700, kind: 'carrot', age: 0, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 2, sprout: false };
     for (const own of [[], ['garlic'], ['ladybirds']] as CardId[][]) {
       const c = cloneRun(s);
       c.draw = c.draw.filter((x) => x.id !== 'ladybirds' && x.id !== 'garlic' && x.id !== 'scarecrow');
       for (const id of own) c.draw.push({ uid: 900 + c.draw.length, id, up: false });
-      const line = tutor().update(c, 'touch', null, 0.1, false).line!;
-      expect(line.id).toBe('pests');
-      if (!own.length) expect(line.text).not.toMatch(/ladybird|garlic/i);
-      else expect(line.text.toLowerCase()).toContain(own[0]);
+      const t = tutor();
+      // The first line is what pests cost, whatever is owned (round 4: it used to name garlic first).
+      const first = t.update(c, 'touch', null, 0.1, false).line!;
+      expect(first.id).toBe('pests');
+      expect(first.text).toMatch(/halve/);
+      expect(first.text).not.toMatch(/ladybird|garlic/i);
+      // Then, once it has had its say, the answer, only if one can still be brought out.
+      const next = t.update(c, 'touch', null, 6, false).line;
+      if (!own.length) expect(next?.text ?? '').not.toMatch(/ladybird|garlic/i);
+      else {
+        expect(next!.id).toBe('pestfix');
+        expect(next!.text.toLowerCase()).toContain(own[0]);
+      }
     }
     const c = cloneRun(s);
     c.plots[3].crop = null;
@@ -1132,7 +1127,7 @@ describe('round 3: cost by power, scoops back, rebalance, hazards that press', (
     expect(r.bench).toBe(energyMax(r) + 1);
   });
 
-  it('the Root Cellar makes the root combo scale: +2 yield, and +1 bloom for each radish or carrot beside a radish or carrot', () => {
+  it('the Root Cellar gives radishes and carrots +2 yield, and +1 bloom with a partner beside them (round 4: once)', () => {
     const ring = (cellar: boolean) => {
       const s = table(['carrot', 'radish', 'radish', 'radish', 'radish']);
       if (cellar) s.pages.push('cellar');
@@ -1143,9 +1138,9 @@ describe('round 3: cost by power, scoops back, rebalance, hazards that press', (
     };
     const plain = ring(false);
     const cellar = ring(true);
-    // Without it: 5 x (1 + 4). With it the carrot is worth 7 and gets +1 more for each radish: 7 x 9; each radish (2 + 2 + 2) gets +1 for the carrot.
+    // Without it: 5 x (1 + 4). With it the carrot is worth 7 and gets +1 more bloom (four radishes, capped at one): 7 x 6; each radish (2 + 2 + 2) gets +1 for the carrot.
     expect(plain.find((h) => h.kind === 'carrot')!.score).toBe(25);
-    expect(cellar.find((h) => h.kind === 'carrot')!.score).toBe(63);
+    expect(cellar.find((h) => h.kind === 'carrot')!.score).toBe(7 * 6);
     expect(cellar.find((h) => h.plot === 1)!.score).toBe(12);
     expect(cellar.find((h) => h.plot === 1)!.mult.some((st) => st.icon === 'cellar')).toBe(true);
   });
@@ -1229,5 +1224,222 @@ describe('round 3: cost by power, scoops back, rebalance, hazards that press', (
     // Day 5's dawn: more than the refill on the bench, and the lesson says why.
     expect(s.bench).toBeGreaterThan(energyMax(s));
     expect(look()!.text).toBe('Crops pulled last night put scoops back.');
+  });
+});
+
+describe('round 4: a finish line, giving up that counts, the Cellar paired, Market Day shown, one answer slot', () => {
+  /** Play the bot through whole seasons until the run reaches this season index, or ends. */
+  function botTo(seed: number, k: number): RunState {
+    const { s } = newRun(seed, null);
+    const o = { noise: 0, seed };
+    const dice = new Dice(seed);
+    for (let g = 0; g < 400 && s.phase !== 'over' && (s.year - 1) * 4 + s.season < k; g++) {
+      if (s.phase === 'shop') botShop(s, o, dice);
+      else botDay(s, o, dice);
+    }
+    return s;
+  }
+
+  it('giving up ends the run the way a missed quota does: recorded, its seasons counted, its best harvest kept', () => {
+    // Two seasons met, then given up on day 3 of the third.
+    const s = botTo(31, 2);
+    expect(s.phase).toBe('day');
+    expect(s.stats.seasonsCleared).toBe(2);
+    endDay(s);
+    endDay(s);
+    const meta = newMeta();
+    meta.best.harvest = 5;
+    const ev = giveUp(s);
+    expect(ev).not.toBeNull();
+    expect(s.phase).toBe('over');
+    expect(s.end!.gaveUp).toBe(true);
+    expect(s.end!.day).toBe(3);
+    // The season so far goes in the log, not met.
+    expect(s.stats.log.at(-1)).toMatchObject({ year: 1, season: 2, cleared: false });
+    const fresh = recordRun(meta, s, UNLOCK_ORDER);
+    expect(meta.runs).toBe(1);
+    expect(meta.seasons).toBe(2);
+    expect(fresh).toEqual(['beehive', 'chili']);
+    expect(meta.best.seasons).toBe(2);
+    expect(meta.best.harvest).toBe(s.stats.bestHarvest);
+    expect(meta.best.harvest).toBeGreaterThan(5);
+    // Recorded once, and nothing more to give up.
+    recordRun(meta, s, UNLOCK_ORDER);
+    expect(meta.runs).toBe(1);
+    expect(giveUp(s)).toBeNull();
+  });
+
+  it('giving up at the stall ends the run too, without a season of nothing in the log', () => {
+    const { s } = newRun(5, null);
+    s.earned = s.quota;
+    while (s.phase === 'day') endDay(s);
+    expect(s.phase).toBe('shop');
+    const logged = s.stats.log.length;
+    giveUp(s);
+    expect(s.phase).toBe('over');
+    expect(s.shop).toBeNull();
+    expect(s.stats.log.length).toBe(logged);
+    expect(s.end).toMatchObject({ gaveUp: true, day: 0 });
+    const meta = newMeta();
+    recordRun(meta, s, UNLOCK_ORDER);
+    expect(meta.seasons).toBe(1);
+  });
+
+  it('the run has a finish line: the last winter of year 3 met wins the run, and wins are kept', () => {
+    expect(TUNING.years).toBe(3);
+    const { s } = newRun(9, null);
+    s.year = 3;
+    s.season = 3;
+    s.earned = 1e6;
+    while (s.phase === 'day') endDay(s);
+    expect(s.phase).toBe('over');
+    expect(s.shop).toBeNull();
+    expect(s.end!.won).toBe(true);
+    const meta = newMeta();
+    recordRun(meta, s, UNLOCK_ORDER);
+    expect(meta.wins).toBe(1);
+    expect(meta.bestWin).toBe(s.stats.totalEarned);
+    // Year 3 autumn met still opens the stall, and its signpost leads to the last winter.
+    const t = newRun(9, null).s;
+    t.year = 3;
+    t.season = 2;
+    t.earned = 1e6;
+    while (t.phase === 'day') endDay(t);
+    expect(t.phase).toBe('shop');
+    // The last winter missed is a loss, like any season.
+    const u = newRun(9, null).s;
+    u.year = 3;
+    u.season = 3;
+    while (u.phase === 'day') {
+      u.earned = 0;
+      endDay(u);
+    }
+    expect(u.phase).toBe('over');
+    expect(u.end!.won).toBeFalsy();
+  });
+
+  it('in the last winter a seed that ripens after the last night previews as never pulled', () => {
+    const s = table(['pumpkin', 'radish'], { year: 3, season: 3 });
+    s.day = 4;
+    const pv = previewPlay(s, s.hand.findIndex((c) => c.id === 'pumpkin'), 5)!;
+    expect(pv.harvest!.never).toBe(true);
+    expect(pv.harvest!.score).toBe(0);
+    // A radish still comes in tonight.
+    expect(previewPlay(s, s.hand.findIndex((c) => c.id === 'radish'), 5)!.harvest!.never).toBeFalsy();
+    // A year earlier the same pumpkin ripens next season and counts then.
+    const t = table(['pumpkin'], { year: 2, season: 3 });
+    t.day = 4;
+    expect(previewPlay(t, 0, 5)!.harvest).toMatchObject({ late: true });
+    expect(previewPlay(t, 0, 5)!.harvest!.never).toBeFalsy();
+  });
+
+  it('the Root Cellar pairs the roots: a radish beside a radish gets no bloom from it, and a crop gets its +1 once', () => {
+    const s = table([]);
+    s.pages.push('cellar');
+    const radish = (uid: number) => ({ uid, kind: 'radish' as const, age: 1, days: 1, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+    // Two radishes side by side, no carrot: the Cellar adds yield, no bloom.
+    s.plots[0].crop = radish(1);
+    s.plots[1].crop = radish(2);
+    // A carrot ringed by four radishes: +4 bloom of its own, the Cellar's +1 once.
+    s.plots[10].crop = { ...radish(3), kind: 'carrot', days: 2, age: 2 };
+    for (const [i, uid] of [[6, 4], [9, 5], [11, 6], [14, 7]]) s.plots[i].crop = radish(uid);
+    const hs = harvests(endDay(s));
+    const at = (i: number) => hs.find((h) => h.plot === i)!;
+    expect(at(0).mult.filter((st) => st.icon === 'cellar')).toHaveLength(0);
+    expect(at(0).score).toBe(4);
+    expect(at(10).mult.filter((st) => st.icon === 'cellar').reduce((a, st) => a + st.v, 0)).toBe(TUNING.cellarCap);
+    expect(at(10).score).toBe(7 * (1 + 4 + TUNING.cellarCap));
+    expect(at(6).mult.filter((st) => st.icon === 'cellar')).toHaveLength(1);
+  });
+
+  it('Market Day shows in the previews and readings: the fifth crop pulled tonight pays x2, and is stamped', () => {
+    const s = table(['radish']);
+    s.pages.push('market');
+    const ripe = (uid: number) => ({ uid, kind: 'lettuce' as const, age: 2, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+    // Five lettuces ripe tonight, in reading order: plots 0, 2, 8, 10, 15. The one on 15 is fifth.
+    for (const [i, uid] of [[0, 1], [2, 2], [8, 3], [10, 4], [15, 5]]) s.plots[i].crop = ripe(uid);
+    // The reading of the fifth says what the night will pay (it used to say 4 and pay 8).
+    expect(nextPick(s, 15)!.score).toBe(8);
+    expect(nextPick(s, 10)!.score).toBe(4);
+    expect(marketTonight(s)).toEqual([15]);
+    // A radish sown on plot 5 is pulled tonight before plot 15: it becomes the fourth, the lettuce on 10 the fifth.
+    const pv = previewPlay(s, 0, 5)!;
+    expect(pv.market).toEqual([10]);
+    // A radish on plot 12 is the fifth itself: its own total shows the x2.
+    expect(previewPlay(s, 0, 12)!.harvest!.score).toBe(4);
+    // And the night pays what the reading said.
+    const hs = harvests(endDay(s));
+    expect(hs.find((h) => h.plot === 15)!.score).toBe(8);
+  });
+
+  it('the stall gives a hazard\'s answer one slot at most, none on fresh stock, and none once enough are owned', () => {
+    let both = 0;
+    let freshScarecrows = 0;
+    let rolls = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      // Year 1 autumn met, crows and pests both seen, no answers owned: both hazards want an answer.
+      const s = table(['radish'], { season: 2, seed });
+      s.draw = s.draw.filter((c) => !['scarecrow', 'ladybirds', 'garlic'].includes(c.id));
+      s.stats.crows = 1;
+      s.stats.pests = 1;
+      while (s.phase === 'day') {
+        s.earned = 1e6;
+        endDay(s);
+      }
+      expect(hazardAnswers(s)).toHaveLength(2);
+      const ids = s.shop!.cards.map((c) => c.card);
+      expect(ids.includes('scarecrow') || ids.includes('ladybirds') || ids.includes('garlic')).toBe(true);
+      if (ids.includes('scarecrow') && (ids.includes('ladybirds') || ids.includes('garlic'))) both++;
+      // Fresh stock is new cards: it does not force an answer again.
+      s.coins = 1e6;
+      for (let k = 0; k < 4; k++) {
+        reroll(s);
+        rolls++;
+        if (s.shop!.cards.some((c) => c.card === 'scarecrow')) freshScarecrows++;
+      }
+    }
+    // Two answer slots on every tray before; now both only when a random good happens to be the other.
+    expect(both / 60).toBeLessThan(0.35);
+    expect(freshScarecrows / rolls).toBeLessThan(0.4);
+    // Enough owned: one scarecrow (it stands for the rest of the run) and two cards for pests.
+    const s = table(['radish'], { season: 2 });
+    s.stats.crows = 1;
+    s.stats.pests = 1;
+    s.draw = s.draw.filter((c) => !['scarecrow', 'ladybirds', 'garlic'].includes(c.id));
+    s.placed.push({ uid: 990, id: 'scarecrow', up: false });
+    s.draw.push({ uid: 991, id: 'ladybirds', up: false }, { uid: 992, id: 'garlic', up: false });
+    expect(hazardAnswers(s)).toEqual([]);
+  });
+
+  it('a new year brings the merchant new stock for the run, and a tray shows different cards from the last where it can', () => {
+    const { s } = newRun(4, null);
+    const before = s.pool.length;
+    s.season = 3;
+    s.earned = 1e6;
+    while (s.phase === 'day') endDay(s);
+    const ev = leaveShop(s)!;
+    expect(s.year).toBe(2);
+    expect(s.pool.length).toBe(before + 2);
+    const stock = ev.find((e): e is Extract<Ev, { t: 'stock' }> => e.t === 'stock')!;
+    expect(stock.cards).toHaveLength(2);
+    for (const c of stock.cards) expect(UNLOCK_ORDER).toContain(c);
+    // Tray to tray, fewer repeats than chance alone would give from fourteen cards.
+    let repeats = 0;
+    let slots = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const t = newRun(seed, null).s;
+      t.coins = 1e6;
+      t.earned = 1e6;
+      while (t.phase === 'day') endDay(t);
+      let last = t.shop!.cards.map((c) => c.card);
+      for (let k = 0; k < 3; k++) {
+        reroll(t);
+        const now = t.shop!.cards.map((c) => c.card);
+        repeats += now.filter((c) => last.includes(c)).length;
+        slots += now.length;
+        last = now;
+      }
+    }
+    expect(repeats / slots).toBeLessThan(0.1);
   });
 });

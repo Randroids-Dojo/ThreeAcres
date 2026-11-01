@@ -35,6 +35,17 @@
 // (the quota, a first-row plot, a crow) covers a key letter or number;
 // reading a plot says what it pays; an improved crop's Select stake is 14 px
 // or more across.
+//
+// Round 4 adds: on boards with tall crops under other crops (bean poles, corn,
+// sunflowers, wheat, a scarecrow), no crop's pixels inside its own plot are
+// changed by a neighbour's (on the round 3 build up to 22% of a crop was
+// covered: beans under wheat, a carrot under a bean pole); Market Day's stamp on tonight's fifth crop and the
+// readings counting its x2; readings name a plot only where the plate shows
+// row numbers, say "tomorrow night", and the beans' grammar; no reason under a
+// taken plot; the quota note off the plate's caption; on the desktop, a lifted
+// card off the caption and the close-up off the scoops, bench, plate, ledger and
+// hand; garlic and ladybirds picture a pest; the win page; desktop goods 115 px
+// wide and up. ONLY=text runs just the states whose name holds it.
 // node scripts/deck-overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -427,6 +438,236 @@ async function run(label, viewport, touch) {
       if (st.length !== 1 || st[0] < 14) extra.push(`the Select stake: ${JSON.stringify(st)} px`);
       console.log(`       ${label} Select stake: ${st.join(', ')} px across`);
     }],
+    // Round 4: tall crops kept in their plots, Market Day's stamp, readings that name rows only with numbers, the beans
+    // and the sunflower's grammar, the quota note off the caption, the desktop's lifted card and close-up, the win page.
+    ['round 4: no crop covers a neighbouring plot\'s crop', async () => {
+      await p.evaluate(() => window.deck.skip());
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        const b = t.board;
+        const C = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        // The fourth playtest's boards: bean poles under a carrot and a young sunflower, a ripe sunflower under a
+        // strawberry, corn under lettuce, wheat under beans, a scarecrow under a radish.
+        for (const q of s.plots) { q.crop = null; q.obj = null; }
+        const put = { 13: C(9701, 'beans', 3, 3), 9: C(9702, 'carrot', 1, 2), 14: C(9703, 'beans', 3, 3), 10: C(9704, 'sunflower', 1, 3), 15: C(9705, 'sunflower', 3, 3), 11: C(9706, 'strawberry', 3, 3), 6: C(9707, 'corn', 4, 4), 2: C(9708, 'lettuce', 2, 2), 4: C(9709, 'wheat', 3, 3), 0: C(9710, 'beans', 3, 3), 8: C(9711, 'radish', 1, 1), 5: C(9712, 'pumpkin', 5, 5), 1: C(9713, 'chili', 2, 2) };
+        for (const [i, c] of Object.entries(put)) s.plots[i].crop = c;
+        s.plots[12].obj = 'scarecrow';
+        t.syncAll();
+        const g = b.canvas.getContext('2d');
+        const T = b.T;
+        const rectOf = (i) => ({ x: b.bx + (i % b.cols) * T, y: b.by + Math.floor(i / b.cols) * T, w: T, h: T });
+        const grab = (r) => g.getImageData(Math.round(r.x * b.dpr), Math.round(r.y * b.dpr), Math.round(r.w * b.dpr), Math.round(r.h * b.dpr)).data;
+        const full = t.shown;
+        const empty = full.map((p) => ({ ...p, crop: null, obj: null }));
+        const draw = (plots) => b.draw(plots, 0);
+        const out = [];
+        for (let i = 0; i < full.length; i++) {
+          if (!full[i].crop && !full[i].obj) continue;
+          const r = rectOf(i);
+          draw(empty);
+          const bare = grab(r);
+          draw(full.map((p, j) => (j === i ? p : { ...p, crop: null, obj: null })));
+          const solo = grab(r);
+          draw(full);
+          const all = grab(r);
+          let own = 0;
+          let covered = 0;
+          const d = (a, c, k) => Math.max(Math.abs(a[k] - c[k]), Math.abs(a[k + 1] - c[k + 1]), Math.abs(a[k + 2] - c[k + 2]));
+          for (let k = 0; k < solo.length; k += 4) {
+            if (d(solo, bare, k) < 40) continue;
+            own++;
+            if (d(all, solo, k) > 40) covered++;
+          }
+          out.push({ plot: i, kind: full[i].crop?.kind ?? full[i].obj, own, share: own ? covered / own : 0 });
+        }
+        return out;
+      });
+      const worst = q.reduce((a, c) => (c.share > a.share ? c : a), { share: 0 });
+      for (const c of q) if (c.share > 0.02) extra.push(`${c.kind} on plot ${c.plot}: ${Math.round(c.share * 100)}% of it covered by a neighbour`);
+      console.log(`       ${label} crops in their own plots: ${q.length} crops, the most covered ${worst.kind ?? 'none'} at ${(worst.share * 100).toFixed(1)}%`);
+    }],
+    ['round 4: Market Day stamps tonight\'s fifth crop and the readings count it', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const t = window.deck.table;
+        const s = t.run;
+        for (const q of s.plots) { q.crop = null; q.obj = null; }
+        s.pages = ['market'];
+        for (const [i, uid] of [[0, 1], [2, 2], [8, 3], [10, 4], [15, 5]]) s.plots[i].crop = { uid: 9300 + uid, kind: 'lettuce', age: 2, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        t.syncAll();
+        await new Promise((r) => setTimeout(r, 120));
+        const br = t.board.canvas.getBoundingClientRect();
+        return { stamps: (t.board.stamps ?? []).map((st) => ({ l: br.left + st.x, t: br.top + st.y, r: br.left + st.x + st.w, b: br.top + st.y + st.h })), fifth: t.plotLine(15), fourth: t.plotLine(10), plot15: (() => { const c = t.board.centre(15); return { l: br.left + c.x - t.board.T / 2, r: br.left + c.x + t.board.T / 2, t: br.top + c.y - t.board.T / 2, b: br.top + c.y + t.board.T / 2 }; })() };
+      });
+      if (q.stamps.length !== 1) extra.push(`${q.stamps.length} market stamps, not one`);
+      else if (q.stamps[0].l < q.plot15.l || q.stamps[0].r > q.plot15.r || q.stamps[0].t < q.plot15.t || q.stamps[0].b > q.plot15.b) extra.push('the market stamp is not on the fifth crop\'s plot');
+      if (!/pays 8 tonight/.test(q.fifth) || !/pays 4 tonight/.test(q.fourth)) extra.push(`readings ignore Market Day: "${q.fourth}" / "${q.fifth}"`);
+      console.log(`       ${label} Market Day: ${q.stamps.length} stamp(s); "${q.fourth}" / "${q.fifth}"`);
+    }],
+    ['round 4: readings name a row only where the plate shows row numbers; plain grammar', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        for (const q of s.plots) { q.crop = null; q.obj = null; }
+        // Beans on their last pick tonight beside a carrot to come: the beans leave first.
+        s.plots[5].crop = { uid: 9401, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 2, pest: 0, sprout: false };
+        s.plots[9].crop = { uid: 9402, kind: 'radish', age: 0, days: 1, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.plots[10].crop = { uid: 9403, kind: 'carrot', age: 0, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.energy = 5;
+        window.deck.hand(['carrot', 'radish']);
+        const numbers = t.board.keyBoxes().filter((k) => /\d/.test(k.text)).length;
+        const reading = t.plotLine(10);
+        const tonight = t.plotLine(9);
+        // Hold the carrot and aim beside the beans: why the beans' +2 will not pay.
+        t.pickUp(t.run.hand[0].uid);
+        t.cursor = 6;
+        const device = window.deck.table['ctx'].device();
+        t['hover'] = 6;
+        t.updateHighlight();
+        const why = window.deck.preview()?.reason?.text ?? '';
+        // Aimed at the beans' own plot (taken): no reason at all.
+        t['hover'] = 5;
+        t.updateHighlight();
+        const taken = window.deck.preview()?.reason?.text ?? '';
+        t['hover'] = null;
+        t.putDown(true);
+        return { numbers, reading, tonight, why, taken, device };
+      });
+      const named = /^[A-E]\d: /.test(q.reading);
+      if (named !== q.numbers > 0) extra.push(`a reading ${named ? 'names' : 'does not name'} its plot with ${q.numbers} row numbers on the plate: "${q.reading}"`);
+      if (!/tomorrow night/.test(q.reading)) extra.push(`a crop ripe in one night reads "${q.reading}"`);
+      if (q.why !== 'The beans are pulled before the carrot ripens.') extra.push(`the reason reads "${q.why}"`);
+      if (q.taken) extra.push(`a taken plot shows a reason: "${q.taken}"`);
+      console.log(`       ${label} readings: ${q.numbers} row numbers, "${q.reading}", "${q.tonight}"; why: "${q.why}"; on a taken plot: "${q.taken || 'nothing'}"`);
+    }],
+    ['round 4: the quota note sits off the caption', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        t.setLine(null);
+        t.say('Quota met.', null);
+        const n = document.querySelector('.sb-note').getBoundingClientRect();
+        const br = t.board.canvas.getBoundingClientRect();
+        const c = t.board.captionBox();
+        const cap = { l: br.left + c.x, t: br.top + c.y, r: br.left + c.x + c.w, b: br.top + c.y + c.h };
+        const w = Math.min(n.right, cap.r) - Math.max(n.left, cap.l);
+        const h = Math.min(n.bottom, cap.b) - Math.max(n.top, cap.t);
+        return { over: w > 1 && h > 1, note: [n.left, n.top, n.right, n.bottom].map(Math.round) };
+      });
+      if (q.over) extra.push(`"Quota met." covers the plate caption at ${q.note.join(',')}`);
+      await settle(2400);
+    }],
+    ['round 4: on the desktop a lifted card stays off the caption and the close-up off the scoops', async () => {
+      if (label !== 'desk') return;
+      await fresh(4242);
+      const held = await p.evaluate(async () => {
+        const t = window.deck.table;
+        const br = t.board.canvas.getBoundingClientRect();
+        const c = t.board.captionBox();
+        const cap = { l: br.left + c.x, t: br.top + c.y, r: br.left + c.x + c.w, b: br.top + c.y + c.h };
+        const hits = [];
+        for (const card of t.run.hand) {
+          t.pickUp(card.uid);
+          await new Promise((r) => setTimeout(r, 380));
+          const r = t.handEls.get(card.uid).el.getBoundingClientRect();
+          const w = Math.min(r.right, cap.r) - Math.max(r.left, cap.l);
+          const h = Math.min(r.bottom, cap.b) - Math.max(r.top, cap.t);
+          if (w > 1 && h > 1) hits.push(`${card.id} ${Math.round(w)}x${Math.round(h)}`);
+          t.putDown(true);
+        }
+        return hits;
+      });
+      for (const h of held) extra.push(`a lifted card covers the plate caption: ${h}`);
+      // Rest the mouse on a card until its close-up comes, then measure it against the bench and the plate.
+      const pt = await p.evaluate(() => { const t = window.deck.table; const r = t.handEls.get(t.run.hand[2].uid).el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.6]; });
+      await p.mouse.move(pt[0], pt[1]);
+      await settle(700);
+      const q = await p.evaluate(() => {
+        const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+        const d = document.querySelector('.sb-detail.on.hover');
+        if (!d) return null;
+        const t = window.deck.table;
+        const br = t.board.canvas.getBoundingClientRect();
+        const plate = { l: br.left + t.board.px0, t: br.top + t.board.py0, r: br.left + t.board.px0 + t.board.pw, b: br.top + t.board.py0 + t.board.ph };
+        const parts = [...d.querySelectorAll('img, .sb-detail-notes')].map(box);
+        const against = [['the scoops', [...document.querySelectorAll('.sb-scoops img')].map(box)], ['the bench', [box(document.querySelector('.sb-bench'))]], ['the plate', [plate]], ['the ledger', [box(document.querySelector('.sb-ledger'))]], ['the hand', [...document.querySelectorAll('.sb-hand .sb-card')].map(box)]];
+        const hits = [];
+        for (const a of parts) for (const [name, list] of against) for (const c of list) if (Math.min(a.r, c.r) - Math.max(a.l, c.l) > 1 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 1) hits.push(name);
+        return { hits: [...new Set(hits)], img: box(d.querySelector('img')) };
+      });
+      if (!q) extra.push('no close-up came under the resting pointer');
+      else for (const h of q.hits) extra.push(`the close-up covers ${h}`);
+      console.log(`       ${label} lifted cards over the caption: ${held.length}; close-up ${q ? `${Math.round(q.img.r - q.img.l)} px wide at ${Math.round(q.img.l)},${Math.round(q.img.t)}, covering ${q.hits.join(', ') || 'nothing'}` : 'missing'}`);
+      await p.mouse.move(640, 20);
+      await settle(200);
+    }],
+    ['round 4: garlic and ladybirds picture a pest kept off', async () => {
+      if (label !== 'phone') return;
+      const q = await p.evaluate(async () => {
+        const out = {};
+        const { faceUrl } = await import('/src/games/deck/view/faces.ts');
+        for (const id of ['garlic', 'ladybirds', 'scarecrow']) {
+          const img = new Image();
+          img.src = faceUrl(id, false);
+          await img.decode();
+          const c = document.createElement('canvas');
+          c.width = img.width;
+          c.height = img.height;
+          const g = c.getContext('2d');
+          g.drawImage(img, 0, 0);
+          // The rule line sits in the bottom quarter of the face.
+          const d = g.getImageData(0, Math.round(img.height * 0.74), img.width, Math.round(img.height * 0.24)).data;
+          let bug = 0;
+          for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 0xa8) < 26 && Math.abs(d[k + 1] - 0xc8) < 26 && Math.abs(d[k + 2] - 0x32) < 40) bug++;
+          out[id] = bug;
+        }
+        return out;
+      });
+      for (const id of ['garlic', 'ladybirds']) if (q[id] < 20) extra.push(`the ${id}'s rule picture shows no pest (${q[id]} bug-green pixels)`);
+      console.log(`       ${label} bug-green pixels on the rule line: garlic ${q.garlic}, ladybirds ${q.ladybirds}, scarecrow ${q.scarecrow}`);
+    }],
+    ['round 4: the win page', async () => {
+      await fresh(4242);
+      await p.evaluate(async () => {
+        const d = window.deck;
+        const w = (ms) => new Promise((r) => setTimeout(r, ms));
+        const s = d.state();
+        s.year = 3;
+        s.season = 3;
+        s.stats.log = Array.from({ length: 11 }, (_, k) => ({ year: Math.floor(k / 4) + 1, season: k % 4, earned: 300 + k * 90, quota: 280 + k * 80, cleared: true }));
+        s.stats.seasonsCleared = 11;
+        while (d.state().phase === 'day') {
+          d.state().earned = 99999;
+          d.endDay();
+          d.skip();
+          await w(30);
+        }
+      });
+      await settle(600);
+      const q = await p.evaluate(() => {
+        const e = document.querySelector('.sb-entry');
+        const b = [...document.querySelectorAll('.sb-entry button')].find((x) => /fresh page/.test(x.textContent));
+        const r = b?.getBoundingClientRect();
+        return { won: window.deck.state().end?.won, wins: window.deck.table.meta.wins, text: e?.textContent ?? '', seal: !!document.querySelector('.sb-seal'), btn: r ? [r.top, r.bottom] : null, H: innerHeight, kind: window.deck.table.sheets.kind };
+      });
+      if (!q.won || q.kind !== 'entry') extra.push(`no win page: won ${q.won}, sheet ${q.kind}`);
+      if (!/The run is won/.test(q.text) || !/Runs won: \d/.test(q.text) || !q.seal) extra.push(`the win page does not say so: "${q.text.slice(0, 120)}"`);
+      if (!q.btn || q.btn[1] > q.H || q.btn[0] < 0) extra.push('"Turn to a fresh page" is off the screen on the win page');
+      console.log(`       ${label} win page: won ${q.won}, runs won ${q.wins}, seal ${q.seal}`);
+    }],
+    ['round 4: the desktop stall reads from arm\'s length', async () => {
+      await toStall(91, 400);
+      const q = await p.evaluate(() => {
+        const goods = [...document.querySelectorAll('.sb-good')].map((e) => e.getBoundingClientRect().width);
+        const st = document.querySelector('.sb-stall').getBoundingClientRect();
+        return { goods: Math.min(...goods), stall: st.width, W: innerWidth };
+      });
+      if (label === 'desk' && q.goods < 115) extra.push(`desktop goods are ${q.goods.toFixed(0)} px wide`);
+      console.log(`       ${label} stall: goods ${q.goods.toFixed(0)} px and up, the stall ${Math.round((q.stall / q.W) * 100)}% of the screen's width`);
+    }],
     ['stall', async () => {
       await toStall(91, 400);
       const q = await purse();
@@ -657,6 +898,8 @@ async function run(label, viewport, touch) {
     }],
   ];
   for (const [name, setup] of states) {
+    // ONLY=text runs just the states whose name holds it (the round 4 states set themselves up).
+    if (process.env.ONLY && !name.includes(process.env.ONLY)) continue;
     extra.length = 0;
     await setup();
     await settle(250);

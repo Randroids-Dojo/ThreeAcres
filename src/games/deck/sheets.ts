@@ -17,8 +17,10 @@ import {
   CARDS,
   cardText,
   costOf,
+  isFinal,
   leaveShop,
   maxPages,
+  nextSeason,
   PAGES,
   removeCard,
   removePrice,
@@ -27,6 +29,7 @@ import {
   SEASON_NAMES,
   seasonsToNext,
   SEEDS,
+  START_POOL,
   slotOnSale,
   slotPrice,
   TUNING,
@@ -189,7 +192,10 @@ export class Sheets {
     const page = el('div', 'sb-book-page');
     page.append(el('i', 'sb-ribbon'));
     page.append(el('h2', '', 'The almanac'));
-    page.append(el('p', 'sb-sub', `${cap(SEASON_NAMES[s.season])}, year ${s.year}. ${s.phase === 'day' ? `Day ${s.day} of ${TUNING.days}.` : s.phase === 'shop' ? 'At the stall.' : ''}`));
+    // Where the run stands, against its end: the last winter is the finish line.
+    const k = (s.year - 1) * 4 + s.season + 1;
+    const of = s.phase === 'over' || k > TUNING.years * 4 ? '' : ` Season ${k} of ${TUNING.years * 4}.`;
+    page.append(el('p', 'sb-sub', `${cap(SEASON_NAMES[s.season])}, year ${s.year}. ${s.phase === 'day' ? `Day ${s.day} of ${TUNING.days}.` : s.phase === 'shop' ? 'At the stall.' : ''}${of}`));
     const toc = el('div', 'sb-toc');
     const row = (label: string, hint: string, on: () => void) => toc.append(btn('sb-toc-row', `<span>${label}</span><i></i><em>${hint}</em>`, on));
     row(s.phase === 'shop' ? 'Back to the stall' : 'Carry on', keys ? 'Esc' : '', () => this.back());
@@ -204,7 +210,7 @@ export class Sheets {
       this.close();
       this.ctx.openSwitcher();
     });
-    row('Give up this run', '', () => {
+    if (s.phase !== 'over') row('Give up this run', '', () => {
       if (!this.giveUpArmed) {
         this.giveUpArmed = true;
         const last = toc.lastElementChild as HTMLElement;
@@ -213,7 +219,7 @@ export class Sheets {
       }
       this.giveUpArmed = false;
       this.close();
-      this.t.fresh(null, false);
+      this.t.giveUp();
     });
     this.giveUpArmed = false;
     page.append(toc);
@@ -223,7 +229,7 @@ export class Sheets {
       el(
         'p',
         'sb-foot',
-        `${m.runs ? `Runs finished: ${m.runs}. Most seasons: ${best.seasons}. Best harvest: ${best.harvest}.` : 'No runs finished yet.'}${s.stats.bestHarvest ? ` This run's best: ${kinds} for ${s.stats.bestHarvest}.` : ''}`,
+        `${m.runs ? `Runs finished: ${m.runs}. Runs won: ${m.wins ?? 0}. Most seasons: ${best.seasons}. Best harvest: ${best.harvest}.` : 'No runs finished yet.'}${s.stats.bestHarvest ? ` This run's best: ${kinds} for ${s.stats.bestHarvest}.` : ''}`,
       ),
     );
     // Keys only for a keyboard: a phone has none.
@@ -444,6 +450,12 @@ export class Sheets {
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
     if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}'s harvest is in: ${last.earned} of ${last.quota}.`));
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
+    // Each new year the merchant brings cards the catalogue does not hold yet, for this run: said at the year's first stall.
+    if (s.season === 0 && s.year >= 2) {
+      const visiting = s.pool.filter((c) => !START_POOL.includes(c) && !this.t.meta.unlocked.includes(c));
+      const fresh = visiting.slice((s.year - 2) * TUNING.newStock, (s.year - 1) * TUNING.newStock);
+      if (fresh.length) head.append(el('p', 'sb-purse-line sb-stock', `New stock this year: ${listOf(fresh.map((c) => lower(c)))}.`));
+    }
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
     const body = el('div', 'sb-stall-body');
@@ -605,7 +617,7 @@ export class Sheets {
       spot.append(d);
     } else if (this.t.stallLine) spot.append(this.lessonEl);
     foot.append(spot);
-    const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : `On to ${SEASON_NAMES[s.season + 1]}`;
+    const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : isFinal(nextSeason(s)) ? 'On to the last winter' : `On to ${SEASON_NAMES[s.season + 1]}`;
     foot.append(
       btn('sb-signpost', `<span>${next}</span>`, () => {
         const ev = leaveShop(s);
@@ -615,6 +627,7 @@ export class Sheets {
         this.t.syncAll();
         this.t.relayout();
         this.ctx.audio.cue('deck.shuffle');
+        if (isFinal(s)) this.t.say('The last winter: meet it to win.', null);
       }),
     );
     wrap.append(foot);
@@ -654,23 +667,30 @@ export class Sheets {
   entry(): void {
     const s = this.t.run;
     const m = this.t.meta;
+    const end = s.end;
     // The account scrolls if a long run fills it; the way on stays in sight below it.
-    const sheet = el('div', 'sb-entry');
+    const sheet = el('div', `sb-entry${end?.won ? ' won' : ''}`);
     const page = el('div', 'sb-entry-body');
     sheet.append(page);
     page.append(el('h2', '', `The almanac, year ${s.year}`));
-    page.append(el('p', 'sb-sub', 'An account of the kitchen plot.'));
+    // A won run: every season to the last winter met. Its own line, and the count of runs won.
+    page.append(el('p', 'sb-sub', end?.won ? `${cap(NUMS[TUNING.years] ?? String(TUNING.years))} years on the kitchen plot, every quota met. The run is won.` : 'An account of the kitchen plot.'));
     const list = el('ol', 'sb-entries');
-    for (const l of s.stats.log) {
+    s.stats.log.forEach((l, k) => {
       const li = el('li');
-      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned} against a quota of ${l.quota}. ${l.cleared ? 'Met.' : `Short by ${l.quota - l.earned}. The run ends here.`}`;
+      const last = k === s.stats.log.length - 1;
+      const how = l.cleared ? 'Met.' : last && end?.gaveUp ? `Given up${end.day ? ` on day ${end.day}` : ''}.` : `Short by ${l.quota - l.earned}. The run ends here.`;
+      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned} against a quota of ${l.quota}. ${how}`;
       list.append(li);
-    }
+    });
+    // Given up at the stall, between seasons: the run ends before the next one starts.
+    if (end?.gaveUp && !end.day) list.append(el('li', '', 'Given up at the stall.'));
     page.append(list);
     const bits: string[] = [];
     if (s.stats.bestKind) bits.push(`Best single harvest: ${lower(s.stats.bestKind)}, for ${s.stats.bestHarvest}.`);
     bits.push(`Coins taken in all: ${s.stats.totalEarned}. Harvests: ${s.stats.harvests}.`);
-    bits.push(`Seasons met: ${s.stats.seasonsCleared}. Your most: ${m.best.seasons}.`);
+    bits.push(`Seasons met: ${s.stats.seasonsCleared} of ${TUNING.years * 4}. Your most: ${m.best.seasons}.`);
+    if (end?.won || (m.wins ?? 0) > 0) bits.push(`Runs won: ${m.wins ?? 0}.${end?.won && m.bestWin === s.stats.totalEarned && (m.wins ?? 0) > 1 ? ' Your best yet.' : ''}`);
     for (const b of bits) page.append(el('p', '', b));
     const fresh: CardId[] = s.end?.unlocked ?? [];
     if (fresh.length) {
@@ -688,9 +708,13 @@ export class Sheets {
       const more = seasonsToNext(m);
       page.append(el('p', 'sb-quiet', more ? `The catalogue holds nothing new yet. Meet ${NUMS[more] ?? more} more ${more === 1 ? 'season' : 'seasons'}, in any run, to add to it.` : 'The catalogue holds every card.'));
     }
-    sheet.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    // The way on, and for a won run a red wax seal beside it (kept off the ruled account).
+    const foot = el('div', 'sb-entry-foot');
+    foot.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    if (end?.won) foot.append(el('div', 'sb-seal', '<span>Won</span>'));
+    sheet.append(foot);
     this.show('entry', sheet);
-    this.ctx.audio.cue('deck.fail');
+    this.ctx.audio.cue(end?.won ? 'deck.big' : 'deck.fail');
   }
 
   // ---------------------------------------------------------------- keys

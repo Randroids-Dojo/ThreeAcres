@@ -353,7 +353,13 @@
 .sb-detail-notes p { margin: 0 0 5px; font-size: 14px; line-height: 1.35; }
 .sb-detail.hover { background: none; pointer-events: none; flex-direction: row; align-items: flex-end; justify-content: flex-start; padding: 0; }
 .sb-detail.hover img { width: 200px; }
-.sb[data-layout='wide'] .sb-detail.hover { left: auto; right: 20px; top: auto; bottom: 230px; width: auto; height: auto; flex-direction: column; align-items: center; }
+/* On the desktop the close-up under the pointer stands in the bare table right of the plate (the table sets the box), clear of the scoops. */
+.sb[data-layout='wide'] .sb-detail.hover {
+  left: var(--sb-dx); top: var(--sb-dy); right: auto; bottom: auto; width: var(--sb-dw); height: auto; max-height: var(--sb-dh);
+  flex-direction: column; align-items: center; justify-content: flex-start; gap: 8px;
+}
+.sb[data-layout='wide'] .sb-detail.hover img { width: min(200px, 100%); }
+.sb[data-layout='wide'] .sb-detail.hover .sb-detail-notes { max-width: 100%; box-sizing: border-box; }
 
 /* The seed tin, opened. */
 .sb-tinview {
@@ -469,7 +475,6 @@
 .sb-good.m { width: 102px; height: 143px; }
 .sb-good.l { width: 112px; height: 157px; }
 .sb-good.lifted { transform: rotate(0deg) translateY(-10px) scale(1.04); z-index: 2; }
-.sb[data-layout='wide'] .sb-goods { gap: 22px; }
 .sb-chalk { position: absolute; inset: 30% 0 auto; font-size: 22px; font-style: italic; color: rgba(245, 240, 225, 0.75); transform: rotate(-12deg); }
 /* The price hangs from the card's top corner, above the face, so it never covers the name. */
 .sb-pricetag {
@@ -509,6 +514,41 @@
 .sb[data-layout='phone'] .sb-lip { margin: 0 -14px; }
 .sb[data-layout='phone'] .sb-pagebtn { width: min(47%, 230px); }
 
+/* The desktop stall reads from arm's length: wider, its goods and words larger (goods were about 90 px wide and
+   the rule pictures on them about 10 px, with over half the screen bare). --sbk is set by the table from the
+   screen's height, so every control still fits a 1280 by 800 screen in every stall state. */
+.sb[data-layout='wide'] .sb-stall { width: min(1200px, 100%); }
+/* Side by side on a wide screen: the cork board of pages on the left, the tray on the right, so the goods can
+   grow without pushing the services or the signpost off an 800 px screen. */
+.sb[data-layout='wide'] .sb-stall-body { flex-direction: row; align-items: stretch; justify-content: center; gap: 14px; }
+.sb[data-layout='wide'] .sb-cork { flex: 0 1 36%; width: auto; display: flex; flex-direction: column; }
+.sb[data-layout='wide'] .sb-tray { flex: 1 1 auto; width: auto; max-width: 820px; display: flex; flex-direction: column; justify-content: flex-end; }
+.sb[data-layout='wide'] .sb-cork .sb-pins { flex-direction: column; align-items: center; flex-wrap: nowrap; gap: 10px; }
+.sb[data-layout='wide'] .sb-good.s { width: calc(92px * var(--sbk, 1.3)); height: calc(129px * var(--sbk, 1.3)); }
+.sb[data-layout='wide'] .sb-good.m { width: calc(102px * var(--sbk, 1.3)); height: calc(143px * var(--sbk, 1.3)); }
+.sb[data-layout='wide'] .sb-good.l { width: calc(112px * var(--sbk, 1.3)); height: calc(157px * var(--sbk, 1.3)); }
+.sb[data-layout='wide'] .sb-goods { gap: calc(18px * var(--sbk, 1.3)); }
+.sb[data-layout='wide'] .sb-pricetag { font-size: 19px; }
+.sb[data-layout='wide'] .sb-chalk { font-size: 28px; }
+.sb[data-layout='wide'] .sb-sign span { font-size: 25px; }
+.sb[data-layout='wide'] .sb-closed { font-size: 18px; max-width: 760px; }
+.sb[data-layout='wide'] .sb-purse-line { font-size: 16.5px; }
+.sb[data-layout='wide'] .sb-purse-line b { font-size: 21px; }
+.sb[data-layout='wide'] .sb-cork h3 { font-size: 15.5px; }
+.sb[data-layout='wide'] .sb-pagebtn { width: min(100%, 360px); }
+.sb[data-layout='wide'] .sb-pins .sb-pagesheet { font-size: 14.5px; padding: 12px 12px 8px; }
+.sb[data-layout='wide'] .sb-pins .sb-pagesheet b { font-size: 16.5px; margin: 0 -12px; padding: 0 12px 2px; }
+.sb[data-layout='wide'] .sb-pins .sb-pencil { font-size: 15px; }
+.sb[data-layout='wide'] .sb-kept, .sb[data-layout='wide'] .sb-keptpage, .sb[data-layout='wide'] .sb-slot { font-size: 14.5px; }
+.sb[data-layout='wide'] .sb-thing img { width: 54px; height: 54px; }
+.sb[data-layout='wide'] .sb-thing span { font-size: 16px; }
+.sb[data-layout='wide'] .sb-thing em { font-size: 14px; }
+.sb[data-layout='wide'] .sb-read, .sb[data-layout='wide'] .sb-done p, .sb[data-layout='wide'] .sb-stall-lesson { font-size: 16px; }
+.sb[data-layout='wide'] .sb-slipspot { max-width: 640px; }
+.sb[data-layout='wide'] .sb-signpost { font-size: 21px; }
+.sb[data-layout='wide'] .sb-stall-book { width: 52px; height: 60px; }
+.sb[data-layout='wide'] .sb-stall-book span { font-size: 11px; }
+
 /* The almanac's entry for the run: the account scrolls in a long run, the way on stays in sight under it. */
 .sb-entry {
   width: min(460px, 100%); max-height: 100%; display: flex; flex-direction: column; box-sizing: border-box; padding: 26px 26px 12px;
@@ -520,12 +560,20 @@
   flex: 1 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain;
   background-image: repeating-linear-gradient(180deg, transparent 0 25px, rgba(70, 110, 160, 0.22) 25px 26px); background-attachment: local;
 }
-.sb-entry > .sb-plain { flex: 0 0 auto; align-self: flex-start; }
+.sb-entry-foot > .sb-plain { flex: 0 0 auto; }
 .sb-entry h2 { margin: 0; font-size: 28px; font-style: italic; }
 .sb-entry p { font-size: 15px; line-height: 26px; margin: 0; }
 .sb-entries { margin: 10px 0; padding-left: 0; list-style: none; }
 .sb-entries li { font-size: 15px; line-height: 26px; }
 .sb-new { display: flex; gap: 8px; margin: 6px 0; }
+/* The way on sits under the account; a won run's red wax seal stands beside it. */
+.sb-entry-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sb-seal {
+  flex: 0 0 auto; width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; transform: rotate(-12deg); margin: 6px 4px 0 0;
+  background: radial-gradient(circle at 38% 34%, #d0503e, #9a2a22 62%, #7a1e18); box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4), inset 0 0 0 4px rgba(255, 200, 170, 0.18);
+}
+.sb-seal span { color: #fbe6c8; font-size: 15px; font-style: italic; font-weight: 720; letter-spacing: 0.04em; }
+.sb-stock { font-style: italic; }
 .sb-new img { width: 74px; height: 104px; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
 
 @media (prefers-reduced-motion: reduce) {

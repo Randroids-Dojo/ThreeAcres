@@ -130,6 +130,11 @@ export interface RunEnd {
   unlocked: CardId[];
   /** The meta record has taken this run. */
   recorded: boolean;
+  /** Every season met to the last winter: the run is won. */
+  won?: boolean;
+  /** The player gave the run up (on this day, or at the stall: day 0). It ends like a missed quota. */
+  gaveUp?: boolean;
+  day?: number;
 }
 
 export type Phase = 'day' | 'shop' | 'over';
@@ -179,8 +184,10 @@ export interface RunState {
   guided: boolean;
   /** The guided first season: the hands still to deal, one list per day. Empty once dealt. */
   script: CardId[][];
-  /** The card pool for this run's shop. */
+  /** The card pool for this run's shop. It grows at each new year with cards the catalogue does not hold yet, for this run only. */
   pool: CardId[];
+  /** Cards on the last tray the merchant laid out, so the next tray brings different ones where it can. */
+  lastTray?: CardId[];
   stats: RunStats;
   end: RunEnd | null;
 }
@@ -193,6 +200,10 @@ export interface Meta {
   /** Seasons met across every run so far: the catalogue grows with these, so every run can add to it. */
   seasons?: number;
   best: { seasons: number; harvest: number; coins: number; year: number; season: Season };
+  /** Runs won: every season met to the last winter. */
+  wins?: number;
+  /** The most coins a won run took in all. */
+  bestWin?: number;
 }
 
 export interface NightGrowth {
@@ -234,6 +245,8 @@ export type Ev =
   | { t: 'season'; year: number; season: Season; quota: number }
   | { t: 'shop' }
   | { t: 'over'; end: RunEnd }
+  /** The merchant has new stock this year, for this run: cards the catalogue does not hold yet. */
+  | { t: 'stock'; cards: CardId[] }
   | { t: 'buy'; card: CardId }
   | { t: 'page'; page: PageId }
   | { t: 'remove'; card: Card }

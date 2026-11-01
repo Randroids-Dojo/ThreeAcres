@@ -6,7 +6,7 @@
 
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
-import { CARDS, type CardId, type SeedId } from '../rules';
+import { CARDS, TUNING, type CardId, type SeedId } from '../rules';
 import { paintScoop } from './art';
 import { paintSeedProduce } from './crops';
 import { paintGlyph } from './glyphs';
@@ -286,6 +286,18 @@ export function crow(g: Ctx, x: number, y: number, s: number, kept = false): voi
   g.restore();
 }
 
+/** A pest in a red ring with a bar across it: pests kept off, or cleared. s across, centred on (x, y). */
+export function noBug(g: Ctx, x: number, y: number, s: number): void {
+  bug(g, x, y + s * 0.02, s * 0.5);
+  g.save();
+  g.beginPath();
+  g.arc(x, y, s * 0.44, 0, Math.PI * 2);
+  g.moveTo(x - s * 0.31, y + s * 0.31);
+  g.lineTo(x + s * 0.31, y - s * 0.31);
+  ink(g, BLOOM, Math.max(0.8, s * 0.09), 1);
+  g.restore();
+}
+
 /** A bold number or sign, left-aligned at x, baseline centred on y. Returns its width. */
 export function num(g: Ctx, text: string, x: number, y: number, size: number, col: string): number {
   g.save();
@@ -321,6 +333,7 @@ export type Bit =
   | { t: 'bloom' }
   | { t: 'map'; k: Diagram }
   | { t: 'nocrow' }
+  | { t: 'nobug' }
   | { t: 'scoop' }
   | { t: 'text'; s: string; c: 'y' | 'b' | 'i' };
 
@@ -348,7 +361,7 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
       return [prod('beans'), B('×1.5'), BLOOMB];
     case 'sunflower':
       // It faces the crop below it.
-      return bees ? [map('below'), B('+2'), BLOOMB, B('×2')] : [map('below'), B('+2'), BLOOMB];
+      return bees ? [map('below'), B('+2'), BLOOMB, B(`×${TUNING.beesTimes}`)] : [map('below'), B('+2'), BLOOMB];
     case 'pumpkin':
       return [map('alone'), B('×2'), BLOOMB];
     case 'strawberry':
@@ -357,7 +370,8 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
     case 'mint':
       return [map('spread')];
     case 'garlic':
-      return [map('guard')];
+      // A pest kept off, and the plots it is kept off: the garlic and its neighbours (it used to be the cross alone).
+      return [{ t: 'nobug' }, map('next')];
     case 'wheat':
       return [prod('wheat'), Y('+2'), BASKET];
     case 'chili':
@@ -373,12 +387,13 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
     case 'shears':
       return [Y('×2'), BASKET];
     case 'ladybirds':
-      return up ? [map('guard'), I('+1')] : [map('guard')];
+      // Every pest on the plot cleared.
+      return up ? [{ t: 'nobug' }, map('all'), I('+1')] : [{ t: 'nobug' }, map('all')];
     case 'scarecrow':
       // A crow kept off, and the 3 by 3 it is kept off.
       return [{ t: 'nocrow' }, map('area')];
     case 'beehive':
-      return bees ? [map('area'), B('+1'), BLOOMB, B('×2')] : [map('area'), B('+1'), BLOOMB];
+      return bees ? [map('area'), B('+1'), BLOOMB, B(`×${TUNING.beesTimes}`)] : [map('area'), B('+1'), BLOOMB];
     case 'rain':
       return [map('all'), MOON, I('+1')];
     case 'sun':
@@ -397,6 +412,7 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
         return numWidth(g, b.s, h * 0.78);
       case 'map':
       case 'nocrow':
+      case 'nobug':
         return h;
       case 'basket':
       case 'bloom':
@@ -444,6 +460,9 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
         break;
       case 'nocrow':
         crow(g, mx, cy, h, true);
+        break;
+      case 'nobug':
+        noBug(g, mx, cy, h);
         break;
       case 'scoop':
         scoop(g, mx, cy, h * 1.1, true);

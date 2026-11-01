@@ -142,8 +142,8 @@ export interface PageDef {
 
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
-  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom for each radish or carrot beside them.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'A crop a sunflower or a beehive blooms gets x2, once.' },
+  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom with a partner beside them (a carrot for a radish, a radish for a carrot).' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'A crop a sunflower or a beehive blooms gets x1.5, once.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },

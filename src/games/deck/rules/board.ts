@@ -8,15 +8,30 @@ import type { Crop, PageId, Plot, RunState, Season } from './types';
 export const TUNING = {
   /** Year 1's quotas, spring to winter. */
   quotas: [170, 260, 300, 350] as number[],
-  /** Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. */
-  quotas2: [400, 480, 540, 600] as number[],
-  /** Year 3's. With the plot carrying over, takes climb steeply into year 3 and then flatten, so it has its own row too. */
-  quotas3: [600, 660, 700, 740] as number[],
-  /** Each year after the third multiplies year 3's quotas by this. */
+  /**
+   * Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. Round 4 set years 2 and 3 against
+   * the strong builds (roots with the Cellar, bloom with Busy Bees, perennials), which ran at 1.8 to 2.5 times the old
+   * quotas: a run that clears year 2 no longer all but surely clears year 3, and the combos are needed to win.
+   */
+  quotas2: [420, 500, 580, 650] as number[],
+  /** Year 3's, the last: its winter is the finish line. Takes climb into year 3 and flatten, so it has its own row too. */
+  quotas3: [740, 820, 900, 960] as number[],
+  /** Each year after the third multiplies year 3's quotas by this (checks and the balance scripts only: a run ends after year 3). */
   yearMult: 1.3,
+  /**
+   * Years in a run. Its last winter is the finish line: meet it and the run is
+   * won. The fourth playtest's strong runs never ended (a roots run was still at
+   * 1.5 times the quota in year 4 summer with 5,113 coins it could not spend);
+   * by the end of year 3 the almanac is full, the scoops are bought and the
+   * engine is built, so the run ends there.
+   */
+  years: 3,
   /** The guided first season's quota: its first three days are set hands, so it takes less. */
   guidedQuota: 70,
-  /** A guided first run's other year 1 quotas are this much of the usual: its first stall had fewer coins to spend. */
+  /**
+   * A guided first run's other year 1 quotas, and its year 2 quotas, are this much of the usual: its first stall had
+   * fewer coins to spend, and its deck is a year behind. (Year 2 at the full rate cleared 9% of guided bot runs.)
+   */
   firstYear: 0.88,
   days: 6,
   handSize: 5,
@@ -38,6 +53,8 @@ export const TUNING = {
   pestPay: 0.5,
   /** Scoops a crop puts back on the next morning's bench when it is pulled up. */
   scoopBack: 1,
+  /** Checks only (the quota fit): a missed season still opens the stall, so every run sees every season with the real quotas in play. */
+  noEnd: false,
   /** Which crops put a scoop back when pulled up: every crop (shipped), or for checks only those that cost a scoop, or none. */
   scoopFrom: 'all' as 'all' | 'paid' | 'none',
   /**
@@ -48,10 +65,22 @@ export const TUNING = {
   scoopCap: 2,
   /** Bloom a sunflower gives the crop below it. */
   sunBloom: 2,
-  /** Yield the Root Cellar adds to radishes and carrots (on top of its bloom for each root beside them). */
+  /** Yield the Root Cellar adds to radishes and carrots (on top of its bloom for each radish and carrot pair). */
   cellarYield: 2,
-  /** Busy Bees' one multiplier for a crop a sunflower or a beehive blooms, however many. */
-  beesTimes: 2,
+  /**
+   * The most bloom the Root Cellar gives one crop: +1 when a radish stands beside
+   * a carrot (or a carrot beside a radish), up to this. It counted every root
+   * beside a root, uncapped, and decided the run: the same shopping cleared year 3
+   * 76% of the time with it and 0% without. Capped at 2 a roots build still took
+   * about 1,200 a season in year 3 against about 1,000 for the other strong builds.
+   */
+  cellarCap: 1,
+  /**
+   * Busy Bees' one multiplier for a crop a sunflower or a beehive blooms, however
+   * many. At x2 the bloom build took about 1,600 a season in year 3, a half again
+   * as much as any other strong build, once the quotas were set against them.
+   */
+  beesTimes: 1.5,
   /**
    * Almanac pages kept before any slot is bought. Four, not five: buying only
    * pages cleared year 2 more often than buying good cards (the tester's 40%
@@ -71,6 +100,8 @@ export const TUNING = {
   rerollStep: 3,
   /** Cards on the merchant's tray: at least one seed and one uncommon or rarer. */
   goods: 4,
+  /** Cards the merchant brings each new year of a run, at random from those the catalogue does not hold yet, for that run only. */
+  newStock: 2,
   /** Shop prices rise by this much each year after the first. */
   priceYear: 0.5,
   minDeck: 6,
@@ -80,6 +111,16 @@ export const TUNING = {
   /** Room for one more almanac page, sold once the almanac is full: this much, doubling each time. A late use for coins. */
   slotPrice: 250,
 };
+
+/** The run's last season: its winter is the finish line. */
+export function isFinal(s: Pick<RunState, 'year' | 'season'>): boolean {
+  return s.year >= TUNING.years && s.season === 3;
+}
+
+/** Seasons in a whole run, and how many this is, from 1. */
+export function seasonsInRun(): number {
+  return TUNING.years * 4;
+}
 
 export function byYear(list: number[], year: number): number {
   return list[Math.min(list.length - 1, year - 1)];
@@ -107,6 +148,7 @@ function nice(q: number): number {
 export function quotaFor(year: number, season: Season, pages: readonly PageId[], guided = false): number {
   let q = year === 1 ? TUNING.quotas[season] : year === 2 ? TUNING.quotas2[season] : TUNING.quotas3[season] * Math.pow(TUNING.yearMult, year - 3);
   if (year === 1 && guided) q = season === 0 ? TUNING.guidedQuota : q * TUNING.firstYear;
+  if (year === 2 && guided) q *= TUNING.firstYear;
   if (season === 3 && pages.includes('coldframe')) q *= 0.8;
   return nice(q);
 }

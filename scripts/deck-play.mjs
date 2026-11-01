@@ -185,10 +185,10 @@ while (days < wantDays) {
     } else {
       await tap(...cp);
       await tap(...(await plotPoint(sug.plot)));
-      // A tool or object on one plot aims on the first tap (a finger has no hover) and plays on the second.
+      // A seed, tool or object on one plot aims on the first tap (a finger has no hover) and plays on the second.
       const aimed = await p.evaluate((uid) => {
         const c = window.deck.state().hand.find((x) => x.uid === uid);
-        return !!c && ['can', 'compost', 'fertiliser', 'shears', 'scarecrow', 'beehive'].includes(c.id);
+        return !!c && !['rain', 'sun', 'storm', 'ladybirds', 'trowel'].includes(c.id);
       }, before.uid[sug.h]);
       if (aimed) await tap(...(await plotPoint(sug.plot)));
       tapsPlays++;

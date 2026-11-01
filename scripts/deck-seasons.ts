@@ -27,6 +27,10 @@ interface Tally {
   slots: number[];
   pages: number[];
   kept: number[];
+  /** Different cards the stalls' first trays offered in a run, and tray slots that repeat the stall before. */
+  offered: number[];
+  repeats: number;
+  traySlots: number;
 }
 
 function play(noise: number, guided: boolean): Tally {
@@ -43,16 +47,29 @@ function play(noise: number, guided: boolean): Tally {
     slots: [],
     pages: [],
     kept: [],
+    offered: [],
+    repeats: 0,
+    traySlots: 0,
   };
   for (let i = 0; i < runs; i++) {
     const seed = 1000 + i * 7919;
     const o = { noise, seed: 77 + i, guided };
     const { s } = newRun(seed, null, guided);
     const dice = new Dice(o.seed ^ seed);
+    const offered = new Set<string>();
+    let last: string[] = [];
+    const tray = () => {
+      const now = (s.shop?.cards ?? []).map((c) => c.card);
+      for (const c of now) offered.add(c);
+      t.repeats += now.filter((c) => last.includes(c)).length;
+      t.traySlots += now.length;
+      last = now;
+    };
     for (let guard = 0; guard < 800 && s.phase !== 'over'; guard++) {
       const k = (s.year - 1) * 4 + s.season;
       if (k >= K) break;
       if (s.phase === 'shop') {
+        tray();
         botShop(s, o, dice);
         // Coins left in the purse on leaving the stall that opens year 2 summer and later: what found no use.
         if (k >= 5) t.kept.push(s.coins);
@@ -74,6 +91,7 @@ function play(noise: number, guided: boolean): Tally {
         t.quota[k] = end.quota;
       }
     }
+    t.offered.push(offered.size);
     t.unspent.push(s.coins);
     t.slots.push((s as { slots?: number }).slots ?? 0);
     t.pages.push(s.pages.length);
@@ -112,4 +130,5 @@ for (const [name, noise, guided] of bots) {
   console.log(`coins unspent when the run ends: median ${med(t.unspent)}, mean ${mean(t.unspent).toFixed(0)}, max ${Math.max(...t.unspent)}`);
   console.log(`coins left on leaving a stall from year 2 summer on: median ${med(t.kept)}, p90 ${[...t.kept].sort((a, b) => a - b)[Math.floor(t.kept.length * 0.9)] ?? 0}`);
   console.log(`pages kept at the end: mean ${mean(t.pages).toFixed(1)}, max ${Math.max(...t.pages)}; page slots bought: ${t.slots.filter((n) => n > 0).length} runs, max ${Math.max(...t.slots)}`);
+  console.log(`stall variety: ${mean(t.offered).toFixed(1)} different cards on the stalls' trays in a run (median ${med(t.offered)}); ${((t.repeats / Math.max(1, t.traySlots)) * 100).toFixed(0)}% of tray slots repeat the stall before`);
 }
