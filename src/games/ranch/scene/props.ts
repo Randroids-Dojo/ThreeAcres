@@ -294,6 +294,20 @@ export function buildProps(boardMat: Material): Props {
       [1, 1],
     ]) S.push(box(0.14, h + 0.12, 0.14, WOOD_D, x + (cx * w) / 2, y0 + h / 2, z + (cz * w) / 2));
     S.push(box(w - 0.1, 0.05, w - 0.1, 0x3a2e24, x, y0 + 0.35, z));
+    // A mouth that faces the lane: a tall backboard leaning back and low flared
+    // sides, with the front left open, so from the lane you see into the crate
+    // and have a board to blow against. (A front board read as a closed lid.)
+    {
+      const back = 0.8;
+      const lean = 0.22;
+      S.push(box(w + 0.3, back, 0.07, WOOD_L, x, y0 + h + (back / 2) * Math.cos(lean), z + w / 2 + 0.05 + (back / 2) * Math.sin(lean), 0, lean, 0, { vary: 0.06 }));
+      const side = 0.4;
+      const tilt = 0.5;
+      const ys = y0 + h + (side / 2) * Math.cos(tilt);
+      const os = w / 2 + 0.05 + (side / 2) * Math.sin(tilt);
+      S.push(box(0.06, side, w + 0.2, 0xb88a5e, x - os, ys, z + 0.05, 0, 0, tilt, { vary: 0.06 }));
+      S.push(box(0.06, side, w + 0.2, 0xb88a5e, x + os, ys, z + 0.05, 0, 0, -tilt, { vary: 0.06 }));
+    }
     // A plate on the side facing the lane says what the crate is for.
     SIGN.push(quadUV(1.0, 0.25, atlas.uv['plate-sell'], x, y0 + 0.62, z - w / 2 - 0.075, Math.PI));
     // The board on its easel, facing the lane.

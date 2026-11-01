@@ -126,7 +126,7 @@ export class Ranch {
   private prevMenuZ = 0;
   private quality: 'low' | 'high';
   private nanArmed = false;
-  private crossTarget: 'target' | 'prickly' | null = null;
+  private crossTarget: 'target' | 'prickly' | 'sell' | null = null;
   readonly debug: DebugHooks = { afterFrame: null };
   /** Frame stats for scripted checks: CPU ms per frame (update plus render submit). */
   readonly cpu: number[] = [];

@@ -406,3 +406,77 @@ describe('the journal and the save', () => {
     expect(deserialize(null, [])).toBeNull();
   });
 });
+
+describe('the sell crate', () => {
+  const CX = -6.5;
+  const CZ = 36.5;
+  /** A ranch with fluff chosen, the player stood at (x, z). */
+  function at(x: number, z: number, n = 1) {
+    const sim = new Sim(null);
+    const s = sim.s;
+    s.player.x = x;
+    s.player.z = z;
+    s.player.y = sim.phys.floor(x, z);
+    s.slots[0].t = 'tuft-clover';
+    s.slots[0].n = n;
+    s.sel = 0;
+    return sim;
+  }
+  function aimAt(sim: Sim, x: number, y: number, z: number): Aim {
+    const p = sim.s.player;
+    const ex = p.x;
+    const ey = p.y + 1.6;
+    const ez = p.z;
+    const l = Math.hypot(x - ex, y - ey, z - ez);
+    const dx = (x - ex) / l;
+    const dy = (y - ey) / l;
+    const dz = (z - ez) / l;
+    return { ex, ey, ez, dx, dy, dz, mx: ex + dx * 0.77, my: ey + dy * 0.77 - 0.25, mz: ez + dz * 0.77 };
+  }
+  const run = (sim: Sim, seconds: number, aim: Aim) => {
+    for (let t = 0; t < seconds; t += 1 / 60) sim.update(1 / 60, idle, aim);
+  };
+
+  it('draws in fluff lying within reach, and leaves fluff further off alone', () => {
+    const sim = at(CX + 9, CZ - 9, 0);
+    const s = sim.s;
+    const fl = (x: number, z: number) => sim.phys.floor(x, z) + 0.1;
+    const near = newItem(s, 'tuft-clover', CX + 1.3, fl(CX + 1.3, CZ - 1.3), CZ - 1.3);
+    const far = newItem(s, 'tuft-clover', CX + 3.5, fl(CX + 3.5, CZ - 1), CZ - 1);
+    for (const it of [near, far]) {
+      it.grounded = true;
+      it.flyT = -1;
+      s.items.push(it);
+    }
+    const x0 = far.x;
+    run(sim, 4, aimAt(sim, CX + 20, 8, CZ));
+    expect(near.gone).toBe(true);
+    expect(s.stats.sold).toBe(1);
+    expect(far.gone).toBe(false);
+    expect(Math.abs(far.x - x0)).toBeLessThan(0.6);
+  });
+
+  it('takes a blow that would have landed short or a little wide', () => {
+    for (const [tx, ty] of [
+      [CX, -0.75],
+      [CX + 0.9, 0],
+    ]) {
+      const sim = at(CX + 1, CZ - 5);
+      const aim = aimAt(sim, tx, sim.phys.floor(CX, CZ) + 0.75 + ty, CZ);
+      sim.puff(aim);
+      run(sim, 4, aim);
+      expect(sim.s.stats.sold).toBe(1);
+    }
+  });
+
+  it('shows the sell mark only when a blow would sell, and only with fluff chosen', () => {
+    const sim = at(CX + 1, CZ - 5);
+    const fl = sim.phys.floor(CX, CZ);
+    expect(sim.aimTarget(aimAt(sim, CX, fl + 0.75, CZ))).toBe('sell');
+    // Turned well away from the crate.
+    expect(sim.aimTarget(aimAt(sim, CX + 8, fl + 1.5, CZ - 6))).not.toBe('sell');
+    // Clover heads chosen: no promise of a sale.
+    sim.s.slots[0].t = 'cloverhead';
+    expect(sim.aimTarget(aimAt(sim, CX, fl + 0.75, CZ))).not.toBe('sell');
+  });
+});

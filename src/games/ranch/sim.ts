@@ -154,6 +154,33 @@ export interface MenuOption {
 const G_DOWNY = 9;
 const G_ITEM = 16;
 const G_TUFT = 2.4;
+/** The sell crate draws in fluff within this many metres of its middle (flying or lying). */
+const PULL_R = 2.4;
+const CRATE_X = (CRATE.x0 + CRATE.x1) / 2;
+const CRATE_Z = (CRATE.z0 + CRATE.z1) / 2;
+
+/**
+ * The sell crate's pull on a piece of fluff: towards a point just over its
+ * funnel, harder the nearer it is, with a little damping so it settles in
+ * rather than orbiting. Shared by the real flight and the crosshair's guess.
+ */
+function cratePull(b: { x: number; y: number; z: number; vx: number; vy: number; vz: number }, floor: number, dt: number): boolean {
+  const dx = CRATE_X - b.x;
+  const dz = CRATE_Z - b.z;
+  const dh = Math.hypot(dx, dz);
+  if (dh > PULL_R || b.y > floor + 3.4) return false;
+  const dy = floor + CRATE.h + 0.35 - b.y;
+  const k = 1 - dh / PULL_R;
+  const pull = 7 + 12 * k;
+  const l = Math.hypot(dx, dy, dz) || 1;
+  b.vx += (dx / l) * pull * dt;
+  b.vy += (dy / l) * pull * dt;
+  b.vz += (dz / l) * pull * dt;
+  const damp = Math.exp(-3 * k * dt);
+  b.vx *= damp;
+  b.vz *= damp;
+  return true;
+}
 const PLAYER_G = 22;
 const EYE = 1.6;
 const CONE = Math.cos((25 * Math.PI) / 180);
@@ -695,9 +722,10 @@ export class Sim {
   }
 
   /** What the crosshair is on: something drawable, a prickly nettleback, or nothing. */
-  aimTarget(aim: Aim): 'target' | 'prickly' | null {
+  aimTarget(aim: Aim): 'target' | 'prickly' | 'sell' | null {
     const s = this.s;
     for (const n of s.nettles) if (!n.gone && this.inCone(aim, n.x, n.y + 0.2, n.z) > 0) return 'prickly';
+    if (this.wouldSell(aim)) return 'sell';
     for (const d of s.downies) if (!d.gone && this.inCone(aim, d.x, d.y + 0.25, d.z) > 0) return 'target';
     for (const it of s.items) if (!it.gone && this.inCone(aim, it.x, it.y, it.z) > 0) return 'target';
     return null;
@@ -1040,6 +1068,16 @@ export class Sim {
       if (it.gone) continue;
       if (it.rest && it.drawn === 0) continue;
       const tuft = isTuft(it.type);
+      // Fluff near the sell crate is drawn in, even lying on the ground, and counts as in flight so the crate takes it.
+      if (tuft && it.drawn === 0 && cratePull(it, this.crateFloor, dt)) {
+        if (it.grounded || it.rest) {
+          it.grounded = false;
+          it.rest = false;
+          it.src = -1;
+          it.vy = Math.max(it.vy, 1.4);
+        }
+        it.flyT = Math.min(Math.max(it.flyT, 0), 1);
+      }
       if (it.flyT >= 0) it.flyT += dt;
       it.spin += it.spinV * dt;
       it.spinV *= Math.exp(-2 * dt);
@@ -1093,12 +1131,75 @@ export class Sim {
     }
   }
 
+  /** The ground under the sell crate. */
+  private get crateFloor(): number {
+    return (this._crateFloor ??= this.phys.floor(CRATE_X, CRATE_Z));
+  }
+  private _crateFloor: number | undefined;
+  private ghost: Item | undefined;
+
+  /**
+   * Inside the sell crate's catch: its box, the flared sides over the rim, or
+   * the backboard behind it (fluff that reaches the board drops in, as it looks
+   * like it should). The front is open, facing the lane.
+   */
+  private inCrate(x: number, y: number, z: number): boolean {
+    const cfl = this.crateFloor;
+    const rim = cfl + CRATE.h;
+    if (y <= cfl) return false;
+    if (y >= rim - 0.05 && y < rim + 0.85 && x > CRATE.x0 - 0.2 && x < CRATE.x1 + 0.2 && z > CRATE.z1 - 0.1 && z < CRATE.z1 + 0.4) return true;
+    if (y >= rim + 0.5) return false;
+    const m = y >= rim - 0.05 ? 0.35 : 0.15;
+    return x > CRATE.x0 - m && x < CRATE.x1 + m && z > CRATE.z0 - m && z < CRATE.z1 + m;
+  }
+
+  /**
+   * Would a blow now sell? Flies the chosen fluff ahead the way the real one
+   * flies (the crate's pull included) and says whether it lands in the crate,
+   * or on the ground near enough for the crate to draw it in.
+   */
+  wouldSell(aim: Aim): boolean {
+    const s = this.s;
+    const slot = s.slots[s.sel];
+    if (!slot.t || slot.n <= 0 || !isTuft(slot.t)) return false;
+    const p = s.player;
+    // A scratch tuft, never added to the ranch, bumping into things as a real one would.
+    const b = (this.ghost ??= newItem(s, 'tuft-clover', 0, 0, 0));
+    b.x = aim.mx + aim.dx * 0.3;
+    b.y = aim.my + aim.dy * 0.3;
+    b.z = aim.mz + aim.dz * 0.3;
+    b.vx = aim.dx * 14 + p.vx * 0.5;
+    b.vy = aim.dy * 14 + 1.4;
+    b.vz = aim.dz * 14 + p.vz * 0.5;
+    const cfl = this.crateFloor;
+    // The real step, so thin things (the board's easel legs) stop it here too.
+    const dt = 1 / 60;
+    for (let t = 0; t < 3; t += dt) {
+      cratePull(b, cfl, dt);
+      b.vy -= G_TUFT * dt;
+      const drag = Math.exp(-1.5 * dt);
+      b.vx *= drag;
+      b.vz *= drag;
+      b.vy *= Math.exp(-1.2 * dt);
+      b.vx += 0.25 * dt;
+      const ox = b.x;
+      const oz = b.z;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.z += b.vz * dt;
+      this.phys.collide(b, ox, oz, 'item');
+      if (this.inCrate(b.x, b.y, b.z)) return true;
+      if (b.y <= this.phys.floor(b.x, b.z)) return Math.hypot(b.x - CRATE_X, b.z - CRATE_Z) < PULL_R - 0.1;
+    }
+    return false;
+  }
+
   /** The Exchange crate, silos and feeder hoppers swallow things puffed into them. */
   private catchers(it: Item): boolean {
     const s = this.s;
     // The Exchange.
-    const cfl = this.phys.floor((CRATE.x0 + CRATE.x1) / 2, (CRATE.z0 + CRATE.z1) / 2);
-    if (it.x > CRATE.x0 - 0.15 && it.x < CRATE.x1 + 0.15 && it.z > CRATE.z0 - 0.15 && it.z < CRATE.z1 + 0.15 && it.y < cfl + CRATE.h + 0.45 && it.y > cfl) {
+    const cfl = this.crateFloor;
+    if (this.inCrate(it.x, it.y, it.z)) {
       if (isTuft(it.type)) {
         const k = TUFT_KIND[it.type];
         const coins = this.price(k);

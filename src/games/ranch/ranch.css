@@ -19,6 +19,9 @@
 .rh-cross[data-s='prickly'] .x-prickly { display: inline; }
 .rh-cross[data-s='prickly'] { color: #f4b6a2; }
 .rh-cross[data-s='tag'] .x-tag { display: inline; }
+/* Fluff chosen and a blow from here would sell: a little funnel with the fluff dropping in. */
+.rh-cross[data-s='sell'] .x-sell { display: inline; }
+.rh-cross[data-s='sell'] { color: #ffd98a; animation: rh-breathe 0.9s ease-in-out infinite; }
 @keyframes rh-breathe { 50% { transform: scale(1.12); } }
 .rh-count { position: absolute; left: calc(50% + 16px); top: calc(50% + 10px); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 14px; font-weight: 600; text-shadow: var(--ink-shadow); white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.92; }
 .rh-count.named { font-style: italic; font-weight: 500; }

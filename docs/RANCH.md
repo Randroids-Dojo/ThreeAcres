@@ -89,7 +89,10 @@ Six pads at the ranch. Interact (E) with a pad's post to open its menu.
 
 ## The Exchange
 
-A crate with a chalk price board by the house. Puff down into the crate to sell it.
+A crate with a chalk price board by the house (on screen: the sell crate, with a "Sell fluff" plate). Blow fluff into it to sell it. It is built to be easy to hit from first person with the bellows:
+- **Open to the lane:** a tall backboard leaning back and low flared sides, front open, so from the lane you see into it. Fluff that reaches the backboard drops in. (A funnel with a front board read as a closed lid and hid the inside.)
+- **It draws fluff in:** fluff within 2.4 m of its middle, flying or lying on the ground, is pulled over the rim (`cratePull` in `sim.ts`). A blow that would land short or a metre wide still sells, and so does fluff shed nearby. Fluff further off is left alone.
+- **The crosshair says when a blow would sell:** with fluff chosen, `wouldSell` flies the fluff ahead with the real step, pull and collisions, and the crosshair turns into a small gold funnel. Measured by `npx tsx scripts/ranch-sell-aim.ts` over 770 blows from 1.6 to 8 m with up to 1.2 m of aiming error: 99% sell (80% before the pull), and the mark matched the outcome every time.
 - **Prices:** each kind of down has a base price that drifts daily within plus or minus 25%.
 - **Saturation:** each tuft sold today lowers that kind's price by 1.5%, recovering overnight.
 - **Board:** shows today's prices with up and down arrows.
