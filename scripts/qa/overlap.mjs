@@ -121,8 +121,7 @@ async function run(label, viewport, touch) {
       window.sunup.dialogs.close(true);
       Object.assign(st, { day: 6, rep: 1, requested: 1, orders: [], coins: 300 });
       for (const q of st.plots) if (q.crop && q.crop.stage < 4) q.crop = null;
-      const g = await import('/src/sim/goals.ts');
-      g.fillRequests(st, true);
+      window.sunup.pinRequests();
       window.sunup.dialogs.board('requests');
     })],
     // The forecast's three words sit inside the day card.

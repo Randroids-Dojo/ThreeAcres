@@ -6,6 +6,7 @@ import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
 import { resolve, workLeft } from '../../sim/actions';
 import { facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
+import { fillRequests } from '../../sim/goals';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
@@ -415,6 +416,11 @@ export class Director {
         this.dialogs.refresh();
         break;
     }
+  }
+
+  /** For checks: pin requests as a morning would (works on any build, unlike importing the sim from the page). */
+  pinRequests(): void {
+    fillRequests(this.state, true);
   }
 
   save(): void {

@@ -600,8 +600,7 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
     st.coins = 260;
     for (const pl of st.plots) pl.crop = null;
     // The same as a morning: a pair is pinned.
-    const g = await import('/src/sim/goals.ts');
-    g.fillRequests(st, true);
+    window.sunup.pinRequests();
   });
   await q.waitForTimeout(600);
   const qs = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', orders: window.sunup.state.orders.length, pt: (() => { const e = document.querySelector('.tpoint'); return { on: e.classList.contains('on') }; })() }));
