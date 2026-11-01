@@ -5,7 +5,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames, touchSession } from './ranch-lib.mjs';
 
-const out = process.argv[2] || '/tmp/ranch/hud';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const out = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/hud';
 fs.mkdirSync(out, { recursive: true });
 const b = await launch();
 for (const [dev, w, h, dpr, touch] of [['desk', 1280, 800, 1, false], ['phone', 412, 900, 2.6, true]]) {

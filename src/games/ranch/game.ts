@@ -24,7 +24,7 @@ import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, thingColor, thingName, type DownyKind, type GoalId, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, type Frame } from './input';
-import { Tutor, creditLessons, fullNote, goalSpot, goalText, teachAll, type Say } from './lessons';
+import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, teachAll, type Say } from './lessons';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
 import { PORCH } from './physics';
@@ -34,7 +34,7 @@ import { GroundTex, buildFluff, buildGrass } from './scene/grass';
 import { Marker } from './scene/marker';
 import { U, armNaNWatch } from './scene/mat';
 import { PadView } from './scene/pads';
-import { canvas, layoutTag, paintBoard, tex, type BoardRow, type TagLayout } from './scene/paint';
+import { canvas, layoutTag, paintBoard, tex, type BoardOrder, type BoardRow, type TagLayout } from './scene/paint';
 import { buildProps, type Props } from './scene/props';
 import { Sky } from './scene/sky';
 import { TagMenu, type Rail } from './scene/tags';
@@ -52,7 +52,7 @@ const FIRST: Record<DownyKind, [string, string]> = {
   clover: ['First clover downy', 'Loves clover heads.'],
   ember: ['First ember downy', 'Loves sweetroot.'],
   brook: ['First brook downy', 'Loves dewberries.'],
-  thistle: ['A thistle downy', 'Eats anything. Best fluff in the valley.'],
+  thistle: ['A thistle downy', 'Eats anything. Hops any fence but a high one.'],
 };
 
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
@@ -88,6 +88,7 @@ export class Ranch {
   /** J hides the calm goal line until the next lesson or goal. */
   private goalHidden = false;
   private goalShown = '';
+  private goalKey = '';
   /** Counts down to the darkest moment of the sleep fade, when you are turned to face the yard. */
   private wakeT = 0;
   readonly input: Input;
@@ -122,6 +123,7 @@ export class Ranch {
   private loopsOn = { draw: false, wind: false, water: false, vents: false };
   private forceTouch: boolean;
   private wasTouch = false;
+  private penN = [0, 0, 0, 0, 0, 0];
   private spotObjs = [0, 1, 2, 3, 4].map(() => ({ x: 0, y: 0 }));
   private spots: ({ x: number; y: number } | null)[] = [null, null, null, null, null];
   private box = { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -134,7 +136,7 @@ export class Ranch {
   private prevMenuZ = 0;
   private quality: 'low' | 'high';
   private nanArmed = false;
-  private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | null = null;
+  private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | null = null;
   /** Seconds the journal goal's spot (a gate) has been pointed at: the edge chevron shows only at first. */
   private goalSpotT = 0;
   readonly debug: DebugHooks = { afterFrame: null };
@@ -432,7 +434,8 @@ export class Ranch {
     // Slots, once the lesson about them has come. Holding the switch key tips a window out.
     if (!this.menu && knows('slots')) {
       if (f.slotDirect >= 0 && f.slotDirect < s.slots.length) this.selectSlot(f.slotDirect);
-      if (f.slotDelta) this.selectSlot((s.sel + f.slotDelta + s.slots.length * 4) % s.slots.length);
+      // Q, R, the wheel and LB or RB step to the next window that holds something, skipping empty ones.
+      if (f.slotDelta) this.stepSlot(Math.sign(f.slotDelta));
       if (f.empty !== -1) this.emptySlot(f.empty === -2 ? s.sel : f.empty);
     }
 
@@ -456,7 +459,7 @@ export class Ranch {
     if (this.menu) this.menuTick(f, dt);
     else if (f.interact) {
       if (near) this.openMenu(near);
-      else if (knows('slots')) this.selectSlot((s.sel + 1) % s.slots.length);
+      else if (knows('slots')) this.stepSlot(1);
     }
 
     // Controls.
@@ -566,6 +569,10 @@ export class Ranch {
     const mk = this.tutor.mark;
     this.creatures.update(s, this.sim.phys, this.t, { x: a.mx, y: a.my, z: a.mz }, mk.on && mk.icon !== 'arrow' ? mk : null, this.ctx.settings().reducedMotion);
     this.pads.update(dt, s.pads);
+    // Each pen post's count tag, once the pen limit has been taught (no allocation: a reused array).
+    this.penN.fill(0);
+    for (const d of s.downies) if (!d.gone && d.pen >= 0) this.penN[d.pen]++;
+    this.pads.setCounts(s.pads, this.penN, this.sim.knows('crowd'), night);
     this.props.update(this.t, night);
     this.tags.update(dt, gust);
     if (this.sim.drawing && dt > 0) this.fx.drawStream(dt, a.ex, a.ey, a.ez, a.dx, a.dy, a.dz, a.mx, a.my, a.mz, this.sim.range);
@@ -618,11 +625,19 @@ export class Ranch {
       const known = s.caught.includes(k) || k === 'clover';
       return { name: KIND[k].name.replace(' downy', ''), price: known ? price : null, trend: Math.sign(price - s.market.prev[k]) };
     });
-    const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}`;
+    // Today's orders, chalked under the prices.
+    const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: `${o.n} ${KIND[o.kind].name.replace(' downy', '')} fluff by dusk`, pay: o.mult > 2 ? 'pays triple' : 'pays double', state: o.state })) : [];
+    const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}|${orders.map((o) => `${o.text}:${o.state}`).join(',')}`;
     if (key === this.board.key) return;
     this.board.key = key;
-    paintBoard(this.board.ctx, 512, 384, s.day, rows.map((r) => ({ ...r, name: r.name[0].toUpperCase() + r.name.slice(1) })));
+    paintBoard(this.board.ctx, 512, 384, s.day, rows.map((r) => ({ ...r, name: r.name[0].toUpperCase() + r.name.slice(1) })), orders);
     this.board.tex.needsUpdate = true;
+  }
+
+  /** For checks: the orders as the board chalks them. */
+  boardOrders(): string[] {
+    const s = this.sim.s;
+    return s.orderDay === s.day ? s.orders.map((o) => `${o.n} ${KIND[o.kind].name.replace(' downy', '')} fluff by dusk, ${o.mult > 2 ? 'pays triple' : 'pays double'}${o.state === 'open' ? '' : `, ${o.state}`}`) : [];
   }
 
   private render(): void {
@@ -757,8 +772,7 @@ export class Ranch {
         break;
       case 'goal':
         this.cue('ranch.goal');
-        // While a lesson is up, the page belongs to it; the pause page keeps the tally.
-        if (!this.tutor.busy) this.showGoals(e.id);
+        this.showGoals(e.id);
         break;
       case 'deny':
         this.cue('ranch.deny');
@@ -815,6 +829,29 @@ export class Ranch {
       case 'zone':
         this.hud.showZone(ZONE_NAMES[e.zone]);
         break;
+      case 'escape':
+        // It broke free: say so plainly (a brook into the pond, the rest off and away).
+        this.hud.note(e.dove ? 'It slipped into the water.' : 'It got away.', 1.8);
+        break;
+      case 'order': {
+        if (e.state === 'filled') {
+          const y = heightAt(e.x, e.z) + 1.2;
+          this.cue('ranch.goal');
+          this.cue('ranch.coins', e.x, y, e.z, 1);
+          this.fx.coinPop(e.x, y, e.z, 6);
+          this.lastSale = e.bonus;
+          // While a lesson is up, the page belongs to it: this page waits for it to tick and go.
+          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} fluff, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
+        } else if (e.state === 'missed') this.hud.note('Dusk. The order went unfilled.', 3);
+        break;
+      }
+      case 'feeder':
+        // Into the hopper: how much it holds now; bounced off: why.
+        if (e.why) {
+          this.cue('ranch.deny');
+          this.hud.note(e.why);
+        } else this.hud.note(`Feeder: ${e.n}`, 1.2);
+        break;
       case 'air':
         break;
     }
@@ -823,11 +860,32 @@ export class Ranch {
   /** A goal just done, struck, for a moment; then the journal goes back to the next one (see lessonTick). */
   private showGoals(done: GoalId): void {
     const g = GOALS.find((q) => q.id === done)!;
-    const lines: PageLine[] = [{ text: g.text, done: true, fresh: true }];
+    this.queuePage(`Earned ${g.reward} coins`, [{ text: g.text, done: true, fresh: true }]);
+  }
+
+  /**
+   * A page of something just done ("Earned 100 coins" over the struck goal or
+   * the filled order). While a lesson has the page it waits until the lesson
+   * has ticked and gone (only the latest waits), then shows for a few seconds.
+   */
+  private queuePage(title: string, lines: PageLine[]): void {
+    this.pending = { title, lines, at: this.t };
+    this.flushPage();
+  }
+
+  private flushPage(): void {
+    if (!this.pending) return;
+    // A page that waited too long behind a lesson is old news (the pause page keeps the tally).
+    if (this.t - this.pending.at > 6) this.pending = null;
+    if (!this.pending || this.tutor.busy || this.paused) return;
+    const { title, lines } = this.pending;
+    this.pending = null;
     this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(`Paid ${g.reward} coins`, lines, 3.4);
+    this.hud.showPage(title, lines, 3.4);
   }
+
+  private pending: { title: string; lines: PageLine[]; at: number } | null = null;
 
   /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do (a gate's goal counts the coins towards it). */
   private goalLine(): string {
@@ -864,14 +922,23 @@ export class Ranch {
       this.cue('ranch.slot', undefined, undefined, undefined, 0.7, 1.3);
     }
     this.hud.setLesson(v.line, v.done);
-    // No lesson up: the next journal goal, calmly, on the same page (J hides it until something changes).
+    // A page of something just done that waited for the lesson to go.
+    if (!v.line) this.flushPage();
+    // No lesson up: the day's orders with their tally, then the next journal goal, calmly, on the same page
+    // (J hides them until something changes).
     const goal = v.line ? '' : this.goalLine();
-    if (goal !== this.goalShown) {
-      if (goal.split(',')[0] !== this.goalShown.split(',')[0]) this.goalSpotT = 0;
-      this.goalShown = goal;
-      this.goalHidden = false;
+    const orders = v.line ? [] : orderLines(s);
+    const key = [...orders, goal].join('|');
+    if (key !== this.goalShown) {
+      if (goal.split(',')[0] !== this.goalKey) this.goalSpotT = 0;
+      this.goalKey = goal.split(',')[0];
+      // A tally ticking up does not bring a hidden page back; a new goal or order does.
+      if (key.replace(/\d+/g, '#') !== this.goalShown.replace(/\d+/g, '#')) this.goalHidden = false;
+      this.goalShown = key;
     }
-    this.hud.setGoal(this.goalHidden ? '' : goal);
+    // The day's orders all filled: that line is ticked.
+    const allFilled = s.orders.length > 0 && s.orders.every((o) => o.state === 'filled');
+    this.hud.setGoal(this.goalHidden ? [] : [...orders.map((text) => ({ text, done: allFilled })), ...(goal ? [{ text: goal, done: false }] : [])]);
     // A goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
     if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
@@ -900,6 +967,15 @@ export class Ranch {
       }
     }
     this.selectSlot((s.sel + 1) % s.slots.length);
+  }
+
+  /**
+   * Step to the next window in a direction that holds something, skipping
+   * empty ones (the third playtest's Q stepped through empty windows, and a
+   * Blow mid-step sent clover heads at the crate). Nothing aboard: no change.
+   */
+  stepSlot(dir: number): void {
+    this.selectSlot(this.sim.stepWindow(dir));
   }
 
   /** Tip a whole window out on the ground in front of you. */
@@ -960,11 +1036,16 @@ export class Ranch {
   }
 
   /**
-   * A tall phone's tags: a bar about 1.8 m in front of your eyes, between you
-   * and where the tags would hang on the post, the bench, the porch or the gate,
-   * turned to face you.
+   * Tags hang as a near grid: a bar in front of your eyes, between you and
+   * where the tags would hang on the post, the bench, the porch or the gate,
+   * turned to face you; two columns on a tall phone, three on a wide screen.
+   * However close you stand, they look as big as they would at their reading
+   * distance (1.8 m on a phone, 1.7 m on a wide screen, so notes read at 12 px
+   * or more; desktop notes were about 10 px on the posts' rails), and never
+   * wider than the screen: hung nearer, they are made smaller to match (the
+   * third playtest's ran off the phone's edges up close to a post at an angle).
    */
-  private nearRail(it: Interactable, n: number): Rail {
+  private nearRail(it: Interactable, n: number, cols: number): { rail: Rail; scale: number } {
     const base = this.railFor(it, n);
     const along = base.ax === 0 && base.az === 0 ? 0 : 0.4 + ((n - 1) * 0.56 * 0.66) / 2;
     const cx = base.x + base.ax * along;
@@ -975,19 +1056,23 @@ export class Ranch {
     const l = Math.hypot(dx, dz) || 1;
     dx /= l;
     dz /= l;
-    const D = clamp(l - 0.3, 1.2, 1.8);
+    const D = clamp(l - 0.3, 1.0, 1.8);
     const ry = Math.atan2(-dx, -dz);
-    return { x: e.x + dx * D, y: e.y + 0.24, z: e.z + dz * D, ax: Math.cos(ry), az: -Math.sin(ry), ry };
+    // The distance they should look to be at: the reading distance, or further if the grid would not fit the width.
+    const tanW = Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * (this.w / this.h);
+    const half = (Math.min(cols, n) * (0.56 + 0.05) - 0.05) / 2;
+    const look = Math.max(this.h > this.w * 1.15 ? 1.8 : 1.7, half / (0.94 * tanW));
+    return { rail: { x: e.x + dx * D, y: e.y + 0.24 * (D / look), z: e.z + dz * D, ax: Math.cos(ry), az: -Math.sin(ry), ry }, scale: D / look };
   }
 
   private openMenu(it: Interactable): void {
     const opts = this.sim.menu(it);
     this.doneHint('use');
     if (!opts.length) return;
-    // On a tall phone the tags hang as a near grid in front of you, all on screen and large enough to read.
-    const near = this.isTouch() && this.h > this.w * 1.15;
-    const rail = near ? this.nearRail(it, opts.length) : this.railFor(it, opts.length);
-    this.tags.show(rail, opts, near);
+    // The tags hang as a near grid in front of you, all on screen and large enough to read.
+    const cols = this.h > this.w * 1.15 ? 2 : 3;
+    const { rail, scale } = this.nearRail(it, opts.length, cols);
+    this.tags.show(rail, opts, true, cols, scale);
     // Nothing is chosen as the tags come down, unless the lesson on screen teaches one of them.
     this.choice.open(this.tags.opts, this.pickDev(), this.tutor.tag);
     const p = this.sim.s.player;
@@ -1230,6 +1315,9 @@ export class Ranch {
    * the side. Otherwise it sits in its usual place.
    */
   private placeAct(touch: boolean): void {
+    // With a mouse or a pad, the use prompt moves just under the tags (or over them) so it never covers their words.
+    const deskBox = !touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
+    this.hud.placePrompt(!deskBox ? null : deskBox.y1 + 34 <= this.h - 40 ? deskBox.y1 + 12 : Math.max(70, deskBox.y0 - 34));
     const box = touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
     if (!box) {
       this.input.placeAct(null);

@@ -11,7 +11,7 @@ import { GOALS, fmtCoins, type GoalId } from './defs';
 const BOX = `<svg class="box" viewBox="0 0 20 20"><path d="M3 4 Q10 2.6 17 3.6 Q17.6 10 16.6 17 Q9 17.6 3.4 16.8 Q2.6 10 3 4 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="tick" d="M5 10 L9 14.5 L17 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 import { hash2 } from './noise';
 
-type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'sell' | 'pen';
+type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'sell' | 'pen' | 'feeder';
 
 /** What a window holds, as a small icon drawn in it: a downy, one of the three foods, or fluff. */
 export type SlotIcon = 'downy' | 'clover' | 'root' | 'berry' | 'fluff';
@@ -99,8 +99,8 @@ export class Hud {
   /** The lesson line on the page, if one is up. */
   private lessonLine = '';
   private lessonDone = false;
-  /** With no lesson up, the next goal sits on the page instead; what it is, and what is showing. */
-  private goalWant = '';
+  /** With no lesson up, the day's orders and the next goal sit on the page instead; what they are, and what is showing. */
+  private goalWant: { text: string; done: boolean }[] = [];
   private goalShown = '';
   /** A window held down: which, since when (a long press tips it out). */
   private slotHold: { i: number; id: number; t: number; fired: boolean; x: number; y: number } | null = null;
@@ -114,7 +114,7 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
     this.arcDot = this.arc.querySelector('.sun')!;
@@ -242,6 +242,12 @@ export class Hud {
     this.prompt.classList.add('on');
   }
 
+  /** Where the use prompt sits: just under the hanging tags while they are down (y in CSS px), or its usual place (null). */
+  placePrompt(y: number | null): void {
+    const top = y === null ? '' : `${Math.round(y)}px`;
+    if (this.prompt.style.top !== top) this.prompt.style.top = top;
+  }
+
   /** A short plain line under the crosshair: why something did not happen. */
   note(text: string, secs = 2.2): void {
     setText(this.say, text);
@@ -308,29 +314,31 @@ export class Hud {
   }
 
   /**
-   * With no lesson up, the next goal sits on the journal page: one calm line,
-   * the same page. A goal just done (a timed page) has the page first. '' puts it away.
+   * With no lesson up, the day's orders (with their tally) and the next goal
+   * sit on the journal page: a few calm lines, the same page. A goal just done
+   * (a timed page) has the page first. An empty list puts it away.
    */
-  setGoal(line: string): void {
-    this.goalWant = line;
+  setGoal(lines: { text: string; done: boolean }[]): void {
+    this.goalWant = lines;
     if (this.lessonLine || this.pageT > 0) return;
     this.showGoal();
   }
 
   private showGoal(): void {
-    const line = this.goalWant;
+    const lines = this.goalWant;
     if (this.lessonLine || this.pageT > 0) return;
-    if (!line) {
+    if (!lines.length) {
       if (this.goalShown) {
         this.goalShown = '';
         this.hidePage();
       }
       return;
     }
+    const line = lines.map((l) => `${l.done ? '+' : ''}${l.text}`).join('|');
     if (line === this.goalShown && this.pageUp) return;
     const fresh = !this.pageUp;
     this.goalShown = line;
-    this.pageBody.innerHTML = `<ul><li>${BOX}<span>${line}</span></li></ul>`;
+    this.pageBody.innerHTML = `<ul>${lines.map((l) => `<li class="${l.done ? 'done' : ''}">${BOX}<span>${l.text}</span></li>`).join('')}</ul>`;
     this.page.classList.add('lesson', 'goal');
     this.page.classList.remove('note');
     if (fresh) {
@@ -387,14 +395,22 @@ export class Hud {
     this.goalShown = '';
   }
 
-  /** The pause page: the whole journal (done goals struck), what the lessons taught so far, and the controls learned. */
+  /**
+   * The pause page: the journal so far (done goals struck, and the one you are
+   * on; the ones to come stay hidden, as the third playtest found all eleven on
+   * day 1), what the lessons taught so far, and the controls learned.
+   */
   showPause(when: string, goals: GoalId[], now: string, notes: string[], keys: string): void {
     this.pauseOpen = true;
     this.pauseFocus = 0;
-    const goalRows = GOALS.map((g) => `<li class="${goals.includes(g.id) ? 'done' : ''}">${g.text}</li>`).join('');
+    const current = GOALS.find((g) => !goals.includes(g.id));
+    const goalRows = GOALS.filter((g) => goals.includes(g.id) || g === current)
+      .map((g) => `<li class="${goals.includes(g.id) ? 'done' : ''}">${g.text}</li>`)
+      .join('');
+    const done = GOALS.filter((g) => goals.includes(g.id)).length;
     const nowRow = now ? `<p class="now">${now}</p>` : '';
     const noteRows = notes.length ? `<h4>Notes</h4><ul class="notes">${notes.map((n) => `<li>${n}</li>`).join('')}</ul>` : '';
-    this.pauseBody.innerHTML = `<div class="when">${when}</div>${nowRow}<h4>Journal, ${goals.length} of ${GOALS.length} done</h4><ol>${goalRows}</ol>${noteRows}<p class="keys">${keys}</p><div class="acts"><button data-act="resume" class="focus">Back to the ranch</button><button data-act="games">Games and settings</button></div>`;
+    this.pauseBody.innerHTML = `<div class="when">${when}</div>${nowRow}<h4>Journal, ${done} done</h4><ol>${goalRows}</ol>${noteRows}<p class="keys">${keys}</p><div class="acts"><button data-act="resume" class="focus">Back to the ranch</button><button data-act="games">Games and settings</button></div>`;
     this.pause.classList.add('on');
     this.el.classList.add('paused');
   }
@@ -510,7 +526,7 @@ export class Hud {
       if (this.pageT <= 0) {
         // A goal waiting takes the page straight over; otherwise it goes down.
         this.pageT = 0;
-        if (this.goalWant) {
+        if (this.goalWant.length) {
           this.goalShown = '';
           this.showGoal();
         } else this.hidePage();

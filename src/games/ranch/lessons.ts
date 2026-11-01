@@ -9,10 +9,10 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { GARDEN_HOURS, GOALS, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId } from './defs';
+import { GARDEN_HOURS, GOALS, ORDER_BY, PEN_MAX, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId } from './defs';
 import { padSpots, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
-import { DOOR, EXCHANGE, GATES, PADS, PEN_R, RANCH_GATE, WORKBENCH, zoneAt } from './world';
+import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, RANCH_GATE, RIDGE_TOP, WORKBENCH, zoneAt } from './world';
 
 export type Dev = 'touch' | 'mouse' | 'pad';
 
@@ -60,8 +60,8 @@ interface Lesson {
   text(say: Say, s?: RanchState): string;
   /** Every other line it can show, for checks of length and wording. */
   also?(say: Say): string[];
-  /** Runs every frame while it is on screen. */
-  each?(s: RanchState): void;
+  /** Runs every frame while it is on screen (dt: seconds this frame). */
+  each?(s: RanchState, dt: number): void;
   done(s: RanchState, n: N): boolean;
   /** The moment passed without it being done (night fell before you slept): it leaves quietly, not learned, and comes back the next time it applies. */
   lapse?(s: RanchState): boolean;
@@ -136,6 +136,40 @@ function ripen(s: RanchState, food: Food = 'cloverhead'): void {
 /** Your downies (tame or the porch one), not gone. */
 const mine = (d: Downy) => !d.gone && (d.tame || d.keep);
 
+/** How many downies are in pen i. */
+const penCount = (s: RanchState, i: number) => s.downies.reduce((a, d) => a + (!d.gone && d.pen === i ? 1 : 0), 0);
+
+/** The nearest pen with room for another downy (fewer than ten), or -1. */
+const penWithRoom = (s: RanchState, not = -1) => nearestPad(s, (i) => i !== not && s.pads[i].kind === 'pen' && penCount(s, i) < PEN_MAX);
+
+/** The fullest pen, and how many are in it. */
+function fullest(s: RanchState): { pad: number; n: number } {
+  let pad = -1;
+  let n = 0;
+  s.pads.forEach((p, i) => {
+    if (p.kind !== 'pen') return;
+    const c = penCount(s, i);
+    if (c > n) {
+      n = c;
+      pad = i;
+    }
+  });
+  return { pad, n };
+}
+
+/** Downies in the jar. */
+const aboard = (s: RanchState) => s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
+
+/** A thistle of yours behind a low fence (in the pen, or loose having hopped out of it): the pen, or -1. */
+function lowThistlePen(s: RanchState): number {
+  for (const d of s.downies) {
+    if (d.gone || !d.tame || d.kind !== 'thistle') continue;
+    const pen = d.pen >= 0 ? d.pen : d.strayFrom;
+    if (pen >= 0 && s.pads[pen]?.kind === 'pen' && !s.pads[pen].ups.includes('high')) return pen;
+  }
+  return -1;
+}
+
 /** Fluff you have blown that is still in the air: a sale is on its way, so the line stays on blowing. */
 const blowing = (s: RanchState) => s.items.some((it) => !it.gone && it.blown && it.flyT >= 0 && isTuft(it.type));
 
@@ -178,12 +212,16 @@ const hungryOne = (s: RanchState) => nearestDowny(s, (d) => mine(d) && d.hunger 
  * then a hungry downy (feed it, or fetch food for it), and with everyone fed,
  * catch another downy.
  */
-function farmStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' | 'food' | 'catch' {
+function farmStep(s: RanchState): 'blow' | 'pen' | 'build' | 'choose' | 'pull' | 'feed' | 'food' | 'catch' {
   const sell = sellStep(s);
-  if (sell === 'blow' || sell === 'choose' || sell === 'pull') return sell;
+  if (sell === 'blow') return sell;
+  // A downy aboard (a fresh catch): pen it first (the third playtest's line said to catch another
+  // with one in the jar). With every pen full, build another.
+  if (carrying(s, isDowny)) return penWithRoom(s) >= 0 ? 'pen' : 'build';
+  if (sell === 'choose' || sell === 'pull') return sell;
   const d = hungryOne(s);
   if (d) return carrying(s, (t) => isFood(t) && eats(d.kind, t)) ? 'feed' : 'food';
-  return 'catch';
+  return penWithRoom(s) >= 0 || !s.pads.some((p) => p.kind === 'pen') ? 'catch' : 'build';
 }
 /** Whole turns of the loop the farm lesson waits for. */
 export const FARM_CYCLES = 3;
@@ -192,6 +230,7 @@ const FARM = {
   feed: 'Feed the hungry downy its favourite food.',
   food: 'Pull up food for the hungry downy.',
   catch: 'Catch another downy out in Clover Meadow.',
+  pen: 'Blow the downy into a pen.',
 };
 
 const SELL = {
@@ -262,15 +301,20 @@ const strays = (s: RanchState) => s.downies.filter((d) => !d.gone && d.strayFrom
  * pen (it is in the jar). Done once no stray is loose and a downy has come down
  * in a pen since (or none is aboard): the jar may hold others, caught wild.
  */
-function strayStep(s: RanchState): 'pull' | 'blow' | null {
+function strayStep(s: RanchState): 'pull' | 'blow' | 'other' | null {
   if (strays(s).length) return 'pull';
   const back = (s.learnCount['penned'] ?? 0) > (s.learnCount['stray:penned'] ?? 0);
-  return carrying(s, isDowny) && !back ? 'blow' : null;
+  if (!carrying(s, isDowny) || back) return null;
+  // Its pen is full (it hopped out of a crowd): another pen with room, or nothing to nag about.
+  const was = s.learnCount['stray:pen'] ?? -1;
+  if (was >= 0 && s.pads[was]?.kind === 'pen' && penCount(s, was) >= PEN_MAX) return penWithRoom(s, was) >= 0 ? 'other' : null;
+  return 'blow';
 }
 
 const STRAY = {
   pull: 'Pull in the downy that got out.',
   blow: 'Blow the downy into the pen.',
+  other: 'Blow the downy into another pen.',
 };
 
 /** The pen with a feeder to fill: the nearest. */
@@ -508,6 +552,8 @@ const LESSONS: Lesson[] = [
     id: 'farm',
     after: ['meadow'],
     unlocks: [],
+    // Then the price board's orders begin, the next morning.
+    then: ['orders'],
     ready: () => true,
     // Count whole turns of the loop from when it first came up (dusk taking over and handing back must
     // not start the count again): a meal you gave, its fluff pulled up and blown into the crate.
@@ -522,9 +568,9 @@ const LESSONS: Lesson[] = [
     },
     text: (q, s) => {
       const step = s ? farmStep(s) : 'feed';
-      return step === 'blow' ? SELL.blow : step === 'choose' ? SELL.choose(q) : FARM[step];
+      return step === 'blow' ? SELL.blow : step === 'choose' ? SELL.choose(q) : step === 'build' ? plotLine(q, 'Pen') : FARM[step];
     },
-    also: () => [SELL.blow, FARM.pull, FARM.food, FARM.catch],
+    also: (q) => [SELL.blow, FARM.pull, FARM.food, FARM.catch, FARM.pen, plotLine(q, 'Pen')],
     done: (_s, n) => n('cycle') - n('farm:from') >= FARM_CYCLES,
     mark: (s, m, floor) => {
       const step = farmStep(s);
@@ -537,6 +583,17 @@ const LESSONS: Lesson[] = [
         m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
         return false;
       }
+      if (step === 'pen') {
+        // The pen with room, and a chevron over the downy's window if it is not chosen.
+        const sel = s.slots[s.sel];
+        if (!(sel?.t && isDowny(sel.t))) m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isDowny(q.t));
+        const i = penWithRoom(s);
+        const p = PADS[i];
+        arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
+        ring(m, p.x, p.z, PEN_R);
+        return true;
+      }
+      if (step === 'build') return onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true);
       if (step === 'pull') {
         const it = fluffToPoint(s);
         if (it) return arrow(m, it.x, it.y + 0.9, it.z);
@@ -566,6 +623,28 @@ const LESSONS: Lesson[] = [
       return onDowny(m, nearestDowny(s, (d) => !d.tame && !d.keep, 26));
     },
     note: 'Hungry downies show the food they want. Fed ones drop fluff.',
+  },
+  {
+    // The day's orders, taught once when the first is posted (the morning after the loop), pointing at the
+    // price board. Done when the first fluff counts towards one; the journal then keeps the tally.
+    id: 'order',
+    after: ['farm'],
+    unlocks: [],
+    // It comes when the first order does, over whatever calm lesson is up, and hands back.
+    urgent: true,
+    ready: (s) => s.orders.some((o) => o.state === 'open'),
+    text: () => "Fill today's order on the price board.",
+    // Short: done once you have read the board (stood by it a moment) or sent its first fluff.
+    each: (s, dt) => {
+      if (dist(s, BOARD.x, BOARD.z) < 5) s.learnCount['order:read'] = (s.learnCount['order:read'] ?? 0) + dt;
+    },
+    done: (_s, n) => n('order') >= 1 || n('order:read') >= 1.5,
+    mark: (_s, m, floor) => {
+      arrow(m, BOARD.x, floor(BOARD.x, BOARD.z) + 2.6, BOARD.z);
+      ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+      return true;
+    },
+    note: 'The price board posts orders each morning. They pay double by dusk.',
   },
   {
     id: 'jump',
@@ -717,6 +796,42 @@ const LESSONS: Lesson[] = [
     note: 'Gates open the far meadows and their downies.',
   },
   {
+    // A thistle behind a low fence hops straight out (in about six seconds): say why and point at the post,
+    // its High fence tag chosen when the tags come down. Every time it happens; never counted as learned.
+    // (Before the stray line, which only nagged while the thistle kept hopping out.)
+    id: 'high',
+    after: ['penin'],
+    unlocks: ['up:high'],
+    urgent: true,
+    repeat: true,
+    tag: 'pen:high',
+    ready: (s) => lowThistlePen(s) >= 0,
+    text: () => 'Thistles need a high fence. Buy one.',
+    done: (s) => lowThistlePen(s) < 0,
+    mark: (s, m, floor) => onPost(m, lowThistlePen(s), floor, false),
+    note: 'Thistles hop any fence but a high one.',
+  },
+  {
+    // The pen limit, taught before it bites: when a pen holds eight, or the jar would take one past ten.
+    // The pen post's count tag ("8 of 10") says it in the world from then on.
+    id: 'crowd',
+    after: ['penin'],
+    unlocks: ['crowd'],
+    urgent: true,
+    ready: (s) => {
+      const f = fullest(s);
+      return f.n >= 8 || (f.n >= 5 && f.n + aboard(s) > PEN_MAX);
+    },
+    text: () => 'Keep ten or fewer downies in a pen.',
+    // Up long enough to read, with no pen over ten (with one over, it stays until it is not).
+    each: (s, dt) => {
+      s.learnCount['crowd:up'] = (s.learnCount['crowd:up'] ?? 0) + dt;
+    },
+    done: (s, n) => n('crowd:up') >= 3.5 && fullest(s).n <= PEN_MAX,
+    mark: (s, m, floor) => onPost(m, fullest(s).pad, floor, false),
+    note: 'Ten to a pen. More get frazzled and hop out.',
+  },
+  {
     // Whenever one of your downies hops out of its pen: a line and an arrow on it, then back into the pen.
     id: 'stray',
     after: ['penin'],
@@ -724,8 +839,11 @@ const LESSONS: Lesson[] = [
     urgent: true,
     repeat: true,
     ready: (s) => strays(s).length > 0,
-    text: (_q, s) => (s && strayStep(s) === 'blow' ? STRAY.blow : STRAY.pull),
-    also: () => [STRAY.blow],
+    text: (_q, s) => {
+      const step = s ? strayStep(s) : 'pull';
+      return step === 'blow' ? STRAY.blow : step === 'other' ? STRAY.other : STRAY.pull;
+    },
+    also: () => [STRAY.blow, STRAY.other],
     done: (s) => strayStep(s) === null,
     // While one is loose, remember its pen and how many downies have come down in pens so far.
     start: (s) => {
@@ -740,9 +858,9 @@ const LESSONS: Lesson[] = [
     mark: (s, m, floor) => {
       const d = nearestDowny(s, (q) => q.strayFrom >= 0 && q.pen < 0);
       if (d) return onDowny(m, d);
-      // In the jar: the pen it came from.
+      // In the jar: the pen it came from (or, that one full, another with room).
       const was = s.learnCount['stray:pen'] ?? -1;
-      const i = was >= 0 && s.pads[was]?.kind === 'pen' ? was : nearestPad(s, (k) => s.pads[k].kind === 'pen');
+      const i = strayStep(s) === 'other' ? penWithRoom(s, was) : was >= 0 && s.pads[was]?.kind === 'pen' ? was : nearestPad(s, (k) => s.pads[k].kind === 'pen');
       if (i < 0) return false;
       const p = PADS[i];
       arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
@@ -762,6 +880,7 @@ const QUIET: { what: string; after: string[]; when(s: RanchState, n: N): boolean
   { what: 'up:trough', after: ['ups'], when: (s) => s.caught.includes('brook') },
   { what: 'up:chute', after: ['ups'], when: (s) => s.stats.sold >= 20 },
   { what: 'up:garden', after: ['ups', 'plant'], when: () => true },
+  { what: 'up:run', after: ['feeder'], when: (s) => s.pads.some((p) => p.kind === 'pen' && p.ups.includes('feeder')) },
   { what: 'silo', after: ['ups'], when: (s, n) => kinds(s) >= s.slots.length || n('full') >= 1 },
   { what: 'up:slots', after: ['bench'], when: (s) => kinds(s) >= 4 },
   { what: 'up:glide', after: ['bench'], when: (s) => s.gates.ridge || s.gates.hollow },
@@ -870,6 +989,9 @@ export class Tutor {
         break;
       case 'penned':
         this.add(s, 'penned');
+        break;
+      case 'order':
+        if (e.state === 'progress' || e.state === 'filled') this.add(s, 'order');
         break;
       case 'full':
       case 'jump':
@@ -985,7 +1107,7 @@ export class Tutor {
       return v;
     }
     this.shownFor += dt;
-    l.each?.(s);
+    l.each?.(s, dt);
     const want = l.text(say, s);
     if (want !== this.shownLine) {
       if (want !== this.pendLine) {
@@ -1033,15 +1155,43 @@ export function goalText(id: GoalId, s: RanchState): string {
   if (!g) return '';
   if ((id === 'ridge' || id === 'hollow') && !s.gates[id] && s.coins < GATES[id].cost) return `Open the ${GATES[id].name} gate, ${fmtCoins(s.coins)} of ${fmtCoins(GATES[id].cost)}.`;
   if (id === 'rich') return `${g.text.slice(0, -1)}, ${fmtCoins(s.earned)} so far.`;
+  // The thistle hunt has a clue (it had none): by day, when they come; at dusk, where, with an arrow.
+  if (id === 'thistle') return thistleTime(s) ? 'Catch a thistle on the ridge top.' : 'Thistles visit the ridge top at dusk.';
+  if (id === 'orders5') return `Fill five orders, ${Math.min(5, s.stats.filled)} so far.`;
   return g.text;
 }
 
-/** A journal goal with a place to go: an arrow over it (a gate). False for goals without one. */
+/** Dusk, when thistles are on the ridge top (half past five to half past eight). */
+export const thistleTime = (s: RanchState) => s.hour >= 17.5 && s.hour < 20.5;
+
+/** A journal goal with a place to go: an arrow over it (a gate; the ridge top or a thistle at dusk). False for goals without one. */
 export function goalSpot(id: GoalId, s: RanchState, m: Mark, floor: Floor): boolean {
+  if (id === 'thistle') {
+    if (!thistleTime(s) || !s.gates.ridge) return false;
+    // The nearest thistle once you are up there, else the ridge top.
+    const d = nearestDowny(s, (q) => !q.tame && !q.keep && q.kind === 'thistle', 30);
+    if (d) return onDowny(m, d);
+    return arrow(m, RIDGE_TOP.x, floor(RIDGE_TOP.x, RIDGE_TOP.z) + 3, RIDGE_TOP.z);
+  }
   if ((id !== 'ridge' && id !== 'hollow') || s.gates[id]) return false;
   const g = GATES[id];
   const x = g.x + (id === 'ridge' ? 0.6 : -0.6);
   return arrow(m, x, floor(x, g.z) + 3.6, g.z);
+}
+
+const KIND_WORD: Record<string, string> = { clover: 'Clover', ember: 'Ember', brook: 'Brook', thistle: 'Thistle' };
+
+/**
+ * The day's orders for the journal page, with their tally ("Ember fluff, 2 of
+ * 6."): the open ones; once all are filled, a line saying so until dusk. A
+ * missed day says nothing. Empty before the first order.
+ */
+export function orderLines(s: RanchState): string[] {
+  if (!s.orders.length || s.orderDay !== s.day) return [];
+  const open = s.orders.filter((o) => o.state === 'open');
+  if (open.length) return open.map((o) => `${KIND_WORD[o.kind]} fluff, ${o.got} of ${o.n}.`);
+  if (s.hour < ORDER_BY && s.orders.every((o) => o.state === 'filled')) return ['Orders filled. New ones come at dawn.'];
+  return [];
 }
 
 /** Mark lessons finished, with what they bring in, and everything they come after. */

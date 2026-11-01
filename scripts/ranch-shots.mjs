@@ -3,7 +3,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames } from './ranch-lib.mjs';
 
-const out = process.argv[2] || '/tmp/ranch/shots';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const out = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/shots';
 const w = +(process.argv[3] || 1280);
 const h = +(process.argv[4] || 800);
 const dpr = +(process.argv[5] || 1);

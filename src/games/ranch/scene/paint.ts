@@ -208,6 +208,13 @@ export interface BoardRow {
   trend: number;
 }
 
+/** A day's order chalked under the prices: "6 ember fluff by dusk", "pays double", and how it stands. */
+export interface BoardOrder {
+  text: string;
+  pay: string;
+  state: 'open' | 'filled' | 'missed';
+}
+
 function chalkText(g: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, seed: number, align: CanvasTextAlign = 'left'): void {
   g.font = `500 ${size}px ${SERIF}`;
   g.textAlign = align;
@@ -219,7 +226,7 @@ function chalkText(g: CanvasRenderingContext2D, text: string, x: number, y: numb
   g.globalAlpha = 1;
 }
 
-export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, day: number, rows: BoardRow[]): void {
+export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, day: number, rows: BoardRow[], orders: BoardOrder[] = []): void {
   g.fillStyle = '#2c3a33';
   g.fillRect(0, 0, w, h);
   // Old chalk ghosts.
@@ -233,23 +240,26 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
   g.globalAlpha = 1;
   g.fillStyle = '#f2eee2';
   g.strokeStyle = '#f2eee2';
-  chalkText(g, 'Fluff prices', w / 2, 46, 46, 1, 'center');
-  chalkText(g, `day ${day}`, w - 24, 46, 24, 2, 'right');
+  // With orders to chalk up, the prices sit closer together to leave them room below.
+  const tight = orders.length > 0;
+  chalkText(g, 'Fluff prices', w / 2, tight ? 36 : 46, tight ? 40 : 46, 1, 'center');
+  chalkText(g, `day ${day}`, w - 24, tight ? 36 : 46, 24, 2, 'right');
   g.globalAlpha = 0.5;
   g.lineWidth = 2;
   g.beginPath();
-  g.moveTo(30, 80);
-  g.lineTo(w - 30, 82);
+  g.moveTo(30, tight ? 62 : 80);
+  g.lineTo(w - 30, tight ? 64 : 82);
   g.stroke();
   g.globalAlpha = 1;
   rows.forEach((r, i) => {
-    const y = 122 + i * 62;
-    chalkText(g, r.name, 34, y, 38, 10 + i);
+    const y = tight ? 88 + i * 40 : 122 + i * 62;
+    const fs = tight ? 32 : 38;
+    chalkText(g, r.name, 34, y, fs, 10 + i);
     if (r.price === null) {
-      chalkText(g, '?', w - 120, y, 38, 20 + i, 'right');
+      chalkText(g, '?', w - 120, y, fs, 20 + i, 'right');
       return;
     }
-    chalkText(g, String(r.price), w - 100, y, 42, 20 + i, 'right');
+    chalkText(g, String(r.price), w - 100, y, tight ? 34 : 42, 20 + i, 'right');
     // Arrow: chalk strokes, up or down; a dash if steady.
     const ax = w - 62;
     g.lineWidth = 4;
@@ -276,7 +286,47 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
     g.stroke();
     g.globalAlpha = 1;
   });
-  chalkText(g, 'blow fluff into the crate', w / 2, h - 30, 24, 40, 'center');
+  if (!tight) {
+    chalkText(g, 'blow fluff into the crate', w / 2, h - 30, 24, 40, 'center');
+    return;
+  }
+  // The day's orders, under a second rule: what is wanted by dusk on the left, what it pays on the right.
+  g.globalAlpha = 0.5;
+  g.strokeStyle = '#f2eee2';
+  g.beginPath();
+  g.moveTo(30, 248);
+  g.lineTo(w - 30, 246);
+  g.stroke();
+  g.globalAlpha = 1;
+  orders.slice(0, 2).forEach((o, i) => {
+    const y = orders.length === 1 ? 300 : 282 + i * 52;
+    g.fillStyle = o.state === 'filled' ? '#bfe3a8' : '#f2eee2';
+    g.globalAlpha = o.state === 'missed' ? 0.45 : 1;
+    const right = o.state === 'filled' ? 'filled' : o.pay;
+    // Both halves fit the board's width, the words shrinking a little if they must.
+    let fs = 29;
+    const width = (t: string, size: number) => {
+      g.font = `500 ${size}px ${SERIF}`;
+      return g.measureText(t).width;
+    };
+    for (; fs > 18 && width(o.text, fs) + width(right, fs - 4) + 24 > w - 58; fs--);
+    chalkText(g, o.text, 30, y, fs, 50 + i);
+    chalkText(g, right, w - 28, y, fs - 4, 60 + i, 'right');
+    g.globalAlpha = 1;
+    if (o.state !== 'open') {
+      // Struck through in chalk.
+      g.strokeStyle = o.state === 'filled' ? '#bfe3a8' : '#f2eee2';
+      g.globalAlpha = 0.7;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(28, y + 2);
+      g.lineTo(32 + width(o.text, fs), y);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+    g.fillStyle = '#f2eee2';
+    g.strokeStyle = '#f2eee2';
+  });
 }
 
 // ---------------------------------------------------------------- hanging tags

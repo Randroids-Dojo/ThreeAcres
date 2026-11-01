@@ -118,8 +118,9 @@ describe('P0: your first downy does not starve and run off during the meadow les
   it('the porch downy and a loose one of yours wait too, and hunger runs again once the day does', () => {
     const { sim, s, run } = ranch(TO_MEADOW, TO_MEADOW_F);
     s.hour = 16.5;
-    // (Nothing to eat about, so its hunger only climbs.)
+    // (Nothing to eat about, so its hunger only climbs: no crop in the starter garden either.)
     s.items = [];
+    s.pads[0].crop = null;
     const loose = sim.spawn('clover', 0, 32, true);
     loose.hunger = 0.4;
     const porch = s.downies.find((q) => q.keep)!;

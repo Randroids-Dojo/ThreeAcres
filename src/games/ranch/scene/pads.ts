@@ -3,8 +3,8 @@
 // bed with its crop growing, or a little silo. One mesh per pad, rebuilt when
 // it changes, popping up with a bounce when something new is built.
 
-import { BoxGeometry, BufferAttribute, ConeGeometry, CylinderGeometry, Group, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshLambertMaterial, PlaneGeometry, Quaternion, SphereGeometry, Vector3, type BufferGeometry } from 'three';
-import type { Food } from '../defs';
+import { BoxGeometry, BufferAttribute, Color, ConeGeometry, CylinderGeometry, Group, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshLambertMaterial, PlaneGeometry, Quaternion, SphereGeometry, Vector3, type BufferGeometry, type CanvasTexture } from 'three';
+import { PEN_MAX, type Food } from '../defs';
 import { hash2 } from '../noise';
 import { BED_H, BED_HALF, SILO_H, SILO_R } from '../physics';
 import { padSpots } from '../sim';
@@ -12,7 +12,7 @@ import type { Pad } from '../state';
 import { PADS, PEN_R, heightAt } from '../world';
 import { at, jitter, merge, part } from './geo';
 import { matte } from './mat';
-import { signAtlas } from './paint';
+import { canvas, paintTag, signAtlas, tex } from './paint';
 
 const WOOD = 0x9a6c48;
 const WOOD_D = 0x6f4a32;
@@ -131,6 +131,19 @@ function padGeometry(i: number, p: Pad): G[] {
       S.push(part(at(new CylinderGeometry(0.16, 0.08, 0.1, 8), 0, BED_H + 1.12, 0), 0xc9a24a, { flat: true }));
       S.push(box(0.7, 0.04, 0.04, 0x8a9aa8, 0, BED_H + 1.15, 0));
     }
+    // A feed run: a sloping plank trough from the bed towards each neighbour on the row.
+    if (p.ups.includes('run')) {
+      for (const side of [-1, 1]) {
+        const j = i + side;
+        if (j < 0 || j >= PADS.length || Math.floor(j / 3) !== Math.floor(i / 3)) continue;
+        const x0 = side * (BED_HALF + 0.15);
+        const x1 = side * (Math.abs(PADS[j].x - at0.x) - PEN_R + 0.3);
+        const top = BED_H + 1.35;
+        S.push(beam(x0, top, 0.9, x1, local(x1, 0.9) + 1.2, 0.9, 0.22, WOOD_L));
+        S.push(box(0.12, top, 0.12, WOOD_D, x0, top / 2, 0.9));
+        S.push(box(0.1, 1.2, 0.1, WOOD_D, x1, local(x1, 0.9) + 0.6, 0.9));
+      }
+    }
   } else if (p.kind === 'silo') {
     const body = new CylinderGeometry(SILO_R, SILO_R, SILO_H, 14, 6);
     at(body, 0, SILO_H / 2, 0);
@@ -185,6 +198,8 @@ export class PadView {
   private crops: Record<Food, InstancedMesh>;
   private plates: Mesh;
   private mat = matte();
+  /** A pen post's count tag ("8 of 10"), once the pen limit has been taught: the limit, in the world. */
+  private counts: { mesh: Mesh; ctx: CanvasRenderingContext2D; tex: CanvasTexture; key: string; mat: MeshLambertMaterial }[] = [];
 
   constructor() {
     this.crops = {} as Record<Food, InstancedMesh>;
@@ -201,6 +216,41 @@ export class PadView {
     this.plates = new Mesh(new PlaneGeometry(1, 1), new MeshLambertMaterial({ map: signAtlas().tex }));
     this.plates.name = 'plates';
     this.group.add(this.plates);
+    PADS.forEach((_, i) => {
+      const [c, g] = canvas(320, 160);
+      const t = tex(c);
+      const mat = new MeshLambertMaterial({ map: t, transparent: true, alphaTest: 0.5, emissiveMap: t, emissive: new Color(0xffffff), emissiveIntensity: 0 });
+      const mesh = new Mesh(new PlaneGeometry(0.5, 0.25), mat);
+      const sp = padSpots(i);
+      mesh.position.set(sp.post.x, heightAt(sp.post.x, sp.post.z) + 1.02, sp.post.z + sp.ls * 0.11);
+      mesh.rotation.y = sp.ls > 0 ? 0 : Math.PI;
+      mesh.visible = false;
+      mesh.name = `count-${i}`;
+      this.group.add(mesh);
+      this.counts.push({ mesh, ctx: g, tex: t, key: '', mat });
+    });
+  }
+
+  /** Each pen post's count tag: how many are in the pen, of ten (on: the pen limit has been taught; night lights it to read in the dark). */
+  setCounts(pads: Pad[], counts: number[], on: boolean, night: number): void {
+    this.counts.forEach((c, i) => {
+      const show = on && pads[i]?.kind === 'pen';
+      c.mesh.visible = show;
+      if (!show) return;
+      const n = counts[i] ?? 0;
+      const key = `${n}`;
+      c.mat.emissiveIntensity = 0.12 + night * 0.55;
+      if (key === c.key) return;
+      c.key = key;
+      paintTag(c.ctx, 320, 160, `${n} of ${PEN_MAX}`, null, n > PEN_MAX ? 'Too many. They hop out.' : 'More get frazzled', n <= PEN_MAX, false, 30 + i);
+      c.tex.needsUpdate = true;
+    });
+  }
+
+  /** For checks: what a pen post's count tag says ('' if it is not up). */
+  countTag(i: number): string {
+    const c = this.counts[i];
+    return c && c.mesh.visible ? c.key : '';
   }
 
   /** Rebuild any pad whose build or upgrades changed. justBuilt pops it up. */

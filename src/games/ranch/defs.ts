@@ -97,12 +97,17 @@ export const NEGLECT_HOURS = 4;
 
 export type PadKind = 'empty' | 'pen' | 'garden' | 'silo';
 export type PenUp = 'high' | 'feeder' | 'trough' | 'hedge' | 'chute';
-export type GardenUp = 'sprinkler' | 'soil';
+export type GardenUp = 'sprinkler' | 'soil' | 'run';
 
-export const BUILD_COST: Record<Exclude<PadKind, 'empty'>, number> = { pen: 250, garden: 200, silo: 300 };
+/** A pen holds ten calmly; more than that and they all get frazzled and hop out. */
+export const PEN_MAX = 10;
+
+// A pen costs less than the gate's reward, so the first pen for ember downies is affordable the
+// moment the ridge opens (the third playtest had 180 coins after the gate and a 250 coin pen).
+export const BUILD_COST: Record<Exclude<PadKind, 'empty'>, number> = { pen: 200, garden: 200, silo: 300 };
 export const BUILD_NAME: Record<Exclude<PadKind, 'empty'>, string> = { pen: 'Pen', garden: 'Garden', silo: 'Silo' };
 export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] = [
-  { id: 'high', name: 'High fence', cost: 200, line: 'Keeps jumpers in' },
+  { id: 'high', name: 'High fence', cost: 200, line: 'Keeps thistles in' },
   { id: 'feeder', name: 'Feeder', cost: 300, line: 'Feeds hungry downies' },
   { id: 'trough', name: 'Trough', cost: 150, line: 'Brook downies shed more' },
   { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps pests out' },
@@ -110,12 +115,22 @@ export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] 
 ];
 export const GARDEN_UPS: { id: GardenUp; name: string; cost: number; line: string }[] = [
   { id: 'sprinkler', name: 'Sprinkler', cost: 250, line: 'Grows half again as fast' },
-  { id: 'soil', name: 'Rich soil', cost: 300, line: 'Eight to a crop, not five' },
+  { id: 'soil', name: 'Rich soil', cost: 300, line: 'Half again to each crop' },
+  { id: 'run', name: 'Feed run', cost: 300, line: "Fills the next pen's feeder" },
 ];
-export const GARDEN_HOURS = 5;
+/**
+ * A garden grows a small crop often rather than a big one now and then: two
+ * every hour and a half (three with rich soil), so every round of tending
+ * finds food (the third playtest found nothing in four rounds of nine).
+ */
+export const GARDEN_HOURS = 1.5;
+export const GARDEN_YIELD = 2;
+export const GARDEN_YIELD_SOIL = 3;
+/** A garden stops growing once this much lies on its bed (it banks food while you are away). */
+export const GARDEN_PILE = 12;
 export const SILO_KINDS = 4;
 export const SILO_CAP = 50;
-export const FEEDER_CAP = 40;
+export const FEEDER_CAP = 60;
 
 export type BenchUp = 'slots' | 'cap' | 'range' | 'glide';
 export const BENCH_UPS: { id: BenchUp; name: string; costs: number[]; line: string }[] = [
@@ -129,21 +144,86 @@ export const RANGES = [7, 10];
 
 // ---------------------------------------------------------------- the journal
 
-export type GoalId = 'catch' | 'pen' | 'feed' | 'sell' | 'plant' | 'ridge' | 'ember' | 'feeder' | 'hollow' | 'thistle' | 'rich';
+export type GoalId =
+  | 'catch'
+  | 'pen'
+  | 'feed'
+  | 'sell'
+  | 'plant'
+  | 'order'
+  | 'ridge'
+  | 'ember'
+  | 'feeder'
+  | 'hollow'
+  | 'thistle'
+  | 'orders5'
+  | 'prized'
+  | 'fullclover'
+  | 'fullember'
+  | 'fullbrook'
+  | 'fullthistle'
+  | 'rich';
 
+/**
+ * The journal, shown one goal at a time. After the gates come the long goals:
+ * orders to fill, a prized order, and a full pen of each kind, so the page
+ * always has something worth chasing (the third playtest found only the
+ * 10,000 coins left after the thistle, then a blank page for good).
+ */
 export const GOALS: { id: GoalId; text: string; reward: number }[] = [
   { id: 'catch', text: 'Catch a clover downy.', reward: 20 },
   { id: 'pen', text: 'Build a pen and blow a downy in.', reward: 40 },
   { id: 'feed', text: 'Feed a downy its favourite.', reward: 40 },
   { id: 'sell', text: 'Sell 20 fluff at the sell crate.', reward: 60 },
   { id: 'plant', text: 'Plant something in a garden.', reward: 40 },
-  { id: 'ridge', text: 'Open the gate to Ember Ridge.', reward: 100 },
+  { id: 'order', text: 'Fill an order from the price board.', reward: 60 },
+  // The gate pays for the first pen beyond it.
+  { id: 'ridge', text: 'Open the gate to Ember Ridge.', reward: 200 },
   { id: 'ember', text: 'Catch an ember downy.', reward: 80 },
   { id: 'feeder', text: 'Build a feeder in a pen.', reward: 100 },
   { id: 'hollow', text: 'Open the gate to Brook Hollow.', reward: 150 },
-  { id: 'thistle', text: 'Find a thistle downy.', reward: 200 },
+  { id: 'thistle', text: 'Catch a thistle downy.', reward: 250 },
+  { id: 'orders5', text: 'Fill five orders.', reward: 150 },
+  { id: 'prized', text: 'Fill a prized order.', reward: 250 },
+  { id: 'fullclover', text: 'Keep ten clover downies in one pen.', reward: 150 },
+  { id: 'fullember', text: 'Keep ten ember downies in one pen.', reward: 250 },
+  { id: 'fullbrook', text: 'Keep ten brook downies in one pen.', reward: 300 },
+  { id: 'fullthistle', text: 'Keep five thistle downies in one pen.', reward: 400 },
   { id: 'rich', text: 'Earn 10,000 coins in all.', reward: 500 },
 ];
+
+/** The full-pen goals: how many of a kind in one pen. */
+export const FULL_PEN: Partial<Record<GoalId, { kind: DownyKind; n: number }>> = {
+  fullclover: { kind: 'clover', n: 10 },
+  fullember: { kind: 'ember', n: 10 },
+  fullbrook: { kind: 'brook', n: 10 },
+  fullthistle: { kind: 'thistle', n: 5 },
+};
+
+// ---------------------------------------------------------------- orders
+
+/**
+ * A day's order from the price board: so much of one kind of fluff by dusk.
+ * Its fluff sells at the board's price as usual, and filling it pays that
+ * again (a prized order, twice again).
+ */
+export interface Order {
+  kind: DownyKind;
+  /** Fluff wanted. */
+  n: number;
+  /** Fluff sent so far. */
+  got: number;
+  /** What the order's fluff has sold for so far: the bonus on filling pays it again (mult - 1 times). */
+  paid: number;
+  /** 2 pays double; 3 (a prized order) pays triple. */
+  mult: number;
+  state: 'open' | 'filled' | 'missed';
+}
+
+/** Orders close at dusk. */
+export const ORDER_BY = 19;
+/** The board posts the day's orders in the morning (from dawn until noon; a later start waits for the next morning). */
+export const ORDER_POST: [number, number] = [5, 12];
 
 export function fmtCoins(n: number): string {
   return Math.floor(n).toLocaleString('en-US');

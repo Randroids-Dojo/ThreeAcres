@@ -25,6 +25,9 @@
 /* A downy chosen and a blow from here would land it in a pen: a little fence with the downy over it. */
 .rh-cross[data-s='pen'] .x-pen { display: inline; }
 .rh-cross[data-s='pen'] { color: #eaf3c6; animation: rh-breathe 0.9s ease-in-out infinite; }
+/* Food chosen and a blow from here would land in a feeder that takes it: a little hopper with the food over it. */
+.rh-cross[data-s='feeder'] .x-feeder { display: inline; }
+.rh-cross[data-s='feeder'] { color: #f3e2b4; animation: rh-breathe 0.9s ease-in-out infinite; }
 @keyframes rh-breathe { 50% { transform: scale(1.12); } }
 /* A wild downy digging in: a ring round the crosshair fills as it tires. */
 .rh-cross .x-tug { display: none; transition: stroke-dashoffset 0.08s linear; }

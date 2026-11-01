@@ -4,9 +4,12 @@
 // half of game time: it picks the gardens, tops up the feeders (or blows food
 // into a pen without one), pulls up the fluff in the pens and sells it at the
 // crate at that moment's price, so the day's saturation counts. The downies,
-// hunger, eating, shedding, fences, gardens and feeders are the game's own.
+// hunger, eating, shedding, fences, gardens, feeders, feed runs and the price
+// board's daily orders are the game's own: the hand's sales go through the
+// crate's own sale (Sim.sellFluff), so they count towards the day's orders,
+// and filling one pays its bonus.
 //   npx tsx scripts/ranch-balance.ts
-import { FEEDER_CAP, HOUR, KIND, TUFT_KIND, isFood, isTuft, type DownyKind, type Food } from '../src/games/ranch/defs';
+import { BUILD_COST, FEEDER_CAP, GARDEN_YIELD, GARDEN_YIELD_SOIL, GOALS, HOUR, KIND, ORDER_BY, TUFT_KIND, isFood, isTuft, type DownyKind, type Food } from '../src/games/ranch/defs';
 import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { rng } from '../src/games/ranch/noise';
@@ -83,6 +86,13 @@ interface Day {
   feederLeft: number;
   inPens: number;
   firstOut: number | null;
+  /** The day's orders: posted, filled, and the bonus coins they paid. */
+  orders: number;
+  filled: number;
+  bonus: number;
+  /** Rounds of tending, and those that found no new food from the gardens. */
+  rounds: number;
+  bare: number;
 }
 
 /** One round of the hand: garden produce into feeders (or the pens), fluff in the pens to the crate. */
@@ -142,13 +152,13 @@ function tend(sim: Sim, setup: Setup, day: Day, pool: Record<Food, number>): voi
     if (it.gone || !isTuft(it.type) || it.drawn > 0) continue;
     if (sim.phys.penAt(it.x, it.z) < 0 && !setup.pens.some((p) => Math.hypot(it.x - PADS[p.pad].x, it.z - PADS[p.pad].z) < PEN_R + 1.5)) continue;
     it.gone = true;
-    const k = TUFT_KIND[it.type];
-    const c = sim.price(k);
-    s.market.sold[k]++;
-    s.coins += c;
+    // The crate's own sale: today's price, and an order of its kind counts it (filling one pays the bonus).
+    const c = sim.sellFluff(TUFT_KIND[it.type], true);
     day.sold++;
     day.coins += c;
   }
+  for (const e of sim.events) if (e.t === 'order' && e.state === 'filled') day.bonus += e.bonus;
+  sim.events.length = 0;
 }
 
 function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
@@ -160,29 +170,36 @@ function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
   const dt = 1 / 20;
   let t = 0;
   for (let k = 0; k < days; k++) {
-    const day: Day = { sold: 0, coins: 0, grown: 0, eaten: 0, feederLeft: 0, inPens: 0, firstOut: null };
+    const day: Day = { sold: 0, coins: 0, grown: 0, eaten: 0, feederLeft: 0, inPens: 0, firstOut: null, orders: 0, filled: 0, bonus: 0, rounds: 0, bare: 0 };
     let next = 0;
     let grown = 0;
+    let grownAt = 0;
+    let lastRound = -1;
     const fed0 = s.stats.fed;
-    const countGarden = () => s.items.filter((i) => !i.gone && isFood(i.type) && i.src >= GARDEN_SRC).length;
-    let onBeds = countGarden();
-    const crops0 = new Map<number, number>();
-    void crops0;
     while (s.hour < 21) {
       sim.update(dt, idle, aim);
+      // Crops, onto the gardens' beds or straight into a feeder by a feed run.
+      for (const e of sim.events) if (e.t === 'crop') grown += s.pads[e.pad].ups.includes('soil') ? GARDEN_YIELD_SOIL : GARDEN_YIELD;
+      for (const e of sim.events) if (e.t === 'order' && e.state === 'filled') day.bonus += e.bonus;
       sim.events.length = 0;
       t += dt;
-      const nowBeds = countGarden();
-      if (nowBeds > onBeds) grown += nowBeds - onBeds;
-      onBeds = nowBeds;
       if (setup.every > 0 && t >= next) {
         next = t + setup.every * HOUR;
+        // Each round a full interval after the last (not the one at dawn, straight after the night): did the
+        // gardens grow anything since?
+        if (lastRound >= 0) {
+          day.rounds++;
+          if (grown === grownAt) day.bare++;
+        }
+        lastRound = t;
+        grownAt = grown;
         tend(sim, setup, day, pool);
-        onBeds = countGarden();
       }
       if (day.firstOut === null && s.downies.some((d) => !d.gone && d.pen < 0)) day.firstOut = s.hour;
     }
     if (setup.every > 0) tend(sim, setup, day, pool);
+    day.orders = s.orders.length;
+    day.filled = s.orders.filter((o) => o.state === 'filled').length;
     day.grown = grown;
     day.eaten = s.stats.fed - fed0;
     day.feederLeft = setup.pens.reduce((a, p) => a + s.pads[p.pad].feeder.n, 0);
@@ -202,6 +219,8 @@ const SETUPS: Setup[] = [
   { name: 'Ember pen of 6 and clover pen of 6, a garden each with a sprinkler', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }, { pad: 2, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 1.5 },
   { name: 'Brook pen of 6 with a trough and ember pen of 6, a garden each with a sprinkler', pens: [{ pad: 1, kind: 'brook', n: 6, ups: ['feeder', 'trough'] }, { pad: 2, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'dewberry', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 1.5 },
   { name: 'Hand-fed: pen of 6 clover, no feeder, the starter garden', pens: [{ pad: 1, kind: 'clover', n: 6, ups: [] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 1.5 },
+  { name: 'Starter with a feed run: the starter garden fills the pen of 6\'s feeder', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run'] }], every: 1.5 },
+  { name: 'Late ranch: clover 10, ember 10, thistle 3 (high fence), two gardens with feed runs', pens: [{ pad: 1, kind: 'clover', n: 10, ups: ['feeder'] }, { pad: 3, kind: 'ember', n: 10, ups: ['feeder'] }, { pad: 5, kind: 'thistle', n: 3, ups: ['feeder', 'high'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run', 'sprinkler', 'soil'] }, { pad: 4, crop: 'sweetroot', ups: ['run', 'sprinkler', 'soil'] }], every: 1.5 },
   { name: 'First pen: 3 clover, hand-fed, the starter garden', pens: [{ pad: 1, kind: 'clover', n: 3, ups: [] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 1.5 },
 ];
 
@@ -210,15 +229,25 @@ console.log('Thistledown balance: one game day is 6 am to 9 pm (7.5 real minutes
 console.log(`Prices: base ${Object.entries(KIND).map(([k, v]) => `${k} ${v.value}`).join(', ')}; each sale today takes ${(SATURATION * 100).toFixed(1)}% off, down to ${Math.round(SAT_FLOOR * 100)}%.`);
 console.log(`Gates: ${GATES.ridge.name} ${GATES.ridge.cost}, ${GATES.hollow.name} ${GATES.hollow.cost}.\n`);
 const avgs: { name: string; coins: number }[] = [];
+const orderRows: { name: string; coins: number; bonus: number; filled: number; posted: number; bare: number; rounds: number }[] = [];
 for (const setup of SETUPS) {
   const days = runSetup(setup);
   console.log(setup.name);
-  console.log('   day  fluff  coins  per fluff  grown  eaten  feeder left  in pens');
-  days.forEach((d, i) => console.log(`   ${pad(i + 1, 3)}  ${pad(d.sold, 5)}  ${pad(d.coins, 5)}  ${pad((d.coins / Math.max(1, d.sold)).toFixed(1), 9)}  ${pad(d.grown, 5)}  ${pad(d.eaten, 5)}  ${pad(d.feederLeft, 11)}  ${pad(d.inPens, 7)}${d.firstOut !== null ? `  (one out at ${d.firstOut.toFixed(1)} h)` : ''}`));
-  const coins = days.slice(1).reduce((a, d) => a + d.coins, 0) / Math.max(1, days.length - 1);
+  console.log('   day  fluff  coins  per fluff  grown  eaten  feeder left  in pens  orders  bonus  bare rounds');
+  days.forEach((d, i) => console.log(`   ${pad(i + 1, 3)}  ${pad(d.sold, 5)}  ${pad(d.coins, 5)}  ${pad((d.coins / Math.max(1, d.sold)).toFixed(1), 9)}  ${pad(d.grown, 5)}  ${pad(d.eaten, 5)}  ${pad(d.feederLeft, 11)}  ${pad(d.inPens, 7)}  ${pad(`${d.filled}/${d.orders}`, 6)}  ${pad(d.bonus, 5)}  ${pad(`${d.bare}/${d.rounds}`, 11)}${d.firstOut !== null ? `  (one out at ${d.firstOut.toFixed(1)} h)` : ''}`));
+  const settled = days.slice(1);
+  const coins = settled.reduce((a, d) => a + d.coins, 0) / Math.max(1, settled.length);
+  const bonus = settled.reduce((a, d) => a + d.bonus, 0) / Math.max(1, settled.length);
   avgs.push({ name: setup.name, coins });
-  console.log(`   settled income: ${Math.round(coins)} coins a day\n`);
+  orderRows.push({ name: setup.name, coins, bonus, filled: settled.reduce((a, d) => a + d.filled, 0), posted: settled.reduce((a, d) => a + d.orders, 0), bare: days.reduce((a, d) => a + d.bare, 0), rounds: days.reduce((a, d) => a + d.rounds, 0) });
+  console.log(`   settled income: ${Math.round(coins)} coins a day, ${Math.round(bonus)} of it from orders\n`);
 }
+
+// The order economy: what the day's orders add to each ranch, and how often the gardens came up empty.
+console.log('The order economy (settled days; the hand sells everything, so it fills what the ranch can make by dusk)');
+console.log('   ranch                                                                     income  from orders  orders filled  bare garden rounds');
+for (const r of orderRows) console.log(`   ${r.name.slice(0, 72).padEnd(72)}  ${pad(Math.round(r.coins), 6)}  ${pad(`${Math.round(r.bonus)} (${Math.round((r.bonus / Math.max(1, r.coins)) * 100)}%)`, 11)}  ${pad(`${r.filled} of ${r.posted}`, 13)}  ${pad(`${r.bare} of ${r.rounds}`, 18)}`);
+console.log(`   (Orders close at ${ORDER_BY}:00; an order's fluff sells at the board's price and filling it pays that again, a prized one twice again.)\n`);
 
 // Sweeping the meadow instead of ranching: the real valley, wild downies foraging the wild food, and a
 // hand that walks the meadow every hour and a half picking up every piece of fluff lying outside the ranch
@@ -271,27 +300,45 @@ for (const setup of SETUPS) {
   console.log(`   settled: ${Math.round(sweep)} coins a day sweeping, against ${Math.round(pen3)} for a first pen of three and ${Math.round(avgs[0].coins)} for the starter pen of six\n`);
 }
 
-// Neglect: a pen of 6 with a full feeder and nobody tending it.
+// Neglect: a pen of 6 left alone: with a feeder filled once, then with the starter garden's feed run
+// filling it, then a pen of 8 and an ember pen of 6 with feed runs left for a ten-minute thistle trip.
+// (The third playtest's five-minute trip found every pen starving, embers frazzled and downies out.)
 {
-  const setup: Setup = { name: 'Neglect', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [], every: 0, fullFeeders: true };
-  const sim = build(setup, 9);
-  const s = sim.s;
-  const aim: Aim = { ex: s.player.x, ey: s.player.y + 1.6, ez: s.player.z, dx: 0, dy: 0, dz: -1, mx: s.player.x, my: s.player.y + 1.4, mz: s.player.z - 0.6 };
-  let t = 0;
-  let empty: number | null = null;
-  let first: number | null = null;
-  let all: number | null = null;
-  for (; t < 60 * 60 && all === null; t += 1 / 20) {
-    sim.update(1 / 20, idle, aim);
-    sim.events.length = 0;
-    if (empty === null && s.pads[1].feeder.n === 0) empty = t;
-    const out = s.downies.filter((d) => !d.gone && d.pen < 0).length;
-    if (first === null && out > 0) first = t;
-    if (out === 6) all = t;
-  }
   const m = (v: number | null) => (v === null ? 'never (an hour)' : `${(v / 60).toFixed(1)} min`);
-  console.log('Neglect: a pen of 6 clover, the feeder filled once (40), nobody tending it');
-  console.log(`   feeder empty after ${m(empty)}, first downy out after ${m(first)}, all out after ${m(all)}\n`);
+  const leave = (setup: Setup, minutes: number, seed: number) => {
+    const sim = build(setup, seed);
+    const s = sim.s;
+    // No pests (this is about food: a hedge keeps them off); the clock runs.
+    sim.teaching = true;
+    s.learn = ['time'];
+    const aim: Aim = { ex: s.player.x, ey: s.player.y + 1.6, ez: s.player.z, dx: 0, dy: 0, dz: -1, mx: s.player.x, my: s.player.y + 1.4, mz: s.player.z - 0.6 };
+    let empty: number | null = null;
+    let first: number | null = null;
+    let all: number | null = null;
+    let fraz = 0;
+    let peak = 0;
+    const n = setup.pens.reduce((a, p) => a + p.n, 0);
+    for (let t = 0; t < minutes * 60 && all === null; t += 1 / 20) {
+      sim.update(1 / 20, idle, aim);
+      sim.events.length = 0;
+      if (empty === null && setup.pens.every((p) => s.pads[p.pad].feeder.n === 0)) empty = t;
+      const out = s.downies.filter((d) => !d.gone && d.pen < 0).length;
+      if (first === null && out > 0) first = t;
+      if (out === n) all = t;
+      fraz = Math.max(fraz, s.downies.filter((d) => !d.gone && d.mood === 'frazzled').length);
+      peak = Math.max(peak, ...s.downies.filter((d) => !d.gone).map((d) => d.hunger));
+    }
+    return { empty, first, all, fraz, peak };
+  };
+  const a = leave({ name: 'Neglect', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [], every: 0, fullFeeders: true }, 60, 9);
+  console.log(`Neglect: a pen of 6 clover, the feeder filled once (${FEEDER_CAP}), nobody tending it`);
+  console.log(`   feeder empty after ${m(a.empty)}, first downy out after ${m(a.first)}, all out after ${m(a.all)}`);
+  const b = leave({ name: 'Run', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run'] }], every: 0 }, 60, 9);
+  console.log(`   the same pen beside the starter garden with a feed run (feeder empty at the start): first downy out after ${m(b.first)}, most frazzled at once ${b.fraz}, hungriest ${b.peak.toFixed(2)}`);
+  const c = leave({ name: 'Trip', pens: [{ pad: 1, kind: 'clover', n: 8, ups: ['feeder'] }, { pad: 4, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['run', 'sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['run', 'sprinkler'] }], every: 0, fullFeeders: true }, 10, 4);
+  const c0 = leave({ name: 'Trip, no runs', pens: [{ pad: 1, kind: 'clover', n: 8, ups: ['feeder'] }, { pad: 4, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 0 }, 10, 4);
+  console.log(`   a ten-minute trip from a clover pen of 8 and an ember pen of 6 with sprinkler gardens: with feed runs, first out ${m(c.first)}, most frazzled ${c.fraz}, hungriest ${c.peak.toFixed(2)};`);
+  console.log(`      without them (feeders empty, as the playtest left them), first out ${m(c0.first)}, most frazzled ${c0.fraz}, hungriest ${c0.peak.toFixed(2)}\n`);
 }
 
 // From the end of the lessons to the gates, on the starter income, then the next step up.
@@ -300,6 +347,8 @@ for (const setup of SETUPS) {
   const a = avgs[0].coins;
   const b = avgs[1].coins;
   const toRidge = (GATES.ridge.cost + 300 + 250 - start) / a;
+  const reward = GOALS.find((g) => g.id === 'ridge')!.reward;
   console.log(`Gates: with about ${start} coins after the lessons, the feeder (300) and a sprinkler (250) bought on the way,`);
   console.log(`   Ember Ridge (${GATES.ridge.cost}) takes about ${toRidge.toFixed(1)} days on the starter pen; Brook Hollow (${GATES.hollow.cost}) about ${(GATES.hollow.cost / ((b + avgs[4].coins) / 2)).toFixed(1)} more days between the sprinkler and the ember setups.`);
+  console.log(`   Opening the ridge with just the ${GATES.ridge.cost} coins leaves its reward, ${reward}, against a pen at ${BUILD_COST.pen}: the first ember pen is ${reward >= BUILD_COST.pen ? 'affordable at once' : 'not affordable'} (it was 180 against 250).`);
 }

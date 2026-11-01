@@ -5,7 +5,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames, checker, S } from './ranch-lib.mjs';
 
-const shots = process.argv[2] || '/tmp/ranch/play';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const shots = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/play';
 fs.mkdirSync(shots, { recursive: true });
 const { check, failed } = checker();
 const b = await launch();
@@ -90,7 +91,7 @@ check('the pen tag is on screen', tag && tag.x > 0 && tag.x < 1280 && tag.y > 0 
 await page.mouse.click(tag.x, tag.y);
 await page.waitForTimeout(900);
 s1 = await S(page);
-check('clicking the Pen tag builds a pen', s1.pads[1] === 'pen' && s1.coins === coins0 - 250, `${s1.pads[1]}, coins ${coins0} to ${s1.coins}`);
+check('clicking the Pen tag builds a pen', s1.pads[1] === 'pen' && s1.coins === coins0 - 200, `${s1.pads[1]}, coins ${coins0} to ${s1.coins}`);
 await shot('04-pen-built');
 
 // ---- puff the downy into the pen

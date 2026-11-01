@@ -426,6 +426,7 @@ export function buildProps(boardMat: Material): Props {
   // ------------------------------------------------------------ zone walls and gates
   const gateObjs = {} as Props['gates'];
   const gatePaint: (() => void)[] = [];
+  const gateFaces: MeshLambertMaterial[] = [];
   {
     const R = rng(77);
     const wall = (x: number, zone: 'ridge' | 'hollow') => {
@@ -476,7 +477,10 @@ export function buildProps(boardMat: Material): Props {
       const out = zone === 'ridge' ? 1 : -1;
       const [tc, tgx] = canvas(320, 160);
       const ttex = tex(tc);
-      const face = new Mesh(new PlaneGeometry(0.64, 0.32), new MeshLambertMaterial({ map: ttex, transparent: true, alphaTest: 0.5 }));
+      // Lit from within at night so it reads in the dark (it could not be read at night).
+      const faceMat = new MeshLambertMaterial({ map: ttex, transparent: true, alphaTest: 0.5, emissiveMap: ttex, emissive: new Color(0xffffff), emissiveIntensity: 0.1 });
+      gateFaces.push(faceMat);
+      const face = new Mesh(new PlaneGeometry(0.64, 0.32), faceMat);
       face.position.set(out * 0.03, 0, 0);
       face.rotation.y = (out * Math.PI) / 2;
       tag.add(face);
@@ -602,6 +606,7 @@ export function buildProps(boardMat: Material): Props {
     update(t: number, night: number) {
       sails.rotation.z = -t * 0.35;
       glow.emissiveIntensity = 0.15 + night * 1.6;
+      for (const m of gateFaces) m.emissiveIntensity = 0.1 + night * 0.4;
     },
   };
 }

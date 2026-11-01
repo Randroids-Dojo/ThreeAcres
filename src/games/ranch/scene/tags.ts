@@ -59,8 +59,10 @@ export class TagMenu {
   hot = -1;
   open = false;
   private t = 0;
-  /** Hung as a near grid of two columns (a tall phone), not a zigzag row along a rail. */
+  /** Hung as a near grid (two columns on a tall phone, three on a wide screen), not a zigzag row along a rail. */
   private grid = false;
+  /** A near grid's scale: hung closer than its reading distance, it is made smaller to look the same size. */
+  private k = 1;
   /** The bar a near grid hangs from. */
   private dowel: Mesh;
 
@@ -100,9 +102,11 @@ export class TagMenu {
    * a bar (the rail's point is its middle), for a tall phone, where a row of
    * five ran off both edges of the screen and the words were too small to read.
    */
-  show(rail: Rail, opts: MenuOption[], grid = false): void {
+  show(rail: Rail, opts: MenuOption[], grid = false, cols = 2, scale = 1): void {
     this.rail = rail;
     this.grid = grid;
+    this.k = grid ? scale : 1;
+    const k = this.k;
     this.opts = opts.slice(0, MAX);
     this.open = true;
     this.hot = -1;
@@ -119,10 +123,11 @@ export class TagMenu {
       if (!tg.opt) return;
       let off: number;
       if (grid) {
-        const row = Math.floor(i / 2);
-        // A tag alone on its row hangs in the middle.
-        const alone = i === n - 1 && n % 2 === 1;
-        off = alone ? 0 : ((i % 2) - 0.5) * (TW + 0.05);
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        // A short last row hangs in the middle.
+        const inRow = Math.min(cols, n - row * cols);
+        off = (col - (inRow - 1) / 2) * (TW + 0.05) * k;
         this.hang(tg, 0.06 + row * (TH + 0.06), row > 0 ? -0.03 : 0);
       } else {
         const step = TW * 0.66;
@@ -133,9 +138,9 @@ export class TagMenu {
       tg.pivot.rotation.set(0, rail.ry, 0, 'YXZ');
       this.paint(tg, false);
     });
-    this.dowel.position.set(rail.x, rail.y + 0.01, rail.z);
+    this.dowel.position.set(rail.x, rail.y + 0.01 * k, rail.z);
     this.dowel.rotation.set(0, rail.ry, 0);
-    this.dowel.scale.x = n > 1 ? 2 * TW + 0.25 : TW + 0.15;
+    this.dowel.scale.set((Math.min(cols, n) * (TW + 0.05) + 0.15) * k, k, k);
     this.dowel.visible = grid && n > 0;
   }
 
@@ -227,7 +232,7 @@ export class TagMenu {
     // A grid: the middle of its rows.
     let lo = 0;
     for (const t of vis) lo = Math.max(lo, t.twine + TH);
-    out.y -= lo / 2;
+    out.y -= (lo * this.k) / 2;
     return out;
   }
 
@@ -259,7 +264,7 @@ export class TagMenu {
       _a.set(ox + dx * t - _p.x, oy + dy * t - _p.y, oz + dz * t - _p.z);
       const u = _a.dot(_r.set(1, 0, 0).transformDirection(tg.face.matrixWorld));
       const v = _a.dot(_u.set(0, 1, 0).transformDirection(tg.face.matrixWorld));
-      if (Math.abs(u) < TW / 2 + 0.03 && Math.abs(v) < TH / 2 + 0.05 && t < bd) {
+      if (Math.abs(u) < (TW / 2 + 0.03) * this.k && Math.abs(v) < (TH / 2 + 0.05) * this.k && t < bd) {
         bd = t;
         best = i;
       }
@@ -299,7 +304,7 @@ export class TagMenu {
       tg.angle += tg.angleV * dt;
       const d = Math.max(0, tg.drop);
       const ease = 1 - (1 - d) * (1 - d);
-      tg.pivot.scale.set(1, ease, 1);
+      tg.pivot.scale.set(this.k, ease * this.k, this.k);
       tg.pivot.rotation.x = tg.angle + (tg.gone > 0 ? tg.gone * 6 : 0);
     });
   }

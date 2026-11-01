@@ -4,7 +4,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames } from './ranch-lib.mjs';
 
-const out = process.argv[2] || '/tmp/ranch/kinds';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const out = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/kinds';
 fs.mkdirSync(out, { recursive: true });
 const b = await launch();
 const { page } = await openRanch(b, { width: 1280, height: 800, query: 'freeze' });

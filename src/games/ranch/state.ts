@@ -9,6 +9,7 @@ import {
   type Food,
   type GoalId,
   type ItemType,
+  type Order,
   type PadKind,
   type Thing,
 } from './defs';
@@ -70,8 +71,16 @@ export interface Downy extends Body {
   feedId: number;
   /** The pen it hopped out of, while it is loose (-1: none). Not saved. */
   strayFrom: number;
-  /** Seconds the bellows leaves it alone (just tipped out of a window). */
+  /** Seconds the bellows leaves it alone (just tipped out of a window, or it got away from a pull). */
   noPull: number;
+  /** Seconds since a wild one first dug in against this pull (0: not fighting). Not saved. */
+  strain: number;
+  /** The most of the pull it has given up this fight, 0..1. Not saved. */
+  peak: number;
+  /** Seconds of running flat out (a thistle bolting, or one that got away). Not saved. */
+  bolt: number;
+  /** A brook that got away is leaping into the pond: gone when it lands in the water. Not saved. */
+  dive: boolean;
 }
 
 export interface Item extends Body {
@@ -182,7 +191,11 @@ export interface RanchState {
   hints: string[];
   caught: DownyKind[];
   zones: Zone[];
-  stats: { sold: number; fed: number; drawn: number };
+  stats: Stats;
+  /** Today's orders from the price board (see defs.ts, Order). */
+  orders: Order[];
+  /** The day the board last posted orders. */
+  orderDay: number;
   /** Last day the overnight changes ran. */
   night: number;
   nextId: number;
@@ -190,6 +203,15 @@ export interface RanchState {
   learn: string[];
   /** Counts the lessons wait on. */
   learnCount: Record<string, number>;
+}
+
+export interface Stats {
+  sold: number;
+  fed: number;
+  drawn: number;
+  /** Orders filled, and prized ones among them. */
+  filled: number;
+  prized: number;
 }
 
 export function emptyPad(): Pad {
@@ -233,7 +255,9 @@ export function freshState(): RanchState {
     hints: [],
     caught: [],
     zones: ['ranch'],
-    stats: { sold: 0, fed: 0, drawn: 0 },
+    stats: { sold: 0, fed: 0, drawn: 0, filled: 0, prized: 0 },
+    orders: [],
+    orderDay: 0,
     night: 0,
     nextId: 1,
     learn: [],
@@ -268,8 +292,11 @@ export interface SaveV1 {
   hints: string[];
   caught: DownyKind[];
   zones: Zone[];
-  stats: { sold: number; fed: number; drawn: number };
+  stats: Partial<Stats>;
   night: number;
+  /** Added with orders; older saves have none and get their first at the next morning. */
+  orders?: Order[];
+  orderDay?: number;
   /** Added with the lessons; older saves have neither and are credited on load. */
   learn?: string[];
   learnCount?: Record<string, number>;
@@ -300,6 +327,8 @@ export function serialize(s: RanchState): SaveV1 {
     zones: [...s.zones],
     stats: { ...s.stats },
     night: s.night,
+    orders: s.orders.map((o) => ({ ...o })),
+    orderDay: s.orderDay,
     learn: [...s.learn],
     learnCount: Object.fromEntries(Object.entries(s.learnCount).map(([k, v]) => [k, r3(v)])),
   };
@@ -345,6 +374,10 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     feedId: 0,
     strayFrom: -1,
     noPull: 0,
+    strain: 0,
+    peak: 0,
+    bolt: 0,
+    dive: false,
   };
 }
 
@@ -421,6 +454,8 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.zones = [...(d.zones ?? ['ranch'])];
   s.stats = { ...s.stats, ...d.stats };
   s.night = num(d.night, 0);
+  s.orders = Array.isArray(d.orders) ? d.orders.filter((o) => o && KINDS.includes(o.kind) && Number.isFinite(o.n)).map((o) => ({ kind: o.kind, n: o.n, got: num(o.got, 0), paid: num(o.paid, 0), mult: num(o.mult, 2), state: o.state === 'filled' || o.state === 'missed' ? o.state : 'open' })) : [];
+  s.orderDay = num(d.orderDay, 0);
   // A save from before the lessons has no list: the director credits it (see creditLessons).
   s.learn = Array.isArray(d.learn) ? d.learn.filter((x) => typeof x === 'string') : [];
   s.learnCount = {};

@@ -2,7 +2,8 @@
 // as a strip of frames. node scripts/ranch-drawseq.mjs [out.png]
 import fs from 'node:fs';
 import { launch, openRanch, frames } from './ranch-lib.mjs';
-const out = process.argv[2] || '/tmp/ranch/drawseq.png';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const out = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/drawseq.png';
 const dir = '/tmp/ranch/drawseq';
 fs.mkdirSync(dir, { recursive: true });
 const b = await launch();

@@ -9,6 +9,13 @@
 // icon; the zone's name clears the journal page; Blow moves on to the next
 // window when one runs out and says so when the jar is empty. Real touch
 // events through CDP.
+//
+// From the third playtest: the journal page holding the day's orders and the
+// next goal (three lines) still clears the stick, the zone's name, the pause
+// button and the shell corner; so does the order lesson's page; a wild downy
+// let go of mid-tug gets away (and the crosshair note says so), with real
+// touch on Pull; and with food chosen the crosshair marks a feeder it would
+// land in.
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -209,6 +216,100 @@ await p.waitForTimeout(200);
 const m1 = await S();
 check('the stick walks with the journal up', Math.hypot(m1.x - m0.x, m1.z - m0.z) > 0.3);
 await p.screenshot({ path: '/tmp/ranch-thumbs.png' });
+await p.evaluate(() => window.ranch.hud.hidePage());
+
+// The day's orders and the next goal on the journal page: three lines (two wrap), clear of the stick, the zone's name,
+// the pause button, the coins and the shell corner.
+await p.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  s.hour = 7;
+  s.gates.ridge = true;
+  for (const [i, kind] of [[1, 'clover'], [2, 'ember']]) {
+    s.pads[i].kind = 'pen';
+    s.pads[i].ups = [];
+    for (let k = 0; k < 6; k++) r.sim.spawn(kind, [6, 17, 28][i] + Math.cos(k) * 2, 26.5 + Math.sin(k) * 2, true);
+  }
+  r.sim.phys.setPads(s.pads);
+  r.pads.sync(s.pads);
+  s.goals = ['catch', 'pen', 'feed', 'sell'];
+  r.sim.postOrders(true);
+});
+// (Any page of a goal just done goes first.)
+await p.waitForTimeout(800);
+await p.waitForFunction(() => !document.querySelector('.rh-page.up h4'), null, { timeout: 6000 });
+await p.waitForTimeout(300);
+const og = await p.evaluate(() => {
+  const rect = (sel) => { const e = document.querySelector(sel); const q = e.getBoundingClientRect(); return { l: q.left, t: q.top, r: q.right, b: q.bottom }; };
+  return { lines: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins'), orders: window.ranch.sim.s.orders.length, goal: window.ranch.sim.openGoals(1)[0].text };
+});
+const apart = (a, c) => a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
+check('the journal shows the day\'s orders with their tally, and the next goal', og.orders === 2 && og.lines.length === 3 && /^Clover fluff, 0 of \d+\.$/.test(og.lines.find((l) => l.startsWith('Clover')) ?? '') && /^Ember fluff, 0 of \d+\.$/.test(og.lines.find((l) => l.startsWith('Ember')) ?? '') && og.lines[2] === og.goal, JSON.stringify(og.lines));
+check('with three lines, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
+await p.evaluate(() => window.ranch.hud.showZone('Ember Ridge'));
+await p.waitForTimeout(700);
+const oz = await p.evaluate(() => { const a = document.querySelector('.rh-zone').getBoundingClientRect(); const b = document.querySelector('.rh-page').getBoundingClientRect(); return { clear: a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left, zone: Math.round(a.top), page: Math.round(b.bottom) }; });
+check("with three lines, the zone's name still sits clear of the journal page", oz.clear, JSON.stringify(oz));
+await p.screenshot({ path: '/tmp/ranch-thumbs-orders.png' });
+// The order lesson's page (when the first order is posted): clear of the pause button and the coins too.
+await p.evaluate(() => { const s = window.ranch.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount.order = 0; s.learnCount['order:read'] = 0; const pl = s.player; pl.x = 0; pl.z = 30; pl.y = window.ranch.sim.phys.floor(0, 30); });
+await p.waitForTimeout(800);
+const ol = await p.evaluate(() => { const rect = (sel) => { const q = document.querySelector(sel).getBoundingClientRect(); return { l: q.left, t: q.top, r: q.right, b: q.bottom }; }; return { line: window.ranch.seen().line, page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins') }; });
+check("the order lesson's line is up, its page clear of the pause button and the coins", ol.line === "Fill today's order on the price board." && apart(ol.page, ol.pause) && apart(ol.page, ol.coins) && ol.page.b < 838 * 0.32, JSON.stringify(ol));
+await p.evaluate(() => { const s = window.ranch.sim.s; if (!s.learn.includes('lesson:order')) s.learn.push('lesson:order'); });
+await p.waitForTimeout(1800);
+
+// A wild downy let go of mid-tug gets away, with real touch on Pull; the note under the crosshair says so.
+await p.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  s.hour = 10;
+  r.sim.wild = false;
+  for (const q of s.slots) { q.t = null; q.n = 0; }
+  const pl = s.player; pl.x = -16; pl.z = -2; pl.y = r.sim.phys.floor(-16, -2);
+  const d = r.sim.spawn('clover', -16, -7.2, false);
+  d.hunger = 0.2;
+  d.hopT = 5;
+  window.__wild = d;
+  r.aimAt(d.x, d.y + 0.25, d.z);
+});
+const pullBtn = await box('.rt-draw');
+await touch('touchStart', [[pullBtn.x, pullBtn.y, 23]]);
+let tugMax = 0;
+for (let i = 0; i < 9; i++) {
+  await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
+  await p.waitForTimeout(60);
+  tugMax = Math.max(tugMax, await p.evaluate(() => window.__wild.tug));
+}
+await touch('touchEnd', []);
+await p.waitForTimeout(500);
+const got = await p.evaluate(() => { const d = window.__wild; const e = document.querySelector('.rh-say'); return { noPull: d.noPull, tame: d.tame, gone: d.gone, note: e.classList.contains('on') ? e.textContent : '' }; });
+check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && got.note === 'It got away.', `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
+
+// Food chosen and aimed so a blow lands in a feeder's hopper: the crosshair marks the feeder.
+const fm = await p.evaluate(() => {
+  const r = window.ranch;
+  const sim = r.sim;
+  const s = sim.s;
+  s.pads[1].ups = ['feeder'];
+  s.pads[1].feeder = { t: null, n: 0 };
+  sim.phys.setPads(s.pads);
+  for (const q of s.slots) { q.t = null; q.n = 0; }
+  s.slots[0] = { t: 'cloverhead', n: 5 };
+  s.sel = 0;
+  const hx = 17 + 4.4 * 0.72;
+  const hz = 26.5 + 4.4 * 0.69;
+  const pl = s.player; pl.x = hx + 1; pl.z = hz + 4.6; pl.y = sim.phys.floor(pl.x, pl.z);
+  const hy = sim.phys.floor(hx, hz) + 1.55;
+  for (let up = -0.4; up <= 1.6; up += 0.05) {
+    r.aimAt(hx, hy + up, hz);
+    if (sim.aimTarget(r.aim) === 'feeder') return up;
+  }
+  return null;
+});
+await p.waitForTimeout(300);
+const fx = await p.evaluate(() => document.querySelector('.rh-cross').dataset.s);
+check('with food chosen and a blow that would land in a feeder, the crosshair marks the feeder', fm !== null && fx === 'feeder', `${fm} ${fx}`);
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 const failed = results.filter((r) => !r).length;

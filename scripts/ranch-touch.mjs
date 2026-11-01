@@ -5,7 +5,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames, checker, S, touchSession } from './ranch-lib.mjs';
 
-const shots = process.argv[2] || '/tmp/ranch/touch';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const shots = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/touch';
 fs.mkdirSync(shots, { recursive: true });
 const { check, failed } = checker();
 const b = await launch();
@@ -94,7 +95,7 @@ check('a first tap on the Pen tag chooses it and spends nothing', s1.pads[1] ===
 await tap(tag.x, tag.y, 11);
 await page.waitForTimeout(900);
 s1 = await S(page);
-check('a second tap on the Pen tag builds it', s1.pads[1] === 'pen' && s1.coins === c0 - 250, `${s1.pads[1]}, ${c0} to ${s1.coins}`);
+check('a second tap on the Pen tag builds it', s1.pads[1] === 'pen' && s1.coins === c0 - 200, `${s1.pads[1]}, ${c0} to ${s1.coins}`);
 
 // ---- tap Puff to send the downy into the pen
 await place(17, 34.5, 17, 6.6, 26.5);

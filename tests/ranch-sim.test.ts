@@ -215,20 +215,20 @@ describe('downies', () => {
 });
 
 describe('gardens', () => {
-  it('grow five every five game hours; a sprinkler is half again as fast; rich soil gives eight', () => {
+  it('grow two every hour and a half; a sprinkler is half again as fast; rich soil gives three', () => {
     const sim = quiet();
     const g = sim.s.pads[0];
     g.grow = 0;
     const count = () => sim.s.items.filter((i) => !i.gone && i.src === GARDEN_SRC).length;
-    run(sim, 5 * HOUR - 2);
+    run(sim, 1.5 * HOUR - 2);
     expect(count()).toBe(0);
     run(sim, 3);
-    expect(count()).toBe(5);
+    expect(count()).toBe(2);
     sim.s.items = [];
     g.grow = 0;
     g.ups = ['sprinkler', 'soil'];
-    run(sim, (5 * HOUR) / 1.5 + 1);
-    expect(count()).toBe(8);
+    run(sim, (1.5 * HOUR) / 1.5 + 1);
+    expect(count()).toBe(3);
   });
 
   it('take a puffed food as their crop when empty', () => {
@@ -319,7 +319,7 @@ describe('builds and gates', () => {
     const post = { kind: 'pad' as const, id: 1, label: '', x: 0, y: 0, z: 0 };
     sim.s.coins = 260;
     expect(sim.choose(post, 'build:pen')).toBe(true);
-    expect(sim.s.coins).toBe(10);
+    expect(sim.s.coins).toBe(60);
     expect(sim.choose({ ...post, id: 2 }, 'build:garden')).toBe(false);
     expect(sim.events.some((e) => e.t === 'deny')).toBe(true);
     expect(sim.menu(post).map((o) => o.id)).toContain('pen:feeder');
@@ -418,7 +418,7 @@ describe('the journal and the save', () => {
     sim.complete('ridge');
     sim.complete('ridge');
     sim.complete('catch');
-    expect(sim.s.coins).toBe(c + 100 + 20);
+    expect(sim.s.coins).toBe(c + 200 + 20);
     expect(sim.openGoals(2).map((g) => g.id)).toEqual(['pen', 'feed']);
   });
 
@@ -659,7 +659,7 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     expect(d.gone).toBe(true);
   });
 
-  it('a wild downy digs in for about a second of steady Pull, and slips loose when the aim leaves it', () => seeds(4, () => {
+  it('a wild downy digs in for about a second of steady Pull, and gets away when the pull lets go of it', () => seeds(4, () => {
     const sim = quiet();
     stand(sim, 0, -16);
     const d = sim.spawn('clover', 0, -21.6, false);
@@ -671,9 +671,13 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     pullFor(0.6);
     expect(d.gone).toBe(false);
     expect(d.tug).toBeGreaterThan(0.4);
-    // Looked away: the tug fades and it hops off. Close in on it again (it has seen you: it is out of reach by now, or nearly).
+    // Let go once it was well on its way: it gets away (the bellows cannot take it for a moment). Close in on it
+    // again once it can be pulled (it has seen you: it is out of reach by now, or nearly).
+    sim.events.length = 0;
     run(sim, 1.2, idle);
     expect(d.tug).toBe(0);
+    expect(d.noPull).toBeGreaterThan(0);
+    run(sim, 0.6, idle);
     const away = Math.hypot(d.x - sim.s.player.x, d.z - sim.s.player.z);
     const l = Math.max(away, 1e-3);
     stand(sim, d.x - ((d.x - sim.s.player.x) / l) * 4.5, d.z - ((d.z - sim.s.player.z) / l) * 4.5);

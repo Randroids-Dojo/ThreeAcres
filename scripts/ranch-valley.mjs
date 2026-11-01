@@ -6,7 +6,8 @@
 import fs from 'node:fs';
 import { launch, openRanch, frames, checker, S } from './ranch-lib.mjs';
 
-const shots = process.argv[2] || '/tmp/ranch/valley';
+// A URL is not a folder: the base comes from RANCH_URL (ranch-lib.mjs).
+const shots = process.argv[2] && !/^https?:/.test(process.argv[2]) ? process.argv[2] : '/tmp/ranch/valley';
 fs.mkdirSync(shots, { recursive: true });
 const { check, failed } = checker();
 const b = await launch();
@@ -47,8 +48,8 @@ await frames(page, 4);
 let opts = await useTag('Digit1');
 check('the ridge gate hangs its price tag', opts.includes('gate:ridge'), opts.join(','));
 let s = await S(page);
-// The gate's price (500) less, the goal's reward (100) back.
-check('buying it opens the gate', await page.evaluate(() => window.ranch.sim.s.gates.ridge) && s.coins === 6000 - 500 + 100 && s.goals.includes('ridge'), `coins ${s.coins}`);
+// The gate's price (500) less, the goal's reward (200) back.
+check('buying it opens the gate', await page.evaluate(() => window.ranch.sim.s.gates.ridge) && s.coins === 6000 - 500 + 200 && s.goals.includes('ridge'), `coins ${s.coins}`);
 await page.waitForTimeout(1200);
 await shot('01-gate-open');
 await page.keyboard.down('KeyW');
@@ -189,8 +190,11 @@ const th = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find
 check('thistles turn up on the ridge top at dusk', !!th);
 if (th) {
   await place(th.x + 6, th.z + 3, th.x, th.y + 0.25, th.z);
-  await page.waitForTimeout(2400);
-  check('getting close counts as finding one', (await S(page)).goals.includes('thistle'));
+  await page.waitForTimeout(600);
+  // It hears you and bolts (faster than you walk): a running approach or a quick tug. A glimpse is not a catch.
+  const bolt = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.kind === 'thistle'); return d ? { bolt: d.bolt, alert: d.alert } : null; });
+  check('getting close, the thistle notices you and bolts', !!bolt && bolt.alert && bolt.bolt > 0, JSON.stringify(bolt));
+  check('a glimpse is not a catch: the thistle goal waits', !(await S(page)).goals.includes('thistle'));
   await shot('09-thistle');
 }
 
