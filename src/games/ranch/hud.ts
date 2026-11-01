@@ -11,7 +11,18 @@ import { GOALS, fmtCoins, type GoalId } from './defs';
 const BOX = `<svg class="box" viewBox="0 0 20 20"><path d="M3 4 Q10 2.6 17 3.6 Q17.6 10 16.6 17 Q9 17.6 3.4 16.8 Q2.6 10 3 4 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="tick" d="M5 10 L9 14.5 L17 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 import { hash2 } from './noise';
 
-type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'sell';
+type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'sell' | 'pen';
+
+/** What a window holds, as a small icon drawn in it: a downy, one of the three foods, or fluff. */
+export type SlotIcon = 'downy' | 'clover' | 'root' | 'berry' | 'fluff';
+
+const ICON: Record<SlotIcon, string> = {
+  downy: `<circle cx="0" cy="1" r="7.5"/><circle cx="-2.6" cy="0" r="1.3" class="f"/><circle cx="2.6" cy="0" r="1.3" class="f"/>`,
+  clover: `<circle cx="0" cy="-3.6" r="3.4"/><circle cx="-3.4" cy="1.6" r="3.4"/><circle cx="3.4" cy="1.6" r="3.4"/><path d="M0 2 L0 8.5"/>`,
+  root: `<path d="M-6 -6 Q0 -4 6 -6 L1 8 Q0 9.5 -1 8 Z"/><path d="M-2 -7.5 L-3.5 -10.5 M2 -7.5 L3.5 -10.5"/>`,
+  berry: `<circle cx="-3" cy="1.5" r="3.3"/><circle cx="3" cy="1.5" r="3.3"/><circle cx="0" cy="-3.6" r="3.3"/>`,
+  fluff: `<path d="M0 9 L0 -1"/><path d="M0 -1 L-6 -6 M0 -1 L6 -6 M0 -1 L0 -8.5 M0 -1 L-7.5 0 M0 -1 L7.5 0"/>`,
+};
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, html = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -69,6 +80,10 @@ export class Hud {
   private bellowsBtn = el('button', 'rh-bellows');
   /** A cream chevron over the slot window a lesson points at, like the markers in the world. */
   private slotPoint = el('div', 'rh-slotpoint');
+  /** A cream ring round the chosen window, on every device, so the choice reads at a glance. */
+  private slotSel = el('div', 'rh-slotsel');
+  /** A small icon in each window saying what it holds. */
+  private slotIcons: { el: HTMLElement; key: string }[] = [];
   private crossState: CrossState | '' = '';
   private shownCoins = -1;
   private coinTarget = 0;
@@ -99,7 +114,7 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
     this.arcDot = this.arc.querySelector('.sun')!;
@@ -144,13 +159,14 @@ export class Hud {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
       this.slotBtns.push(b);
     }
+    for (let i = 0; i < 5; i++) this.slotIcons.push({ el: el('div', 'rh-slotico'), key: '' });
     this.bellowsBtn.setAttribute('aria-label', 'Next window');
     this.bellowsBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.onCycle();
     });
-    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
+    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, ...this.slotIcons.map((q) => q.el), this.slotSel, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
     this.pause.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t) return;
@@ -404,6 +420,36 @@ export class Hud {
     this.fade.classList.remove('go');
     void this.fade.offsetWidth;
     this.fade.classList.add('go');
+  }
+
+  /**
+   * The chosen window's ring and each window's icon (seen: the windows are on
+   * screen; r: a window's radius in CSS px; icons: what each holds).
+   */
+  markSlots(spots: ({ x: number; y: number } | null)[], seen: boolean, sel: number, r: number, icons: (SlotIcon | null)[]): void {
+    const at = seen ? spots[sel] : null;
+    this.slotSel.classList.toggle('on', !!at);
+    if (at) {
+      const d = Math.round(2 * r + 9);
+      this.slotSel.style.width = this.slotSel.style.height = `${d}px`;
+      this.slotSel.style.transform = `translate(${(at.x - d / 2).toFixed(0)}px, ${(at.y - d / 2).toFixed(0)}px)`;
+    }
+    // Icons only where a window is big enough to carry one.
+    const big = r >= 10;
+    this.slotIcons.forEach((q, i) => {
+      const s = spots[i];
+      const key = seen && big && s ? (icons[i] ?? '') : '';
+      if (key !== q.key) {
+        q.key = key;
+        q.el.innerHTML = key ? `<svg viewBox="-12 -12 24 24">${ICON[key as SlotIcon]}</svg>` : '';
+        q.el.classList.toggle('on', !!key);
+      }
+      if (key && s) {
+        const d = Math.round(r * 1.25);
+        q.el.style.width = q.el.style.height = `${d}px`;
+        q.el.style.transform = `translate(${(s.x - d / 2).toFixed(0)}px, ${(s.y - d / 2).toFixed(0)}px)`;
+      }
+    });
   }
 
   /** Tap targets over the bellows: one per slot window, sized to their spacing, and the body behind them. */

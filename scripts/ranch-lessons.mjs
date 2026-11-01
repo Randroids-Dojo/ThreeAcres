@@ -9,6 +9,12 @@
 // the crosshair, the bellows and its slot windows, the Use button, gate price
 // tags. It also notes when each one first appeared. Each lesson must end when
 // its action is done and not before.
+//
+// From the second playtest: the first downy's hunger waits with the held clock
+// through the meadow lesson; a lesson's own tag is chosen when its post's tags
+// come down (and nothing else is); a new feeder is filled in its own lesson; a
+// downy that hops out of its pen brings a line and an arrow; a night lesson
+// slept through comes back the next night; a gate goal counts the coins.
 //   node scripts/ranch-lessons.mjs [base url]      (or RANCH_URL)
 import fs from 'node:fs';
 import { launch, frames, checker } from './ranch-lib.mjs';
@@ -72,8 +78,8 @@ const WATCH = () => {
       const ui = window.__ui();
       const learn = r.sim.s.learn;
       const lesson = r.seen().lesson || '(none)';
-      // The edge pointer belongs to a lesson: never up without one.
-      if (ui.edge && !r.seen().line && window.__bad.length < 20) window.__bad.push(`edge pointer with no lesson during ${lesson}`);
+      // The edge pointer belongs to a lesson (or a journal goal with a place, a gate): never up without one.
+      if (ui.edge && !r.seen().line && !r.seen().goalSpot && window.__bad.length < 20) window.__bad.push(`edge pointer with no lesson during ${lesson}`);
       for (const [k, on] of Object.entries(ui)) {
         if (!on || k === 'page' || k === 'stick' || k === 'marker' || k === 'edge') continue;
         if (!(k in window.__first)) window.__first[k] = lesson;
@@ -196,12 +202,21 @@ function only(ui, allowed) {
     await tap(t.x, t.y, 11);
     await page.waitForTimeout(700);
     const still = await page.evaluate((id) => window.ranch.menuOptions().includes(id), id);
-    if (still) {
+    // (A tag no lesson teaches is chosen by the first tap and taken by a second: not a miss.)
+    const nowChosen = await page.evaluate((id) => { const r = window.ranch; const c = r.tagChoice(); return c.hot >= 0 && r.menuOptions()[c.hot] === id; }, id);
+    if (still && !nowChosen) {
       console.log(`   (tag ${id} tap missed at ${Math.round(t.x)},${Math.round(t.y)}: ${JSON.stringify(await page.evaluate((i) => { const r = window.ranch; return { now: r.tagScreen(i), tapLog: window.__taps, look: r.input.lookId }; }, i))})`);
       await k.shot(`miss-${id.replace(':', '-')}`);
     }
     return true;
   };
+  /** A tag a lesson is not teaching: the first tap chooses it, the second takes it. */
+  const takeTag = async (id) => {
+    await tapTag(id);
+    if (await page.evaluate((id) => window.ranch.menuOptions().includes(id), id)) await tapTag(id);
+  };
+  /** What the tags came down with: the chosen one's id (or null) and the Use button's word. */
+  const chosen = () => page.evaluate(() => { const r = window.ranch; const c = r.tagChoice(); return { id: c.hot >= 0 ? r.menuOptions()[c.hot] : null, label: document.querySelector('.rt-act').textContent }; });
   const tapWindow = async (slot) => {
     const w = await page.evaluate((i) => window.ranch.slotScreen(i), slot);
     if (!w || !Number.isFinite(w.x)) console.log(`   (window ${slot} has no spot: ${JSON.stringify(w)} ${await k.why()})`);
@@ -412,6 +427,8 @@ function only(ui, allowed) {
   await page.waitForTimeout(700);
   const opts = await page.evaluate(() => window.ranch.menuOptions());
   check('phone: an empty pad offers only a pen for now', opts.join() === 'build:pen', opts.join());
+  let pick = await chosen();
+  check('phone: the pen lesson\'s tag comes down chosen, and Use says Buy', pick.id === 'build:pen' && pick.label === 'Buy', JSON.stringify(pick));
   await k.shot('phone-09-tags');
   await tapTag('build:pen');
   check('phone: tapping the Pen tag ends the pen lesson', await k.finished('pen'));
@@ -434,6 +451,13 @@ function only(ui, allowed) {
 
   // ---- 9. meadow, and jump when the meadow needs it
   check('phone: meadow lesson comes next', await k.lessonOn('meadow'));
+  // The second playtest: the clock held at half past four, but the penned downy starved and ran off.
+  // Five game minutes of the held afternoon, stepped without drawing.
+  await page.evaluate(() => (window.ranch.sim.s.hour = 16.5));
+  const held0 = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.pen >= 0); return d && { hunger: d.hunger, pen: d.pen }; });
+  await page.evaluate(() => window.ranch.step(300, 1 / 20));
+  const held1 = await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; const d = s.downies.find((q) => !q.gone && q.tame && q.pen >= 0); return { hunger: d?.hunger ?? -1, pen: d?.pen ?? -1, hour: s.hour, lesson: r.seen().lesson, mood: d?.mood }; });
+  check('phone: five minutes into the held afternoon the penned downy is no hungrier, calm and still penned', !!held0 && held1.pen === held0.pen && held1.hunger <= held0.hunger + 0.01 && held1.mood !== 'frazzled' && Math.abs(held1.hour - 16.5) < 0.01 && held1.lesson === 'meadow', `${JSON.stringify(held0)} -> ${JSON.stringify(held1)}`);
   await page.waitForTimeout(400);
   u = await k.ui();
   check('phone: meadow line, arrow at the ranch gate', u.page === 'Catch a downy out in Clover Meadow.' && u.marker === 'arrow', u.page);
@@ -460,6 +484,11 @@ function only(ui, allowed) {
   await press('.rt-draw', 450, 17, async () => { const q = await k.downy('wild'); if (q) await k.aim(q.x, q.y + 0.25, q.z); ringSeen ||= await page.evaluate(() => document.querySelector('.rh-cross').classList.contains('tug')); });
   check('phone: a short Pull does not take a wild downy', !(await k.finished('meadow')));
   check('phone: the crosshair shows the tug', ringSeen);
+  // It has seen you (wild downies notice you further off than Pull reaches) and hops away: close in again, then hold it.
+  d = await k.downy('wild');
+  const noticed = await page.evaluate(() => { const s = window.ranch.sim.s; return s.downies.some((q) => !q.gone && !q.tame && !q.keep && q.alert); });
+  check('phone: the wild downy noticed you', noticed);
+  await k.place(d.x + 4.2, d.z + 2, d.x, d.y + 0.25, d.z);
   await press('.rt-draw', 3000, 17, async () => { const q = await k.downy('wild'); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
   check('phone: a steady Pull catches the wild downy and ends the meadow lesson', await k.finished('meadow'));
   s = await k.st();
@@ -489,6 +518,28 @@ function only(ui, allowed) {
   check('phone: hungry downies show the food they want', want.hungry >= 1 && want.signs + want.marker === want.hungry, JSON.stringify(want));
   await k.shot('phone-12b-farm');
 
+  // ---- a downy of yours over the fence: a line and an arrow on it, then back into the pen
+  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; for (const d of s.downies) if (!d.gone && (d.tame || d.keep)) d.hunger = 0.1; const d = s.downies.find((q) => !q.gone && q.tame && q.pen === 1); d.x = 17 + 4.4 + 1.6; d.z = 26.5; d.y = r.sim.phys.floor(d.x, d.z); d.vx = d.vy = d.vz = 0; d.grounded = true; d.hopT = 3; });
+  check('phone: a downy out of its pen brings a line', await k.lessonOn('stray', 3000));
+  u = await k.ui();
+  const onStray = await page.evaluate(() => { const r = window.ranch; const m = r.tutor.mark; const d = r.sim.s.downies.find((q) => !q.gone && q.strayFrom >= 0 && q.pen < 0); return !!d && m.on && m.icon === 'arrow' && Math.hypot(m.x - d.x, m.z - d.z) < 0.6; });
+  check('phone: "Pull in the downy that got out.", the arrow on it', u.page === 'Pull in the downy that got out.' && onStray, u.page);
+  await k.shot('phone-12c-stray');
+  const sd = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.strayFrom >= 0); return { x: d.x, y: d.y, z: d.z }; });
+  await k.place(sd.x + 2.2, sd.z + 2.6, sd.x, sd.y + 0.25, sd.z);
+  await press('.rt-draw', 1400, 31, async () => { const q = await page.evaluate(() => { const d = window.ranch.sim.s.downies.find((q) => !q.gone && q.strayFrom >= 0); return d && { x: d.x, y: d.y, z: d.z }; }); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
+  await page.waitForTimeout(400);
+  u = await k.ui();
+  check('phone: pulled in, the line says to blow it back into the pen', u.page === 'Blow the downy into the pen.', u.page);
+  const cs = await k.slotOf('clover');
+  if (cs >= 0 && (await k.st()).sel !== cs) await tapWindow(cs);
+  await k.place(17, 34.5, 17, 6.6, 26.5);
+  await frames(page, 3);
+  const penMark = await page.evaluate(() => document.querySelector('.rh-cross').dataset.s);
+  check('phone: aimed at the pen with a downy chosen, the crosshair shows it would land in the pen', penMark === 'pen', penMark);
+  await press('.rt-puff', 90, 32);
+  check('phone: blown back into its pen, the stray line ticks and goes', await k.waitFor(() => { const r = window.ranch; return r.seen().lesson !== 'stray' && r.sim.s.downies.some((d) => !d.gone && d.tame && d.pen === 1); }, null, 6000), await k.why());
+
   // ---- 10. dusk: the clock and the door
   await page.evaluate(() => (window.ranch.sim.s.hour = 18.2));
   check('phone: dusk brings its lesson', await k.lessonOn('dusk', 8000));
@@ -513,7 +564,22 @@ function only(ui, allowed) {
   await page.evaluate(() => (window.ranch.sim.s.hour = 20.55));
   check('phone: nightfall brings the nettleback lesson', await k.lessonOn('night', 6000));
   check('phone: night line', (await k.ui()).page === 'Blow anything at the pest to shoo it.');
-  check('phone: nettlebacks come only now', await k.waitFor(() => window.ranch.sim.s.nettles.some((n) => !n.gone), null, 6000));
+  // The second playtest: sleeping through the night lesson marked it learned, and night 2's pests came with no line.
+  await k.place(-16, 37.4, -16, 5.4, 39.6);
+  await frames(page, 6);
+  const actN = await centre('.rt-act');
+  if (actN) {
+    await tap(actN[0], actN[1], 27);
+    await page.waitForTimeout(700);
+    pick = await chosen();
+    check('phone: at the door with no lesson teaching it, the Sleep tag is not chosen for you', pick.id === null && pick.label === 'Tap a tag', JSON.stringify(pick));
+    await takeTag('sleep');
+  }
+  await page.waitForTimeout(1500);
+  check('phone: slept through, the night lesson is not counted as learned', (await k.st()).day >= 3 && !(await k.finished('night')), await k.why());
+  await page.evaluate(() => (window.ranch.sim.s.hour = 20.55));
+  check('phone: the next night the nettleback lesson comes back', await k.lessonOn('night', 6000));
+  check('phone: nettlebacks come only now', await k.waitFor(() => window.ranch.sim.s.nettles.some((n) => !n.gone), null, 10000));
   // However far off the pest is, the lesson points at it (on screen, or with the chevron on the edge).
   const farPest = await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; const n = s.nettles.find((q) => !q.gone); const m = r.tutor.mark; return { on: m.on, d: Math.hypot(n.x - s.player.x, n.z - s.player.z), at: Math.hypot(m.x - n.x, m.z - n.z) }; });
   await frames(page, 3);
@@ -553,6 +619,8 @@ function only(ui, allowed) {
   if (act3) { await tap(act3[0], act3[1], 20); await page.waitForTimeout(700); }
   const opts2 = await page.evaluate(() => window.ranch.menuOptions());
   check('phone: now the pad offers a garden too, but no silo yet', opts2.join() === 'build:pen,build:garden', opts2.join());
+  pick = await chosen();
+  check('phone: the garden lesson\'s Garden tag comes down chosen, not Pen (the playtest had Pen)', pick.id === 'build:garden' && pick.label === 'Buy', JSON.stringify(pick));
   await k.shot('phone-15-garden');
   await tapTag('build:garden');
   check('phone: building a garden ends the lesson', await k.finished('garden'));
@@ -572,9 +640,35 @@ function only(ui, allowed) {
   if (act4) { await tap(act4[0], act4[1], 22); await page.waitForTimeout(700); }
   const opts3 = await page.evaluate(() => window.ranch.menuOptions());
   check('phone: the pen post offers only what matters yet: the feeder, and the hedge after a night', opts3.join() === 'pen:feeder,pen:hedge', opts3.join());
+  pick = await chosen();
+  check('phone: the Feeder tag comes down chosen (the lesson teaches it), the Hedge not', pick.id === 'pen:feeder' && pick.label === 'Buy', JSON.stringify(pick));
   await k.shot('phone-16-ups');
   await tapTag('pen:feeder');
   check('phone: fitting a feeder ends the upgrades lesson', await k.finished('ups'));
+  // ---- the new feeder: filled in its own lesson, the hopper marked (the playtest's sat empty a day and a half)
+  check('phone: a lesson to fill the feeder comes next', await k.lessonOn('feeder', 4000));
+  await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 3; i++) sim.stow('cloverhead'); });
+  const headSlot = await k.slotOf('cloverhead');
+  if ((await k.st()).sel !== headSlot) {
+    await page.waitForTimeout(400);
+    u = await k.ui();
+    check("phone: clover heads aboard but not chosen: the line says to choose the food's window", u.page === "Tap the food's window to choose it.", u.page);
+    await tapWindow(headSlot);
+  }
+  await page.waitForTimeout(400);
+  u = await k.ui();
+  const hop = await page.evaluate(() => { const m = window.ranch.tutor.mark; return { on: m.on, x: m.x, y: m.y, z: m.z, r: m.r }; });
+  check('phone: "Blow food into the feeder.", the arrow on the hopper', u.page === 'Blow food into the feeder.' && hop.on && Math.abs(hop.x - 20.17) < 0.2 && Math.abs(hop.z - 29.54) < 0.2, `${u.page} ${JSON.stringify(hop)}`);
+  await k.place(21.2, 34, hop.x, hop.y - 0.75, hop.z);
+  await frames(page, 3);
+  await k.shot('phone-16b-feeder');
+  await press('.rt-puff', 90, 33);
+  check('phone: blowing a clover head into the hopper fills the feeder and ends the lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:feeder'), null, 4000), JSON.stringify(await page.evaluate(() => window.ranch.sim.s.pads[1].feeder)));
+  // ---- a gate goal counts the coins and points at the gate (it was a dead end)
+  await page.evaluate(() => { const s = window.ranch.sim.s; for (const g of ['sell', 'plant']) if (!s.goals.includes(g)) s.goals.push(g); s.coins = 288; });
+  await page.waitForTimeout(2500);
+  const gg = await page.evaluate(() => { const r = window.ranch; const m = r.tutor.mark; const pg = document.querySelector('.rh-page'); return { page: pg.classList.contains('up') ? pg.textContent.trim() : '', spot: r.seen().goalSpot, at: m.on ? Math.hypot(m.x - -35.4, m.z - -10) : -1 }; });
+  check('phone: the gate goal reads "Open the Ember Ridge gate, 288 of 500." with an arrow on the gate', gg.page === 'Open the Ember Ridge gate, 288 of 500.' && gg.spot && gg.at >= 0 && gg.at < 0.5, JSON.stringify(gg));
   await page.evaluate(() => (window.ranch.sim.s.coins = 450));
   check('phone: 400 coins bring the workbench lesson', await k.lessonOn('bench', 4000));
   await k.place(-10.6, 38.9, -10.6, 5.4, 41.2);
@@ -583,6 +677,8 @@ function only(ui, allowed) {
   if (act5) { await tap(act5[0], act5[1], 23); await page.waitForTimeout(700); }
   const opts4 = await page.evaluate(() => window.ranch.menuOptions());
   check('phone: the workbench offers a bigger canister and a longer draw, nothing more yet', opts4.join() === 'bench:cap,bench:range', opts4.join());
+  pick = await chosen();
+  check('phone: the Bigger jar tag comes down chosen', pick.id === 'bench:cap', JSON.stringify(pick));
   await k.shot('phone-17-bench');
   await tapTag('bench:cap');
   check('phone: fitting a bigger canister ends the workbench lesson', await k.finished('bench'));
@@ -714,7 +810,9 @@ function only(ui, allowed) {
   await page.keyboard.up('KeyQ');
   await page.waitForTimeout(200);
   const afterQ = await k.st();
-  check('desk: holding Q tips the chosen window out, and does not switch', afterQ.sel === before.sel && !afterQ.slots[before.sel][0] && !!before.slots[before.sel][0], `${JSON.stringify(before.slots)} sel ${before.sel} -> ${JSON.stringify(afterQ.slots)} sel ${afterQ.sel}`);
+  // Not a quick Q (which steps back a window): the chosen window empties, and the next one that holds something is chosen.
+  const nextFilled = [1, 2, 3].map((k2) => (before.sel + k2) % before.slots.length).find((i) => i !== before.sel && afterQ.slots[i][0]) ?? before.sel;
+  check('desk: holding Q tips the chosen window out, and the next filled window is chosen (not a Q switch)', afterQ.sel === nextFilled && !afterQ.slots[before.sel][0] && !!before.slots[before.sel][0], `${JSON.stringify(before.slots)} sel ${before.sel} -> ${JSON.stringify(afterQ.slots)} sel ${afterQ.sel}`);
   // Space jumps before its lesson on keys (nothing on screen for it), so the jump lesson will pass quietly.
   const y0 = await page.evaluate(() => window.ranch.sim.s.player.y);
   await page.keyboard.down('Space');

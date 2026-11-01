@@ -103,10 +103,10 @@ export const BUILD_COST: Record<Exclude<PadKind, 'empty'>, number> = { pen: 250,
 export const BUILD_NAME: Record<Exclude<PadKind, 'empty'>, string> = { pen: 'Pen', garden: 'Garden', silo: 'Silo' };
 export const PEN_UPS: { id: PenUp; name: string; cost: number; line: string }[] = [
   { id: 'high', name: 'High fence', cost: 200, line: 'Keeps jumpers in' },
-  { id: 'feeder', name: 'Feeder', cost: 300, line: 'Drops food when they are hungry' },
+  { id: 'feeder', name: 'Feeder', cost: 300, line: 'Feeds hungry downies' },
   { id: 'trough', name: 'Trough', cost: 150, line: 'Brook downies shed more' },
   { id: 'hedge', name: 'Hedge', cost: 250, line: 'Keeps pests out' },
-  { id: 'chute', name: 'Fluff chute', cost: 400, line: 'Catches shed fluff in a box' },
+  { id: 'chute', name: 'Fluff chute', cost: 400, line: 'Gathers fluff in a box' },
 ];
 export const GARDEN_UPS: { id: GardenUp; name: string; cost: number; line: string }[] = [
   { id: 'sprinkler', name: 'Sprinkler', cost: 250, line: 'Grows half again as fast' },

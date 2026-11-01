@@ -274,7 +274,8 @@ export class Viewmodel {
     // move over to the right so they never cross a window); a fifth window sits above them. Rows are spaced a little wider than columns because
     // the tilted plate foreshortens them on screen.
     const row = 1.0;
-    const gx = -0.03;
+    // Left of the bellows' middle, so the right column keeps at least 8 px from the Blow button (it was 2 to 3).
+    const gx = -0.22;
     const z0 = 0.1755;
     for (const g of this.grips) g.position.x = grid ? Viewmodel.GRIP_X : 0;
     const spots = grid
@@ -566,6 +567,16 @@ export class Viewmodel {
     out.x1 = x1;
     out.y1 = y1;
     return out;
+  }
+
+  /** A window's radius on screen, as a share of the view's width. */
+  windowRadius(): number {
+    const p = this.windowSpots[0];
+    const parent = this.windows.parent!;
+    _v.copy(p).applyMatrix4(parent.matrixWorld).project(this.camera);
+    const x0 = _v.x;
+    _v.set(p.x + this.windowR, p.y, p.z).applyMatrix4(parent.matrixWorld).project(this.camera);
+    return Math.abs(_v.x - x0) / 2;
   }
 
   /** Screen positions (0..1 from top left) of each slot window, for tapping. */

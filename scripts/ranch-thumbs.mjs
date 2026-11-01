@@ -3,8 +3,12 @@
 // the stick works where it overlaps the bellows, the bellows still changes slot,
 // and the journal page never blocks the stick. Every slot window's tap target
 // is at least 44 px and overlaps no other target or button (with four windows
-// and with the fifth), and a long press on a window tips it out while a tap
-// only picks it. Real touch events through CDP.
+// and with the fifth), keeps at least 8 px from every button (Blow sat 2 px
+// from the bottom-right one), and a long press on a window tips it out while a
+// tap only picks it. The chosen window wears a ring and every filled window an
+// icon; the zone's name clears the journal page; Blow moves on to the next
+// window when one runs out and says so when the jar is empty. Real touch
+// events through CDP.
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -90,6 +94,15 @@ const overlaps = (rs) => {
   }
   return out;
 };
+/** The smallest gap between any window target and any button (negative: they overlap). */
+const clearance = (rs) => {
+  let worst = { g: 1e9, at: '' };
+  for (const a of rs.filter((q) => /slotbtn/.test(q.cls))) for (const c of rs.filter((q) => /rt-btn/.test(q.cls))) {
+    const g = Math.max(c.l - a.r, a.l - c.r, c.t - a.b, a.t - c.b);
+    if (g < worst.g) worst = { g, at: `${c.cls.replace('rt-btn ', '')} by window @${Math.round(a.l)},${Math.round(a.t)}` };
+  }
+  return worst;
+};
 for (const n of [4, 5]) {
   if (n === 5) {
     await p.evaluate(() => window.ranch.sim.s.slots.push({ t: null, n: 0 }));
@@ -100,6 +113,8 @@ for (const n of [4, 5]) {
   check(`${n} windows: every window target is at least 44 px`, slots.length === n && slots.every((q) => q.w >= 44 && q.h >= 44), slots.map((q) => `${Math.round(q.w)}x${Math.round(q.h)}`).join(' '));
   const ov = overlaps(rs);
   check(`${n} windows: no window target overlaps another, or Blow, Pull, Jump or pause`, ov.length === 0, ov.join(' | '));
+  const cl = clearance(rs);
+  check(`${n} windows: every window target keeps at least 8 px from every button`, cl.g >= 8, `${Math.round(cl.g)} px, ${cl.at}`);
   const cov = await p.evaluate(reachScan, '.rh-slotbtn, .rt-btn');
   check(`${n} windows: every window and button takes a tap at five points across it`, cov.length === 0, cov.map((q) => `${q.control} under ${q.under} at ${q.at}`).join(' | '));
 }
@@ -141,6 +156,48 @@ const g1 = await S();
 const n1 = await p.evaluate(() => window.ranch.sim.s.slots[0].n);
 await p.evaluate(() => { const r = window.ranch; const pl = r.sim.s.player; pl.x = -15.5; pl.z = 37.2; pl.y = r.sim.phys.floor(pl.x, pl.z); pl.yaw = -0.55; });
 check('a drag that starts on a window walks, and tips nothing out', Math.hypot(g1.x - g0.x, g1.z - g0.z) > 0.5 && n1 === n0 && n0 > 0, `moved ${Math.hypot(g1.x - g0.x, g1.z - g0.z).toFixed(2)} m, window ${n0} -> ${n1}`);
+// The chosen window wears a ring, and every filled window an icon of what it holds (an empty one none).
+await p.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (const q of s.slots) { q.t = null; q.n = 0; } sim.stow('clover'); sim.stow('tuft-clover'); sim.stow('dewberry'); s.sel = 0; });
+await p.waitForTimeout(300);
+const marks = async () => p.evaluate(() => {
+  const r = window.ranch;
+  const ring = document.querySelector('.rh-slotsel');
+  const rr = ring.getBoundingClientRect();
+  const w = r.slotScreen(r.sim.s.sel);
+  const icons = [...document.querySelectorAll('.rh-slotico')].map((e) => (e.classList.contains('on') ? e.getBoundingClientRect() : null));
+  const near = (i) => { const q = r.slotScreen(i); const b = icons.find((c) => c && Math.hypot(c.x + c.width / 2 - q.x, c.y + c.height / 2 - q.y) < 4); return !!b; };
+  return { on: ring.classList.contains('on'), off: Math.hypot(rr.x + rr.width / 2 - w.x, rr.y + rr.height / 2 - w.y), d: rr.width, icons: icons.filter(Boolean).length, filled: [0, 1, 2, 3].map(near) };
+});
+let mk = await marks();
+check('the chosen window wears a cream ring, centred on it', mk.on && mk.off < 3 && mk.d >= 36, JSON.stringify(mk));
+check('each filled window carries an icon, the empty one none', mk.icons === 3 && mk.filled.join() === 'true,true,true,false', JSON.stringify(mk.filled));
+const w2 = await p.evaluate(() => window.ranch.slotScreen(2));
+await touch('touchStart', [[w2.x, w2.y, 9]]);
+await p.waitForTimeout(90);
+await touch('touchEnd', []);
+await p.waitForTimeout(250);
+mk = await marks();
+check('choosing another window moves the ring to it', (await S()).slot === 2 && mk.off < 3, `sel ${(await S()).slot}, ring off by ${mk.off.toFixed(1)}`);
+// Blow: when the chosen window runs out, the next one that holds something is chosen; with nothing aboard it says so.
+await p.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (const q of s.slots) { q.t = null; q.n = 0; } s.slots[0] = { t: 'tuft-clover', n: 1 }; s.slots[2] = { t: 'clover', n: 1 }; s.sel = 0; const pl = s.player; pl.x = 0; pl.z = 30; pl.y = sim.phys.floor(0, 30); pl.yaw = 0; pl.pitch = 0.1; });
+await p.waitForTimeout(200);
+const blow = await box('.rt-puff');
+const tapBlow = async (id) => { await touch('touchStart', [[blow.x, blow.y, id]]); await p.waitForTimeout(70); await touch('touchEnd', []); await p.waitForTimeout(400); };
+await tapBlow(20);
+const afterFluff = await p.evaluate(() => { const s = window.ranch.sim.s; return { sel: s.sel, slots: s.slots.map((q) => q.n) }; });
+check('Blow sends the last fluff, and the window that still holds something is chosen', afterFluff.sel === 2 && afterFluff.slots[0] === 0, JSON.stringify(afterFluff));
+await tapBlow(21);
+const afterDowny = await p.evaluate(() => { const s = window.ranch.sim.s; return { left: s.slots[2].n, out: s.downies.filter((d) => !d.gone && d.tame && Math.hypot(d.x, d.z - 30) < 14).length }; });
+check('the next tap of Blow blows the downy out (it did nothing in the playtest)', afterDowny.left === 0 && afterDowny.out >= 1, JSON.stringify(afterDowny));
+await tapBlow(22);
+const said = await p.evaluate(() => { const e = document.querySelector('.rh-say'); return e.classList.contains('on') ? e.textContent : ''; });
+check('with nothing aboard, Blow says so', said === 'Nothing in the jar.', said);
+// The zone's name comes up clear of the journal page.
+await p.evaluate(() => { const h = window.ranch.hud; h.setLesson('Catch a downy out in Clover Meadow.', false); h.showZone('Clover Meadow'); });
+await p.waitForTimeout(900);
+const zp = await p.evaluate(() => { const a = document.querySelector('.rh-zone').getBoundingClientRect(); const b = document.querySelector('.rh-page').getBoundingClientRect(); return { zone: [a.left, a.top, a.right, a.bottom].map(Math.round), page: [b.left, b.top, b.right, b.bottom].map(Math.round), clear: a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left }; });
+check("the zone's name sits clear of the journal page", zp.clear, JSON.stringify(zp));
+await p.evaluate(() => window.ranch.hud.setLesson('', false));
 // With the journal up, the stick still answers.
 await p.evaluate(() => window.ranch.hud.showPage('Day 1', [{ text: 'Catch a clover downy.', done: false }, { text: 'Build a pen and blow a downy in.', done: false }], 30));
 await p.waitForTimeout(700);

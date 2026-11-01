@@ -142,3 +142,79 @@ const lying = [1.2, 1.8, 2.3, 3.5].map((d) => {
   return `${d} m ${ok}/${angles.length}`;
 });
 console.log(`lying fluff sells from: ${lying.join('  ')}`);
+
+// Blown downies into a pen (the second playtest: they fell short, against the
+// fence). From the lane side of pad 1's pen, 1 to 8 m back from the fence and
+// at angles across it, the crosshair on the pen floor (its middle, and off it
+// as a thumb would be), one downy blown: does it come down in the pen? With the
+// pen's help (a blown downy is steered in and lifted over the rail, then
+// settles) and without it, and whether the crosshair's pen mark told the truth.
+import { PADS, PEN_R } from '../src/games/ranch/world';
+let penAgree = 0;
+let penLiedYes = 0;
+let penLiedNo = 0;
+function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r: number; u: number }, assist: boolean): boolean {
+  const sim = new Sim(null);
+  const s = sim.s;
+  sim.wild = false;
+  s.downies = [];
+  s.items = [];
+  sim.penAssist = assist;
+  s.pads[1].kind = 'pen';
+  sim.phys.setPads(s.pads);
+  const p = s.player;
+  p.x = x;
+  p.z = z;
+  p.y = sim.phys.floor(x, z);
+  p.vx = p.vy = p.vz = 0;
+  s.slots[0] = { t: 'clover', n: 1 };
+  s.sel = 0;
+  const aim = aimFrom(sim, tx, sim.phys.floor(tx, tz), tz, m);
+  const said = sim.aimTarget(aim) === 'pen';
+  sim.puff(aim);
+  const d = s.downies[s.downies.length - 1];
+  for (let t = 0; t < 3 && !(d.grounded && d.flyT < 0); t += 1 / 60) sim.update(1 / 60, idle, aim);
+  const ok = sim.phys.penAt(d.x, d.z) === 1;
+  if (assist) {
+    if (said === ok) penAgree++;
+    else if (said) penLiedYes++;
+    else penLiedNo++;
+  }
+  return ok;
+}
+{
+  const at = PADS[1];
+  const backs = [1, 2, 4, 6, 8];
+  const across = [-40, -20, 0, 20, 40].map((a) => (a * Math.PI) / 180);
+  // Crosshair spots on the pen floor: its middle, a metre or two either way, and the near half.
+  const spots: [number, number][] = [
+    [0, 0],
+    [-1.5, 0],
+    [1.5, 0],
+    [0, 1.8],
+    [0, -1.8],
+  ];
+  for (const assist of [false, true]) {
+    const row: string[] = [];
+    let all = 0;
+    let hit = 0;
+    for (const back of backs) {
+      let n = 0;
+      let ok = 0;
+      for (const a of across) {
+        const r = PEN_R + back;
+        const x = at.x + Math.sin(a) * r;
+        const z = at.z + Math.cos(a) * r;
+        for (const [sx, sz] of spots) {
+          n++;
+          if (tryPen(x, z, at.x + sx, at.z + sz, MUZZLES.phone, assist)) ok++;
+        }
+      }
+      all += n;
+      hit += ok;
+      row.push(`${back} m ${Math.round((ok / n) * 100)}%`);
+    }
+    console.log(`pen, ${assist ? 'with the pen’s help'.replace('’', "'") : 'without help'}: ${row.join('  ')}   overall ${Math.round((hit / all) * 100)}% (back from the fence)`);
+  }
+  console.log(`pen mark: matched ${penAgree}, promised a landing that missed ${penLiedYes}, landed unpromised ${penLiedNo}`);
+}

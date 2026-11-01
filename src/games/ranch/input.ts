@@ -526,6 +526,27 @@ export class Input {
 
   private known = [true, true, true, true];
 
+  /** Put the Use button at (x, y) CSS px, its centre (while tags hang, off them); null puts it back. */
+  placeAct(x: number | null, y = 0): void {
+    const b = this.btn.act;
+    if (x === null) {
+      if (this.actAt) {
+        this.actAt = '';
+        b.classList.remove('free');
+        b.style.left = b.style.top = '';
+      }
+      return;
+    }
+    const at = `${Math.round(x)},${Math.round(y)}`;
+    if (at === this.actAt) return;
+    this.actAt = at;
+    b.classList.add('free');
+    b.style.left = `${Math.round(x - 32)}px`;
+    b.style.top = `${Math.round(y - 32)}px`;
+  }
+
+  private actAt = '';
+
   setAct(label: string | null): void {
     this.btn.act.classList.toggle('show', !!label);
     const lb = this.btn.act.querySelector('.lb');

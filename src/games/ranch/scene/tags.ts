@@ -3,7 +3,7 @@
 // it) to pick it; it swings forward and its edge darkens. Bought tags flip up
 // and away; the rest fold up when you walk off.
 
-import { BoxGeometry, CanvasTexture, DoubleSide, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector3 } from 'three';
+import { BoxGeometry, CanvasTexture, DoubleSide, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector3, type Camera } from 'three';
 import type { MenuOption } from '../sim';
 import { canvas, paintTag, tex } from './paint';
 
@@ -25,6 +25,8 @@ const MAX = 6;
 interface Tag {
   pivot: Group;
   face: Mesh;
+  backing: Mesh;
+  string: Mesh;
   tex: CanvasTexture;
   ctx: CanvasRenderingContext2D;
   angle: number;
@@ -37,6 +39,12 @@ interface Tag {
   gone: number;
 }
 
+const CORNERS = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+] as const;
 const _a = new Vector3();
 const _n = new Vector3();
 const _p = new Vector3();
@@ -51,6 +59,10 @@ export class TagMenu {
   hot = -1;
   open = false;
   private t = 0;
+  /** Hung as a near grid of two columns (a tall phone), not a zigzag row along a rail. */
+  private grid = false;
+  /** The bar a near grid hangs from. */
+  private dowel: Mesh;
 
   constructor() {
     const back = new MeshLambertMaterial({ color: 0xb8956a });
@@ -59,23 +71,38 @@ export class TagMenu {
       const t = tex(c);
       const pivot = new Group();
       const face = new Mesh(new PlaneGeometry(TW, TH), new MeshLambertMaterial({ map: t, transparent: true, alphaTest: 0.5, side: DoubleSide }));
-      // Alternate tags hang low and high so a row can overlap and stay narrow.
-      const twine = 0.24 + (i % 2) * 0.4;
-      face.position.y = -twine - TH / 2;
       const backing = new Mesh(new BoxGeometry(TW * 0.92, TH * 0.9, 0.012), back);
-      backing.position.set(0, -twine - TH / 2 - 0.005, -0.012);
-      const string = new Mesh(new BoxGeometry(0.008, twine, 0.008), new MeshLambertMaterial({ color: 0x5a4430 }));
-      string.position.y = -twine / 2;
+      const string = new Mesh(new BoxGeometry(0.008, 1, 0.008), new MeshLambertMaterial({ color: 0x5a4430 }));
       pivot.add(face, backing, string);
       pivot.visible = false;
       this.group.add(pivot);
-      this.tags.push({ pivot, face, tex: t, ctx: g, angle: 0, angleV: 0, drop: 0, hot: false, opt: null, key: '', twine, gone: 0 });
+      const tg: Tag = { pivot, face, backing, string, tex: t, ctx: g, angle: 0, angleV: 0, drop: 0, hot: false, opt: null, key: '', twine: 0, gone: 0 };
+      // Alternate tags hang low and high so a row can overlap and stay narrow.
+      this.hang(tg, 0.24 + (i % 2) * 0.4, 0);
+      this.tags.push(tg);
     }
+    this.dowel = new Mesh(new BoxGeometry(1, 0.035, 0.035), new MeshLambertMaterial({ color: 0x8a6a44 }));
+    this.dowel.visible = false;
+    this.group.add(this.dowel);
   }
 
-  /** Hang a set of tags from a rail. */
-  show(rail: Rail, opts: MenuOption[]): void {
+  /** Set a tag's twine length (and how far back its string runs, so it hides behind the tags above). */
+  private hang(tg: Tag, twine: number, back: number): void {
+    tg.twine = twine;
+    tg.face.position.y = -twine - TH / 2;
+    tg.backing.position.set(0, -twine - TH / 2 - 0.005, -0.012);
+    tg.string.scale.y = twine;
+    tg.string.position.set(0, -twine / 2, back);
+  }
+
+  /**
+   * Hang a set of tags from a rail. grid: a near grid of two columns hung from
+   * a bar (the rail's point is its middle), for a tall phone, where a row of
+   * five ran off both edges of the screen and the words were too small to read.
+   */
+  show(rail: Rail, opts: MenuOption[], grid = false): void {
     this.rail = rail;
+    this.grid = grid;
     this.opts = opts.slice(0, MAX);
     this.open = true;
     this.hot = -1;
@@ -90,12 +117,26 @@ export class TagMenu {
       tg.angleV = 0;
       tg.key = '';
       if (!tg.opt) return;
-      const step = TW * 0.66;
-      const off = 0.4 + i * step - (rail.ax === 0 && rail.az === 0 ? ((n - 1) * step) / 2 + 0.4 : 0);
+      let off: number;
+      if (grid) {
+        const row = Math.floor(i / 2);
+        // A tag alone on its row hangs in the middle.
+        const alone = i === n - 1 && n % 2 === 1;
+        off = alone ? 0 : ((i % 2) - 0.5) * (TW + 0.05);
+        this.hang(tg, 0.06 + row * (TH + 0.06), row > 0 ? -0.03 : 0);
+      } else {
+        const step = TW * 0.66;
+        off = 0.4 + i * step - (rail.ax === 0 && rail.az === 0 ? ((n - 1) * step) / 2 + 0.4 : 0);
+        this.hang(tg, 0.24 + (i % 2) * 0.4, 0);
+      }
       tg.pivot.position.set(rail.x + rail.ax * off, rail.y, rail.z + rail.az * off);
       tg.pivot.rotation.set(0, rail.ry, 0, 'YXZ');
       this.paint(tg, false);
     });
+    this.dowel.position.set(rail.x, rail.y + 0.01, rail.z);
+    this.dowel.rotation.set(0, rail.ry, 0);
+    this.dowel.scale.x = n > 1 ? 2 * TW + 0.25 : TW + 0.15;
+    this.dowel.visible = grid && n > 0;
   }
 
   /** Update the options in place (prices became affordable, counts changed). */
@@ -130,6 +171,48 @@ export class TagMenu {
     if (tg) tg.angleV += 9;
   }
 
+  /** A little swing through every tag: here they are, tap one. */
+  nudge(): void {
+    this.tags.forEach((tg, i) => {
+      if (tg.opt && tg.gone === 0) tg.angleV += 5 * (i % 2 ? -1 : 1);
+    });
+  }
+
+  /** The tags on screen (CSS px), all of them together, or null. */
+  screenBox(camera: Camera, w: number, h: number, out: { x0: number; y0: number; x1: number; y1: number }): typeof out | null {
+    let any = false;
+    out.x0 = out.y0 = 1e9;
+    out.x1 = out.y1 = -1e9;
+    for (const tg of this.tags) {
+      if (!tg.opt || tg.gone > 0 || !tg.pivot.visible) continue;
+      tg.face.updateWorldMatrix(true, false);
+      for (const [u, v] of CORNERS) {
+        _a.set(u * TW * 0.5, v * TH * 0.5, 0).applyMatrix4(tg.face.matrixWorld).project(camera);
+        if (_a.z > 1) continue;
+        const x = ((_a.x + 1) / 2) * w;
+        const y = ((1 - _a.y) / 2) * h;
+        out.x0 = Math.min(out.x0, x);
+        out.x1 = Math.max(out.x1, x);
+        out.y0 = Math.min(out.y0, y);
+        out.y1 = Math.max(out.y1, y);
+        any = true;
+      }
+    }
+    // A grid's bar, too.
+    if (any && this.grid && this.dowel.visible) {
+      this.dowel.updateWorldMatrix(true, false);
+      for (const u of [-0.5, 0.5]) {
+        _a.set(u, 0.03, 0).applyMatrix4(this.dowel.matrixWorld).project(camera);
+        if (_a.z > 1) continue;
+        out.x0 = Math.min(out.x0, ((_a.x + 1) / 2) * w);
+        out.x1 = Math.max(out.x1, ((_a.x + 1) / 2) * w);
+        out.y0 = Math.min(out.y0, ((1 - _a.y) / 2) * h);
+        out.y1 = Math.max(out.y1, ((1 - _a.y) / 2) * h);
+      }
+    }
+    return any ? out : null;
+  }
+
   centre(out: Vector3): Vector3 | null {
     if (!this.rail) return null;
     const vis = this.tags.filter((t) => t.opt);
@@ -137,7 +220,14 @@ export class TagMenu {
     out.set(0, 0, 0);
     for (const t of vis) out.add(t.pivot.position);
     out.multiplyScalar(1 / vis.length);
-    out.y -= 0.55;
+    if (!this.grid) {
+      out.y -= 0.55;
+      return out;
+    }
+    // A grid: the middle of its rows.
+    let lo = 0;
+    for (const t of vis) lo = Math.max(lo, t.twine + TH);
+    out.y -= lo / 2;
     return out;
   }
 
@@ -195,14 +285,16 @@ export class TagMenu {
           tg.pivot.visible = false;
           if (tg.gone > 0) tg.opt = null;
         }
+        if (!this.open && tg.drop <= 0) this.dowel.visible = false;
       } else {
         tg.drop = Math.min(1, tg.drop + dt * 4);
         tg.pivot.visible = tg.drop > 0;
       }
       const hot = this.open && i === this.hot;
       this.paint(tg, hot);
-      // Swing on a damped spring; the picked tag leans towards you.
-      const target = (hot ? -0.28 : 0) + Math.sin(this.t * 1.7 + i) * 0.04 * wind;
+      // Swing on a damped spring; the picked tag leans towards you (less on a long twine, so a grid's lower rows stay put).
+      const reach = this.grid ? Math.min(1, 0.3 / (tg.twine + TH / 2)) : 1;
+      const target = ((hot ? -0.28 : 0) + Math.sin(this.t * 1.7 + i) * 0.04 * wind) * reach;
       tg.angleV += ((target - tg.angle) * 60 - tg.angleV * 5) * dt;
       tg.angle += tg.angleV * dt;
       const d = Math.max(0, tg.drop);

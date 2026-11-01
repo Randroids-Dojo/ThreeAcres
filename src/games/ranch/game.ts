@@ -22,9 +22,10 @@ import {
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, thingColor, thingName, type DownyKind, type GoalId, type Thing } from './defs';
-import { Hud, type PageLine } from './hud';
+import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, type Frame } from './input';
-import { Tutor, creditLessons, teachAll, type Say } from './lessons';
+import { Tutor, creditLessons, fullNote, goalSpot, goalText, teachAll, type Say } from './lessons';
+import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
 import { PORCH } from './physics';
 import { Fx } from './scene/fx';
@@ -76,6 +77,8 @@ export class Ranch {
   readonly fx = new Fx();
   readonly vm: Viewmodel;
   private tags = new TagMenu();
+  /** Which tag is chosen: nothing when tags come down, unless a lesson is teaching one. */
+  private choice = new TagChoice();
   readonly hud = new Hud();
   readonly tutor = new Tutor();
   private marker: Marker;
@@ -122,6 +125,8 @@ export class Ranch {
   private spotObjs = [0, 1, 2, 3, 4].map(() => ({ x: 0, y: 0 }));
   private spots: ({ x: number; y: number } | null)[] = [null, null, null, null, null];
   private box = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  private tagBox = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  private icons: (SlotIcon | null)[] = [null, null, null, null, null];
   private w = 0;
   private h = 0;
   private dpr = 1;
@@ -129,7 +134,9 @@ export class Ranch {
   private prevMenuZ = 0;
   private quality: 'low' | 'high';
   private nanArmed = false;
-  private crossTarget: 'target' | 'prickly' | 'sell' | null = null;
+  private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | null = null;
+  /** Seconds the journal goal's spot (a gate) has been pointed at: the edge chevron shows only at first. */
+  private goalSpotT = 0;
   readonly debug: DebugHooks = { afterFrame: null };
   /** Frame stats for scripted checks: CPU ms per frame (update plus render submit). */
   readonly cpu: number[] = [];
@@ -217,8 +224,10 @@ export class Ranch {
     this.resize();
     this.placeCamera(0);
     // Fonts arrive after the first paint; redraw the painted things once they do.
+    this.props.paintGates();
     void document.fonts?.ready.then(() => {
       this.board.key = '';
+      this.props.paintGates();
     });
   }
 
@@ -669,8 +678,9 @@ export class Ranch {
         const room = this.sim.accept(e.thing) < 0;
         const none = room && s.slots.every((q) => q.t) && !s.slots.some((q) => q.t === e.thing);
         // Once windows are known, say how to make room: tip one out.
-        const how = !this.sim.knows('slots') ? '' : this.isTouch() ? ' Hold a window to empty it.' : this.device() === 'pad' ? ' Hold LB to empty one.' : ' Hold Q to empty one.';
-        this.hud.note(none ? `No window free.${how}` : `That window is full.${how}`, how ? 3.2 : 2.2);
+        const dev = this.device();
+        const known = this.sim.knows('slots');
+        this.hud.note(fullNote(dev === 'touch' ? 'touch' : dev === 'pad' ? 'pad' : 'mouse', none, known), known ? 3.2 : 2.2);
         break;
       }
       case 'empty':
@@ -769,6 +779,10 @@ export class Ranch {
       case 'store':
         this.cue('ranch.suck', e.x, e.y, e.z, 0.6, 0.7);
         break;
+      case 'stray':
+        // One of yours hopped out of its pen: a squeak where it landed (the journal says so and points at it).
+        this.cue('ranch.squeak', e.x, e.y, e.z, 0.9, 0.9);
+        break;
       case 'first': {
         const [title, line] = FIRST[e.kind];
         this.fx.burst(a.mx + a.dx * 1.2, a.my + a.dy * 1.2, a.mz + a.dz * 1.2, KIND[e.kind].body, 30, 2.2);
@@ -815,9 +829,10 @@ export class Ranch {
     this.hud.showPage(`Paid ${g.reward} coins`, lines, 3.4);
   }
 
-  /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do. */
+  /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do (a gate's goal counts the coins towards it). */
   private goalLine(): string {
-    return this.sim.openGoals(1)[0]?.text ?? '';
+    const g = this.sim.openGoals(1)[0];
+    return g ? goalText(g.id, this.sim.s) : '';
   }
 
   /** Turn to face the yard (the crate and the pens), level, as you wake. */
@@ -852,10 +867,22 @@ export class Ranch {
     // No lesson up: the next journal goal, calmly, on the same page (J hides it until something changes).
     const goal = v.line ? '' : this.goalLine();
     if (goal !== this.goalShown) {
+      if (goal.split(',')[0] !== this.goalShown.split(',')[0]) this.goalSpotT = 0;
       this.goalShown = goal;
       this.goalHidden = false;
     }
     this.hud.setGoal(this.goalHidden ? '' : goal);
+    // A goal with a place (a gate): an arrow over it, as a lesson would.
+    const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
+    if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
+      this.tutor.mark.on = true;
+      this.goalSpotT += dt;
+    } else if (!g) this.goalSpotT = 0;
+  }
+
+  /** Is the arrow on screen a journal goal's (not a lesson's)? */
+  private get goalMarked(): boolean {
+    return this.tutor.mark.on && !this.tutor.line && this.tutor.current === '';
   }
 
   private prevLessonDone = '';
@@ -927,12 +954,42 @@ export class Ranch {
     return { x: g.x + side * 0.55, y: heightAt(g.x, g.z) + 2.25, z: g.z + 0.3, ax: 0, az: 0, ry: (side * Math.PI) / 2 };
   }
 
+  private pickDev(): PickDev {
+    const d = this.device();
+    return d === 'touch' ? 'touch' : d === 'pad' ? 'pad' : 'mouse';
+  }
+
+  /**
+   * A tall phone's tags: a bar about 1.8 m in front of your eyes, between you
+   * and where the tags would hang on the post, the bench, the porch or the gate,
+   * turned to face you.
+   */
+  private nearRail(it: Interactable, n: number): Rail {
+    const base = this.railFor(it, n);
+    const along = base.ax === 0 && base.az === 0 ? 0 : 0.4 + ((n - 1) * 0.56 * 0.66) / 2;
+    const cx = base.x + base.ax * along;
+    const cz = base.z + base.az * along;
+    const e = this.eye;
+    let dx = cx - e.x;
+    let dz = cz - e.z;
+    const l = Math.hypot(dx, dz) || 1;
+    dx /= l;
+    dz /= l;
+    const D = clamp(l - 0.3, 1.2, 1.8);
+    const ry = Math.atan2(-dx, -dz);
+    return { x: e.x + dx * D, y: e.y + 0.24, z: e.z + dz * D, ax: Math.cos(ry), az: -Math.sin(ry), ry };
+  }
+
   private openMenu(it: Interactable): void {
     const opts = this.sim.menu(it);
     this.doneHint('use');
     if (!opts.length) return;
-    const rail = this.railFor(it, opts.length);
-    this.tags.show(rail, opts);
+    // On a tall phone the tags hang as a near grid in front of you, all on screen and large enough to read.
+    const near = this.isTouch() && this.h > this.w * 1.15;
+    const rail = near ? this.nearRail(it, opts.length) : this.railFor(it, opts.length);
+    this.tags.show(rail, opts, near);
+    // Nothing is chosen as the tags come down, unless the lesson on screen teaches one of them.
+    this.choice.open(this.tags.opts, this.pickDev(), this.tutor.tag);
     const p = this.sim.s.player;
     this.menu = { it, rail, x: p.x, z: p.z, closeT: 0 };
     this.cue('ranch.slot', undefined, undefined, undefined, 0.6, 0.8);
@@ -944,7 +1001,7 @@ export class Ranch {
       const dz = c.z - this.eye.z;
       this.turn = { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)), t: 0.45 };
     }
-    this.tags.setHot(-1);
+    this.tags.setHot(this.choice.hot);
   }
 
   private closeMenu(): void {
@@ -961,28 +1018,40 @@ export class Ranch {
       if (m.closeT <= 0) this.closeMenu();
       return;
     }
-    // Pick by looking (crosshair), by tapping or clicking a tag, or by number.
+    // Choose by looking (the crosshair, once you have looked about yourself; never on touch), by tapping
+    // or clicking a tag (on touch the first tap chooses and a second takes it), or by number.
+    const ch = this.choice;
+    ch.setDev(this.pickDev());
     const a = this.aim;
-    let hot = this.tags.pick(a.ex, a.ey, a.ez, a.dx, a.dy, a.dz);
+    ch.aim(this.tags.pick(a.ex, a.ey, a.ez, a.dx, a.dy, a.dz), f.looked ? Math.abs(f.lookX) + Math.abs(f.lookY) : 0);
     if (f.tapped) {
       const ray = this.screenRay(f.tapX, f.tapY);
       const hit = this.tags.pick(this.eye.x, this.eye.y, this.eye.z, ray.x, ray.y, ray.z);
       if (hit >= 0) {
-        this.tags.setHot(hit);
-        this.confirm(hit);
+        const take = ch.tap(hit);
+        this.tags.setHot(ch.hot);
+        if (take) this.confirm(hit);
+        else this.cue('ranch.slot', undefined, undefined, undefined, 0.5, 1.15);
+        return;
+      }
+      // A tap on the view away from the tags puts them away (touch).
+      if (this.isTouch()) {
+        this.closeMenu();
         return;
       }
     }
     if (f.slotDirect >= 0 && f.slotDirect < this.tags.opts.length) {
-      hot = f.slotDirect;
-      this.tags.setHot(hot);
-      this.confirm(hot);
+      ch.hot = f.slotDirect;
+      this.tags.setHot(ch.hot);
+      this.confirm(ch.hot);
       return;
     }
-    if (hot >= 0 || !this.isTouch()) this.tags.setHot(hot);
+    this.tags.setHot(ch.hot);
     if (f.interact || f.confirm || (f.puffPressed && this.input.locked)) {
-      if (this.tags.hot >= 0) this.confirm(this.tags.hot);
-      else this.closeMenu();
+      const what = ch.press(this.tags.opts);
+      if (what === 'take') this.confirm(ch.hot);
+      else if (what === 'close') this.closeMenu();
+      else this.tags.nudge();
     }
     // Keep options fresh (coins change while you stand there).
     if (Math.floor(this.t * 2) !== Math.floor((this.t - dt) * 2)) this.tags.refresh(this.sim.menu(m.it));
@@ -1100,17 +1169,18 @@ export class Ranch {
     if (this.menu) hud.setCross(this.tags.hot >= 0 ? 'tag' : 'idle');
     else hud.setCross(this.crossTarget ?? 'idle');
     const slot = s.slots[s.sel];
-    hud.setCount(slot.t ? slot.n : 0, slot.t ? thingName(slot.t, slot.n) : '', capacity(s));
+    // While tags hang, the count by the crosshair steps aside (it lay over a tag's words).
+    const counted = slot.t && !this.menu;
+    hud.setCount(counted ? slot.n : 0, counted ? thingName(slot.t!, slot.n) : '', capacity(s));
     hud.setCoins(s.coins, dt);
     hud.setHour(s.hour);
     // Use prompt: the key glyph shows until you have used something once.
     const keyGlyph = this.sim.s.hints.includes('use') ? null : touch ? null : this.device() === 'pad' ? 'X' : 'E';
     if (this.menu) {
-      const hot = this.tags.hot;
-      const o = hot >= 0 ? this.tags.opts[hot] : null;
-      const verb = !o ? (touch ? 'Tap a tag' : 'Look at a tag') : o.id === 'sleep' ? 'Sleep' : o.id.startsWith('silo:') ? 'Pull these' : o.price !== null ? 'Buy' : o.id === 'garden:clear' ? 'Pull it' : '';
-      hud.setPrompt(verb || null, o && !touch ? (this.device() === 'pad' ? 'X' : 'E') : null);
-      this.input.setAct(o ? verb || 'Use' : 'Close');
+      const o = this.choice.hot >= 0 ? this.tags.opts[this.choice.hot] : null;
+      const verb = this.choice.label(this.tags.opts);
+      hud.setPrompt(verb, o && !touch ? (this.device() === 'pad' ? 'X' : 'E') : null);
+      this.input.setAct(verb);
     } else if (near) {
       hud.setPrompt(near.label, keyGlyph);
       this.input.setAct(near.kind === 'door' ? 'Door' : near.kind === 'bench' ? 'Bench' : near.kind === 'gate' ? 'Gate' : near.kind === 'chute' ? 'Box' : 'Post');
@@ -1138,6 +1208,13 @@ export class Ranch {
     bb.y0 *= this.h;
     bb.y1 *= this.h;
     hud.placeSlots(this.spots, showSlots && !this.paused, bb, this.paused || this.menu ? -1 : this.tutor.mark.slot);
+    // The chosen window's ring and what each window holds, wherever the windows are on screen.
+    for (let i = 0; i < 5; i++) {
+      const t = s.slots[i]?.t ?? null;
+      this.icons[i] = !t ? null : isDowny(t) ? 'downy' : t === 'cloverhead' ? 'clover' : t === 'sweetroot' ? 'root' : t === 'dewberry' ? 'berry' : 'fluff';
+    }
+    hud.markSlots(this.spots, knows('slots') && this.vm.windowsShown && this.vm.raised > 0.9 && !this.paused, s.sel, this.vm.windowRadius() * this.w, this.icons);
+    this.placeAct(touch);
     // J puts the goal line away (or back), unless a lesson has the page.
     if (f.journal && !hud.lessonUp) this.goalHidden = !this.goalHidden;
     // A wild downy digging in: the crosshair fills as it tires.
@@ -1147,10 +1224,31 @@ export class Ranch {
     hud.update(dt);
   }
 
-  /** When the lesson's spot is out of view, a chevron on the edge of the screen points the way. */
+  /**
+   * While tags hang, the Use button moves off them: just under the tags if
+   * there is room above the bellows and buttons, else just over them, else to
+   * the side. Otherwise it sits in its usual place.
+   */
+  private placeAct(touch: boolean): void {
+    const box = touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
+    if (!box) {
+      this.input.placeAct(null);
+      return;
+    }
+    const R = 32;
+    // The button with its word under it: 32 px up, 32 + 22 px down from its centre.
+    const floor = this.h * 0.7;
+    const top = 120;
+    const x = clamp((box.x0 + box.x1) / 2, R + 12, this.w - R - 12);
+    if (box.y1 + 12 + 2 * R + 22 <= floor) this.input.placeAct(x, box.y1 + 12 + R);
+    else if (box.y0 - 12 - R - 22 - R >= top - R) this.input.placeAct(x, box.y0 - 12 - 22 - R);
+    else this.input.placeAct(box.x1 + 12 + R <= this.w - 8 ? box.x1 + 12 + R : Math.max(R + 8, box.x0 - 12 - R), clamp((box.y0 + box.y1) / 2, top, floor - R - 22));
+  }
+
+  /** When the lesson's spot is out of view, a chevron on the edge of the screen points the way (a journal goal's, only for its first few seconds). */
   private edgePointer(): void {
     const m = this.tutor.mark;
-    if (!m.on || this.menu || this.paused) {
+    if (!m.on || this.menu || this.paused || (this.goalMarked && this.goalSpotT > 6)) {
       this.hud.setEdge(null);
       return;
     }
@@ -1309,7 +1407,7 @@ export class Ranch {
   }
 
   /** What the lessons have put in the 3D layer, for checks: the bellows, its windows, the marker, gate price tags. */
-  seen(): { lesson: string; done: boolean; line: string; bellows: number; windows: boolean; marker: string | null; ring: boolean; gateTags: boolean } {
+  seen(): { lesson: string; done: boolean; line: string; bellows: number; windows: boolean; marker: string | null; ring: boolean; gateTags: boolean; goalSpot: boolean } {
     const m = this.marker.showing;
     return {
       lesson: this.tutor.current,
@@ -1320,7 +1418,13 @@ export class Ranch {
       marker: m.icon,
       ring: m.ring,
       gateTags: this.props.gates.ridge.tag.visible || this.props.gates.hollow.tag.visible,
+      goalSpot: this.goalMarked,
     };
+  }
+
+  /** For checks: the tag chosen now (-1 for none) and what the act button says. */
+  tagChoice(): { hot: number; label: string } {
+    return { hot: this.choice.hot, label: this.menu ? this.choice.label(this.tags.opts) : '' };
   }
 
   thing(t: Thing): string {

@@ -68,6 +68,10 @@ export interface Downy extends Body {
   starveT: number;
   /** The meal you gave it that its next fluff comes from (0: not fed by you). */
   feedId: number;
+  /** The pen it hopped out of, while it is loose (-1: none). Not saved. */
+  strayFrom: number;
+  /** Seconds the bellows leaves it alone (just tipped out of a window). */
+  noPull: number;
 }
 
 export interface Item extends Body {
@@ -90,6 +94,8 @@ export interface Item extends Body {
   by: number;
   /** For fluff: the meal you gave that it came from (0 if not fed by you). */
   feed: number;
+  /** Seconds the bellows leaves it alone (just tipped out of a window). */
+  noPull: number;
 }
 
 export interface Nettle extends Body {
@@ -337,6 +343,8 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     alert: false,
     starveT: 0,
     feedId: 0,
+    strayFrom: -1,
+    noPull: 0,
   };
 }
 
@@ -363,6 +371,7 @@ export function newItem(s: RanchState, type: ItemType, x: number, y: number, z: 
     blown: false,
     by: 0,
     feed: 0,
+    noPull: 0,
   };
 }
 

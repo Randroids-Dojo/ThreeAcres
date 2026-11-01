@@ -145,7 +145,12 @@ const tuftAt = (await page.evaluate(() => { const t = window.ranch.sim.s.items.f
 await place(tuftAt.x, Math.min(tuftAt.z + 3.2, 33), tuftAt.x, tuftAt.y, tuftAt.z);
 await frames(page, 3);
 await page.mouse.down({ button: 'right' });
-await page.waitForTimeout(1600);
+// Sweep the aim over each piece of fluff in turn, as a player would (they land a metre or two apart).
+for (let k = 0; k < 8; k++) {
+  const t = await page.evaluate(() => { const t = window.ranch.sim.s.items.find((i) => !i.gone && i.type.startsWith('tuft')); return t ? { x: t.x, y: t.y, z: t.z } : null; });
+  if (t) await page.evaluate(([x, y, z]) => window.ranch.aimAt(x, y, z), [t.x, t.y, t.z]);
+  await page.waitForTimeout(200);
+}
 await page.mouse.up({ button: 'right' });
 s1 = await S(page);
 const down = s1.slots.find((q) => q[0] === 'tuft-clover');

@@ -11,7 +11,7 @@ import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, type Aim, type Controls } from 
 import { newItem } from '../src/games/ranch/state';
 import { rng } from '../src/games/ranch/noise';
 import { BED_HALF } from '../src/games/ranch/physics';
-import { GATES, PADS, PEN_R } from '../src/games/ranch/world';
+import { GATES, PADS, PEN_R, zoneAt } from '../src/games/ranch/world';
 
 const idle: Controls = { moveX: 0, moveZ: 0, sprint: false, jump: false, jumpPressed: false, draw: false, puff: false, puffPressed: false };
 
@@ -202,6 +202,7 @@ const SETUPS: Setup[] = [
   { name: 'Ember pen of 6 and clover pen of 6, a garden each with a sprinkler', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }, { pad: 2, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 1.5 },
   { name: 'Brook pen of 6 with a trough and ember pen of 6, a garden each with a sprinkler', pens: [{ pad: 1, kind: 'brook', n: 6, ups: ['feeder', 'trough'] }, { pad: 2, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'dewberry', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 1.5 },
   { name: 'Hand-fed: pen of 6 clover, no feeder, the starter garden', pens: [{ pad: 1, kind: 'clover', n: 6, ups: [] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 1.5 },
+  { name: 'First pen: 3 clover, hand-fed, the starter garden', pens: [{ pad: 1, kind: 'clover', n: 3, ups: [] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 1.5 },
 ];
 
 const pad = (v: string | number, n: number) => String(v).padStart(n);
@@ -217,6 +218,57 @@ for (const setup of SETUPS) {
   const coins = days.slice(1).reduce((a, d) => a + d.coins, 0) / Math.max(1, days.length - 1);
   avgs.push({ name: setup.name, coins });
   console.log(`   settled income: ${Math.round(coins)} coins a day\n`);
+}
+
+// Sweeping the meadow instead of ranching: the real valley, wild downies foraging the wild food, and a
+// hand that walks the meadow every hour and a half picking up every piece of fluff lying outside the ranch
+// and selling it (the playtest swept up +122 coins in 23 s and +180 in 34 s, about 8 times ranching).
+{
+  Math.random = rng(13);
+  const sim = new Sim(null);
+  const s = sim.s;
+  s.hour = 6;
+  s.night = s.day;
+  s.player.x = -15.5;
+  s.player.z = 37.2;
+  const aim: Aim = { ex: s.player.x, ey: s.player.y + 1.6, ez: s.player.z, dx: 0, dy: 0, dz: -1, mx: s.player.x, my: s.player.y + 1.4, mz: s.player.z - 0.6 };
+  const days: { coins: number; fluff: number; peak: number; meals: number }[] = [];
+  let t = 0;
+  for (let k = 0; k < 3; k++) {
+    const day = { coins: 0, fluff: 0, peak: 0, meals: 0 };
+    const fed0 = s.stats.fed;
+    let next = 0;
+    while (s.hour < 21) {
+      sim.update(1 / 20, idle, aim);
+      sim.events.length = 0;
+      t += 1 / 20;
+      if (t >= next) {
+        next = t + 1.5 * HOUR;
+        let lying = 0;
+        for (const it of s.items) {
+          if (it.gone || !isTuft(it.type) || zoneAt(it.x, it.z) === 'ranch') continue;
+          lying++;
+          it.gone = true;
+          const kd = TUFT_KIND[it.type];
+          const c = sim.price(kd);
+          s.market.sold[kd]++;
+          day.coins += c;
+          day.fluff++;
+        }
+        day.peak = Math.max(day.peak, lying);
+      }
+    }
+    day.meals = s.stats.fed - fed0;
+    days.push(day);
+    sim.sleep();
+    sim.events.length = 0;
+  }
+  console.log('Sweeping the meadow: wild downies forage on their own; every 1.5 game hours a hand picks up all fluff outside the ranch and sells it');
+  console.log('   day  wild meals  fluff swept  most lying at once  coins');
+  days.forEach((d, i) => console.log(`   ${pad(i + 1, 3)}  ${pad(d.meals, 10)}  ${pad(d.fluff, 11)}  ${pad(d.peak, 18)}  ${pad(d.coins, 5)}`));
+  const sweep = days.slice(1).reduce((a, d) => a + d.coins, 0) / 2;
+  const pen3 = avgs.find((a) => a.name.startsWith('First pen'))!.coins;
+  console.log(`   settled: ${Math.round(sweep)} coins a day sweeping, against ${Math.round(pen3)} for a first pen of three and ${Math.round(avgs[0].coins)} for the starter pen of six\n`);
 }
 
 // Neglect: a pen of 6 with a full feeder and nobody tending it.

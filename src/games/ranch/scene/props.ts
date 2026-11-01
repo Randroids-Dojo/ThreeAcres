@@ -68,7 +68,7 @@ import {
 } from '../world';
 import { at, jitter, merge, part } from './geo';
 import { U, matte } from './mat';
-import { signAtlas } from './paint';
+import { canvas, paintTag, signAtlas, tex } from './paint';
 
 const WOOD = 0x9a6c48;
 const WOOD_D = 0x6f4a32;
@@ -135,6 +135,8 @@ export interface Props {
   board: Mesh;
   /** Where each kind of tag menu hangs: the rail's left end, direction along it, and the way the tags face. */
   tagRails: { bench: { x: number; y: number; z: number; ax: number; az: number; ry: number } };
+  /** Paint the words on the gates' price tags (again once the fonts arrive). */
+  paintGates(): void;
   update(t: number, night: number): void;
 }
 
@@ -423,6 +425,7 @@ export function buildProps(boardMat: Material): Props {
 
   // ------------------------------------------------------------ zone walls and gates
   const gateObjs = {} as Props['gates'];
+  const gatePaint: (() => void)[] = [];
   {
     const R = rng(77);
     const wall = (x: number, zone: 'ridge' | 'hollow') => {
@@ -466,11 +469,22 @@ export function buildProps(boardMat: Material): Props {
         group.add(o);
         return o;
       };
-      // A price tag hangs on the closed gate.
+      // A price tag hangs on the closed gate, with the way it opens and its price on it (it was a blank board).
       const tag = new Group();
-      const tg = merge([box(0.05, 0.36, 0.6, 0xd8bc8a, 0, 0, 0), beam(0, 0.18, 0, 0, 0.5, 0, 0.02, 0x4a3828)]);
+      const tg = merge([box(0.05, 0.36, 0.66, 0xd8bc8a, 0, 0, 0), beam(0, 0.18, 0, 0, 0.5, 0, 0.02, 0x4a3828)]);
       tag.add(new Mesh(tg, matte()));
-      tag.position.set(x + (zone === 'ridge' ? 0.12 : -0.12), py + 1.05, gz);
+      const out = zone === 'ridge' ? 1 : -1;
+      const [tc, tgx] = canvas(320, 160);
+      const ttex = tex(tc);
+      const face = new Mesh(new PlaneGeometry(0.64, 0.32), new MeshLambertMaterial({ map: ttex, transparent: true, alphaTest: 0.5 }));
+      face.position.set(out * 0.03, 0, 0);
+      face.rotation.y = (out * Math.PI) / 2;
+      tag.add(face);
+      gatePaint.push(() => {
+        paintTag(tgx, 320, 160, GATES[zone].name, GATES[zone].cost, 'Opens the gate', true, false, zone === 'ridge' ? 5 : 6);
+        ttex.needsUpdate = true;
+      });
+      tag.position.set(x + out * 0.12, py + 1.05, gz);
       group.add(tag);
       gateObjs[zone] = { left: leaf(-1), right: leaf(1), tag };
     };
@@ -584,6 +598,7 @@ export function buildProps(boardMat: Material): Props {
     glow,
     board: boardMesh!,
     tagRails: { bench: benchRail },
+    paintGates: () => gatePaint.forEach((f) => f()),
     update(t: number, night: number) {
       sails.rotation.z = -t * 0.35;
       glow.emissiveIntensity = 0.15 + night * 1.6;

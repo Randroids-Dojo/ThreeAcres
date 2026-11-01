@@ -356,7 +356,8 @@ export function paintTag(g: CanvasRenderingContext2D, w: number, h: number, titl
   g.lineTo(0, 26);
   g.closePath();
   g.clip();
-  plank(g, 0, 0, w, h, hot ? '#e2c48e' : '#cfae7c', seed);
+  // The chosen tag is plainly chosen: a paler plank and a heavy inked border (it also swings towards you).
+  plank(g, 0, 0, w, h, hot ? '#f1dcae' : '#cfae7c', seed);
   g.restore();
   g.fillStyle = '#3b2814';
   g.beginPath();
@@ -382,7 +383,7 @@ export function paintTag(g: CanvasRenderingContext2D, w: number, h: number, titl
   }
   if (hot) {
     g.strokeStyle = '#2f2012';
-    g.lineWidth = 5;
-    g.strokeRect(7, 30, w - 14, h - 37);
+    g.lineWidth = 9;
+    g.strokeRect(6, 31, w - 12, h - 37);
   }
 }

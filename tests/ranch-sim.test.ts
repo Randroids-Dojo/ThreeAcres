@@ -671,9 +671,12 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     pullFor(0.6);
     expect(d.gone).toBe(false);
     expect(d.tug).toBeGreaterThan(0.4);
-    // Looked away: the tug fades and it hops off.
+    // Looked away: the tug fades and it hops off. Close in on it again (it has seen you: it is out of reach by now, or nearly).
     run(sim, 1.2, idle);
     expect(d.tug).toBe(0);
+    const away = Math.hypot(d.x - sim.s.player.x, d.z - sim.s.player.z);
+    const l = Math.max(away, 1e-3);
+    stand(sim, d.x - ((d.x - sim.s.player.x) / l) * 4.5, d.z - ((d.z - sim.s.player.z) / l) * 4.5);
     let t = 0;
     while (!d.gone && t < 4) {
       sim.update(1 / 30, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
@@ -698,7 +701,7 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     expect(Math.abs(Math.hypot(mine.x - 0, mine.z + 16) - m0)).toBeLessThan(3);
   }));
 
-  it('tips a whole window out on the ground in front of you', () => {
+  it('tips a whole window out on the ground a few metres in front of you', () => {
     const sim = quiet();
     stand(sim, 0, 30);
     for (let i = 0; i < 9; i++) sim.stow('cloverhead');
@@ -711,7 +714,9 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     expect(heads.length).toBe(9);
     for (const h of heads) {
       expect(h.z).toBeLessThan(30);
-      expect(Math.hypot(h.x, h.z - 30)).toBeLessThan(2.6);
+      // Tossed clear of your feet (the playtest's landed within 1.7 m and the next pull took them straight back).
+      expect(Math.hypot(h.x, h.z - 30)).toBeGreaterThan(2);
+      expect(Math.hypot(h.x, h.z - 30)).toBeLessThan(6);
     }
     expect(sim.events.some((e) => e.t === 'empty')).toBe(true);
     // A downy window too: it hops out, still yours.

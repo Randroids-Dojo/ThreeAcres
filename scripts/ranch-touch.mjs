@@ -85,10 +85,16 @@ check('Use hangs the tags', (await S(page)).menu);
 await shot('04-tags');
 const tag = await page.evaluate(() => window.ranch.tagScreen(0));
 const c0 = (await S(page)).coins;
+check('nothing is chosen as the tags come down; Use says to tap a tag', await page.evaluate(() => { const c = window.ranch.tagChoice(); return c.hot === -1 && c.label === 'Tap a tag' && document.querySelector('.rt-act').textContent === 'Tap a tag'; }));
+// A thumb chooses first (Use then says Buy), and a second tap on the chosen tag takes it.
+await tap(tag.x, tag.y, 11);
+await page.waitForTimeout(400);
+s1 = await S(page);
+check('a first tap on the Pen tag chooses it and spends nothing', s1.pads[1] === 'empty' && s1.coins === c0 && (await page.evaluate(() => window.ranch.tagChoice().label)) === 'Buy', `${s1.pads[1]}, ${c0} to ${s1.coins}`);
 await tap(tag.x, tag.y, 11);
 await page.waitForTimeout(900);
 s1 = await S(page);
-check('tapping the Pen tag builds it', s1.pads[1] === 'pen' && s1.coins === c0 - 250, `${s1.pads[1]}, ${c0} to ${s1.coins}`);
+check('a second tap on the Pen tag builds it', s1.pads[1] === 'pen' && s1.coins === c0 - 250, `${s1.pads[1]}, ${c0} to ${s1.coins}`);
 
 // ---- tap Puff to send the downy into the pen
 await place(17, 34.5, 17, 6.6, 26.5);

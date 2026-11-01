@@ -22,6 +22,9 @@
 /* Fluff chosen and a blow from here would sell: a little funnel with the fluff dropping in. */
 .rh-cross[data-s='sell'] .x-sell { display: inline; }
 .rh-cross[data-s='sell'] { color: #ffd98a; animation: rh-breathe 0.9s ease-in-out infinite; }
+/* A downy chosen and a blow from here would land it in a pen: a little fence with the downy over it. */
+.rh-cross[data-s='pen'] .x-pen { display: inline; }
+.rh-cross[data-s='pen'] { color: #eaf3c6; animation: rh-breathe 0.9s ease-in-out infinite; }
 @keyframes rh-breathe { 50% { transform: scale(1.12); } }
 /* A wild downy digging in: a ring round the crosshair fills as it tires. */
 .rh-cross .x-tug { display: none; transition: stroke-dashoffset 0.08s linear; }
@@ -113,6 +116,14 @@
 .rh-slotpoint::after { content: ''; position: absolute; left: -7px; top: -34px; width: 11px; height: 11px; border-right: 3.5px solid #fbf0d4; border-bottom: 3.5px solid #fbf0d4; transform: rotate(45deg); filter: drop-shadow(0 1px 1.5px rgba(20, 16, 36, 0.7)); animation: rh-point 0.8s ease-in-out infinite alternate; }
 @keyframes rh-point { from { translate: 0 -5px; } to { translate: 0 1px; } }
 @media (prefers-reduced-motion: reduce) { .rh-slotpoint::after { animation: none; } }
+/* The chosen window wears a cream ring on every device; each window carries a small icon of what it holds. */
+.rh-slotsel { position: absolute; z-index: 3; left: 0; top: 0; box-sizing: border-box; border-radius: 50%; border: 3px solid #fbf0d4; box-shadow: 0 0 0 1.5px rgba(28, 22, 44, 0.65), inset 0 0 0 1.5px rgba(28, 22, 44, 0.65); pointer-events: none; display: none; }
+.rh-slotsel.on { display: block; }
+.rh-slotico { position: absolute; z-index: 3; left: 0; top: 0; pointer-events: none; display: none; }
+.rh-slotico.on { display: block; }
+.rh-slotico svg { width: 100%; height: 100%; display: block; overflow: visible; fill: none; stroke: #2a2216; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; paint-order: stroke; filter: drop-shadow(0 0 1.2px rgba(251, 240, 212, 0.95)); }
+.rh-slotico svg .f { fill: #2a2216; stroke: none; }
+.rh.paused .rh-slotsel, .rh.paused .rh-slotico { display: none; }
 /* Slot windows sit above the stick's capture zone (a lesson may say to tap any window) and below the buttons. */
 .rh-slotbtn { position: absolute; z-index: 5; left: 0; top: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; pointer-events: auto; display: none; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* Held: a cream ring draws round the window; when it closes, the window tips out. */
@@ -153,6 +164,8 @@
 .rt-jump { right: 28px; bottom: calc(124px + var(--safe-b)); width: 56px; height: 56px; }
 .rt-act { right: 50%; margin-right: -32px; bottom: calc(50% - 150px); width: 64px; height: 64px; display: none; }
 .rt-act.show { display: grid; }
+/* While tags hang, the Use button sits off them (placed from the tags' place on screen). */
+.rt-act.free { right: auto; bottom: auto; margin: 0; }
 .rt-pause { right: 14px; top: calc(72px + var(--safe-t)); width: 40px; height: 40px; border-width: 1.5px; }
 .rt-pause .ic { width: 40%; height: 40%; }
 #app[data-device='touch'] .rh-click { display: none; }
@@ -175,4 +188,6 @@
   .rh-page li .box { width: 14px; height: 14px; margin-top: 3px; }
   .rh-page.lesson { width: min(262px, calc(100% - 108px)); padding: 18px 12px 12px 26px; }
   .rh-page.lesson li { font-size: 15px; --lh: 20px; }
+  /* The zone's name comes up below the journal page, not behind it. */
+  .rh-zone { top: calc(204px + var(--safe-t)); font-size: 24px; }
 }

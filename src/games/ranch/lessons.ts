@@ -9,7 +9,7 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { GARDEN_HOURS, eats, isDowny, isFood, isTuft, wantedFood, type Food } from './defs';
+import { GARDEN_HOURS, GOALS, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId } from './defs';
 import { padSpots, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
 import { DOOR, EXCHANGE, GATES, PADS, PEN_R, RANCH_GATE, WORKBENCH, zoneAt } from './world';
@@ -51,6 +51,10 @@ interface Lesson {
   then?: string[];
   /** Takes over from the lesson on screen when it becomes ready. */
   urgent?: boolean;
+  /** Comes back whenever it applies again (a downy out of its pen); never counted as learned. */
+  repeat?: boolean;
+  /** The hanging tag it teaches: chosen for you when that post's tags come down. */
+  tag?: string;
   ready(s: RanchState, n: N): boolean;
   /** The line now. A lesson with steps words each one from the ranch as it stands. */
   text(say: Say, s?: RanchState): string;
@@ -59,7 +63,7 @@ interface Lesson {
   /** Runs every frame while it is on screen. */
   each?(s: RanchState): void;
   done(s: RanchState, n: N): boolean;
-  /** The moment passed without it being done (night fell before you slept): it leaves quietly. */
+  /** The moment passed without it being done (night fell before you slept): it leaves quietly, not learned, and comes back the next time it applies. */
   lapse?(s: RanchState): boolean;
   /** Runs when it comes on screen. */
   start?(s: RanchState): void;
@@ -250,6 +254,54 @@ function feedMark(s: RanchState, m: Mark, floor: Floor): boolean {
   return true;
 }
 
+/** Your downies that hopped out of a pen and are still loose. */
+const strays = (s: RanchState) => s.downies.filter((d) => !d.gone && d.strayFrom >= 0 && d.pen < 0);
+
+/**
+ * A downy out of its pen: pull it in (it is loose), then blow it back into a
+ * pen (it is in the jar). Done once no stray is loose and a downy has come down
+ * in a pen since (or none is aboard): the jar may hold others, caught wild.
+ */
+function strayStep(s: RanchState): 'pull' | 'blow' | null {
+  if (strays(s).length) return 'pull';
+  const back = (s.learnCount['penned'] ?? 0) > (s.learnCount['stray:penned'] ?? 0);
+  return carrying(s, isDowny) && !back ? 'blow' : null;
+}
+
+const STRAY = {
+  pull: 'Pull in the downy that got out.',
+  blow: 'Blow the downy into the pen.',
+};
+
+/** The pen with a feeder to fill: the nearest. */
+const feederPad = (s: RanchState) => nearestPad(s, (i) => s.pads[i].kind === 'pen' && s.pads[i].ups.includes('feeder'));
+
+/** The food that pen's downies want (clover heads with nobody in it yet). */
+function feederFood(s: RanchState, i: number): Food {
+  const d = s.downies.find((q) => !q.gone && q.pen === i);
+  return d ? wantedFood(d.kind) : 'cloverhead';
+}
+
+/** Filling a new feeder: fetch the food (pull), choose its window (choose), then blow it in at the top (fill). */
+function feederStep(s: RanchState): 'pull' | 'choose' | 'fill' {
+  const f = feederFood(s, feederPad(s));
+  const chosen = s.slots[s.sel];
+  if (chosen?.t === f && chosen.n > 0) return 'fill';
+  return carrying(s, (t) => t === f) ? 'choose' : 'pull';
+}
+
+const FEEDER = {
+  fill: 'Blow food into the feeder.',
+  choose: (q: Say) => (q.dev === 'touch' ? "Tap the food's window to choose it." : q.dev === 'pad' ? 'Press LB or RB to choose the food.' : 'Press Q until the food is chosen.'),
+  pull: (f: Food) => (f === 'cloverhead' ? FEED.pull : 'Pull food from the garden.'),
+};
+
+/** The note under the crosshair when the jar refuses something, worded for the device (eight words or fewer). */
+export function fullNote(dev: Dev, noneFree: boolean, windowsKnown: boolean): string {
+  const how = !windowsKnown ? '' : dev === 'touch' ? ' Hold one to empty it.' : dev === 'pad' ? ' Hold LB to empty one.' : ' Hold Q to empty one.';
+  return noneFree ? `No window free.${how}` : `Window full.${how}`;
+}
+
 /** Steps for the plot lessons: what to tap or press at the post, and which tag to take. */
 const plotLine = (q: Say, tag: string) => `${q.dev === 'touch' ? 'Tap Post' : q.dev === 'pad' ? 'Press X' : 'Press E'} at an empty plot, then ${tag}.`;
 
@@ -404,6 +456,7 @@ const LESSONS: Lesson[] = [
     after: ['sell'],
     unlocks: ['pads'],
     ready: () => true,
+    tag: 'build:pen',
     text: (q) => plotLine(q, 'Pen'),
     done: (s, n) => n('build:pen') >= 1 || s.pads.some((p) => p.kind === 'pen'),
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
@@ -529,6 +582,7 @@ const LESSONS: Lesson[] = [
     after: ['meadow'],
     unlocks: ['clock', 'sleep'],
     urgent: true,
+    tag: 'sleep',
     ready: (s) => s.hour >= 18.3 || s.hour < 4.5,
     text: () => 'Sleep at the front door till morning.',
     done: (s) => s.hour >= 5.5 && s.hour < 18,
@@ -538,7 +592,8 @@ const LESSONS: Lesson[] = [
   },
   {
     id: 'night',
-    after: ['dusk'],
+    // Not after dusk: staying up lets the dusk line lapse unlearned, and the night still comes.
+    after: ['meadow'],
     unlocks: ['nettles', 'up:hedge'],
     urgent: true,
     ready: (s) => s.hour >= 20.5 || s.hour < 4.5,
@@ -569,6 +624,7 @@ const LESSONS: Lesson[] = [
     after: ['meadow'],
     unlocks: ['garden'],
     ready: (s) => s.coins >= 200,
+    tag: 'build:garden',
     text: (q) => plotLine(q, 'Garden'),
     done: (s, n) => n('build:garden') >= 1 || s.pads.filter((p) => p.kind === 'garden').length >= 2,
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'empty'), floor, true),
@@ -594,6 +650,7 @@ const LESSONS: Lesson[] = [
     id: 'ups',
     after: ['penin', 'meadow'],
     unlocks: ['up:feeder'],
+    tag: 'pen:feeder',
     ready: (s) => s.coins >= 300 && s.pads.some((p) => p.kind === 'pen'),
     text: () => 'Buy a feeder at the pen post.',
     done: (_s, n) => n('upgrade') >= 1,
@@ -601,9 +658,47 @@ const LESSONS: Lesson[] = [
     note: 'Pen posts sell upgrades as you need them.',
   },
   {
-    id: 'bench',
+    // A feeder bought is no use empty: fill it, the hopper marked (the playtest's sat empty for a day and a half).
+    id: 'feeder',
     after: ['ups'],
+    unlocks: [],
+    ready: (s) => feederPad(s) >= 0,
+    text: (q, s) => {
+      const step = s ? feederStep(s) : 'fill';
+      return step === 'fill' ? FEEDER.fill : step === 'choose' ? FEEDER.choose(q) : FEEDER.pull(s ? feederFood(s, feederPad(s)) : 'cloverhead');
+    },
+    also: (q) => [FEEDER.choose(q), FEEDER.pull('cloverhead'), FEEDER.pull('sweetroot')],
+    done: (s, n) => n('feeder:fill') >= 1 || s.pads.some((p) => p.kind === 'pen' && p.feeder.n > 0),
+    each: (s) => {
+      if (feederStep(s) === 'pull') ripen(s, feederFood(s, feederPad(s)));
+    },
+    mark: (s, m, floor) => {
+      const i = feederPad(s);
+      if (i < 0) return false;
+      const step = feederStep(s);
+      const f = feederFood(s, i);
+      if (step === 'choose') {
+        m.slot = s.slots.findIndex((q) => q.t === f && q.n > 0);
+        return false;
+      }
+      if (step === 'pull') {
+        const g = gardenFor(s, f);
+        arrow(m, PADS[g].x, floor(PADS[g].x, PADS[g].z) + 2.2, PADS[g].z);
+        ring(m, PADS[g].x, PADS[g].z, 3.1);
+        return true;
+      }
+      const h = padSpots(i).hopper;
+      arrow(m, h.x, floor(h.x, h.z) + h.y + 1.0, h.z);
+      ring(m, h.x, h.z, 0.9);
+      return true;
+    },
+    note: 'A feeder drops food when its downies are hungry.',
+  },
+  {
+    id: 'bench',
+    after: ['feeder'],
     unlocks: ['bench', 'up:cap', 'up:range'],
+    tag: 'bench:cap',
     ready: (s) => s.coins >= 400,
     text: () => 'Buy a bigger jar at the workbench.',
     done: (_s, n) => n('bench') >= 1,
@@ -614,11 +709,46 @@ const LESSONS: Lesson[] = [
     id: 'gates',
     after: ['meadow'],
     unlocks: ['gates'],
+    tag: 'gate:ridge',
     ready: (s) => s.coins >= GATES.ridge.cost,
     text: () => 'Open the gate to Ember Ridge.',
     done: (s) => s.gates.ridge,
     mark: (_s, m, floor) => arrow(m, GATES.ridge.x + 0.6, floor(GATES.ridge.x + 0.6, GATES.ridge.z) + 3.6, GATES.ridge.z),
     note: 'Gates open the far meadows and their downies.',
+  },
+  {
+    // Whenever one of your downies hops out of its pen: a line and an arrow on it, then back into the pen.
+    id: 'stray',
+    after: ['penin'],
+    unlocks: [],
+    urgent: true,
+    repeat: true,
+    ready: (s) => strays(s).length > 0,
+    text: (_q, s) => (s && strayStep(s) === 'blow' ? STRAY.blow : STRAY.pull),
+    also: () => [STRAY.blow],
+    done: (s) => strayStep(s) === null,
+    // While one is loose, remember its pen and how many downies have come down in pens so far.
+    start: (s) => {
+      s.learnCount['stray:penned'] = s.learnCount['penned'] ?? 0;
+    },
+    each: (s) => {
+      const d = nearestDowny(s, (q) => q.strayFrom >= 0 && q.pen < 0);
+      if (!d) return;
+      s.learnCount['stray:pen'] = d.strayFrom;
+      s.learnCount['stray:penned'] = s.learnCount['penned'] ?? 0;
+    },
+    mark: (s, m, floor) => {
+      const d = nearestDowny(s, (q) => q.strayFrom >= 0 && q.pen < 0);
+      if (d) return onDowny(m, d);
+      // In the jar: the pen it came from.
+      const was = s.learnCount['stray:pen'] ?? -1;
+      const i = was >= 0 && s.pads[was]?.kind === 'pen' ? was : nearestPad(s, (k) => s.pads[k].kind === 'pen');
+      if (i < 0) return false;
+      const p = PADS[i];
+      arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
+      ring(m, p.x, p.z, PEN_R);
+      return true;
+    },
   },
 ];
 
@@ -735,6 +865,12 @@ export class Tutor {
         else if (e.what === 'pen' || e.what === 'garden') this.add(s, `build:${e.what}`);
         else if (e.what !== 'clear') this.add(s, 'upgrade');
         break;
+      case 'store':
+        if (e.where === 'feeder') this.add(s, 'feeder:fill');
+        break;
+      case 'penned':
+        this.add(s, 'penned');
+        break;
       case 'full':
       case 'jump':
       case 'sleep':
@@ -752,7 +888,7 @@ export class Tutor {
   }
 
   private finish(s: RanchState, l: Lesson): void {
-    this.unlock(s, `lesson:${l.id}`);
+    if (!l.repeat) this.unlock(s, `lesson:${l.id}`);
     for (const w of l.unlocks) this.unlock(s, w);
     for (const w of l.then ?? []) this.unlock(s, w);
   }
@@ -767,7 +903,12 @@ export class Tutor {
   }
 
   private eligible(s: RanchState, l: Lesson, n: N): boolean {
-    return !Tutor.finished(s, l.id) && l.after.every((a) => Tutor.finished(s, a)) && l.ready(s, n);
+    return (l.repeat || !Tutor.finished(s, l.id)) && l.after.every((a) => Tutor.finished(s, a)) && l.ready(s, n) && !l.lapse?.(s);
+  }
+
+  /** The tag the lesson on screen teaches (chosen for you when its post's tags come down), or null. */
+  get tag(): string | null {
+    return this.active && !this.struck && this.shownFor > 0 ? (this.active.tag ?? null) : null;
   }
 
   /** Once a frame: the line to show, and where to point. */
@@ -792,17 +933,22 @@ export class Tutor {
     for (let guard = 0; guard < LESSONS.length + 2; guard++) {
       const l = this.active;
       // Finished elsewhere (credited, or taught all at once): let it go quietly.
-      if (l && Tutor.finished(s, l.id)) {
+      if (l && !l.repeat && Tutor.finished(s, l.id)) {
         this.active = null;
         continue;
       }
       if (l) {
         const done = l.done(s, n);
-        if (done || l.lapse?.(s)) {
+        // The moment passed (you slept through the night it was teaching): it goes, not learned, and comes back the next time it applies.
+        if (!done && l.lapse?.(s)) {
+          this.active = null;
+          continue;
+        }
+        if (done) {
           this.finish(s, l);
           this.active = null;
           // A line that was on screen gets its tick; one already done when it came up passes quietly.
-          if (done && this.shownFor > 0) {
+          if (this.shownFor > 0) {
             this.struck = l;
             this.gap = 1.3;
             this.struckLine = v.id === l.id && v.line ? v.line : l.text(say, s);
@@ -875,6 +1021,27 @@ export class Tutor {
     this.mark.on = false;
     this.mark.slot = -1;
   }
+}
+
+/**
+ * A journal goal's line. A gate's counts the coins towards it ("Open the Ember
+ * Ridge gate, 288 of 500."), so the page is never a dead end while you save up,
+ * and the big total counts what you have earned.
+ */
+export function goalText(id: GoalId, s: RanchState): string {
+  const g = GOALS.find((q) => q.id === id);
+  if (!g) return '';
+  if ((id === 'ridge' || id === 'hollow') && !s.gates[id] && s.coins < GATES[id].cost) return `Open the ${GATES[id].name} gate, ${fmtCoins(s.coins)} of ${fmtCoins(GATES[id].cost)}.`;
+  if (id === 'rich') return `${g.text.slice(0, -1)}, ${fmtCoins(s.earned)} so far.`;
+  return g.text;
+}
+
+/** A journal goal with a place to go: an arrow over it (a gate). False for goals without one. */
+export function goalSpot(id: GoalId, s: RanchState, m: Mark, floor: Floor): boolean {
+  if ((id !== 'ridge' && id !== 'hollow') || s.gates[id]) return false;
+  const g = GATES[id];
+  const x = g.x + (id === 'ridge' ? 0.6 : -0.6);
+  return arrow(m, x, floor(x, g.z) + 3.6, g.z);
 }
 
 /** Mark lessons finished, with what they bring in, and everything they come after. */
