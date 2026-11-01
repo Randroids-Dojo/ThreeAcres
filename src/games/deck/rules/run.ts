@@ -2,14 +2,14 @@
 // plays cards for energy, and End day resolves the night. Every function here
 // mutates the run and returns what happened as events.
 
-import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, MAX_PAGES, UNLOCK_AT } from './cards';
+import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT } from './cards';
 import { bySeason, emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, nextSeason, quotaFor, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, Shop } from './types';
 
 export function newMeta(): Meta {
-  return { v: 1, unlocked: [], runs: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 } };
+  return { v: 1, unlocked: [], runs: 0, seasons: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 } };
 }
 
 /**
@@ -43,6 +43,8 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     earned: 0,
     quota: 0,
     energy: 0,
+    bench: 0,
+    saved: 0,
     scoops: 0,
     slots: 0,
     crow: false,
@@ -135,8 +137,11 @@ function widen(s: RunState, cols: number): void {
   s.cols = cols;
 }
 
+/** A new day. The bench refills, with a scoop more for each crop pulled up in the night. */
 export function startDay(s: RunState, ev: Ev[]): void {
-  s.energy = energyMax(s);
+  s.bench = energyMax(s) + (s.saved ?? 0);
+  s.saved = 0;
+  s.energy = s.bench;
   s.tossed = false;
   s.dayHarvests = 0;
   if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].boost += 1;
@@ -264,7 +269,8 @@ export function playCard(s: RunState, handIdx: number, plot: number | null, to?:
   } else {
     switch (card.id) {
       case 'can': {
-        const plots = canArea(s, i, card.up);
+        // An improved can is free; it still waters one row.
+        const plots = canArea(s, i, false);
         for (const j of plots) s.plots[j].boost += 1;
         ev.push({ t: 'water', plots });
         break;
@@ -289,7 +295,7 @@ export function playCard(s: RunState, handIdx: number, plot: number | null, to?:
       }
       case 'shears': {
         const h = scoreHarvest(s, i, snapshot(s), { suns: 0, shears: true, roll: true });
-        applyHarvest(s, h, ev);
+        applyHarvest(s, h, ev, true);
         break;
       }
       case 'ladybirds': {
@@ -407,18 +413,23 @@ function rollRarity(s: RunState): Rarity {
   return 'common';
 }
 
+/** Answers to a hazard the merchant keeps in stock until the deck holds this many. */
+export const ANSWERS_HELD = 2;
+
 /**
- * Cards that answer a hazard, if the player owns none of them: a scarecrow for
- * crows; ladybirds or garlic for pests. Stocked once the hazard has shown, and
- * before the first season that can bring it, so the first crow can be met.
+ * Cards that answer a hazard, while the deck holds fewer than two of them: a
+ * scarecrow for crows; ladybirds or garlic for pests. Stocked once the hazard
+ * has shown, and before the first season that can bring it, so the first crow
+ * can be met. (The stall used to stop at one answer, and one ladybird card
+ * seldom came to hand on the night it was needed.)
  */
 export function hazardAnswers(s: RunState): CardId[][] {
-  const own = new Set(allCards(s).map((c) => c.id));
+  const held = (ids: CardId[]) => allCards(s).filter((c) => ids.includes(c.id)).length;
   // The stall opens between seasons: the season it leads to is the one to get ready for.
   const ahead = s.phase === 'shop' ? nextSeason(s) : s;
   const out: CardId[][] = [];
-  if ((s.stats.crows > 0 || bySeason(TUNING.crowChance, ahead) > 0) && !own.has('scarecrow')) out.push(['scarecrow']);
-  if ((s.stats.pests > 0 || bySeason(TUNING.pestChance, ahead) > 0) && !own.has('ladybirds') && !own.has('garlic')) out.push(['ladybirds', 'garlic']);
+  if ((s.stats.crows > 0 || bySeason(TUNING.crowChance, ahead) > 0) && held(['scarecrow']) < ANSWERS_HELD) out.push(['scarecrow']);
+  if ((s.stats.pests > 0 || bySeason(TUNING.pestChance, ahead) > 0) && held(['ladybirds', 'garlic']) < ANSWERS_HELD) out.push(['ladybirds', 'garlic']);
   return out.map((o) => o.filter((c) => s.pool.includes(c))).filter((o) => o.length > 0);
 }
 
@@ -479,7 +490,7 @@ export function buyCard(s: RunState, i: number): Ev[] | null {
 
 /** How many almanac pages the player may keep: five, and one more for each slot bought. */
 export function maxPages(s: Pick<RunState, 'slots'>): number {
-  return MAX_PAGES + (s.slots ?? 0);
+  return TUNING.maxPages + (s.slots ?? 0);
 }
 
 /** Buy a page. With the almanac full, name a kept page to tear out for it. */
@@ -591,15 +602,27 @@ export function leaveShop(s: RunState): Ev[] | null {
 
 // ---------------------------------------------------------------- meta
 
-/** Cards a run that met this many seasons has earned for the merchant's catalogue: two for each mark reached. */
+/** Cards the catalogue holds once this many seasons have been met across every run: two for each mark reached. */
 export function unlocksFor(seasons: number, order: readonly CardId[]): CardId[] {
   return order.slice(0, 2 * UNLOCK_AT.filter((n) => seasons >= n).length);
 }
 
-/** Record a finished run once: cards unlock for future shops by how far it got, and the best record updates. */
+/** Seasons met across every run, for the catalogue. A save from before this counted only its best run. */
+export function seasonsMet(meta: Meta): number {
+  return meta.seasons ?? meta.best.seasons;
+}
+
+/** Seasons still to meet (across runs) before the catalogue grows again, or 0 when it holds everything. */
+export function seasonsToNext(meta: Meta): number {
+  const next = UNLOCK_AT.find((n) => n > seasonsMet(meta));
+  return next === undefined ? 0 : next - seasonsMet(meta);
+}
+
+/** Record a finished run once: its seasons add to the count across runs, cards unlock by that count, and the best record updates. */
 export function recordRun(meta: Meta, s: RunState, order: readonly CardId[]): CardId[] {
   if (s.phase !== 'over' || !s.end || s.end.recorded) return s.end?.unlocked ?? [];
-  const fresh = unlocksFor(s.stats.seasonsCleared, order).filter((c) => !meta.unlocked.includes(c));
+  meta.seasons = seasonsMet(meta) + s.stats.seasonsCleared;
+  const fresh = unlocksFor(meta.seasons, order).filter((c) => !meta.unlocked.includes(c));
   meta.unlocked.push(...fresh);
   meta.runs++;
   const b = meta.best;

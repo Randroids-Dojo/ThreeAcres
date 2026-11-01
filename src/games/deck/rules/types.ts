@@ -40,7 +40,7 @@ export interface Crop {
   rot: boolean;
   /** Picks taken so far (perennials). */
   picks: number;
-  /** Nights of pests left on it; 0 when clean. A pested crop doesn't grow or get picked. */
+  /** Nights of pests left on it; 0 when clean. A pested crop still grows and is picked, at half pay. */
   pest: number;
   /** A mint sprout that spread on its own. */
   sprout: boolean;
@@ -83,6 +83,8 @@ export interface Harvest {
   shears: boolean;
   /** The crop leaves its plot (annuals, or a perennial's last pick). */
   leaves: boolean;
+  /** Scoops this harvest puts back on the bench: one when a crop is pulled up, and a strawberry's every pick. */
+  scoops: number;
 }
 
 export interface ShopCard {
@@ -146,6 +148,10 @@ export interface RunState {
   earned: number;
   quota: number;
   energy: number;
+  /** Scoops on the bench today: the day's refill and the scoops pulled crops put back. The bench lays out this many. */
+  bench: number;
+  /** Scoops put back tonight by crops pulled up, for the next morning's bench. */
+  saved: number;
   /** Seed scoops bought for good at the stall, on top of the usual three. */
   scoops: number;
   /** Almanac page slots bought at the stall, on top of the usual five. */
@@ -184,6 +190,8 @@ export interface Meta {
   /** Shop cards unlocked so far, beyond the starting pool. */
   unlocked: CardId[];
   runs: number;
+  /** Seasons met across every run so far: the catalogue grows with these, so every run can add to it. */
+  seasons?: number;
   best: { seasons: number; harvest: number; coins: number; year: number; season: Season };
 }
 

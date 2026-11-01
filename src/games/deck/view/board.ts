@@ -323,6 +323,16 @@ export class Board {
     return this.by + this.T * this.rows + frameW(this.T) + captionSize(this.T) + 7;
   }
 
+  /** The caption's box, CSS px from the canvas top left, for checks (a lifted card's key number must stay off it). */
+  captionBox(): { x: number; y: number; w: number; h: number } {
+    const size = captionSize(this.T);
+    this.ctx.save();
+    this.ctx.font = `italic 500 ${size}px 'Fraunces Variable', Georgia, serif`;
+    const w = this.ctx.measureText(this.caption).width;
+    this.ctx.restore();
+    return { x: this.px0 + this.pw / 2 - w / 2, y: this.captionBaseline - size * 0.8, w, h: size * 1.05 };
+  }
+
   /** The printed frame's rules under the bed, CSS px from the canvas top: the heavy rule and the hairline inside it. */
   get frameRules(): { heavy: number; hair: number } {
     const bottom = this.py0 + this.ph - FRAME_M;
@@ -414,6 +424,7 @@ export class Board {
 
   draw(plots: readonly Plot[], dt: number): void {
     this.frames++;
+    this.stakes = [];
     this.warm(plots);
     const { ctx, dpr, T } = this;
     const key = `${this.season}|${this.plate}|${this.cols}|${this.rows}|${this.T}|${this.botM}|${this.ruleInk}`;
@@ -430,7 +441,6 @@ export class Board {
     for (let i = 0; i < this.splash.length; i++) if (this.splash[i] > 0) this.splash[i] = Math.max(0, this.splash[i] - dt * 1.6);
     if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);
 
-    this.drawKey();
     this.drawHighlights(plots);
 
     // Crops and objects, back row first so tall ones overlap the row above.
@@ -468,7 +478,7 @@ export class Board {
       this.drop(ctr.x - T * 0.36, ctr.y + T * 0.34, T * 0.07);
     }
 
-    // Ripe-tonight moons and pests on top: a pested crop gets a badge with its nights, and if ripe, a struck moon.
+    // Ripe-tonight moons and pests on top: a pested crop gets a badge with the nights it pays half.
     const day = this.night < 0.05;
     for (let i = 0; i < plots.length; i++) {
       const c = plots[i].crop;
@@ -482,35 +492,62 @@ export class Board {
         ctx.globalAlpha = a ? a.alpha : 1;
         ctx.drawImage(s.c, b.x + s.x0 * T, b.y + s.y0 * T - (a?.lift ?? 0) * T, s.w * T, s.h * T);
         ctx.globalAlpha = 1;
-        if (day) {
-          this.pestBadge(i, c.pest);
-          if (c.age >= c.days) this.heldMoon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085);
-        }
+        if (day) this.pestBadge(i, c.pest);
       }
     }
     this.drawCrow();
+    // The key goes over the crops, on a paper chip, so a bean pole or a scarecrow's hat never hides a letter.
+    this.drawKey();
 
     this.drawPreview();
     this.drawParticles(dt);
   }
 
-  /** Key letters along the top and numbers down the side, like a plate's key. They fade at night, when slips fly over them. */
+  /**
+   * Key letters along the top and numbers down the side, like a plate's key.
+   * They are painted after the crops on a small paper chip, so a tall crop in
+   * the first row (a bean pole, a scarecrow's hat) passes behind them. They fade
+   * at night, when slips fly over them.
+   */
   private drawKey(): void {
-    const { ctx, T } = this;
+    const { ctx } = this;
     const a = Math.max(0, 1 - this.night * 1.8);
     if (a <= 0.01) return;
-    const fw = frameW(T);
+    const boxes = this.keyBoxes();
+    ctx.save();
     ctx.globalAlpha = a;
-    ctx.fillStyle = this.pal.inkSoft;
-    ctx.font = `italic 500 ${Math.round(Math.max(10, T * 0.14))}px 'Fraunces Variable', Georgia, serif`;
+    ctx.font = `italic 600 ${this.keySize}px 'Fraunces Variable', Georgia, serif`;
     ctx.textAlign = 'center';
-    for (let c = 0; c < this.cols; c++) ctx.fillText('ABCDE'[c], this.bx + (c + 0.5) * T, this.by - fw - 5);
-    if (this.bx - this.px0 > 28) {
-      ctx.textAlign = 'right';
-      for (let rr = 0; rr < this.rows; rr++) ctx.fillText(String(rr + 1), this.bx - fw - 5, this.by + (rr + 0.55) * T);
+    ctx.textBaseline = 'middle';
+    for (const b of boxes) {
+      ctx.beginPath();
+      ctx.roundRect(b.x, b.y, b.w, b.h, b.h * 0.3);
+      ctx.fillStyle = this.pal.paper;
+      ctx.globalAlpha = a * 0.92;
+      ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = this.pal.ink;
+      ctx.fillText(b.text, b.x + b.w / 2, b.y + b.h / 2 + 0.5);
     }
-    ctx.textAlign = 'left';
-    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  /** The key's type size, CSS px. */
+  private get keySize(): number {
+    return Math.round(Math.max(11, this.T * 0.15));
+  }
+
+  /** Where each key letter and number sits, with its paper chip, CSS px from the canvas top left. */
+  keyBoxes(): { text: string; x: number; y: number; w: number; h: number }[] {
+    const { T } = this;
+    const fw = frameW(T);
+    const size = this.keySize;
+    const h = Math.round(size * 1.3);
+    const w = Math.round(size * 1.25);
+    const out: { text: string; x: number; y: number; w: number; h: number }[] = [];
+    for (let c = 0; c < this.cols; c++) out.push({ text: 'ABCDE'[c], x: this.bx + (c + 0.5) * T - w / 2, y: this.by - fw - 4 - h, w, h });
+    if (this.bx - this.px0 > 28) for (let rr = 0; rr < this.rows; rr++) out.push({ text: String(rr + 1), x: this.bx - fw - 4 - w, y: this.by + (rr + 0.5) * T - h / 2, w, h });
+    return out;
   }
 
   /** A crow on the bed's top right corner: one comes tonight for a ripe crop no scarecrow guards. */
@@ -589,21 +626,6 @@ export class Board {
     ctx.stroke();
     bug(ctx, x + 3 + size * 0.6, y + h / 2, size * 0.55);
     num(ctx, text, x + size * 1.3 + 4, y + h / 2, size, '#3a2e08');
-  }
-
-  /** A moon with a red stroke through it: this ripe crop will not be pulled tonight. */
-  private heldMoon(x: number, y: number, r: number): void {
-    this.moon(x, y, r);
-    const { ctx } = this;
-    ctx.beginPath();
-    ctx.moveTo(x - r * 1.3, y + r * 1.3);
-    ctx.lineTo(x + r * 1.3, y - r * 1.3);
-    ctx.strokeStyle = '#f6eed2';
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    ctx.strokeStyle = '#b8352a';
-    ctx.lineWidth = 2.2;
-    ctx.stroke();
   }
 
   /** A blue drop: this plot grows an extra night tonight. */
@@ -751,13 +773,46 @@ export class Board {
       ctx.fillRect(-T, -T * 1.1, T * 2, T * 1.6);
     }
     ctx.drawImage(s.c, s.x0 * T, s.y0 * T, s.w * T, s.h * T);
-    if (c.up) {
-      // A small red stake label for Select stock.
-      ctx.fillStyle = '#b8352a';
-      ctx.fillRect(T * 0.28, -T * 0.16, T * 0.12, T * 0.07);
-    }
     ctx.restore();
+    // Select stock: a plant label on a stake by the crop, stamped with a red star (the face's red stamp, at plot size).
+    if (c.up && alpha > 0.5) this.selectStake(x - T * 0.34, y - lift);
   }
+
+  /** The label staked by an improved crop: a cream tag with a red ring and star, at least 14 px across. */
+  private selectStake(x: number, y: number): void {
+    const { ctx, T } = this;
+    const r = Math.max(7, T * 0.1);
+    const cy = y - T * 0.3;
+    ctx.save();
+    ctx.strokeStyle = '#6a4a2a';
+    ctx.lineWidth = Math.max(1.2, T * 0.018);
+    ctx.beginPath();
+    ctx.moveTo(x, y - T * 0.02);
+    ctx.lineTo(x, cy + r);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#f8f0d8';
+    ctx.fill();
+    ctx.strokeStyle = '#b8352a';
+    ctx.lineWidth = Math.max(1.3, r * 0.17);
+    ctx.stroke();
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const an = -Math.PI / 2 + (k * Math.PI) / 5;
+      const rr = k % 2 ? r * 0.3 : r * 0.68;
+      if (k) ctx.lineTo(x + Math.cos(an) * rr, cy + Math.sin(an) * rr);
+      else ctx.moveTo(x + Math.cos(an) * rr, cy + Math.sin(an) * rr);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#b8352a';
+    ctx.fill();
+    ctx.restore();
+    this.stakes.push({ x: x - r, y: cy - r, w: r * 2, h: r * 2 });
+  }
+
+  /** Select stakes painted this frame, for checks. */
+  stakes: { x: number; y: number; w: number; h: number }[] = [];
 
   private moon(x: number, y: number, r: number): void {
     const { ctx } = this;

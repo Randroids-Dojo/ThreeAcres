@@ -3,10 +3,10 @@
 // additive bonuses, then any times multipliers. Every bonus a crop gets from
 // another crop is about what stands next to it, so the board shows it.
 
-import { baseChips, SEEDS } from './cards';
+import { baseChips, CARDS, SEEDS } from './cards';
 import { around, bySeason, guarded, immune, isEmpty, isRipe, isTall, neighbours, TUNING } from './board';
 import { pick, rand } from './rng';
-import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, Step } from './types';
+import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, SeedId, Step } from './types';
 
 /** The board as the harvest starts: neighbour rules read this, not the emptying board. */
 export interface Snapshot {
@@ -23,6 +23,16 @@ export interface ScoreOpts {
   shears: boolean;
   /** Roll the clover. False for previews, which must not touch the rng. */
   roll: boolean;
+  /** Nights from tonight the harvest falls on (previews): pests still on the crop then halve its pay. */
+  night?: number;
+}
+
+/** Scoops a harvest puts back: one when the crop is pulled up, and every pick of a strawberry. */
+export function scoopsBack(kind: SeedId, leaves: boolean): number {
+  if (kind === 'strawberry') return TUNING.scoopBack;
+  if (!leaves || TUNING.scoopFrom === 'none') return 0;
+  if (TUNING.scoopFrom === 'paid' && CARDS[kind].cost < 1) return 0;
+  return TUNING.scoopBack;
 }
 
 /** Score the crop at plot i as if it were harvested now, without changing anything except the clover roll. */
@@ -33,7 +43,6 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   const chips: Step[] = [];
   const mult: Step[] = [];
   const nb = neighbours(s, i);
-  const bee = s.pages.includes('bees') ? 2 : 1;
 
   const near = (k: string) => nb.filter((j) => snap.crops[j]?.kind === k);
   if (kind === 'radish') {
@@ -48,19 +57,37 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   for (const j of near('beans')) chips.push({ label: 'beans next to it', icon: 'beans', op: '+', v: 2, from: j });
   if (crop.compost > 0) chips.push({ label: crop.compost > 1 ? `compost x${crop.compost}` : 'compost', icon: 'compost', op: '+', v: 6 * crop.compost });
   if (crop.rot) chips.push({ label: 'crop rotation', icon: 'rotation', op: '+', v: 4 });
-  if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) chips.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 3 });
+  if ((kind === 'radish' || kind === 'carrot') && TUNING.cellarYield && s.pages.includes('cellar')) chips.push({ label: 'root cellar', icon: 'cellar', op: '+', v: TUNING.cellarYield });
   if (o.suns > 0) chips.push({ label: o.suns > 1 ? `sun x${o.suns}` : 'sun', icon: 'sun', op: '+', v: 3 * o.suns });
   if (o.shears) chips.push({ label: 'shears', icon: 'shears', op: 'x', v: 2 });
 
   if (kind === 'carrot') for (const j of near('radish')) mult.push({ label: 'a radish next to it', icon: 'radish', op: '+', v: 1, from: j });
-  for (const j of near('sunflower')) mult.push({ label: 'sunflower next to it', icon: 'sunflower', op: '+', v: bee, from: j });
-  for (const j of around(s, i)) if (snap.objs[j] === 'beehive') mult.push({ label: 'beehive', icon: 'beehive', op: '+', v: bee, from: j });
+  // The Root Cellar makes the root combo scale with the patch: each radish or carrot beside a radish or carrot gives it +1 bloom.
+  if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) {
+    for (const j of nb) if (snap.crops[j]?.kind === 'radish' || snap.crops[j]?.kind === 'carrot') mult.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 1, from: j });
+  }
+  // A sunflower faces the crop below it (the plate's foot, where the sun is) and blooms it.
+  let bees = 0;
+  const above = i - s.cols;
+  if (above >= 0 && snap.crops[above]?.kind === 'sunflower') {
+    mult.push({ label: 'sunflower above it', icon: 'sunflower', op: '+', v: TUNING.sunBloom, from: above });
+    bees++;
+  }
+  for (const j of around(s, i)) {
+    if (snap.objs[j] !== 'beehive') continue;
+    mult.push({ label: 'beehive', icon: 'beehive', op: '+', v: 1, from: j });
+    bees++;
+  }
+  // Busy Bees: one x2 for a crop a sunflower or a beehive blooms, however many there are (it used to double every bee).
+  if (bees && s.pages.includes('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: TUNING.beesTimes });
   if (kind === 'corn') {
     const b = near('beans')[0];
     if (b !== undefined) mult.push({ label: 'next to beans', icon: 'beans', op: 'x', v: 1.5, from: b });
   }
   if (kind === 'pumpkin' && nb.every((j) => !snap.crops[j] && !snap.objs[j])) mult.push({ label: 'room to sprawl', icon: 'alone', op: 'x', v: 2 });
   for (const j of near('chili')) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: 1.5, from: j });
+  // Pests still on the crop the night it is pulled halve its pay.
+  if (crop.pest > (o.night ?? 0)) mult.push({ label: 'pests', icon: 'pest', op: 'x', v: TUNING.pestPay });
   const n = s.dayHarvests + 1;
   if (s.pages.includes('market') && n % 5 === 0) mult.push({ label: 'market day', icon: 'market', op: 'x', v: 2 });
   let golden = false;
@@ -74,6 +101,7 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   let m = 1;
   for (const st of mult) if (st.op === '+') m += st.v;
   for (const st of mult) if (st.op === 'x') m *= st.v;
+  const leaves = crop.picks + 1 >= SEEDS[kind].picks;
   return {
     plot: i,
     uid: crop.uid,
@@ -88,12 +116,17 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
     n,
     golden,
     shears: o.shears,
-    leaves: crop.picks + 1 >= SEEDS[kind].picks,
+    leaves,
+    scoops: scoopsBack(kind, leaves),
   };
 }
 
-/** Bank a harvest: coins, the day's counters, and the crop leaves or stays. */
-export function applyHarvest(s: RunState, h: Harvest, ev: Ev[]): void {
+/**
+ * Bank a harvest: coins, the day's counters, the scoops it puts back, and the
+ * crop leaves or stays. At night the scoops go on the next morning's bench; a
+ * crop pulled in the day (the shears) puts them on today's.
+ */
+export function applyHarvest(s: RunState, h: Harvest, ev: Ev[], now = false): void {
   const p = s.plots[h.plot];
   const crop = p.crop!;
   const before = s.earned;
@@ -111,17 +144,29 @@ export function applyHarvest(s: RunState, h: Harvest, ev: Ev[]): void {
     p.crop = null;
     p.last = h.kind;
   }
+  // The event carries the scoops that really went back: none past tonight's cap.
+  if (h.scoops) {
+    if (now) {
+      s.energy += h.scoops;
+      s.bench += h.scoops;
+    } else {
+      const room = Math.max(0, TUNING.scoopCap - s.saved);
+      h.scoops = Math.min(h.scoops, room);
+      s.saved += h.scoops;
+    }
+  }
   ev.push({ t: 'harvest', h });
   if (before < s.quota && s.earned >= s.quota) ev.push({ t: 'quota', earned: s.earned, quota: s.quota });
 }
 
 /**
  * Resolve the night: weather, growth, the crow (if one was about at dawn),
- * the harvest cascade, then pests and mint. Pests on a crop at dusk hold it
- * back tonight (no growth, no pick) and then count down; pests that land or
- * spread tonight start holding it back tomorrow. So the nights shown on a
- * pested crop are exactly the nights it stands still, and what the board
- * previews in the day is what the night pays, unless a storm or a crow comes.
+ * the harvest cascade, then pests and mint. Pests on a crop at dusk halve its
+ * pay if it is pulled tonight, then count down; pests that land or spread
+ * tonight start biting tomorrow. So the nights shown on a pested crop are
+ * exactly the nights it pays half, and what the board previews in the day is
+ * what the night pays, unless a storm or a crow comes. Every crop pulled up
+ * puts a scoop back on the next morning's bench.
  */
 export function night(s: RunState, ev: Ev[]): void {
   const weather = s.tonight;
@@ -146,7 +191,7 @@ export function night(s: RunState, ev: Ev[]): void {
     ev.push({ t: 'flatten', plot: i, kind: c.kind, uid: c.uid });
   }
 
-  // 2. Every crop grows a night, plus any boost from the can or the weather. Pests stop it.
+  // 2. Every crop grows a night, plus any boost from the can or the weather.
   const extra = rains + storms * 2;
   const growth: NightGrowth[] = [];
   const pestedAtDusk = s.plots.map((p, i) => (p.crop?.pest ? i : -1)).filter((i) => i >= 0);
@@ -154,7 +199,7 @@ export function night(s: RunState, ev: Ev[]): void {
     const c = p.crop;
     const boost = p.boost;
     p.boost = 0;
-    if (!c || c.pest || isRipe(c)) return;
+    if (!c || isRipe(c)) return;
     const from = c.age;
     c.age = Math.min(c.days, c.age + 1 + extra + boost);
     growth.push({ plot: i, uid: c.uid, from, to: c.age });
@@ -163,7 +208,7 @@ export function night(s: RunState, ev: Ev[]): void {
 
   // 3. A crow, if one sat on the plate at dawn, takes one unguarded ripe crop.
   if (crow) {
-    const opts = s.plots.map((p, i) => (p.crop && isRipe(p.crop) && !p.crop.pest && !guarded(s, i) ? i : -1)).filter((i) => i >= 0);
+    const opts = s.plots.map((p, i) => (p.crop && isRipe(p.crop) && !guarded(s, i) ? i : -1)).filter((i) => i >= 0);
     if (opts.length) {
       const i = pick(s, opts);
       const c = s.plots[i].crop!;
@@ -177,7 +222,7 @@ export function night(s: RunState, ev: Ev[]): void {
   const snap = snapshot(s);
   for (let i = 0; i < s.plots.length; i++) {
     const c = s.plots[i].crop;
-    if (!c || c.pest || !isRipe(c)) continue;
+    if (!c || !isRipe(c)) continue;
     applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev);
   }
 
@@ -213,7 +258,7 @@ export function night(s: RunState, ev: Ev[]): void {
   }
 
   // 6. Mint creeps into an empty neighbour.
-  const mints = s.plots.map((p, i) => (p.crop?.kind === 'mint' && !p.crop.pest ? i : -1)).filter((i) => i >= 0);
+  const mints = s.plots.map((p, i) => (p.crop?.kind === 'mint' ? i : -1)).filter((i) => i >= 0);
   for (const i of mints) {
     const opts = neighbours(s, i).filter((j) => isEmpty(s.plots[j]));
     if (!opts.length) continue;

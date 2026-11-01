@@ -24,6 +24,17 @@
 // the signpost included; and between the first and second tap on every good,
 // page, service and the page slot, nothing on the stall moving by more than a
 // pixel and the second tap landing on the same thing.
+//
+// Round 3 adds: the bench sized to be found (desktop labels 14 px and up, the
+// tin labelled, the spent heap 80 px and scoops 60 px wide, the bench 250 px
+// tall; the bare table above it is reported); a card taken up by keys keeps
+// its key number off the plate's caption; a harvest of seven bonuses wraps its
+// chips onto a second line and no flying bonus lands on a chip already there;
+// with a tall first row (beans, the scarecrow, corn) on the Long Furrow's five
+// columns, no key letter changes by more than 15% of its pixels, and no note
+// (the quota, a first-row plot, a crow) covers a key letter or number;
+// reading a plot says what it pays; an improved crop's Select stake is 14 px
+// or more across.
 // node scripts/deck-overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -190,6 +201,7 @@ async function run(label, viewport, touch) {
         const t = window.deck.table;
         t.run.scoops = n - 3;
         t.run.energy = n;
+        t.run.bench = n;
         t.run.tonight = ['rain', 'sun'];
         t.syncAll();
         const box = (sel) => [...document.querySelectorAll(sel)].map((e) => e.getBoundingClientRect());
@@ -213,6 +225,7 @@ async function run(label, viewport, touch) {
           const t = window.deck.table;
           t.run.scoops = 0;
           t.run.energy = 3;
+          t.run.bench = 3;
           t.run.tonight = [];
           t.syncAll();
         });
@@ -247,6 +260,172 @@ async function run(label, viewport, touch) {
         d.endDay();
       });
       await p.waitForTimeout(1500);
+    }],
+    // Round 3: the bench sized to be found, a lifted card's number, a slip of many bonuses, the key letters, the Select stake.
+    ['the bench sized to be found', async () => {
+      await p.evaluate(() => window.deck.skip());
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const labels = [...document.querySelectorAll('.sb-label')].map((e) => ({ text: e.textContent, size: parseFloat(getComputedStyle(e).fontSize) }));
+        return { labels, heap: r('.sb-heap').width, tin: r('.sb-tin img').width, lantern: r('.sb-lantern').height, scoop: r('.sb-scoops img').width, bench: { t: r('.sb-bench').top, h: r('.sb-bench').height }, peg: r('.sb-peg').bottom };
+      });
+      const want = label === 'desk' ? { label: 14, heap: 80, scoop: 60, bench: 250 } : { label: 11, heap: 50, scoop: 40, bench: 70 };
+      const small = q.labels.filter((x) => x.size < want.label);
+      if (small.length) extra.push(`bench labels under ${want.label} px: ${small.map((x) => `${x.text} ${x.size}`).join(', ')}`);
+      if (!q.labels.some((x) => x.text === 'Seed tin')) extra.push('the tin has no label you can read');
+      if (q.heap < want.heap) extra.push(`the spent heap is ${q.heap.toFixed(0)} px wide`);
+      if (q.scoop < want.scoop) extra.push(`a scoop is ${q.scoop.toFixed(0)} px wide`);
+      if (q.bench.h < want.bench) extra.push(`the bench is ${q.bench.h.toFixed(0)} px tall`);
+      console.log(`       ${label} bench: ${q.bench.h.toFixed(0)} px tall, labels ${q.labels.map((x) => `${x.text} ${x.size} px`).join(', ')}, heap ${q.heap.toFixed(0)} px, tin ${q.tin.toFixed(0)} px, lantern ${q.lantern.toFixed(0)} px, scoops ${q.scoop.toFixed(0)} px${label === 'desk' ? `, bare table between the pegboard and the bench ${Math.round(q.bench.t - q.peg)} px (52 of it the lesson strip)` : ''}`);
+    }],
+    ['a card taken up by keys: its number stays off the plate caption', async () => {
+      if (label !== 'desk') return;
+      await p.keyboard.press('Digit1');
+      await settle(350);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const br = t.board.canvas.getBoundingClientRect();
+        const c = t.board.captionBox();
+        const cap = { l: br.left + c.x, t: br.top + c.y, r: br.left + c.x + c.w, b: br.top + c.y + c.h };
+        const device = document.querySelector('#app')?.dataset.device;
+        const hits = [];
+        let shown = 0;
+        for (const el of document.querySelectorAll('.sb-hand .sb-card:not(.flying)')) {
+          const st = getComputedStyle(el, '::before');
+          if (device !== 'key' || st.content === 'none' || st.visibility === 'hidden') continue;
+          shown++;
+          const r = el.getBoundingClientRect();
+          const n = { l: r.left + r.width / 2 - 9, r: r.left + r.width / 2 + 9, t: r.top - 18, b: r.top - 2 };
+          const w = Math.min(n.r, cap.r) - Math.max(n.l, cap.l);
+          const h = Math.min(n.b, cap.b) - Math.max(n.t, cap.t);
+          if (w > 1 && h > 1) hits.push(`card ${el.dataset.key} (${el.classList.contains('held') ? 'held' : 'in the fan'}) ${Math.round(w)}x${Math.round(h)}`);
+        }
+        return { device, held: !!t.held, shown, hits };
+      });
+      if (q.device !== 'key' || !q.held) extra.push(`no card taken up by keys (${q.device}, held ${q.held})`);
+      for (const h of q.hits) extra.push(`key number over the plate caption: ${h}`);
+      console.log(`       ${label} key numbers: ${q.shown} shown with a card held, ${q.hits.length} over the caption`);
+      await p.keyboard.press('Escape');
+      await settle(150);
+    }],
+    ['a harvest of many bonuses: chips wrap, none under another', async () => {
+      await fresh(77);
+      await p.evaluate(() => {
+        const d = window.deck;
+        const s = d.state();
+        for (const q of s.plots) {
+          q.crop = null;
+          q.obj = null;
+        }
+        const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        // Corn on B2: beans either side, a sunflower above, a chili below and a beehive by it, Busy Bees kept: seven bonuses fly in.
+        s.plots[5].crop = crop(9601, 'corn', 4, 4);
+        s.plots[4].crop = crop(9602, 'beans', 0, 3);
+        s.plots[6].crop = crop(9603, 'beans', 0, 3);
+        s.plots[1].crop = crop(9604, 'sunflower', 0, 3);
+        s.plots[9].crop = crop(9605, 'chili', 0, 2);
+        s.plots[0].obj = 'beehive';
+        s.pages = ['bees'];
+        d.fast(false);
+        d.table.syncAll();
+        d.endDay();
+      });
+      let most = 0;
+      let lines = 0;
+      const seen = new Set();
+      let before = [];
+      for (let k = 0; k < 160 && (await p.evaluate(() => window.deck.busy())); k++) {
+        const q = await p.evaluate((before) => {
+          const box = (e) => e.getBoundingClientRect();
+          const chips = [...document.querySelectorAll('.sb-slip:not(.total) .sb-chip:not(.waiting)')].map((e) => ({ r: box(e), slip: box(e.closest('.sb-slip')) }));
+          const arcs = [...document.querySelectorAll('.sb-arc')].filter((e) => Number(e.style.opacity || 1) > 0.5).map(box);
+          const out = [];
+          const over = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+          for (let i = 0; i < chips.length; i++) {
+            const c = chips[i];
+            if (c.r.left < c.slip.left - 1 || c.r.right > c.slip.right + 1 || c.r.bottom > c.slip.bottom + 1) out.push('a chip runs off its slip');
+            for (let j = i + 1; j < chips.length; j++) if (over(c.r, chips[j].r)) out.push('two chips overlap');
+            // A bonus passing over the slip in flight is fine; one that settles on a chip already there hides it.
+            for (const a of arcs) if (over(c.r, a) && before.some((b) => Math.abs(b.x - a.left) < 4 && Math.abs(b.y - a.top) < 4)) out.push('a landing bonus settles over a chip already on the slip');
+          }
+          // Lines of chips, allowing for the slip's slight tilt.
+          const tops = chips.map((c) => c.r.top).sort((a, b) => a - b);
+          let lines = tops.length ? 1 : 0;
+          for (let i = 1; i < tops.length; i++) if (tops[i] - tops[i - 1] > 8) lines++;
+          return { n: chips.length, lines, out, arcs: arcs.map((a) => ({ x: a.left, y: a.top })) };
+        }, before);
+        before = q.arcs;
+        most = Math.max(most, q.n);
+        lines = Math.max(lines, q.lines);
+        for (const o of q.out) seen.add(o);
+        await p.waitForTimeout(25);
+      }
+      for (const o of seen) extra.push(o);
+      if (most < 6) extra.push(`only ${most} chips seen on the corn's slip`);
+      if (lines < 2) extra.push(`the chips stayed on ${lines} line`);
+      console.log(`       ${label} slip: up to ${most} chips on ${lines} lines, ${seen.size ? [...seen].join('; ') : 'none covered'}`);
+    }],
+    ['the key letters over a tall first row, and notes kept off them', async () => {
+      await p.evaluate(() => window.deck.skip());
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        const b = t.board;
+        // The Long Furrow's five columns: beans in bloom on B1, the scarecrow on C1, corn on D1, a crow about.
+        s.cols = 5;
+        s.plots = Array.from({ length: 20 }, () => ({ crop: null, obj: null, boost: 0, last: null }));
+        s.plots[1].crop = { uid: 9801, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.plots[2].obj = 'scarecrow';
+        s.plots[3].crop = { uid: 9802, kind: 'corn', age: 4, days: 4, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.crow = true;
+        t.syncAll();
+        const keys = b.keyBoxes().filter((k) => /[A-E]/.test(k.text));
+        const read = () => {
+          b.draw(t.shown, 0);
+          const g = b.canvas.getContext('2d');
+          return keys.map((k) => g.getImageData(Math.round(k.x * b.dpr), Math.round(k.y * b.dpr), Math.max(1, Math.round(k.w * b.dpr)), Math.max(1, Math.round(k.h * b.dpr))).data);
+        };
+        const tall = read();
+        const keep = t.shown;
+        t.shown = keep.map((p, i) => (i < 5 ? { ...p, crop: null, obj: null } : p));
+        const bare = read();
+        t.shown = keep;
+        // The share of each letter's chip that a tall crop changes: drawn over the crops, close to none.
+        const changed = keys.map((k, i) => {
+          let n = 0;
+          for (let j = 0; j < tall[i].length; j += 4) if (Math.max(Math.abs(tall[i][j] - bare[i][j]), Math.abs(tall[i][j + 1] - bare[i][j + 1]), Math.abs(tall[i][j + 2] - bare[i][j + 2])) > 48) n++;
+          return { key: k.text, share: n / (tall[i].length / 4) };
+        });
+        // Notes: the quota note and a note about a first-row plot, against the letters' boxes.
+        const br = b.canvas.getBoundingClientRect();
+        const kb = keys.map((k) => ({ l: br.left + k.x, t: br.top + k.y, r: br.left + k.x + k.w, b: br.top + k.y + k.h, text: k.text }));
+        const sideKeys = b.keyBoxes().filter((k) => /\d/.test(k.text)).map((k) => ({ l: br.left + k.x, t: br.top + k.y, r: br.left + k.x + k.w, b: br.top + k.y + k.h, text: k.text }));
+        const noteHits = [];
+        for (const [text, plot] of [['Quota met.', null], [t.plotLine(1), 1], [t.plotLine(0), 0], ['A crow took one.', 3]]) {
+          t.say(text, plot);
+          const n = document.querySelector('.sb-note').getBoundingClientRect();
+          for (const k of [...kb, ...sideKeys]) if (Math.min(n.right, k.r) - Math.max(n.left, k.l) > 1 && Math.min(n.bottom, k.b) - Math.max(n.top, k.t) > 1) noteHits.push(`"${text}" covers ${k.text}`);
+        }
+        return { changed, noteHits, line: t.plotLine(1) };
+      });
+      for (const c of q.changed) if (c.share > 0.15) extra.push(`a tall first-row crop covers the key letter ${c.key} (${Math.round(c.share * 100)}% of it changed)`);
+      for (const h of q.noteHits) extra.push(h);
+      if (!/pays \d+/.test(q.line)) extra.push(`reading a plot does not say what it pays: "${q.line}"`);
+      console.log(`       ${label} key letters with a tall first row: ${q.changed.map((c) => `${c.key} ${Math.round(c.share * 100)}%`).join(', ')} changed; notes over letters: ${q.noteHits.length}; "${q.line}"`);
+    }],
+    ['an improved crop wears a stake you can read', async () => {
+      await fresh(4242);
+      const st = await p.evaluate(async () => {
+        const t = window.deck.table;
+        t.run.plots[10].crop = { uid: 9901, kind: 'carrot', age: 1, days: 2, up: true, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        t.syncAll();
+        await new Promise((r) => setTimeout(r, 120));
+        return t.board.stakes.map((b) => +b.w.toFixed(1));
+      });
+      if (st.length !== 1 || st[0] < 14) extra.push(`the Select stake: ${JSON.stringify(st)} px`);
+      console.log(`       ${label} Select stake: ${st.join(', ')} px across`);
     }],
     ['stall', async () => {
       await toStall(91, 400);
@@ -368,7 +547,7 @@ async function run(label, viewport, touch) {
       await p.evaluate(() => window.deck.table.sheets.back());
       await toStall(95, 4000, (s) => {
         s.year = 2;
-        s.pages = ['barrel', 'cellar', 'bees', 'thumb', 'basket'];
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
       });
       const q = await p.evaluate(() => ({ slot: !!document.querySelector('.sb-slot'), scoop: [...document.querySelectorAll('.sb-thing')].some((b) => /scoop/.test(b.textContent)), goods: document.querySelectorAll('.sb-good').length }));
       if (!q.slot || !q.scoop || q.goods !== 4) extra.push(`year 2 stall: slot ${q.slot}, scoop ${q.scoop}, ${q.goods} goods`);
@@ -384,7 +563,7 @@ async function run(label, viewport, touch) {
       const before = await p.evaluate(() => window.deck.state().slots);
       await tapAt('.sb-slot', 0);
       const q = await p.evaluate(() => ({ slots: window.deck.state().slots, done: document.querySelector('.sb-slipspot .sb-done')?.textContent ?? '' }));
-      if (q.slots !== before + 1 || !/6 pages/.test(q.done)) extra.push(`the page slot: slots ${before} to ${q.slots}, note "${q.done}"`);
+      if (q.slots !== before + 1 || !/5 pages/.test(q.done)) extra.push(`the page slot: slots ${before} to ${q.slots}, note "${q.done}"`);
       const pq = await purse();
       if (!purseOk(pq)) extra.push(`purse wrong after the page slot: table ${pq.table}, stall ${pq.line}, rules ${pq.rules}`);
     }],

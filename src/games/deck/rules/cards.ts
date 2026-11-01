@@ -40,20 +40,26 @@ export const SEEDS: Record<SeedId, SeedDef> = {
 
 const D = (id: CardId, name: string, type: CardType, cost: number, rarity: Rarity, target: Target, text: string, upText?: string): CardDef => ({ id, name, type, cost, rarity, target, text, upText });
 
+/**
+ * Seeds are priced by power, from free fillers to dear stars: a radish costs
+ * nothing, the everyday crops a scoop, the strong ones two and corn and the
+ * pumpkin three. A crop pulled up puts a scoop back on the next morning's
+ * bench, so a plot of quick crops pays for the dear ones (see night.ts).
+ */
 export const CARDS: Record<CardId, CardDef> = {
-  radish: D('radish', 'Radish', 'seed', 1, 'common', 'empty', '+2 yield next to a carrot.'),
+  radish: D('radish', 'Radish', 'seed', 0, 'common', 'empty', '+2 yield next to a carrot.'),
   carrot: D('carrot', 'Carrot', 'seed', 1, 'common', 'empty', '+1 bloom for each radish next to it.'),
   lettuce: D('lettuce', 'Lettuce', 'seed', 1, 'common', 'empty', '+4 yield next to a tall crop (sunflower or corn).'),
-  beans: D('beans', 'Beans', 'seed', 1, 'uncommon', 'empty', 'Picks for 3 nights. Neighbours get +2 yield.'),
-  corn: D('corn', 'Corn', 'seed', 2, 'rare', 'empty', 'Tall. x1.5 bloom next to beans.'),
-  sunflower: D('sunflower', 'Sunflower', 'seed', 1, 'uncommon', 'empty', 'Tall. Neighbours get +1 bloom.'),
-  pumpkin: D('pumpkin', 'Pumpkin', 'seed', 2, 'rare', 'empty', 'x2 bloom with nothing next to it.'),
-  strawberry: D('strawberry', 'Strawberry', 'seed', 1, 'uncommon', 'empty', 'Picks for 4 nights.'),
+  beans: D('beans', 'Beans', 'seed', 2, 'uncommon', 'empty', 'Picks for 3 nights. Neighbours get +2 yield.'),
+  corn: D('corn', 'Corn', 'seed', 3, 'rare', 'empty', 'Tall. x1.5 bloom next to beans.'),
+  sunflower: D('sunflower', 'Sunflower', 'seed', 2, 'uncommon', 'empty', 'Tall. It faces the crop below it: +2 bloom.'),
+  pumpkin: D('pumpkin', 'Pumpkin', 'seed', 3, 'rare', 'empty', 'x2 bloom with nothing next to it.'),
+  strawberry: D('strawberry', 'Strawberry', 'seed', 2, 'uncommon', 'empty', 'Picks for 4 nights. Every pick puts a scoop back.'),
   mint: D('mint', 'Mint', 'seed', 1, 'common', 'empty', 'Each night it spreads into an empty neighbour.'),
   garlic: D('garlic', 'Garlic', 'seed', 1, 'common', 'empty', 'Pests keep off it and its neighbours.'),
   wheat: D('wheat', 'Wheat', 'seed', 1, 'common', 'empty', '+2 yield for each wheat next to it.'),
-  chili: D('chili', 'Chili', 'seed', 1, 'uncommon', 'empty', 'Neighbours get x1.5 bloom.'),
-  can: D('can', 'Watering Can', 'tool', 0, 'common', 'plot', 'A row grows an extra night tonight.', 'A row and a column grow an extra night tonight.'),
+  chili: D('chili', 'Chili', 'seed', 2, 'uncommon', 'empty', 'Neighbours get x1.5 bloom.'),
+  can: D('can', 'Watering Can', 'tool', 1, 'common', 'plot', 'A row grows an extra night tonight.'),
   compost: D('compost', 'Compost', 'tool', 1, 'uncommon', 'crop', 'A crop gets +6 yield at harvest.'),
   fertiliser: D('fertiliser', 'Fertiliser', 'tool', 1, 'uncommon', 'growing', 'A crop grows a night now.'),
   trowel: D('trowel', 'Trowel', 'tool', 0, 'uncommon', 'move', 'Move a crop to an empty plot next to it.', 'Move a crop to any empty plot.'),
@@ -115,10 +121,17 @@ export const RETIRED: Record<string, CardId> = { hose: 'rain', mulch: 'can' };
 /** Locked cards, unlocked two at a time in this order. */
 export const UNLOCK_ORDER: CardId[] = ['beehive', 'chili', 'corn', 'wheat', 'pumpkin', 'shears', 'mint', 'trowel', 'storm'];
 
-/** Seasons met in one run that unlock the next pair: earned by getting further, never by finishing runs. */
-export const UNLOCK_AT = [1, 3, 5, 7, 9];
+/**
+ * Seasons met, counted across every run, that unlock the next pair: earned by
+ * getting further, never by finishing runs. Counting across runs means a run of
+ * three or four seasons still adds to the catalogue (the third playtest's runs 2
+ * to 4 met 1 to 4 seasons each and found nothing new, since the old marks were
+ * for one run).
+ */
+export const UNLOCK_AT = [1, 3, 5, 8, 12];
 
-export const PRICE: Record<Rarity, number> = { common: 20, uncommon: 40, rare: 65 };
+/** Cards are cheaper than they were (20, 40, 65): a good card has to be worth buying over another page. */
+export const PRICE: Record<Rarity, number> = { common: 15, uncommon: 30, rare: 45 };
 
 export interface PageDef {
   id: PageId;
@@ -129,18 +142,19 @@ export interface PageDef {
 
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
-  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +3 yield.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Sunflowers and beehives give +2 bloom, not +1.' },
-  thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'A fourth seed scoop every day.' },
+  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom for each radish or carrot beside them.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'A crop a sunflower or a beehive blooms gets x2, once.' },
+  thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },
   market: { id: 'market', name: 'Market Day', price: 130, text: 'Every fifth harvest in a day is x2.' },
   clover: { id: 'clover', name: 'Four-Leaf Clover', price: 140, text: 'One harvest in eight comes up golden, x3.' },
-  furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column.' },
+  furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column, and one more scoop a day.' },
   coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
 };
 
 export const PAGE_IDS = Object.keys(PAGES) as PageId[];
-export const MAX_PAGES = 5;
+/** Almanac pages kept before a slot is bought (TUNING.maxPages is what the rules read). */
+export const MAX_PAGES = 4;
 
 export const SEASON_NAMES = ['spring', 'summer', 'autumn', 'winter'] as const;

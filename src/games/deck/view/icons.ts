@@ -168,7 +168,7 @@ export function loop(g: Ctx, x: number, y: number, s: number): void {
   g.restore();
 }
 
-export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' | 'all' | 'area' | 'one' | 'move' | 'moveany' | 'scare';
+export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' | 'all' | 'area' | 'one' | 'move' | 'moveany' | 'scare' | 'below';
 
 /**
  * A little map of plots, s across, centred on (x, y): the crop in the middle
@@ -187,6 +187,7 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
       const centre = r === mid && k === mid;
       let on = false;
       if (kind === 'next' || kind === 'spread' || kind === 'guard') on = edge;
+      else if (kind === 'below') on = r === 2 && k === 1;
       else if (kind === 'area' || kind === 'scare') on = !centre;
       else if (kind === 'row') on = r === 1;
       else if (kind === 'rowcol') on = r === 1 || k === 1;
@@ -320,6 +321,7 @@ export type Bit =
   | { t: 'bloom' }
   | { t: 'map'; k: Diagram }
   | { t: 'nocrow' }
+  | { t: 'scoop' }
   | { t: 'text'; s: string; c: 'y' | 'b' | 'i' };
 
 const Y = (s: string): Bit => ({ t: 'text', s, c: 'y' });
@@ -345,11 +347,13 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
     case 'corn':
       return [prod('beans'), B('×1.5'), BLOOMB];
     case 'sunflower':
-      return [map('next'), B(bees ? '+2' : '+1'), BLOOMB];
+      // It faces the crop below it.
+      return bees ? [map('below'), B('+2'), BLOOMB, B('×2')] : [map('below'), B('+2'), BLOOMB];
     case 'pumpkin':
       return [map('alone'), B('×2'), BLOOMB];
     case 'strawberry':
-      return [{ t: 'loop' }, I('×4')];
+      // Its picks are on the basket row; its rule is the scoop each pick puts back.
+      return [{ t: 'loop' }, { t: 'scoop' }, I('+1')];
     case 'mint':
       return [map('spread')];
     case 'garlic':
@@ -359,7 +363,7 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
     case 'chili':
       return [map('next'), B('×1.5'), BLOOMB];
     case 'can':
-      return [map(up ? 'rowcol' : 'row'), MOON, I('+1')];
+      return [map('row'), MOON, I('+1')];
     case 'compost':
       return [map('one'), Y('+6'), BASKET];
     case 'fertiliser':
@@ -374,7 +378,7 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
       // A crow kept off, and the 3 by 3 it is kept off.
       return [{ t: 'nocrow' }, map('area')];
     case 'beehive':
-      return [map('area'), B(bees ? '+2' : '+1'), BLOOMB];
+      return bees ? [map('area'), B('+1'), BLOOMB, B('×2')] : [map('area'), B('+1'), BLOOMB];
     case 'rain':
       return [map('all'), MOON, I('+1')];
     case 'sun':
@@ -398,6 +402,8 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
       case 'bloom':
       case 'moon':
         return h * 0.78;
+      case 'scoop':
+        return h * 1.1;
       default:
         return h;
     }
@@ -439,6 +445,9 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
       case 'nocrow':
         crow(g, mx, cy, h, true);
         break;
+      case 'scoop':
+        scoop(g, mx, cy, h * 1.1, true);
+        break;
       case 'text':
         num(g, b.s, x, cy, h * 0.78, b.c === 'b' ? BLOOM : light ? '#f6ecd0' : INK);
         break;
@@ -475,6 +484,8 @@ export function iconUrl(key: string, size = 40): string {
   else if (key === 'moon') moon(g, m, m, size * 0.4);
   else if (key === 'alone') diagram(g, 'alone', m, m, size * 0.9);
   else if (key === 'tall') tall(g, m, m, size);
+  else if (key === 'pest') bug(g, m, m, size * 0.3);
+  else if (key === 'scoop') scoop(g, m, m, size * 0.95, true);
   else {
     // An almanac page: a ruled leaf with a red ribbon.
     g.save();

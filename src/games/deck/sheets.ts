@@ -25,6 +25,7 @@ import {
   reroll,
   scoopPrice,
   SEASON_NAMES,
+  seasonsToNext,
   SEEDS,
   slotOnSale,
   slotPrice,
@@ -43,6 +44,8 @@ import type { Table } from './table';
 import { pinUrl, scoopUrl, thingUrl } from './view/art';
 import { faceUrl, VARIETY } from './view/faces';
 import { paintBell, paintStamp } from './view/glyphs';
+
+const NUMS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
 
 type Kind = 'menu' | 'rules' | 'deck' | 'stall' | 'entry';
 
@@ -234,13 +237,14 @@ export class Sheets {
     page.append(el('i', 'sb-ribbon'));
     page.append(el('h2', '', 'The rules in brief'));
     const lines = [
-      'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner.',
+      'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner: a radish is free, corn and the pumpkin take three.',
+      'Every crop pulled up puts a scoop back on the next morning\'s bench, two at most a night. A strawberry puts one back with every pick.',
       'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. Beans and strawberries stay and pick night after night. The watering can and rain add a night.',
       'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
-      'From summer, pests settle on crops: a pested crop does not grow or get picked for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
+      'From summer, pests settle on crops: a pested crop pays half for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
     ];
     for (const l of lines) page.append(el('p', '', l));
@@ -438,7 +442,7 @@ export class Sheets {
     const last = s.stats.log[s.stats.log.length - 1];
     const head = el('div', 'sb-stall-head');
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])} is in. You took ${last.earned} of ${last.quota}.`));
+    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}'s harvest is in: ${last.earned} of ${last.quota}.`));
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
@@ -679,7 +683,11 @@ export class Sheets {
         row.append(img);
       }
       page.append(row);
-    } else page.append(el('p', 'sb-quiet', 'The catalogue holds nothing new. Meet more seasons in a run to add to it.'));
+    } else {
+      // Seasons count across runs, so say how many more add to the catalogue.
+      const more = seasonsToNext(m);
+      page.append(el('p', 'sb-quiet', more ? `The catalogue holds nothing new yet. Meet ${NUMS[more] ?? more} more ${more === 1 ? 'season' : 'seasons'}, in any run, to add to it.` : 'The catalogue holds every card.'));
+    }
     sheet.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
     this.show('entry', sheet);
     this.ctx.audio.cue('deck.fail');

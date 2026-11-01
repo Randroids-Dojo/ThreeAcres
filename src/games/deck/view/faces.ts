@@ -105,7 +105,12 @@ export interface CostBox {
 }
 
 const SCOOP_W = 17;
-const COST_AT: Record<string, { x: number; y: number }> = { seed: { x: 6, y: 15 }, tool: { x: 15, y: 37 }, weather: { x: 9, y: 30 }, object: { x: 12, y: 33 } };
+/**
+ * Where the cost chip sits. On a seed packet it is a price sticker over the
+ * torn top edge, so the name keeps the whole band: seeds now cost up to three
+ * scoops, and three beside the name squeezed "Pumpkin" to 6 units.
+ */
+const COST_AT: Record<string, { x: number; y: number }> = { seed: { x: 5, y: 0.5 }, tool: { x: 15, y: 37 }, weather: { x: 9, y: 30 }, object: { x: 10, y: 33 } };
 
 /** The cost scoops' boxes on a face. Free cards have none. */
 export function costBoxes(id: CardId, up: boolean): CostBox[] {
@@ -261,9 +266,9 @@ function packet(ctx: Ctx, id: SeedId, up: boolean, S: number, showCost: boolean,
   body();
   ink(ctx, '#7a6446', 0.6, 0.6);
 
-  // The cost in the top left, the name in the band after it.
+  // The cost as a sticker on the top edge; the name has the band to itself.
   if (showCost) costChip(ctx, id, up);
-  const nx = 10 + costWidth(id, up, showCost);
+  const nx = 10;
   ctx.fillStyle = '#fbf3df';
   const nsize = fit(ctx, CARDS[id].name, 15, 91 - nx, 720);
   ctx.textAlign = 'left';
@@ -600,10 +605,11 @@ function plaque(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean,
   ctx.fillText(CARDS[id].name, 52, 29);
   nameAt(ctx, CARDS[id].name, 52, 29, 12.5, 'center');
   if (showCost) costChip(ctx, id, up);
+  // The thing itself, clear of a three-scoop cost chip.
   ctx.save();
-  ctx.translate(58, 60);
-  ctx.scale(28, 28);
-  paintGlyph(ctx, id, 1 / (28 * S), '#2a1a0a', pal);
+  ctx.translate(60, 63);
+  ctx.scale(25, 25);
+  paintGlyph(ctx, id, 1 / (25 * S), '#2a1a0a', pal);
   ctx.restore();
   ctx.beginPath();
   ctx.roundRect(14, 76, 72, 22, 4);
@@ -660,9 +666,9 @@ function faceKey(id: CardId, up: boolean, cost: boolean, bonus: FaceBonus | null
   return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? 'b' : ''}` : ''}`;
 }
 
-/** What the kept pages change on this card's face, or null. */
+/** What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x2 on the sunflower and the beehive. */
 export function faceBonus(id: CardId, pages: readonly string[]): FaceBonus | null {
-  const y = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? 3 : 0;
+  const y = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? 2 : 0;
   const bees = (id === 'sunflower' || id === 'beehive') && pages.includes('bees');
   return y || bees ? { yield: y, bees } : null;
 }

@@ -7,11 +7,11 @@ import type { Crop, PageId, Plot, RunState, Season } from './types';
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
 export const TUNING = {
   /** Year 1's quotas, spring to winter. */
-  quotas: [160, 210, 240, 290] as number[],
+  quotas: [170, 260, 300, 350] as number[],
   /** Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. */
-  quotas2: [320, 420, 510, 650] as number[],
+  quotas2: [400, 480, 540, 600] as number[],
   /** Year 3's. With the plot carrying over, takes climb steeply into year 3 and then flatten, so it has its own row too. */
-  quotas3: [780, 920, 1000, 1080] as number[],
+  quotas3: [600, 660, 700, 740] as number[],
   /** Each year after the third multiplies year 3's quotas by this. */
   yearMult: 1.3,
   /** The guided first season's quota: its first three days are set hands, so it takes less. */
@@ -30,6 +30,35 @@ export const TUNING = {
   pestChance: [0, 0.15, 0.2, 0.25, 0.3, 0.34, 0.38, 0.42, 0.46, 0.5, 0.55] as number[],
   /** Nights pests stay on a crop before they move on. */
   pestNights: 2,
+  /**
+   * What a pested crop's harvest pays: half. Pests used to stop a crop growing and
+   * being picked; perennial builds lost whole nights to them and three of the third
+   * playtest's four deaths came after a pest-struck season. Now they press, not decide.
+   */
+  pestPay: 0.5,
+  /** Scoops a crop puts back on the next morning's bench when it is pulled up. */
+  scoopBack: 1,
+  /** Which crops put a scoop back when pulled up: every crop (shipped), or for checks only those that cost a scoop, or none. */
+  scoopFrom: 'all' as 'all' | 'paid' | 'none',
+  /**
+   * The most scoops pulled crops put back in one night. Uncapped, the morning
+   * bench grew to 9 to 12 scoops and the budget bound on 5% of days; at two it
+   * holds 4 to 8 and binds on about 45% (deck-board).
+   */
+  scoopCap: 2,
+  /** Bloom a sunflower gives the crop below it. */
+  sunBloom: 2,
+  /** Yield the Root Cellar adds to radishes and carrots (on top of its bloom for each root beside them). */
+  cellarYield: 2,
+  /** Busy Bees' one multiplier for a crop a sunflower or a beehive blooms, however many. */
+  beesTimes: 2,
+  /**
+   * Almanac pages kept before any slot is bought. Four, not five: buying only
+   * pages cleared year 2 more often than buying good cards (the tester's 40%
+   * against 35%; 59% against 48% with this round's cards), and a fifth page
+   * now costs a slot.
+   */
+  maxPages: 4,
   /** Chance each pested crop spreads to a neighbour on a night. */
   pestSpread: 0.4,
   /** Chance a crow comes at dawn, by season from the run's first, like the pests. */
@@ -82,8 +111,9 @@ export function quotaFor(year: number, season: Season, pages: readonly PageId[],
   return nice(q);
 }
 
-export function energyMax(s: RunState): number {
-  return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.scoops ?? 0);
+/** The bench's morning refill: three scoops, one more for Green Thumb, one for the Long Furrow, and any bought for good. */
+export function energyMax(s: Pick<RunState, 'pages' | 'scoops'>): number {
+  return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.pages.includes('furrow') ? 1 : 0) + (s.scoops ?? 0);
 }
 
 export function handSize(s: RunState): number {
@@ -193,7 +223,8 @@ export interface Fate {
  * When every crop on the plot will be pulled and when it will leave, if
  * nothing more is played and no hazard comes: each crop grows a night each
  * night (plus tonight's can, rain and storm, and the Rain Barrel each night),
- * pests hold a crop back for the nights they stay, and ripe crops are picked.
+ * and ripe crops are picked. Pests no longer hold a crop back (they halve its
+ * pay instead), so the forecast does not count them.
  * The plot carries over from season to season, so the nights run on past the
  * season's end. The previews use it so a bonus only counts when the crop
  * giving it will still be there on the night the other is pulled.
@@ -207,14 +238,13 @@ export function forecast(s: RunState): (Fate | null)[] {
     if (!c) return null;
     const max = SEEDS[c.kind].picks;
     let age = c.age;
-    let pest = c.pest;
     let picks = c.picks;
     let ripeIn = Infinity;
     let leave = Infinity;
     for (let n = 0; n < 40; n++) {
       const grow = n === 0 ? 1 + extra + p.boost : 1 + (barrel && i % s.cols === 0 ? 1 : 0);
-      if (!pest && age < c.days) age = Math.min(c.days, age + grow);
-      if (!pest && age >= c.days) {
+      if (age < c.days) age = Math.min(c.days, age + grow);
+      if (age >= c.days) {
         if (ripeIn === Infinity) ripeIn = n;
         picks++;
         if (picks >= max) {
@@ -222,7 +252,6 @@ export function forecast(s: RunState): (Fate | null)[] {
           break;
         }
       }
-      if (pest) pest--;
     }
     return { ripeIn, pull: ripeIn, leave, late: ripeIn > last };
   });
@@ -234,9 +263,9 @@ export function nightsLeft(s: RunState, i: number): number {
   return f ? f.ripeIn : 0;
 }
 
-/** Will this crop be pulled tonight, as things stand (before a crow)? Pests on it at dusk hold it back. */
+/** Will this crop be pulled tonight, as things stand (before a crow)? A pested crop is too, at half pay. */
 export function ripeTonight(s: RunState, i: number): boolean {
   const c = s.plots[i].crop;
-  if (!c || c.pest) return false;
+  if (!c) return false;
   return isRipe(c) || c.age + 1 + extraGrowth(s) + s.plots[i].boost >= c.days;
 }

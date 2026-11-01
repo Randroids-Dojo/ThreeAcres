@@ -124,6 +124,7 @@
 .sb-tonight img { width: 36px; height: 50px; margin: 0 -6px; transform: rotate(-6deg); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5)); }
 .sb-tonight img:nth-child(2n) { transform: rotate(5deg); }
 .sb-tin, .sb-heap, .sb-lantern { border: 0; background: none; padding: 0; position: relative; }
+.sb-tin { height: 66px; display: flex; flex-direction: column; justify-content: flex-start; align-items: center; }
 .sb-tin img { width: 66px; height: 48px; display: block; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.5)); }
 .sb-count {
   position: absolute; right: -4px; top: -6px; min-width: 18px; padding: 1px 3px; box-sizing: border-box;
@@ -166,16 +167,23 @@
 .sb-lantern:has(.sb-flame.out)::before { opacity: 0; }
 .sb-lantern:disabled { opacity: 0.6; }
 @keyframes sb-flicker { 0%, 100% { transform: scale(1, 1) rotate(-2deg); } 30% { transform: scale(0.94, 1.08) rotate(2deg); } 60% { transform: scale(1.04, 0.95) rotate(-1deg); } }
-.sb[data-layout='wide'] .sb-bench { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; align-items: end; justify-items: center; gap: 6px 4px; }
-.sb[data-layout='wide'] .sb-scoops { grid-column: 1 / span 2; grid-row: 1; justify-self: start; }
-.sb[data-layout='wide'] .sb-tonight { grid-column: 3; grid-row: 1; height: 70px; }
-.sb[data-layout='wide'] .sb-tin { grid-column: 1; grid-row: 2; margin-bottom: 18px; }
-.sb[data-layout='wide'] .sb-heap { grid-column: 2; grid-row: 2; margin-bottom: 12px; }
-.sb[data-layout='wide'] .sb-lantern { grid-column: 3; grid-row: 2; }
-.sb[data-layout='wide'] .sb-lantern { width: 84px; height: 108px; }
-.sb[data-layout='wide'] .sb-lantern img { width: 70px; height: 100px; left: 7px; top: -12px; }
-.sb[data-layout='wide'] .sb-flame { left: 38px; top: 27px; width: 9px; height: 17px; }
-.sb[data-layout='wide'] .sb-tin img { width: 86px; height: 63px; }
+.sb[data-layout='wide'] .sb-bench { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr auto; align-items: end; justify-items: center; gap: 10px 6px; }
+.sb[data-layout='wide'] .sb-scoops { grid-column: 1 / span 2; grid-row: 1; justify-self: start; align-self: center; margin-bottom: 0; }
+.sb[data-layout='wide'] .sb-tonight { grid-column: 3; grid-row: 1; height: 92px; align-self: center; }
+.sb[data-layout='wide'] .sb-tonight img { width: 50px; height: 70px; }
+.sb[data-layout='wide'] .sb-tin { grid-column: 1; grid-row: 2; margin-bottom: 0; height: 110px; }
+.sb[data-layout='wide'] .sb-heap { grid-column: 2; grid-row: 2; margin-bottom: 0; width: 92px; height: 104px; }
+.sb[data-layout='wide'] .sb-heap-pile { left: 12px; right: 12px; top: 18px; height: 58px; }
+.sb[data-layout='wide'] .sb-heap-done { left: 6px; top: 6px; width: 24px; height: 24px; }
+.sb[data-layout='wide'] .sb-heap-done::after { left: 6px; top: 2px; width: 7px; height: 12px; border-width: 0 3px 3px 0; }
+.sb[data-layout='wide'] .sb-lantern { grid-column: 3; grid-row: 2; width: 112px; height: 144px; }
+.sb[data-layout='wide'] .sb-lantern img { width: 88px; height: 126px; left: 12px; top: -6px; }
+.sb[data-layout='wide'] .sb-lantern::before { left: -26px; top: -30px; width: 164px; height: 164px; }
+.sb[data-layout='wide'] .sb-flame { left: 50px; top: 37px; width: 12px; height: 21px; }
+.sb[data-layout='wide'] .sb-tin img { width: 116px; height: 85px; }
+.sb[data-layout='wide'] .sb-label { font-size: 15px; bottom: -4px; }
+.sb[data-layout='wide'] .sb-count { font-size: 15px; min-width: 24px; padding: 1px 4px; }
+.sb[data-layout='wide'] .sb-pages { overflow-y: auto; }
 
 /* ---------------------------------------------------------------- pages kept (wide) */
 .sb-pages { overflow: hidden; display: flex; flex-wrap: wrap; gap: 6px 10px; align-content: flex-start; padding-top: 6px; }
@@ -209,6 +217,8 @@
   content: attr(data-key); position: absolute; left: 50%; top: -18px; transform: translateX(-50%);
   font-size: 13px; font-weight: 700; color: #f6e8c4; text-shadow: 0 1px 2px #000;
 }
+/* A lifted card's key number would stand over the plate's caption; the card in hand is already chosen. */
+#app[data-device='key'] .sb-card.held::before { visibility: hidden; }
 
 /* ---------------------------------------------------------------- night */
 .sb-night { inset: 0; pointer-events: none; z-index: 4; opacity: 0; background: radial-gradient(90% 70% at 50% 45%, #3a4a7a, #141a30); mix-blend-mode: multiply; }
@@ -229,9 +239,11 @@
 .sb-slip .x { color: var(--ink-soft); font-size: 14px; margin: 0 1px; }
 .sb-slip .m { color: var(--bloom); }
 .sb-ic { width: 17px; height: 17px; }
-.sb-steps { display: flex; gap: 3px; min-height: 0; }
+.sb-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 4px; min-height: 0; max-width: 136px; white-space: nowrap; }
 .sb-steps:empty { display: none; }
 .sb-chip { display: inline-flex; align-items: center; gap: 1px; font-size: 12px; font-weight: 700; font-style: normal; }
+/* A bonus still on its way holds its place on the slip, unseen, so its arc lands there and nowhere else. */
+.sb-chip.waiting { visibility: hidden; }
 .sb-chip img { width: 15px; height: 15px; }
 .sb-chip.y { color: var(--ink); }
 .sb-chip.m { color: var(--bloom); }
@@ -244,6 +256,10 @@
 .sb-slip.big.total b { font-size: 36px; color: #6a3a00; }
 .sb-slip.golden { background: #f6dc8a; }
 .sb-slip.fly { box-shadow: none; }
+/* A scoop put back by a pulled crop, on its way to the bench. */
+.sb-flyscoop { position: absolute; width: 34px; height: 26px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
+.sb-scoops.gain { animation: sb-gain 0.4s ease; }
+@keyframes sb-gain { 50% { filter: drop-shadow(0 0 8px rgba(255, 226, 140, 0.95)); } }
 /* A bonus on its way from the crop that gave it. */
 .sb-arc {
   position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 1px; padding: 1px 5px 1px 2px;

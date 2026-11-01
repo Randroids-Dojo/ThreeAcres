@@ -15,6 +15,11 @@
 //   - a radish aimed beside a fresh carrot promises the carrot bloom it won't
 //     get (the night pulls the radish first), or the day 3 line does not teach
 //     the timing
+//   - cost is not taught a piece at a time: the scoops show before the first
+//     dear seed (the beans, day 4), the beans do not print two scoops and the
+//     radish Free, the two scoops a held bean card would use do not lift, no
+//     scoop flies to the bench for a crop pulled up at night, or day 5's dawn
+//     does not lay out the scoops put back and say why
 //   - the stall's first tap buys, or does not say what the card does; the
 //     purse disagrees with the rules after a purchase
 //   - days 4 to 6 of the guided season bring more than one new card a day
@@ -103,6 +108,26 @@ async function session(label, viewport, touch) {
   const plotPoint = (i) => p.evaluate((i) => { const r = window.deck.rects().plots[i]; return [r.left + r.width / 2, r.top + r.height * 0.6]; }, i);
   const center = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, sel);
   const idle = () => p.waitForFunction(() => !window.deck.busy(), null, { timeout: 30000 });
+  /** Mean luminance of the middle of a hand card's face, from a screenshot: an unaffordable card is dimmed. */
+  const lum = async (uid) => {
+    const r = await p.evaluate((uid) => { const e = window.deck.table.handEls.get(uid).el.querySelector('img').getBoundingClientRect(); return { x: e.left, y: e.top, w: e.width, h: Math.min(e.height, innerHeight - e.top) }; }, uid);
+    const png = await cdp.send('Page.captureScreenshot', { format: 'png', clip: { x: r.x + r.w * 0.15, y: r.y + r.h * 0.3, width: r.w * 0.7, height: r.h * 0.4, scale: 1 } });
+    return p.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      let s = 0;
+      for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      return s / (d.length / 4);
+    }, png.data);
+  };
+
   const frames = (n = 6) => wait(n * 17);
 
   /** Exactly what is on the table right now. */
@@ -309,9 +334,9 @@ async function session(label, viewport, touch) {
   await idle();
   await wait(300);
 
-  // ---------------------------------------------------------------- day 3: bloom, then the scoops
+  // ---------------------------------------------------------------- day 3: bloom; quick crops never run the bench short
   t = await step('day 3, dawn');
-  check(`${label}: day 3 deals more than three scoops' worth`, t.hand.join() === 'radish,radish,carrot,lettuce', t.hand.join());
+  check(`${label}: day 3 deals two radishes, a carrot and the lettuce`, t.hand.join() === 'radish,radish,carrot,lettuce', t.hand.join());
   check(`${label}: the bloom lesson teaches the timing: the carrot ripens tonight`, /ripens tonight/i.test(t.line), t.line);
   check(`${label}: still no scoops`, !t.pieces.scoops && t.cost === 0);
   await shot('8-bloom');
@@ -339,68 +364,22 @@ async function session(label, viewport, touch) {
   await wait(600);
   t = await step('day 3, two radishes round the carrot');
   check(`${label}: the bloom lesson ends`, t.done.includes('bloom'), t.done.join());
-  check(`${label}: the scoops arrive when the hand costs more than is left`, t.pieces.scoops && /scoop/i.test(t.line), t.line);
-  check(`${label}: and the cards show their cost`, t.cost >= 2, `${t.cost} cost marks`);
-  await shot('10-scoops');
-  // Cost glyph size, measured.
-  const glyph = await p.evaluate(() => {
-    const t = window.deck.table;
-    const sizes = [];
-    for (const c of t.run.hand) for (const i of t.handEls.get(c.uid).el.querySelectorAll('.sb-cost i')) sizes.push(i.getBoundingClientRect().width);
-    return sizes;
-  });
-  check(`${label}: cost scoops on cards are at least 14 px`, glyph.length > 0 && Math.min(...glyph) >= 14, glyph.map((x) => x.toFixed(1)).join(', '));
-  // Take up the carrot: the one scoop it would use lifts.
-  const lum = async (uid) => {
-    const r = await p.evaluate((uid) => { const e = window.deck.table.handEls.get(uid).el.querySelector('img').getBoundingClientRect(); return { x: e.left, y: e.top, w: e.width, h: Math.min(e.height, innerHeight - e.top) }; }, uid);
-    const png = await cdp.send('Page.captureScreenshot', { format: 'png', clip: { x: r.x + r.w * 0.15, y: r.y + r.h * 0.3, width: r.w * 0.7, height: r.h * 0.4, scale: 1 } });
-    return p.evaluate(async (data) => {
-      const img = new Image();
-      img.src = `data:image/png;base64,${data}`;
-      await img.decode();
-      const c = document.createElement('canvas');
-      c.width = img.width;
-      c.height = img.height;
-      const g = c.getContext('2d');
-      g.drawImage(img, 0, 0);
-      const d = g.getImageData(0, 0, c.width, c.height).data;
-      let s = 0;
-      for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-      return s / (d.length / 4);
-    }, png.data);
-  };
-  const lettuceUid = await p.evaluate(() => window.deck.state().hand.find((c) => c.id === 'lettuce').uid);
-  const lumBefore = await lum(lettuceUid);
-  if (touch) await tap(...(await cardPoint(await handIndex('carrot'))));
-  else await p.keyboard.press(`Digit${(await handIndex('carrot')) + 1}`);
-  await wait(350);
-  const scoopsHeld = await p.evaluate(() => [...document.querySelectorAll('.sb-scoops img')].map((i) => ({ use: i.classList.contains('use'), empty: i.classList.contains('empty'), top: i.getBoundingClientRect().top })));
-  await shot('11-scoop-lifts');
-  const used = scoopsHeld.filter((s) => s.use);
-  const rest = scoopsHeld.filter((s) => !s.use);
-  check(`${label}: the scoop a held card would use lifts`, used.length === 1 && used[0].top < Math.min(...rest.map((s) => s.top)) - 4, JSON.stringify(scoopsHeld));
-  if (touch) await tap(...(await plotPoint(13)));
-  else {
-    await p.evaluate(() => (window.deck.table.cursor = 13));
-    await p.keyboard.press('Enter');
+  // The radishes are free and the carrot and lettuce a scoop each: the bench never runs short, so the scoops stay off the table.
+  check(`${label}: no scoops while nothing costs more than the bench holds`, !t.pieces.scoops && t.cost === 0 && !/scoop/i.test(t.line), t.line);
+  for (const id of ['carrot', 'lettuce']) {
+    const hi = await handIndex(id);
+    if (hi < 0) continue;
+    const plot = await p.evaluate(() => window.deck.state().plots.findIndex((q, i) => i > 8 && !q.crop && !q.obj));
+    if (touch) {
+      await tap(...(await cardPoint(hi)));
+      await tap(...(await plotPoint(plot)));
+    } else {
+      await p.keyboard.press(`Digit${hi + 1}`);
+      await p.evaluate((plot) => (window.deck.table.cursor = plot), plot);
+      await p.keyboard.press('Enter');
+    }
+    await wait(500);
   }
-  await wait(600);
-  const emptyNow = await p.evaluate(() => document.querySelectorAll('.sb-scoops img.empty').length);
-  check(`${label}: after the play the scoops are visibly empty`, emptyNow === 3, `${emptyNow} of 3 empty`);
-  // The lettuce now costs more than is left: dimmed, and a tap only shakes it.
-  const lumAfter = await lum(lettuceUid);
-  check(`${label}: an unaffordable card is visibly darker`, lumAfter < lumBefore * 0.8, `luminance ${lumBefore.toFixed(0)} to ${lumAfter.toFixed(0)}`);
-  const notesBefore = await p.evaluate(() => window.__notes.length);
-  if (touch) await tap(...(await cardPoint(await handIndex('lettuce'))));
-  else await p.keyboard.press(`Digit${(await handIndex('lettuce')) + 1}`);
-  await wait(120);
-  const nope = await p.evaluate((uid) => ({ held: !!window.deck.table.held, shake: window.deck.table.handEls.get(uid).el.classList.contains('nope'), flash: document.querySelectorAll('.sb-scoops img.flash').length, notes: window.__notes.slice() }), lettuceUid);
-  await shot('12-unaffordable');
-  check(`${label}: tapping it shakes it, flashes the missing scoop, and takes nothing up`, !nope.held && nope.shake && nope.flash === 1, JSON.stringify({ ...nope, notes: undefined }));
-  check(`${label}: and no note about energy`, nope.notes.length === notesBefore && !nope.notes.some((n) => /energy/i.test(n)), nope.notes.slice(notesBefore).join(' | '));
-  await wait(400);
-  t = await step('day 3, scoops spent');
-  check(`${label}: spent, the line turns to ending the day`, /End the day/.test(t.line) && t.pieces.scoops, t.line);
   // End the day: the carrot blooms ×3 with arcs from both radishes.
   if (touch) await tap(...(await center('.sb-lantern')));
   else await p.keyboard.press('KeyE');
@@ -413,17 +392,112 @@ async function session(label, viewport, touch) {
   }
   await idle();
   await wait(200);
-  t = await step('day 4, dawn');
-  check(`${label}: the scoops lesson ends with the day`, t.done.includes('scoops'), t.done.join());
-  const refilled = await p.evaluate(() => document.querySelectorAll('.sb-scoops img.refill').length);
-  check(`${label}: dawn refills the scoops one after another`, refilled === 3, `${refilled} refilled`);
   const scores = await p.evaluate(() => window.deck.shownScores());
   check(`${label}: bloom flies in from each radish and shows on the slip`, bloomSeen.arcs > 0 && bloomSeen.slip > 0, JSON.stringify(bloomSeen));
   check(`${label}: the carrot paid 5 × 3`, scores.includes(15), scores.join(','));
 
+  // ---------------------------------------------------------------- day 4: the beans, a dear seed: the scoops and the cost arrive
+  t = await step('day 4, dawn');
+  check(`${label}: day 4 deals the beans with a carrot and a radish`, t.hand.join() === 'beans,carrot,radish', t.hand.join());
+  check(`${label}: first the new card: read it`, t.lesson === 'newcard', `${t.lesson}: "${t.line}"`);
+  check(`${label}: still no scoops before the dear seed's lesson`, !t.pieces.scoops && t.cost === 0);
+  {
+    const bi = await handIndex('beans');
+    const [x, y] = await cardPoint(bi);
+    if (touch) {
+      await touchEv('touchStart', [[x, y, 6]]);
+      await wait(650);
+      await touchEv('touchEnd', []);
+    } else {
+      await p.mouse.move(x, y);
+      await wait(700);
+    }
+    await wait(200);
+    await shot('10a-beans-read');
+    if (touch) await tap(20, 300);
+    else await p.mouse.move(640, 20);
+    await wait(250);
+    await p.evaluate(() => window.deck.table.sheets.closeDetail());
+    await wait(150);
+  }
+  t = await step('day 4, the beans read');
+  check(`${label}: the new-card lesson ends once it is read`, t.done.includes('newcard'), t.done.join());
+  check(`${label}: then the scoops arrive with the dear seed: "Spend two scoops on the beans."`, t.pieces.scoops && t.lesson === 'scoops' && t.line === 'Spend two scoops on the beans.', `${t.lesson}: "${t.line}"`);
+  check(`${label}: and every card shows its cost`, t.cost >= 3, `${t.cost} cost marks`);
+  const bench4 = await p.evaluate(() => ({ shown: document.querySelectorAll('.sb-scoops img').length, full: document.querySelectorAll('.sb-scoops img:not(.empty)').length, bench: window.deck.state().bench }));
+  check(`${label}: the bench lays out the day's scoops, the two put back included`, bench4.shown === bench4.bench && bench4.full === bench4.bench && bench4.bench === 5, JSON.stringify(bench4));
+  await shot('10-scoops');
+  // Cost glyph size, measured; and a free card says Free (no scoops to mark).
+  const glyph = await p.evaluate(() => {
+    const t = window.deck.table;
+    const sizes = [];
+    for (const c of t.run.hand) for (const i of t.handEls.get(c.uid).el.querySelectorAll('.sb-cost i')) sizes.push(i.getBoundingClientRect().width);
+    return { sizes, radish: t.handEls.get(t.run.hand.find((c) => c.id === 'radish').uid).el.querySelectorAll('.sb-cost i').length, beans: t.handEls.get(t.run.hand.find((c) => c.id === 'beans').uid).el.querySelectorAll('.sb-cost i').length };
+  });
+  check(`${label}: cost scoops on cards are at least 14 px; the beans print two, the radish none (Free)`, glyph.sizes.length > 0 && Math.min(...glyph.sizes) >= 14 && glyph.beans === 2 && glyph.radish === 0, JSON.stringify(glyph));
+  // Take up the beans: the two scoops they would use lift, each from its own place (five scoops sit in two rows).
+  const restTops = await p.evaluate(() => [...document.querySelectorAll('.sb-scoops img')].map((i) => i.getBoundingClientRect().top));
+  if (touch) await tap(...(await cardPoint(await handIndex('beans'))));
+  else await p.keyboard.press(`Digit${(await handIndex('beans')) + 1}`);
+  await wait(350);
+  const scoopsHeld = await p.evaluate(() => [...document.querySelectorAll('.sb-scoops img')].map((i) => ({ use: i.classList.contains('use'), empty: i.classList.contains('empty'), top: i.getBoundingClientRect().top })));
+  await shot('11-scoop-lifts');
+  const used = scoopsHeld.filter((s) => s.use);
+  const lifted = scoopsHeld.map((s, k) => +(restTops[k] - s.top).toFixed(1));
+  check(`${label}: the two scoops the beans would use lift, the rest stay`, used.length === 2 && scoopsHeld.every((s, k) => (s.use ? lifted[k] > 4 : Math.abs(lifted[k]) < 1)), `lifted by ${lifted.join(', ')} px`);
+  {
+    const plot = await p.evaluate(() => window.deck.state().plots.findIndex((q) => !q.crop && !q.obj));
+    if (touch) await tap(...(await plotPoint(plot)));
+    else {
+      await p.evaluate((plot) => (window.deck.table.cursor = plot), plot);
+      await p.keyboard.press('Enter');
+    }
+  }
+  await wait(600);
+  const emptyNow = await p.evaluate(() => document.querySelectorAll('.sb-scoops img.empty').length);
+  check(`${label}: after the play two scoops are visibly empty`, emptyNow === 2, `${emptyNow} empty`);
+  t = await step('day 4, beans sown');
+  check(`${label}: the scoops lesson ends when the dear seed is sown`, t.done.includes('scoops'), t.done.join());
+  // Spend the rest (checks only): the carrot now costs more than is left: dimmed, and a tap only shakes it.
+  const carrotUid = await p.evaluate(() => window.deck.state().hand.find((c) => c.id === 'carrot').uid);
+  const lumBefore = await lum(carrotUid);
+  await p.evaluate(() => {
+    window.deck.state().energy = 0;
+    window.deck.table.renderAll();
+  });
+  await wait(350);
+  const lumAfter = await lum(carrotUid);
+  check(`${label}: an unaffordable card is visibly darker`, lumAfter < lumBefore * 0.8, `luminance ${lumBefore.toFixed(0)} to ${lumAfter.toFixed(0)}`);
+  const notesBefore = await p.evaluate(() => window.__notes.length);
+  if (touch) await tap(...(await cardPoint(await handIndex('carrot'))));
+  else await p.keyboard.press(`Digit${(await handIndex('carrot')) + 1}`);
+  await wait(120);
+  const nope = await p.evaluate((uid) => ({ held: !!window.deck.table.held, shake: window.deck.table.handEls.get(uid).el.classList.contains('nope'), flash: document.querySelectorAll('.sb-scoops img.flash').length, notes: window.__notes.slice() }), carrotUid);
+  await shot('12-unaffordable');
+  check(`${label}: tapping it shakes it, flashes the missing scoop, and takes nothing up`, !nope.held && nope.shake && nope.flash === 1, JSON.stringify({ ...nope, notes: undefined }));
+  check(`${label}: and no note about energy`, nope.notes.length === notesBefore && !nope.notes.some((n) => /energy/i.test(n)), nope.notes.slice(notesBefore).join(' | '));
+  await wait(400);
+  // End the day: crops pulled up fly a scoop each to the bench, two at most.
+  if (touch) await tap(...(await center('.sb-lantern')));
+  else await p.keyboard.press('KeyE');
+  let flew = 0;
+  for (let k = 0; k < 120 && (await p.evaluate(() => window.deck.busy())); k++) {
+    flew = Math.max(flew, await p.evaluate(() => document.querySelectorAll('.sb-flyscoop').length));
+    if (flew) await shot('12b-scoop-back');
+    await wait(30);
+  }
+  await idle();
+  await wait(200);
+  const saved = await p.evaluate(() => ({ bench: window.deck.state().bench, refill: document.querySelectorAll('.sb-scoops img.refill').length, shown: document.querySelectorAll('.sb-scoops img').length }));
+  check(`${label}: at night a pulled crop's scoop flies to the bench`, flew > 0, `${flew} in flight at once`);
+  t = await step('day 5, dawn');
+  check(`${label}: dawn refills the bench one scoop after another, the two put back too`, saved.refill === saved.bench && saved.shown === saved.bench && saved.bench === 5, JSON.stringify(saved));
+  check(`${label}: and the next lesson says why: "Crops pulled last night put scoops back."`, t.lesson === 'saved' && t.line === 'Crops pulled last night put scoops back.', `${t.lesson}: "${t.line}"`);
+  await shot('12c-saved');
+
   // ---------------------------------------------------------------- days 4 to 6: the rest as each first matters
-  // One new card a day: the beans, then the can, then the sunflower, never all at once.
-  const met = new Set(['radish', 'carrot', 'lettuce']);
+  // One new card a day: the beans (day 4, above), then the can, then the sunflower, never all at once.
+  const met = new Set(['radish', 'carrot', 'lettuce', 'beans']);
   const newByDay = {};
   for (let guard = 0; guard < 40; guard++) {
     const st = await p.evaluate(() => ({ phase: window.deck.state().phase, day: window.deck.state().day }));

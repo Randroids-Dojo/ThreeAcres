@@ -18,6 +18,7 @@ import {
   moveTargets,
   newMeta,
   newRun,
+  nextPick,
   playCard,
   previewPlay,
   recordRun,
@@ -116,6 +117,8 @@ function migrateRun(r: RunState): void {
   r.crow ??= false;
   r.scoops ??= 0;
   r.slots ??= 0;
+  r.saved ??= 0;
+  r.bench ??= Math.max(r.energy, energyMax(r));
   r.guided ??= false;
   r.stats.pests ??= 0;
   r.stats.crows ??= 0;
@@ -178,6 +181,8 @@ export class Table {
   shownDay = 1;
   /** Scoops shown full: the night keeps the old day's count until dawn refills them. */
   shownEnergy = 0;
+  /** Scoops laid out on the bench: the night keeps the old day's bench until dawn. */
+  shownBench = 3;
   /** The hand as shown (the old hand stays up through the night). */
   handShown: Card[] = [];
   held: Held | null = null;
@@ -235,7 +240,7 @@ export class Table {
     const tinImg = el('img');
     tinImg.src = tinUrl();
     tinImg.alt = '';
-    this.tin.append(tinImg, this.tinCount);
+    this.tin.append(tinImg, this.tinCount, el('span', 'sb-label', 'Seed tin'));
     this.tin.setAttribute('aria-label', 'Seed tin: your deck (D)');
     this.heap.append(el('span', 'sb-heap-pile'), el('i', 'sb-heap-done'), this.heapCount, el('span', 'sb-label', 'Spent'));
     this.heap.setAttribute('aria-label', 'Spent cards. Drop a card here to toss it, once a day.');
@@ -336,6 +341,7 @@ export class Table {
     this.shownCoins = this.run.coins;
     this.shownDay = this.run.day;
     this.shownEnergy = this.run.energy;
+    this.shownBench = this.run.bench;
     this.handShown = [...this.run.hand];
     this.board.anims.clear();
     this.board.night = 0;
@@ -566,10 +572,13 @@ export class Table {
       place(this.purse, sx + P - 56, 16, 56, 56);
       place(this.book, sx + P - 58, 80, 58, 44);
       place(this.peg, sx, 116, P - 66, 32);
-      const benchY = H - 214;
+      // The bench is the desktop's controls: it takes the side panel's lower half at a size a mouse
+      // finds at once (it was 200 px tall, its labels 11.5 px, with 500 px of bare table above it).
+      const benchH = Math.round(Math.max(260, Math.min(380, H * 0.45)));
+      const benchY = H - benchH - 10;
       this.hintBox = { x: sx, y: benchY - 66, w: P, h: 52 };
       place(this.pages, sx, 160, P, Math.max(60, benchY - 76 - 160));
-      place(this.bench, sx, benchY, P, 200);
+      place(this.bench, sx, benchY, P, benchH);
       boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
       this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
     }
@@ -640,7 +649,8 @@ export class Table {
   /** The scoops: full or empty at a glance; the ones a held card would use lift; the ones it lacks show red. */
   private renderBench(): void {
     const s = this.run;
-    const max = energyMax(s);
+    // The day's scoops: the refill and any a pulled crop put back (the night keeps the old day's until dawn).
+    const max = Math.max(1, this.busy ? this.shownBench : s.bench);
     while (this.scoops.children.length < max) {
       const i = el('img');
       i.alt = '';
@@ -687,14 +697,14 @@ export class Table {
     const benchW = parseFloat(this.bench.style.width) || 0;
     const wide = this.layout === 'wide';
     const gap = 3;
-    const max = wide ? 66 : 48;
+    const max = wide ? 84 : 48;
     let room: number;
     let tall: number;
     if (wide) {
       // Two of the bench's three columns, the top row of its two.
       room = ((benchW - 8) * 2) / 3 - 6;
-      // The lantern (108 px) holds the bottom row; the scoops get what is left above it.
-      tall = parseFloat(this.bench.style.height) - 6 - 108 - 14;
+      // The lantern (144 px) holds the bottom row; the scoops get what is left above it.
+      tall = parseFloat(this.bench.style.height) - 6 - 144 - 14;
     } else {
       // Beside the tin (66), the spent heap (54) and the lantern (64), with the bench's gaps and room for tonight's weather.
       const weather = Math.max(1, this.run.tonight.length);
@@ -1073,7 +1083,7 @@ export class Table {
     const s = this.run;
     const r = Math.floor(i / s.cols);
     const c = i % s.cols;
-    if (card.id === 'can') return s.plots.map((_, j) => j).filter((j) => Math.floor(j / s.cols) === r || (card.up && j % s.cols === c));
+    if (card.id === 'can') return s.plots.map((_, j) => j).filter((j) => Math.floor(j / s.cols) === r);
     if (card.id === 'beehive' || card.id === 'scarecrow') {
       const out: number[] = [];
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
@@ -1327,9 +1337,11 @@ export class Table {
     this.ctx.audio.cue('deck.play');
     this.tutor.count('play');
     if (ev.some((e) => e.t === 'plant')) this.tutor.count('plant');
+    if (costOf(card.id, card.up) >= 2) this.tutor.count('dear');
     if (card.id === 'can') this.tutor.count('can');
     if (CARDS[card.id].type === 'weather') this.tutor.count('weather');
     this.shownEnergy = this.run.energy;
+    this.shownBench = this.run.bench;
     this.flyCard(card, cEl, from, plot ?? null, () => this.landPlay(ev, before));
     this.save();
     this.updateHighlight();
@@ -1515,21 +1527,38 @@ export class Table {
 
   // ---------------------------------------------------------------- notes and inspecting
 
-  /** A short ink note on the table near a plot, gone after a moment. Not a stack: one at a time. */
+  /**
+   * A short ink note on the table, gone after a moment. Not a stack: one at a
+   * time. A note about a plot sits over that plot, kept inside the bed so it
+   * never covers the key letters or numbers (it used to stand above a first-row
+   * plot, over its letter). A note about the whole table ("Quota met.") sits on
+   * the plate's caption under the bed, clear of the key.
+   */
   say(text: string, plot: number | null): void {
     const n = this.note;
     n.textContent = text;
     const br = this.boardWrap.getBoundingClientRect();
     const tr = this.tableEl.getBoundingClientRect();
-    let x = br.left - tr.left + br.width / 2;
-    let y = br.top - tr.top + this.board.by - 8;
+    const b = this.board;
+    const ox = br.left - tr.left;
+    const oy = br.top - tr.top;
+    const w = n.offsetWidth || 160;
+    const h = n.offsetHeight || 26;
+    const bedL = ox + b.bx;
+    const bedR = ox + b.bx + b.T * b.cols;
+    let x = ox + b.bx + (b.T * b.cols) / 2;
+    // The note hangs from its top-centre point upward (translate -50%, -100%): `y` is its bottom edge.
+    let y = oy + b.captionBaseline + 6;
     if (plot !== null) {
-      const c = this.board.centre(plot);
-      x = br.left - tr.left + c.x;
-      y = br.top - tr.top + c.y - this.board.T * 0.7;
+      const c = b.centre(plot);
+      x = ox + c.x;
+      y = Math.max(oy + c.y - b.T * 0.7, oy + b.by + h + 4);
     }
-    n.style.left = `${Math.round(Math.max(90, Math.min(this.W - 90, x)))}px`;
-    n.style.top = `${Math.round(Math.max(60, y))}px`;
+    // Inside the bed's width where it fits, so the numbers down the side stay clear too.
+    if (w <= bedR - bedL) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
+    x = Math.max(w / 2 + 4, Math.min(this.W - w / 2 - 4, x));
+    n.style.left = `${Math.round(x)}px`;
+    n.style.top = `${Math.round(Math.max(60 + h, y))}px`;
     n.classList.remove('on');
     void n.offsetWidth;
     n.classList.add('on');
@@ -1538,16 +1567,25 @@ export class Table {
   }
   private noteTimer = 0;
 
-  private inspect(i: number): void {
+  /** Read a plot: what stands there, what it will pay and when ("C4: carrot pays 15 in 2 nights."), in eight words at most. */
+  plotLine(i: number): string {
     const p = this.run.plots[i];
     const at = `${'ABCDE'[i % this.run.cols]}${Math.floor(i / this.run.cols) + 1}`;
     if (p.crop) {
       const c = p.crop;
-      const left = c.days - c.age;
-      const state = c.pest ? `pests, held back ${c.pest} ${c.pest === 1 ? 'night' : 'nights'}` : left <= 0 ? 'ripe' : ripeTonight(this.run, i) ? 'ripe tonight' : `${left} ${left === 1 ? 'night' : 'nights'} to go`;
-      this.say(`${at}: ${CARDS[c.kind].name.toLowerCase()}, ${state}.`, i);
-    } else if (p.obj) this.say(`${at}: ${CARDS[p.obj].name.toLowerCase()}.`, i);
-    else this.say(`${at}: bare soil.`, i);
+      const name = CARDS[c.kind].name.toLowerCase();
+      const next = nextPick(this.run, i);
+      if (!next) return `${at}: ${name}.`;
+      const n = next.ripeIn;
+      const when = next.late ? 'next season' : n <= 0 ? 'tonight' : `in ${n} ${n === 1 ? 'night' : 'nights'}`;
+      return `${at}: ${name}${c.pest ? ', pests,' : ''} pays ${next.score} ${when}.`;
+    }
+    if (p.obj) return `${at}: ${CARDS[p.obj].name.toLowerCase()}.`;
+    return `${at}: bare soil.`;
+  }
+
+  private inspect(i: number): void {
+    this.say(this.plotLine(i), i);
   }
 
   // ---------------------------------------------------------------- end of day, the night, the cascade
@@ -1562,6 +1600,7 @@ export class Table {
     const before = clonePlots(this.run.plots);
     const handBefore = [...this.run.hand];
     const energyBefore = this.run.energy;
+    const benchBefore = this.run.bench;
     const ev = endDay(this.run);
     for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
     if ((this.run.phase as string) === 'over') recordRun(this.meta, this.run, UNLOCK_ORDER);
@@ -1580,6 +1619,7 @@ export class Table {
     this.ctx.audio.cue('deck.endday');
     this.shown = before;
     this.shownEnergy = energyBefore;
+    this.shownBench = benchBefore;
     this.handShown = handBefore.filter((c) => !ev.some((e) => e.t === 'discardExcess' && e.cards.some((x) => x.uid === c.uid)));
     this.setLine(null);
     this.night(ev);
@@ -1596,6 +1636,7 @@ export class Table {
     this.board.anims.clear();
     this.board.night = 0;
     this.shownEnergy = this.run.energy;
+    this.shownBench = this.run.bench;
     if (this.run.phase === 'day' && this.run.energy > from) {
       this.renderBench();
       this.refill(from);
@@ -1770,7 +1811,7 @@ export class Table {
     });
     s.then(() => {
       // Make sure a skipped night lands in the same place.
-      if (this.shownDay !== this.run.day || this.shownEnergy !== this.run.energy) this.dawn();
+      if (this.shownDay !== this.run.day || this.shownEnergy !== this.run.energy || this.shownBench !== this.run.bench) this.dawn();
       this.shown = clonePlots(this.run.plots);
       this.shownEarned = this.run.earned;
       this.shownCoins = this.run.coins;
@@ -1778,7 +1819,7 @@ export class Table {
       b.anims.clear();
       b.night = 0;
       this.flame.classList.remove('out');
-      this.fx.querySelectorAll('.sb-slip, .sb-arc').forEach((x) => x.remove());
+      this.fx.querySelectorAll('.sb-slip, .sb-arc, .sb-flyscoop').forEach((x) => x.remove());
       this.seq = null;
       if (seasonEnd) {
         this.sheets.close();
@@ -1871,7 +1912,15 @@ export class Table {
     steps.forEach(({ st, kind }, j) => {
       const go = t + lead + j * gap;
       const lands = go + (st.from !== undefined ? fly : 0);
-      if (st.from !== undefined) this.arc(s, go, fly, st, kind, h.plot);
+      // The bonus's picture takes its place on the slip as it sets off (hidden until it lands), so the
+      // arc flies to its own place and never lands on a bonus already there; chips wrap to a second line.
+      let chip: HTMLElement | null = null;
+      s.at(go, () => {
+        chip = el('span', `sb-chip ${kind} waiting`);
+        chip.append(iconImg(st.icon, ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
+        row.append(chip);
+      });
+      if (st.from !== undefined) this.arc(s, go, fly, st, kind, h.plot, () => chip);
       s.at(lands, () => {
         if (kind === 'y') {
           yval = st.op === '+' ? yval + st.v : yval * st.v;
@@ -1890,9 +1939,7 @@ export class Table {
           this.ctx.audio.cue('deck.mult', { pitch: Math.min(2, 0.9 + mAdd * mX * 0.08), gain: Math.min(1, 0.5 + mAdd * mX * 0.08) });
         }
         // The bonus leaves its picture on the slip: a carrot and +2, a radish and +1.
-        const chip = el('span', `sb-chip ${kind}`);
-        chip.append(iconImg(st.icon, ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
-        row.append(chip);
+        chip?.classList.remove('waiting');
       });
     });
     // The total.
@@ -1912,6 +1959,8 @@ export class Table {
       } else if (mid && !reduced) b.emit('spark', c.x, c.y - b.T * 0.5, 7, { col: '#f2d27a', spread: 70, up: 70, size: 4 });
       if (h.golden) b.emit('spark', c.x, c.y - b.T * 0.5, 12, { col: '#ffe08a', spread: 90, up: 90, size: 5 });
     });
+    // A crop pulled up (or a strawberry's pick) puts a scoop back: it flies to the bench for the morning.
+    if (h.scoops > 0 && this.seen('scoops')) this.flyScoop(s, totalAt, h.plot);
     const tail = Math.min(0.3, d * 0.3);
     s.tween(totalAt, tail, (k) => {
       if (h.leaves) {
@@ -1980,8 +2029,46 @@ export class Table {
     });
   }
 
-  /** A bonus travelling from the crop that gave it to the one being scored: its picture and "+1", on an arc. */
-  private arc(s: Seq, go: number, dur: number, st: Step, kind: 'y' | 'm', to: number): void {
+  /** A scoop put back by a pulled crop, flying from its plot to the end of the bench. */
+  private flyScoop(s: Seq, at: number, plot: number): void {
+    const b = this.board;
+    let img: HTMLImageElement | null = null;
+    let p0 = { x: 0, y: 0 };
+    let p1 = { x: 0, y: 0 };
+    const dur = this.ctx.settings().reducedMotion ? 0.15 : 0.5;
+    s.at(at, () => {
+      const tr = this.tableEl.getBoundingClientRect();
+      const br = b.canvas.getBoundingClientRect();
+      const sr = this.scoops.getBoundingClientRect();
+      const c = b.centre(plot);
+      p0 = { x: br.left - tr.left + c.x, y: br.top - tr.top + c.y };
+      p1 = { x: sr.right - tr.left + 10, y: sr.top - tr.top + sr.height / 2 };
+      img = el('img', 'sb-flyscoop');
+      img.src = scoopUrl(true);
+      img.alt = '';
+      img.style.left = `${p0.x}px`;
+      img.style.top = `${p0.y}px`;
+      this.fx.append(img);
+      this.ctx.audio.cue('deck.draw', { gain: 0.35, pitch: 1.3 });
+    });
+    s.tween(at, dur, (k) => {
+      if (!img) return;
+      const e = ease.inOut(k);
+      img.style.left = `${p0.x + (p1.x - p0.x) * e}px`;
+      img.style.top = `${p0.y + (p1.y - p0.y) * e - Math.sin(Math.PI * e) * 60}px`;
+      img.style.opacity = String(k > 0.85 ? (1 - k) / 0.15 : 1);
+    });
+    s.at(at + dur, () => {
+      img?.remove();
+      img = null;
+      this.scoops.classList.remove('gain');
+      void this.scoops.offsetWidth;
+      this.scoops.classList.add('gain');
+    });
+  }
+
+  /** A bonus travelling from the crop that gave it to its own place on the slip: its picture and "+1", on an arc. */
+  private arc(s: Seq, go: number, dur: number, st: Step, kind: 'y' | 'm', to: number, slot: () => HTMLElement | null): void {
     const b = this.board;
     let badge: HTMLElement | null = null;
     let p0 = { x: 0, y: 0 };
@@ -2006,13 +2093,23 @@ export class Table {
     });
     s.tween(go, dur, (k) => {
       if (!badge) return;
+      // Home in on the bonus's place on the slip, which may move as the slip grows.
+      const place = slot();
+      if (place) {
+        const r = place.getBoundingClientRect();
+        const tr = this.tableEl.getBoundingClientRect();
+        p1 = { x: r.left - tr.left + r.width / 2, y: r.top - tr.top + r.height / 2 };
+      }
       const e = ease.inOut(k);
       const lift = Math.max(30, Math.hypot(p1.x - p0.x, p1.y - p0.y) * 0.5);
       const x = p0.x + (p1.x - p0.x) * e;
       const y = p0.y + (p1.y - p0.y) * e - Math.sin(Math.PI * e) * lift;
       badge.style.left = `${x}px`;
       badge.style.top = `${y}px`;
-      badge.style.opacity = String(k > 0.85 ? (1 - k) / 0.15 : 1);
+      // It shrinks to the size of its place on the slip as it lands, so it never overhangs the bonuses beside it.
+      const land = Math.max(0, Math.min(1, (k - 0.45) / 0.35));
+      badge.style.transform = `translate(-50%, -50%) scale(${1 - 0.32 * land * land * (3 - 2 * land)})`;
+      badge.style.opacity = String(k > 0.8 ? (1 - k) / 0.2 : 1);
     });
     s.at(go + dur, () => {
       badge?.remove();

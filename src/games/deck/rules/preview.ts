@@ -60,8 +60,8 @@ export function plotOnNight(s: RunState, fates: readonly (Fate | null)[], n: num
 function scoreFor(s: RunState, i: number, fates: readonly (Fate | null)[], timed: boolean): Harvest {
   const pull = fates[i]?.pull ?? Infinity;
   const snap = timed ? plotOnNight(s, fates, pull) : snapshot(s);
-  // The sun only reaches crops pulled tonight.
-  return scoreHarvest(s, i, snap, { suns: pull === 0 ? suns(s) : 0, shears: false, roll: false });
+  // The sun only reaches crops pulled tonight; pests only bite if they are still on the crop that night.
+  return scoreHarvest(s, i, snap, { suns: pull === 0 ? suns(s) : 0, shears: false, roll: false, night: Number.isFinite(pull) ? pull : 0 });
 }
 
 function parts(h: Harvest): { add: number; times: number } {
@@ -129,4 +129,13 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     if (m.yield || m.bloom || !near(m.times, 1) || m.nights || m.lost) marks.push(m);
   });
   return { plot, harvest: isSeed(card.id) || pulled ? harvest : null, marks };
+}
+
+/** What the crop on plot i will pay at its next pick, on the night it is pulled and against the plot as it will stand then. */
+export function nextPick(s: RunState, i: number): { score: number; ripeIn: number; late: boolean } | null {
+  if (!s.plots[i]?.crop) return null;
+  const fates = forecast(s);
+  const f = fates[i];
+  if (!f || !Number.isFinite(f.pull)) return null;
+  return { score: scoreFor(s, i, fates, true).score, ripeIn: f.ripeIn, late: f.late };
 }

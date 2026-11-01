@@ -70,6 +70,16 @@ export class Dice {
 
 const NONE: Ev[] = [];
 
+/**
+ * What a scoop on tomorrow's bench is worth to the bot, in coins tonight: a
+ * share of what a night of this season has to take, for the first few (a
+ * bench past what a hand can spend is worth little).
+ */
+function scoopWorth(s: RunState, saved: number): number {
+  const k = Math.max(3, s.quota / SCOOP_SHARE);
+  return k * Math.min(saved, 3) + k * 0.3 * Math.max(0, Math.min(saved, 6) - 3);
+}
+
 /** Tonight for real (sampled dice), then calm nights to the season's end and a few past it (the plot carries over), discounted. */
 function evaluate(s: RunState, sample: number): number {
   const c = cloneRun(s);
@@ -77,7 +87,8 @@ function evaluate(s: RunState, sample: number): number {
   const start = c.earned;
   NONE.length = 0;
   night(c, NONE);
-  let v = c.earned - start;
+  // Crops pulled up tonight put scoops on tomorrow's bench: the next day's plays.
+  let v = c.earned - start + scoopWorth(s, c.saved);
   const nights = TUNING.days - s.day + CARRY;
   // Roll forward as if nothing goes wrong.
   c.year = 1;
@@ -101,6 +112,8 @@ function evaluate(s: RunState, sample: number): number {
 
 /** How much a coin tomorrow is worth against one tonight, to the bot. */
 const DISCOUNT = 0.8;
+/** A scoop tomorrow is worth the season's quota over this, in coins tonight. */
+const SCOOP_SHARE = 40;
 /** Nights past the season's end the bot still counts: what stands at the last dusk is there at the next dawn. */
 const CARRY = 3;
 const CARRY_WEIGHT = 0.5;
@@ -194,9 +207,10 @@ export function botDay(s: RunState, o: BotOpts, dice: Dice): Ev[] {
   return ev;
 }
 
+// Radishes are free and put a scoop back when pulled: worth keeping. Sunflowers bloom one crop now; the can costs a scoop.
 const CARD_VALUE: Record<CardId, number> = {
-  corn: 7, beans: 8, strawberry: 8, sunflower: 7, chili: 6, rain: 5, compost: 5, fertiliser: 4, beehive: 9, pumpkin: 6, wheat: 4,
-  garlic: 4, ladybirds: 3, scarecrow: 3, sun: 5, shears: 3, trowel: 2, storm: 5, mint: 3, radish: 0, carrot: 4, lettuce: 2, can: 4,
+  corn: 7, beans: 8, strawberry: 8, sunflower: 5, chili: 6, rain: 5, compost: 5, fertiliser: 4, beehive: 8, pumpkin: 7, wheat: 4,
+  garlic: 4, ladybirds: 3, scarecrow: 3, sun: 5, shears: 3, trowel: 2, storm: 5, mint: 3, radish: 3, carrot: 4, lettuce: 2, can: 3,
 };
 
 const PAGE_VALUE: Record<PageId, number> = { thumb: 10, basket: 8, market: 7, clover: 6, cellar: 6, furrow: 7, bees: 5, rotation: 5, barrel: 6, coldframe: 4 };
@@ -212,8 +226,8 @@ function cardValue(s: RunState, id: CardId): number {
 
 function pageValue(s: RunState, id: PageId): number {
   const cards = allCards(s);
-  if (id === 'cellar') return 3 + cards.filter((c) => c.id === 'radish' || c.id === 'carrot').length * 0.5;
-  if (id === 'bees') return 2 + cards.filter((c) => c.id === 'sunflower' || c.id === 'beehive').length * 2;
+  if (id === 'cellar') return 3 + cards.filter((c) => c.id === 'radish' || c.id === 'carrot').length * 0.6;
+  if (id === 'bees') return 2 + cards.filter((c) => c.id === 'sunflower' || c.id === 'beehive').length * 1.5;
   if (id === 'coldframe') return s.season === 2 ? 8 : 4;
   return PAGE_VALUE[id];
 }
@@ -250,8 +264,9 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
       const seeds = s.draw.filter((c) => !c.up && CARDS[c.id].type === 'seed' && c.id !== 'radish').sort((a, b) => worth(b.id) - worth(a.id));
       if (seeds[0] && upgradeCard(s, seeds[0].uid)) did = true;
     }
+    // Throw out the weakest: a lettuce, and a radish only from a fat deck (they are free, and put a scoop back).
     if (!did && canRemove(s) && !saving && allCards(s).length > 10) {
-      const weak = s.draw.find((c) => c.id === 'radish' && !c.up) ?? s.draw.find((c) => c.id === 'lettuce' && !c.up);
+      const weak = s.draw.find((c) => c.id === 'lettuce' && !c.up) ?? (allCards(s).length > 15 ? s.draw.find((c) => c.id === 'radish' && !c.up) : undefined);
       if (weak && removeCard(s, weak.uid)) did = true;
     }
     if (!did && s.coins > 60 && sh.rerolls < 2 && !saving && sh.cards.every((c) => c.sold || cardValue(s, c.card) < 4.5) && reroll(s)) did = true;

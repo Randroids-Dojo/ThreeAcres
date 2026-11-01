@@ -247,10 +247,13 @@ export function tinUrl(): string {
     g.moveTo(-60, -28);
     g.lineTo(60, -28);
     ink(g, 'rgba(255,255,255,0.35)', 1.2, 1);
-    g.fillStyle = '#8a2a20';
-    g.font = "italic 700 11px 'Fraunces Variable', Georgia, serif";
-    g.textAlign = 'center';
-    g.fillText('Seed tin', 0, -2);
+    // The label's words are the table's own label under the tin, at a size that reads (painted here they came out 5 px).
+    g.beginPath();
+    g.moveTo(-26, -4);
+    g.lineTo(26, -4);
+    g.moveTo(-20, 5);
+    g.lineTo(20, 5);
+    ink(g, 'rgba(138, 42, 32, 0.55)', 1.4, 1);
     return c.toDataURL();
   });
 }
