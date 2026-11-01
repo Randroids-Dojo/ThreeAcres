@@ -1,10 +1,12 @@
 // Overlapping interface in Sunup, measured. Puts the game in each state that
 // opens something (seed picker, build picker, board, a toast, a lesson line,
 // the info caption) on a phone and on a desktop, collects the boxes of every
-// visible HUD piece and fails on any pair that overlaps.
+// visible HUD piece and fails on any pair that overlaps, on a ruled line
+// through words, and on any visible button a tap cannot reach.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
+import { reachScan } from './reach.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
 const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
@@ -91,6 +93,8 @@ async function run(label, viewport, touch) {
     }
     // A ruled line across the middle of any words reads as struck through.
     for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in}`);
+    // Every visible button must take a tap, not something lying over it (the stick's capture zone, say).
+    for (const q of await p.evaluate(reachScan, 'button')) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name}${ok ? '' : `  (${hits.join(', ')})`}`);

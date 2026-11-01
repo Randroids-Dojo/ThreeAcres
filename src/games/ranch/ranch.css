@@ -104,7 +104,8 @@
 .rh-slotpoint::after { content: ''; position: absolute; left: -7px; top: -34px; width: 11px; height: 11px; border-right: 3.5px solid #fbf0d4; border-bottom: 3.5px solid #fbf0d4; transform: rotate(45deg); filter: drop-shadow(0 1px 1.5px rgba(20, 16, 36, 0.7)); animation: rh-point 0.8s ease-in-out infinite alternate; }
 @keyframes rh-point { from { translate: 0 -5px; } to { translate: 0 1px; } }
 @media (prefers-reduced-motion: reduce) { .rh-slotpoint::after { animation: none; } }
-.rh-slotbtn { position: absolute; z-index: 3; left: 0; top: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; pointer-events: auto; display: none; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* Slot windows sit above the stick's capture zone (a lesson may say to tap any window) and below the buttons. */
+.rh-slotbtn { position: absolute; z-index: 5; left: 0; top: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; pointer-events: auto; display: none; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 
 /* ---------------------------------------------------------------- touch */
 /* Stacking under touch: the look pad lies lowest, the bellows (tap to change
@@ -118,7 +119,7 @@
 .rt-base.on { opacity: 1; transition: none; }
 .rt-base.rim { border-color: #fff1c4; }
 .rt-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(251, 246, 234, 0.82); box-shadow: 0 2px 6px rgba(20, 16, 36, 0.35); }
-.rt-btn { position: absolute; z-index: 4; pointer-events: auto; touch-action: none; border-radius: 50%; padding: 0; display: grid; place-items: center; border: 2px solid rgba(251, 246, 234, 0.7); background: rgba(34, 28, 50, 0.3); color: #fbf6ea; -webkit-tap-highlight-color: transparent; transition: transform 0.06s ease, background 0.1s; }
+.rt-btn { position: absolute; z-index: 6; pointer-events: auto; touch-action: none; border-radius: 50%; padding: 0; display: grid; place-items: center; border: 2px solid rgba(251, 246, 234, 0.7); background: rgba(34, 28, 50, 0.3); color: #fbf6ea; -webkit-tap-highlight-color: transparent; transition: transform 0.06s ease, background 0.1s; }
 .rt-btn .ic { width: 52%; height: 52%; display: block; filter: drop-shadow(0 1px 1px rgba(20, 16, 36, 0.5)); }
 .rt-btn .ic svg { width: 100%; height: 100%; display: block; }
 .rt-btn.down { transform: scale(0.92); background: rgba(34, 28, 50, 0.55); }

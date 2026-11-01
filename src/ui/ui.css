@@ -444,6 +444,9 @@ svg { width: 100%; height: 100%; display: block; }
 @media (max-width: 640px) {
   .gameroot.touch-on .seedbar, .gameroot.touch-on .buildbar { bottom: calc(236px + var(--safe-b)); }
 }
+/* An open picker sits above the touch layer: the walk stick's capture zone
+   covers the left half of the screen and would otherwise take its taps. */
+.seedbar, .buildbar { z-index: 6; }
 
 /* A new deploy: a dot on the corner button, a line on the title. Never over a game. */
 .shellbtn.fresh::after { content: ''; position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: #e0674b; box-shadow: 0 0 0 2px #2a2116; }

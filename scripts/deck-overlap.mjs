@@ -10,6 +10,7 @@
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 import { strikeScan } from './qa/strike.mjs';
+import { reachScan } from './qa/reach.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5252';
 const out = '/tmp/deck-lessons/overlap';
@@ -212,6 +213,10 @@ async function run(label, viewport, touch) {
     })) hits.push(`price tag covers the top of "${q.name}" by ${q.over} px`);
     // A ruled line across the middle of any words reads as struck through.
     for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in} at ${q.at}% of the line`);
+    // Every visible button must take a tap, not something lying over it. An open sheet
+    // covers the table on purpose, so then only its own buttons (and the shell's) count.
+    const reachable = await p.evaluate(() => (document.querySelector('.sb-sheets.on') ? '.sb-sheets.on button, .shellbtn' : 'button'));
+    for (const q of await p.evaluate(reachScan, reachable)) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name} (${bx.length} pieces)${ok ? '' : `\n       ${hits.join('\n       ')}`}`);

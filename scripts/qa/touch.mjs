@@ -78,6 +78,35 @@ await touch('touchEnd', []);
 await p.waitForTimeout(100);
 check('a touch brings them back', await visible('.tb-act'));
 
+// The seed picker opens over the left half of the screen, where the walk
+// stick's capture zone is. A real tap on every seed must pick that seed.
+await p.evaluate(() => {
+  for (const what of ['can', 'sleep', 'coins', 'seeds']) window.sunup.input.push({ type: 'unlock', what });
+});
+await p.waitForTimeout(200);
+const openSeeds = async () => {
+  // Opening it again while it is open would close it.
+  await p.evaluate(() => document.querySelector('.seedbar.hidden') && window.sunup.hud.pickTool('seeds'));
+  await p.waitForTimeout(250);
+  return p.evaluate(() => [...document.querySelectorAll('.seedbar .seed')].filter((e) => getComputedStyle(e).display !== 'none').map((e) => {
+    const r = e.getBoundingClientRect();
+    return { crop: e.dataset.crop, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }));
+};
+const seeds = await openSeeds();
+const picked = [];
+// A pick closes the picker on a phone, so open it before each tap. Right to
+// left, so every tap changes the pick (the first seed starts chosen).
+for (const sd of [...seeds].reverse()) {
+  await openSeeds();
+  await touch('touchStart', [[sd.x, sd.y, 7]]);
+  await touch('touchEnd', []);
+  await p.waitForTimeout(200);
+  if ((await p.evaluate(() => window.sunup.state.seed)) === sd.crop) picked.push(sd.crop);
+}
+check('a tap picks every seed in the picker, the stick side too', seeds.length >= 2 && picked.length === seeds.length, `${picked.length} of ${seeds.length}: ${picked.join(', ')}`);
+await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+
 await p.screenshot({ path: '/tmp/acres-touch-walk.png' });
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

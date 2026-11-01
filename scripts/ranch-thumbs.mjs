@@ -5,6 +5,7 @@
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
+import { reachScan } from './qa/reach.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
 const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
@@ -69,6 +70,9 @@ await touch('touchEnd', []);
 await p.waitForTimeout(150);
 const s1 = await S();
 check('tapping the bellows changes slot', s1.slot !== s0.slot, `${s0.slot} to ${s1.slot}`);
+// Every slot window takes its own tap, including those on the stick's side: a lesson may say to tap any of them.
+const covered = await p.evaluate(reachScan, '.rh-slotbtn, .rt-btn');
+check('every slot window and button takes a tap', covered.length === 0, covered.map((q) => `${q.control} under ${q.under} at ${q.at}`).join(' | '));
 // With the journal up, the stick still answers.
 await p.evaluate(() => window.ranch.hud.showPage('Day 1', [{ text: 'Catch a clover downy.', done: false }, { text: 'Build a pen and blow a downy in.', done: false }], 30));
 await p.waitForTimeout(700);
