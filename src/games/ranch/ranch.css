@@ -19,6 +19,8 @@
 .rh-cross[data-s='prickly'] .x-prickly { display: inline; }
 .rh-cross[data-s='prickly'] { color: #f4b6a2; }
 .rh-cross[data-s='tag'] .x-tag { display: inline; }
+.rh-cross[data-s='tag'] { opacity: 0.8; }
+.rh-cross[data-s='none'] { display: none; }
 /* Fluff chosen and a blow from here would sell: a little funnel with the fluff dropping in. */
 .rh-cross[data-s='sell'] .x-sell { display: inline; }
 .rh-cross[data-s='sell'] { color: #ffd98a; animation: rh-breathe 0.9s ease-in-out infinite; }
@@ -33,7 +35,9 @@
 .rh-cross .x-tug { display: none; transition: stroke-dashoffset 0.08s linear; }
 .rh-cross.tug .x-tug { display: inline; }
 .rh-cross.tug { animation: none; }
-.rh-count { position: absolute; left: calc(50% + 16px); top: calc(50% + 10px); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 14px; font-weight: 600; text-shadow: var(--ink-shadow); white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.92; }
+/* The count by the crosshair sits on a soft ink backing, so it never runs into words in the world ("Sell²fluff", "by du14sk"). */
+.rh-count { position: absolute; left: calc(50% + 16px); top: calc(50% + 10px); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 14px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 9px; background: rgba(36, 30, 52, 0.62); text-shadow: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rh-count:empty { display: none; }
 .rh-count.named { font-style: italic; font-weight: 500; }
 .rh-count.full { color: #ffd9a8; }
 

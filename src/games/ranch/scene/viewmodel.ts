@@ -32,7 +32,7 @@ import {
   CircleGeometry,
   DoubleSide,
 } from 'three';
-import { KIND, isDowny, isTuft, thingColor, TUFT_KIND, type DownyKind, type Thing } from '../defs';
+import { FLUFF_ROOM, KIND, isDowny, isTuft, thingColor, TUFT_KIND, type DownyKind, type Thing } from '../defs';
 import { clamp, damp } from '../noise';
 import type { Slot } from '../state';
 import { at, merge, part } from './geo';
@@ -433,7 +433,8 @@ export class Viewmodel {
         _q.setFromAxisAngle(_v.set(0, 1, 0), a + Math.PI);
         _m.compose(_v.set(Math.cos(a) * r, 0.022 + layer * 0.027 + jig, Math.sin(a) * r), _q, _s.set(sc, sc, sc));
         m.setMatrixAt(i, _m);
-        if (isTuft(slot.t)) m.setColorAt?.(i, _c.setHex(KIND[TUFT_KIND[slot.t]].body));
+        // The fluff window's mix shows in the jar, each wisp its own kind's colour.
+        if (isTuft(slot.t)) m.setColorAt?.(i, _c.setHex(KIND[TUFT_KIND[slot.mix?.[i] ?? slot.t]].body));
       }
       m.count = shown;
       m.visible = shown > 0;
@@ -442,8 +443,11 @@ export class Viewmodel {
     }
     this.glass.scale.setScalar(1 + this.jiggle * 0.04);
     // Dial needle.
-    if (o.cap !== this.dialCap) this.paintDial(o.cap);
-    const frac = slot && slot.t ? slot.n / o.cap : 0;
+    // The fluff window holds twice as much: its own dial.
+    const capOf = (q: Slot | undefined) => (q?.t && isTuft(q.t) ? o.cap * FLUFF_ROOM : o.cap);
+    const selCap = capOf(slot);
+    if (selCap !== this.dialCap) this.paintDial(selCap);
+    const frac = slot && slot.t ? slot.n / selCap : 0;
     this.needleAngle = damp(this.needleAngle, -Math.PI * 0.75 + frac * Math.PI * 1.5, 12, dt);
     this.needle.rotation.z = -this.needleAngle;
     // Slot windows: each filled with its kind's colour to its level.
@@ -459,7 +463,7 @@ export class Viewmodel {
       _m.compose(p, _q, _s.setScalar(this.windowR));
       this.windows.setMatrixAt(i, _m);
       if (s.t) {
-        const lvl = 0.35 + 0.65 * (s.n / o.cap);
+        const lvl = 0.35 + 0.65 * (s.n / capOf(s));
         _c.setHex(thingColor(s.t)).multiplyScalar(lvl);
       } else _c.setRGB(0.12, 0.13, 0.17);
       this.windows.setColorAt(i, _c);

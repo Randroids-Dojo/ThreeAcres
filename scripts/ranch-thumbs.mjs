@@ -10,12 +10,14 @@
 // window when one runs out and says so when the jar is empty. Real touch
 // events through CDP.
 //
-// From the third playtest: the journal page holding the day's orders and the
-// next goal (three lines) still clears the stick, the zone's name, the pause
-// button and the shell corner; so does the order lesson's page; a wild downy
-// let go of mid-tug gets away (and the crosshair note says so), with real
-// touch on Pull; and with food chosen the crosshair marks a feeder it would
-// land in.
+// From the third playtest: the journal page holding the day's order and the
+// next goal still clears the stick, the zone's name, the pause button and the
+// shell corner; so does the order lesson's page; a wild downy let go of
+// mid-tug gets away (and the crosshair note says so), with real touch on
+// Pull; and with food chosen the crosshair marks a feeder it would land in.
+// From the fourth: the morning's offers say so on the journal ("Orders wait on
+// the price board."), the order taken shows its tally, and the count by the
+// crosshair sits on its own ink backing (it ran into world words: "Sell²fluff").
 // Opens a ranch with every lesson taught, so every button is there.
 // node scripts/ranch-thumbs.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -239,23 +241,29 @@ await p.evaluate(() => {
 await p.waitForTimeout(800);
 await p.waitForFunction(() => !document.querySelector('.rh-page.up h4'), null, { timeout: 6000 });
 await p.waitForTimeout(300);
-const og = await p.evaluate(() => {
+const pageNow = () => p.evaluate(() => {
   const rect = (sel) => { const e = document.querySelector(sel); const q = e.getBoundingClientRect(); return { l: q.left, t: q.top, r: q.right, b: q.bottom }; };
-  return { lines: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins'), orders: window.ranch.sim.s.orders.length, goal: window.ranch.sim.openGoals(1)[0].text };
+  return { lines: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins'), offers: window.ranch.sim.offers().length, goal: window.ranch.sim.openGoals(1)[0].text };
 });
+const ow = await pageNow();
+check('the morning\'s offers: the journal says they wait on the price board, then the next goal', ow.offers >= 2 && ow.lines.length === 2 && ow.lines[0] === 'Orders wait on the price board.' && ow.lines[1] === ow.goal, JSON.stringify(ow.lines));
+// Taken at the board: one order, its tally on the journal.
+await p.evaluate(() => window.ranch.sim.takeOrder(window.ranch.sim.offers().findIndex((o) => !o.live)));
+await p.waitForTimeout(600);
+const og = await pageNow();
 const apart = (a, c) => a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
-check('the journal shows the day\'s orders with their tally, and the next goal', og.orders === 2 && og.lines.length === 3 && /^Clover fluff, 0 of \d+\.$/.test(og.lines.find((l) => l.startsWith('Clover')) ?? '') && /^Ember fluff, 0 of \d+\.$/.test(og.lines.find((l) => l.startsWith('Ember')) ?? '') && og.lines[2] === og.goal, JSON.stringify(og.lines));
-check('with three lines, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
+check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
+check('with the order and the goal, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
 await p.evaluate(() => window.ranch.hud.showZone('Ember Ridge'));
 await p.waitForTimeout(700);
 const oz = await p.evaluate(() => { const a = document.querySelector('.rh-zone').getBoundingClientRect(); const b = document.querySelector('.rh-page').getBoundingClientRect(); return { clear: a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left, zone: Math.round(a.top), page: Math.round(b.bottom) }; });
-check("with three lines, the zone's name still sits clear of the journal page", oz.clear, JSON.stringify(oz));
+check("with the order and the goal up, the zone's name still sits clear of the journal page", oz.clear, JSON.stringify(oz));
 await p.screenshot({ path: '/tmp/ranch-thumbs-orders.png' });
 // The order lesson's page (when the first order is posted): clear of the pause button and the coins too.
-await p.evaluate(() => { const s = window.ranch.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount.order = 0; s.learnCount['order:read'] = 0; const pl = s.player; pl.x = 0; pl.z = 30; pl.y = window.ranch.sim.phys.floor(0, 30); });
+await p.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount['order:taken'] = 0; r.sim.postOrders(true); const pl = s.player; pl.x = 0; pl.z = 30; pl.y = r.sim.phys.floor(0, 30); });
 await p.waitForTimeout(800);
 const ol = await p.evaluate(() => { const rect = (sel) => { const q = document.querySelector(sel).getBoundingClientRect(); return { l: q.left, t: q.top, r: q.right, b: q.bottom }; }; return { line: window.ranch.seen().line, page: rect('.rh-page'), pause: rect('.rt-pause'), coins: rect('.rh-coins') }; });
-check("the order lesson's line is up, its page clear of the pause button and the coins", ol.line === "Fill today's order on the price board." && apart(ol.page, ol.pause) && apart(ol.page, ol.coins) && ol.page.b < 838 * 0.32, JSON.stringify(ol));
+check("the order lesson's line is up, its page clear of the pause button and the coins", ol.line === 'Take an order at the price board.' && apart(ol.page, ol.pause) && apart(ol.page, ol.coins) && ol.page.b < 838 * 0.32, JSON.stringify(ol));
 await p.evaluate(() => { const s = window.ranch.sim.s; if (!s.learn.includes('lesson:order')) s.learn.push('lesson:order'); });
 await p.waitForTimeout(1800);
 
@@ -310,6 +318,17 @@ const fm = await p.evaluate(() => {
 await p.waitForTimeout(300);
 const fx = await p.evaluate(() => document.querySelector('.rh-cross').dataset.s);
 check('with food chosen and a blow that would land in a feeder, the crosshair marks the feeder', fm !== null && fx === 'feeder', `${fm} ${fx}`);
+
+// The count by the crosshair on its own ink backing, so world words never run into it: the backing's alpha,
+// and the contrast of its number against it (readback of the count's box).
+const cb = await p.evaluate(() => {
+  const e = document.querySelector('.rh-count');
+  const cs = getComputedStyle(e);
+  const r = e.getBoundingClientRect();
+  const m = cs.backgroundColor.match(/rgba?\(([\d.]+), ([\d.]+), ([\d.]+)(?:, ([\d.]+))?\)/);
+  return { text: e.textContent, alpha: m ? Number(m[4] ?? 1) : 0, w: r.width, h: r.height, x: r.left, y: r.top, pad: parseFloat(cs.paddingLeft) };
+});
+check('the count by the crosshair sits on an ink backing (alpha 0.5 or more) with room round its number', cb.text !== '' && cb.alpha >= 0.5 && cb.pad >= 5 && cb.h >= 16, JSON.stringify(cb));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 const failed = results.filter((r) => !r).length;

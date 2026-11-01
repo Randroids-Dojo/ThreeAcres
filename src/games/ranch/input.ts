@@ -164,9 +164,7 @@ export class Input {
     });
     root.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', this.onLockChange);
-    document.addEventListener('pointerlockerror', () => {
-      this.locked = false;
-    });
+    document.addEventListener('pointerlockerror', () => this.refused());
     // ---- touch
     this.touch = document.createElement('div');
     this.touch.className = 'rt';
@@ -318,10 +316,27 @@ export class Input {
     if (!this.lockAvailable) return;
     try {
       const p = (this.canvasEl as HTMLElement & { requestPointerLock(o?: unknown): Promise<void> | void }).requestPointerLock();
-      if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => (this.locked = false));
+      if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => this.refused());
     } catch {
-      this.locked = false;
+      this.refused();
     }
+  }
+
+  /** When pointer lock was last let go (Esc), for telling a refusal from the browser's short wait after it. */
+  private unlockedAt = -1e9;
+
+  /**
+   * The browser refused pointer lock. Right after letting go of it (Esc) that
+   * is only the browser's short wait, so the next click may ask again; any
+   * other refusal means it will not come (headless, a frame that forbids it):
+   * fall back to right-drag looking, and stop asking on every click (the
+   * fourth playtest's every click asked again and the line stayed "Click the
+   * view to look around.").
+   */
+  private refused(): void {
+    this.locked = false;
+    if (performance.now() - this.unlockedAt < 1500) return;
+    this.lockAvailable = false;
   }
 
   releaseLock(): void {
@@ -337,6 +352,7 @@ export class Input {
     const was = this.locked;
     this.locked = document.pointerLockElement === this.canvasEl;
     if (was && !this.locked) {
+      this.unlockedAt = performance.now();
       this.mouseL = this.mouseR = this.mouseM = false;
       if (!this.releasing && this.enabled) this.onLockLost();
     }

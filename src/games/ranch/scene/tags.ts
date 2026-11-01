@@ -3,7 +3,7 @@
 // it) to pick it; it swings forward and its edge darkens. Bought tags flip up
 // and away; the rest fold up when you walk off.
 
-import { BoxGeometry, CanvasTexture, DoubleSide, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector3, type Camera } from 'three';
+import { BoxGeometry, CanvasTexture, Color, DoubleSide, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector3, type Camera } from 'three';
 import type { MenuOption } from '../sim';
 import { canvas, paintTag, tex } from './paint';
 
@@ -65,6 +65,8 @@ export class TagMenu {
   private k = 1;
   /** The bar a near grid hangs from. */
   private dowel: Mesh;
+  private faceMats: MeshLambertMaterial[] = [];
+  private night = -1;
 
   constructor() {
     const back = new MeshLambertMaterial({ color: 0xb8956a });
@@ -72,7 +74,11 @@ export class TagMenu {
       const [c, g] = canvas(320, 160);
       const t = tex(c);
       const pivot = new Group();
-      const face = new Mesh(new PlaneGeometry(TW, TH), new MeshLambertMaterial({ map: t, transparent: true, alphaTest: 0.5, side: DoubleSide }));
+      // Lit from within at night, the way the gates' boards are (the fourth playtest read a post's tag at 9:40 pm
+      // as 3 of 255 with ink at 1, and the sleep tag at 11:55 pm as 11 and 1).
+      const faceMat = new MeshLambertMaterial({ map: t, transparent: true, alphaTest: 0.5, side: DoubleSide, emissiveMap: t, emissive: new Color(0xffffff), emissiveIntensity: 0 });
+      this.faceMats.push(faceMat);
+      const face = new Mesh(new PlaneGeometry(TW, TH), faceMat);
       const backing = new Mesh(new BoxGeometry(TW * 0.92, TH * 0.9, 0.012), back);
       const string = new Mesh(new BoxGeometry(0.008, 1, 0.008), new MeshLambertMaterial({ color: 0x5a4430 }));
       pivot.add(face, backing, string);
@@ -270,6 +276,13 @@ export class TagMenu {
       }
     });
     return best;
+  }
+
+  /** How dark it is (0 day, 1 night): the tags' faces light from within as it gets dark. */
+  setNight(night: number): void {
+    if (Math.abs(night - this.night) < 0.01) return;
+    this.night = night;
+    for (const m of this.faceMats) m.emissiveIntensity = 0.06 + night * 0.48;
   }
 
   setHot(i: number): void {

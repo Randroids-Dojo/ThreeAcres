@@ -218,3 +218,60 @@ function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r:
   }
   console.log(`pen mark: matched ${penAgree}, promised a landing that missed ${penLiedYes}, landed unpromised ${penLiedNo}`);
 }
+
+// Blown downies into the crate for a live order (round 4): the same spread of
+// distances, angles and crosshair errors, one downy blown from the jar with
+// today's live order open. Does the crate take it, and did the crosshair's sell
+// mark tell the truth? (Without an order the crate takes none; see the tests.)
+{
+  let ok = 0;
+  let all = 0;
+  let agreeD = 0;
+  let yesD = 0;
+  let noD = 0;
+  const row: string[] = [];
+  for (const d of dists) {
+    let n = 0;
+    let k = 0;
+    for (const a of angles) {
+      const x = cx + Math.cos(a) * d;
+      const z = cz + Math.sin(a) * d;
+      const lx = -(cz - z) / d;
+      const lz = (cx - x) / d;
+      for (const [side, up] of errs) {
+        const sim = new Sim(null);
+        const s = sim.s;
+        sim.wild = false;
+        s.downies = [];
+        s.items = [];
+        s.orders = [{ kind: 'clover', live: true, n: 99, got: 0, paid: 0, mult: 2, pay: 55, state: 'open' }];
+        s.orderDay = s.day;
+        const p = s.player;
+        p.x = x;
+        p.z = z;
+        p.y = sim.phys.floor(x, z);
+        p.vx = p.vy = p.vz = 0;
+        s.slots[0] = { t: 'clover', n: 1 };
+        s.sel = 0;
+        const aim = aimFrom(sim, cx + lx * side, floor + 0.75 + up, cz + lz * side, MUZZLES.phone);
+        const said = sim.aimTarget(aim) === 'sell';
+        sim.puff(aim);
+        let took = false;
+        for (let t = 0; t < 4 && !took; t += 1 / 60) {
+          sim.update(1 / 60, idle, aim);
+          if ((s.stats.live ?? 0) > 0) took = true;
+        }
+        n++;
+        if (took) k++;
+        if (said === took) agreeD++;
+        else if (said) yesD++;
+        else noD++;
+      }
+    }
+    all += n;
+    ok += k;
+    row.push(`${d} m ${Math.round((k / n) * 100)}%`);
+  }
+  console.log(`live downies into the crate: ${row.join('  ')}   overall ${Math.round((ok / all) * 100)}%`);
+  console.log(`downy sell mark: matched ${agreeD}, promised a sale that missed ${yesD}, sold unpromised ${noD}`);
+}

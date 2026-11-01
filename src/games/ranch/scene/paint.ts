@@ -211,8 +211,9 @@ export interface BoardRow {
 /** A day's order chalked under the prices: "6 ember fluff by dusk", "pays double", and how it stands. */
 export interface BoardOrder {
   text: string;
+  /** The right-hand half: what an offer earns, or how a taken order stands. */
   pay: string;
-  state: 'open' | 'filled' | 'missed';
+  state: 'offer' | 'open' | 'filled' | 'missed';
 }
 
 function chalkText(g: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, seed: number, align: CanvasTextAlign = 'left'): void {
@@ -298,13 +299,15 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
   g.lineTo(w - 30, 246);
   g.stroke();
   g.globalAlpha = 1;
-  orders.slice(0, 2).forEach((o, i) => {
-    const y = orders.length === 1 ? 300 : 282 + i * 52;
+  // Up to three offers in the morning; once one is taken, it alone, with its tally.
+  const shown = orders.slice(0, 3);
+  shown.forEach((o, i) => {
+    const y = shown.length === 1 ? 300 : shown.length === 2 ? 282 + i * 52 : 276 + i * 41;
     g.fillStyle = o.state === 'filled' ? '#bfe3a8' : '#f2eee2';
     g.globalAlpha = o.state === 'missed' ? 0.45 : 1;
     const right = o.state === 'filled' ? 'filled' : o.pay;
     // Both halves fit the board's width, the words shrinking a little if they must.
-    let fs = 29;
+    let fs = shown.length > 2 ? 26 : 29;
     const width = (t: string, size: number) => {
       g.font = `500 ${size}px ${SERIF}`;
       return g.measureText(t).width;
@@ -313,7 +316,7 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
     chalkText(g, o.text, 30, y, fs, 50 + i);
     chalkText(g, right, w - 28, y, fs - 4, 60 + i, 'right');
     g.globalAlpha = 1;
-    if (o.state !== 'open') {
+    if (o.state === 'filled' || o.state === 'missed') {
       // Struck through in chalk.
       g.strokeStyle = o.state === 'filled' ? '#bfe3a8' : '#f2eee2';
       g.globalAlpha = 0.7;

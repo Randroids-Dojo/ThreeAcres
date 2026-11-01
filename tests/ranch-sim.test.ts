@@ -364,7 +364,7 @@ describe('pen and silo upgrades', () => {
     run(sim, 14);
     expect(sim.s.pads[1].chute[0]).toBe(2);
     expect(sim.emptyChute(1)).toBe(2);
-    expect(sim.s.slots[0]).toEqual({ t: 'tuft-clover', n: 2 });
+    expect({ t: sim.s.slots[0].t, n: sim.s.slots[0].n }).toEqual({ t: 'tuft-clover', n: 2 });
   });
 
   it('a silo stores what is puffed at it and gives the chosen kind back to a draw', () => {
@@ -688,7 +688,8 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     }
     expect(d.gone).toBe(true);
     expect(t).toBeGreaterThan(0.8);
-    expect(t).toBeLessThan(2.2);
+    // (Round 4: one that got away is wary, and digs in half as long again.)
+    expect(t).toBeLessThan(2.6);
     expect(sim.s.slots.some((q) => q.t === 'clover')).toBe(true);
   }));
 

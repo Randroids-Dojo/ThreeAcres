@@ -3,7 +3,9 @@
 
 import {
   CAPS,
+  FLUFF_ROOM,
   KINDS,
+  isTuft,
   type BenchUp,
   type DownyKind,
   type Food,
@@ -12,6 +14,7 @@ import {
   type Order,
   type PadKind,
   type Thing,
+  type Tuft,
 } from './defs';
 import { PADS, START, heightAt, type GateId, type Zone } from './world';
 
@@ -81,6 +84,11 @@ export interface Downy extends Body {
   bolt: number;
   /** A brook that got away is leaping into the pond: gone when it lands in the water. Not saved. */
   dive: boolean;
+  /** Seconds a wild one that got away stays wary: it hears you from further off and digs in harder. Not saved. */
+  wary: number;
+  /** A thistle's seconds of bolting lately, and how long it is winded for once it has run itself out. Not saved. */
+  run: number;
+  winded: number;
 }
 
 export interface Item extends Body {
@@ -121,10 +129,17 @@ export interface Nettle extends Body {
 }
 
 export interface Slot {
+  /** What it holds; for the fluff window, the kind of fluff that comes out next. */
   t: Thing | null;
   n: number;
   /** For fluff: the meals you gave that it came from, oldest first (not saved). */
   feeds?: number[];
+  /**
+   * The fluff window takes every kind of fluff (the fourth playtest's four
+   * windows choked on three foods and four fluffs): the kinds in it, oldest
+   * first, one per fluff (mix[0] is t).
+   */
+  mix?: Tuft[];
 }
 
 export interface Pad {
@@ -192,10 +207,12 @@ export interface RanchState {
   caught: DownyKind[];
   zones: Zone[];
   stats: Stats;
-  /** Today's orders from the price board (see defs.ts, Order). */
+  /** Today's orders from the price board: the offers, then the one taken (see defs.ts, Order). */
   orders: Order[];
   /** The day the board last posted orders. */
   orderDay: number;
+  /** The orders the board has offered lately (kind, live, day), newest last: it asks for what it has not asked for in a while. */
+  orderLog: { kind: DownyKind; live: boolean; day: number }[];
   /** Last day the overnight changes ran. */
   night: number;
   nextId: number;
@@ -212,6 +229,10 @@ export interface Stats {
   /** Orders filled, and prized ones among them. */
   filled: number;
   prized: number;
+  /** Fluff sold of each kind, all told. */
+  kinds?: Partial<Record<DownyKind, number>>;
+  /** Live downies sent to the crate for orders. */
+  live?: number;
 }
 
 export function emptyPad(): Pad {
@@ -220,6 +241,11 @@ export function emptyPad(): Pad {
 
 export function capacity(s: RanchState): number {
   return CAPS[s.up.cap] ?? CAPS[0];
+}
+
+/** What a window holds at most: the fluff window twice as much (fluff is light). */
+export function slotCap(s: RanchState, q: Slot): number {
+  return q.t && isTuft(q.t) ? capacity(s) * FLUFF_ROOM : capacity(s);
 }
 
 const rec = <T>(f: (k: DownyKind) => T) => Object.fromEntries(KINDS.map((k) => [k, f(k)])) as Record<DownyKind, T>;
@@ -258,6 +284,7 @@ export function freshState(): RanchState {
     stats: { sold: 0, fed: 0, drawn: 0, filled: 0, prized: 0 },
     orders: [],
     orderDay: 0,
+    orderLog: [],
     night: 0,
     nextId: 1,
     learn: [],
@@ -276,7 +303,8 @@ export interface SaveV1 {
   coins: number;
   earned: number;
   player: [number, number, number, number, number];
-  slots: [Thing | null, number][];
+  /** what, how many, and for the fluff window the kinds in it. */
+  slots: [Thing | null, number, Tuft[]?][];
   sel: number;
   up: Record<BenchUp, number>;
   gates: Record<GateId, boolean>;
@@ -297,6 +325,7 @@ export interface SaveV1 {
   /** Added with orders; older saves have none and get their first at the next morning. */
   orders?: Order[];
   orderDay?: number;
+  orderLog?: { kind: DownyKind; live: boolean; day: number }[];
   /** Added with the lessons; older saves have neither and are credited on load. */
   learn?: string[];
   learnCount?: Record<string, number>;
@@ -311,7 +340,7 @@ export function serialize(s: RanchState): SaveV1 {
     coins: s.coins,
     earned: s.earned,
     player: [r3(p.x), r3(p.y), r3(p.z), r3(p.yaw), r3(p.pitch)],
-    slots: s.slots.map((q) => [q.t, q.n]),
+    slots: s.slots.map((q) => (q.mix && q.t && isTuft(q.t) ? [q.t, q.n, [...q.mix]] : [q.t, q.n])),
     sel: s.sel,
     up: { ...s.up },
     gates: { ...s.gates },
@@ -329,6 +358,7 @@ export function serialize(s: RanchState): SaveV1 {
     night: s.night,
     orders: s.orders.map((o) => ({ ...o })),
     orderDay: s.orderDay,
+    orderLog: s.orderLog.map((o) => ({ ...o })),
     learn: [...s.learn],
     learnCount: Object.fromEntries(Object.entries(s.learnCount).map(([k, v]) => [k, r3(v)])),
   };
@@ -378,6 +408,9 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     peak: 0,
     bolt: 0,
     dive: false,
+    wary: 0,
+    run: 0,
+    winded: 0,
   };
 }
 
@@ -423,7 +456,26 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.earned = num(d.earned, 0);
   const [px, py, pz, yaw, pitch] = d.player;
   Object.assign(s.player, { x: num(px, START.x), y: num(py, 5), z: num(pz, START.z), yaw: num(yaw, 0), pitch: num(pitch, 0), grounded: true });
-  s.slots = d.slots.map(([t, n]) => ({ t, n: num(n, 0) }));
+  s.slots = d.slots.map(([t, n, mix]) => {
+    const q: Slot = { t, n: num(n, 0) };
+    // The fluff window: the kinds in it (an older save's fluff window holds one kind).
+    if (t && isTuft(t)) {
+      q.mix = Array.isArray(mix) && mix.length === q.n && mix.every((m) => typeof m === 'string' && isTuft(m)) ? [...mix] : Array.from({ length: q.n }, () => t);
+      q.t = q.mix[0] ?? null;
+      if (!q.n) q.mix = undefined;
+    }
+    return q;
+  });
+  // An older save may hold fluff in more than one window: they pour into the first.
+  const tuftSlots = s.slots.filter((q) => q.t && isTuft(q.t) && q.mix);
+  for (const q of tuftSlots.slice(1)) {
+    const into = tuftSlots[0];
+    into.mix!.push(...q.mix!);
+    into.n = into.mix!.length;
+    q.t = null;
+    q.n = 0;
+    q.mix = undefined;
+  }
   s.sel = Math.min(num(d.sel, 0), s.slots.length - 1);
   s.up = { ...s.up, ...d.up };
   s.gates = { ...s.gates, ...d.gates };
@@ -454,8 +506,13 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.zones = [...(d.zones ?? ['ranch'])];
   s.stats = { ...s.stats, ...d.stats };
   s.night = num(d.night, 0);
-  s.orders = Array.isArray(d.orders) ? d.orders.filter((o) => o && KINDS.includes(o.kind) && Number.isFinite(o.n)).map((o) => ({ kind: o.kind, n: o.n, got: num(o.got, 0), paid: num(o.paid, 0), mult: num(o.mult, 2), state: o.state === 'filled' || o.state === 'missed' ? o.state : 'open' })) : [];
+  s.orders = Array.isArray(d.orders)
+    ? d.orders
+        .filter((o) => o && KINDS.includes(o.kind) && Number.isFinite(o.n))
+        .map((o) => ({ kind: o.kind, live: !!o.live, n: o.n, got: num(o.got, 0), paid: num(o.paid, 0), mult: num(o.mult, 2), pay: num(o.pay, 0), state: o.state === 'filled' || o.state === 'missed' || o.state === 'offer' ? o.state : 'open' }))
+    : [];
   s.orderDay = num(d.orderDay, 0);
+  s.orderLog = Array.isArray(d.orderLog) ? d.orderLog.filter((o) => o && KINDS.includes(o.kind)).map((o) => ({ kind: o.kind, live: !!o.live, day: num(o.day, 0) })) : [];
   // A save from before the lessons has no list: the director credits it (see creditLessons).
   s.learn = Array.isArray(d.learn) ? d.learn.filter((x) => typeof x === 'string') : [];
   s.learnCount = {};

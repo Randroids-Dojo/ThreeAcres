@@ -19,6 +19,15 @@
 // px or more (they were about 10); the gate's price tag can be read at night
 // (frame readback of ink against plank, with a control that turns its night
 // light off); a pen post's count tag and the price board's orders.
+//
+// From the fourth playtest: a pen post's tags at 9:40 pm and the sleep tag at
+// 11:55 pm read at night (the playtest measured a plank at 3 of 255 with ink
+// at 1, and 11 with 1), read back the same way with a control that turns the
+// tags' night light off; so do the meadow's signpost and the ranch gate's
+// sign; the board's morning offers say what they earn; a lone tag (the sleep
+// tag) comes down chosen, so one tap takes it; and while tags hang the
+// crosshair never covers their words (on touch it goes, with a mouse it is a
+// pin-prick ring; the 14 px box read "Sleep till[]norning").
 //   node scripts/ranch-tags.mjs [base url]      (or RANCH_URL)
 import { launch, openRanch, frames, checker } from './ranch-lib.mjs';
 
@@ -52,8 +61,13 @@ const res = await page.evaluate(() => {
   take(post(1));
   set('garden');
   take(post(1));
+  // (Its feed run hangs only with a pen and feeder on the next plot of the row.)
+  s.pads[2].kind = 'pen';
+  s.pads[2].ups = ['feeder'];
   set('garden', [], { crop: 'dewberry' });
   take(post(1));
+  s.pads[2].kind = 'empty';
+  s.pads[2].ups = [];
   set('silo');
   take({ ...post(1), kind: 'silo' });
   set('silo', [], { silo: [{ t: 'tuft-thistle', n: 50 }, { t: 'sweetroot', n: 50 }, { t: 'dewberry', n: 9 }, { t: 'tuft-brook', n: 1 }] });
@@ -77,7 +91,7 @@ const over = res.filter((o) => !o.lay.fits);
 console.log(`   ${res.length} tag options set`);
 for (const o of res) if (o.lay.noteLines.length > 1 || o.lay.titleSize < 40 || o.lay.noteSize < 24) console.log(`   fitted: ${o.where} "${o.title}" ${o.lay.titleSize}px / "${o.lay.noteLines.join(' | ')}" ${o.lay.noteSize}px`);
 check('every tag option was found', res.length >= 20, `${res.length}`);
-check('the garden post offers the feed run (once a feeder is known)', res.some((o) => o.title === 'Feed run'), res.filter((o) => o.where === 'pad').map((o) => o.title).join(', '));
+check('the garden post offers the feed run (once a feeder is known, with a pen and feeder next door)', res.some((o) => o.title === 'Feed run'), res.filter((o) => o.where === 'pad').map((o) => o.title).join(', '));
 // The control: words that cannot fit any tag must be caught.
 const control = await page.evaluate(() => window.ranch.tagLayout('A very long title that runs on', 1500, 'A note far too long to fit on a tag even on two lines at the smallest size'));
 check('the check catches words that cannot fit', !control.fits, JSON.stringify(control));
@@ -197,6 +211,113 @@ console.log(`   gate tag, plank (90th) and ink (2nd percentile) luminance: day $
 check('the check finds the gate tag too dark to read at night with its light off (control)', !!dark && (dark.p90 < 60 || ratio(dark) < 2.5), JSON.stringify(dark));
 check('the gate\'s price tag reads at night: a lit plank with dark ink on it, near its daytime look', !!night && night.p90 >= 60 && ratio(night) >= 2.5 && night.p90 >= day.p90 * 0.6, JSON.stringify(night));
 
+// Round 4: hanging tags and painted signs at night, read back the same way: the plank (90th percentile)
+// against the ink (2nd), by day, at night, and at night with their glow off (the control).
+const readRect = async (corners) => {
+  await page.evaluate((corners) => {
+    const r = window.ranch;
+    const pts = corners.map(([x, y, z]) => r.project(x, y, z)).filter(Boolean);
+    window.__want = { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
+  }, corners);
+  await frames(page, 3);
+  return page.evaluate(() => window.__px);
+};
+/** Tag 0's face on a post's (or the door's) tags, opened from where you would stand. */
+const readTag = async (hour, where, off) => {
+  await page.evaluate(([hour, where, off]) => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.hour = hour;
+    s.nettles = [];
+    const p = s.player;
+    if (where === 'post') {
+      s.pads[1].kind = 'pen';
+      s.pads[1].ups = [];
+      r.sim.phys.setPads(s.pads);
+      p.x = 16; p.z = 34; p.y = r.sim.phys.floor(16, 34);
+      r.aimAt(15.2, 5.6, 31.8);
+    } else {
+      p.x = -16; p.z = 37.4; p.y = r.sim.phys.floor(-16, 37.4);
+      r.aimAt(-16, r.sim.phys.floor(-16, 39.6) + 1.4, 39.6);
+    }
+    const near = r.sim.interactable(r.aim);
+    if (near) r.openMenu(near);
+    for (const m of r.tags.faceMats) m.emissive.setRGB(off ? 0 : 1, off ? 0 : 1, off ? 0 : 1);
+  }, [hour, where, off]);
+  await page.waitForTimeout(900);
+  await frames(page, 20);
+  const corners = await page.evaluate(() => {
+    const r = window.ranch;
+    const t = r.tags.tags.find((q) => q.opt && q.gone === 0);
+    if (!t) return null;
+    t.face.updateWorldMatrix(true, false);
+    const e = t.face.matrixWorld.elements;
+    return [[-0.2, -0.09], [0.2, -0.09], [0.2, 0.09], [-0.2, 0.09]].map(([u, v]) => [e[0] * u + e[4] * v + e[12], e[1] * u + e[5] * v + e[13], e[2] * u + e[6] * v + e[14]]);
+  });
+  const px = corners ? await readRect(corners) : null;
+  await page.evaluate(() => { const r = window.ranch; for (const m of r.tags.faceMats) m.emissive.setRGB(1, 1, 1); r.closeMenu(); });
+  return px;
+};
+/** A painted sign: the meadow's signpost (its ridge board) or the ranch gate's teaching sign, from a few metres in front. */
+const readSign = async (hour, which, off) => {
+  const corners = await page.evaluate(([hour, which, off]) => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.hour = hour;
+    s.nettles = [];
+    const signs = r.scene.getObjectByName('signs');
+    signs.material.emissive.setRGB(off ? 0 : 1, off ? 0 : 1, off ? 0 : 1);
+    const f = r.sim.phys.floor;
+    const p = s.player;
+    let c;
+    let hw;
+    let hh;
+    if (which === 'signpost') {
+      const x = 1.3;
+      const z = -3.4;
+      const y = f.call(r.sim.phys, x, z);
+      c = [x - 0.62, y + 2.55, z + 0.001];
+      hw = 0.45;
+      hh = 0.06;
+      p.x = c[0]; p.z = z + 3.6;
+    } else {
+      const x = 3.6;
+      const z = 19.8;
+      const y = f.call(r.sim.phys, x, z);
+      c = [x, y + 1.25, z + 0.02];
+      hw = 0.38;
+      hh = 0.26;
+      p.x = x; p.z = z + 3.4;
+    }
+    p.y = f.call(r.sim.phys, p.x, p.z);
+    r.aimAt(c[0], c[1], c[2]);
+    return [[c[0] - hw, c[1] - hh, c[2]], [c[0] + hw, c[1] - hh, c[2]], [c[0] + hw, c[1] + hh, c[2]], [c[0] - hw, c[1] + hh, c[2]]];
+  }, [hour, which, off]);
+  await frames(page, 30);
+  const px = await readRect(corners);
+  await page.evaluate(() => window.ranch.scene.getObjectByName('signs').material.emissive.setRGB(1, 1, 1));
+  return px;
+};
+// Read at night about as by day: a plank lit to most of its daytime brightness, with its ink as plain against it
+// (the signpost's light letters on dark boards have less contrast by day too).
+const lit = (q, dayQ) => !!q && !!dayQ && q.p90 >= 60 && q.p90 >= dayQ.p90 * 0.6 && ratio(q) >= Math.max(1.5, ratio(dayQ) * 0.85);
+const show = (q) => (q ? `${q.p90.toFixed(0)}/${q.p10.toFixed(0)} (${ratio(q).toFixed(1)})` : 'none');
+for (const [name, read, dayH, nightH] of [
+  ['a pen post\'s tag at 9:40 pm', (h, off) => readTag(h, 'post', off), 12, 21 + 40 / 60],
+  ['the sleep tag at 11:55 pm', (h, off) => readTag(h, 'door', off), 12, 23 + 55 / 60],
+  ["the meadow's signpost at 11 pm", (h, off) => readSign(h, 'signpost', off), 12, 23],
+  ["the ranch gate's sign at 11 pm", (h, off) => readSign(h, 'teach', off), 12, 23],
+]) {
+  const qd = await read(dayH, false);
+  const qn = await read(nightH, false);
+  const qo = await read(nightH, true);
+  console.log(`   ${name}: plank/ink by day ${show(qd)}, at night ${show(qn)}, at night with its glow off ${show(qo)}`);
+  check(`the check finds ${name} too dark to read with its glow off (control)`, !lit(qo, qd), show(qo));
+  check(`${name} reads about as it does by day`, lit(qn, qd), `${show(qn)} against ${show(qd)}`);
+}
+
 // A pen post's count tag: up once the pen limit is taught, counting the pen; and the price board's orders.
 const counted = await page.evaluate(() => {
   const r = window.ranch;
@@ -214,7 +335,14 @@ void counted;
 await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
-check('the price board chalks up the day\'s order: what, by dusk, and that it pays double', tagSays.board.length >= 1 && /^\d+ clover fluff by dusk, pays (double|triple)$/.test(tagSays.board[0]), JSON.stringify(tagSays.board));
+check('the price board chalks up the morning\'s offers: what, by dusk, and what each earns', tagSays.board.length >= 2 && tagSays.board.every((t) => /^\d+ clover (fluff|downies) by dusk, earns [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+// The board's tags: one per offer, its note saying what it earns, fitting the tag.
+const boardTags = await page.evaluate(() => {
+  const r = window.ranch;
+  const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 });
+  return opts.map((o) => ({ id: o.id, title: o.title, note: o.note, fit: r.tagLayout(o.title, o.price, o.note).fits }));
+});
+check("the board's tags: one per offer, saying what it earns, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^Earns [\d,]+ (more )?by dusk$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
 await b.close();
 
 // =================================================================== tags on the phone, played with real touch
@@ -334,6 +462,22 @@ await b.close();
   const chosenId = L.choice.hot >= 0 ? (await ph.evaluate(() => window.ranch.menuOptions()))[L.choice.hot] : null;
   check('phone: the garden lesson\'s tags come down with Garden chosen, and Use says Buy', chosenId === 'build:garden' && L.label === 'Buy', `${chosenId} ${L.label}`);
   await ph.screenshot({ path: '/tmp/ranch-tags-lesson.png' });
+  // A lone tag comes down chosen: the sleep tag, one tap on Use and you sleep (it took two). The crosshair is gone
+  // while the tags hang on touch (a tap chooses), so it never sits on their words.
+  await ph.evaluate(() => { const r = window.ranch; r.closeMenu(); const s = r.sim.s; s.hour = 21; s.nettles = []; const p = s.player; p.x = -16; p.z = 37.4; p.y = r.sim.phys.floor(-16, 37.4); r.aimAt(-16, r.sim.phys.floor(-16, 39.6) + 1.4, 39.6); });
+  await frames(ph, 6);
+  const door = await centre('.rt-act.show');
+  if (door) await tap(door[0], door[1], 8);
+  await ph.waitForTimeout(900);
+  L = await layout();
+  const crossShown = await ph.evaluate(() => { const c = document.querySelector('.rh-cross'); return getComputedStyle(c).display !== 'none' && c.getBoundingClientRect().width > 0; });
+  check('phone: the sleep tag, alone, comes down chosen and Use says Sleep', L.choice.hot === 0 && L.label === 'Sleep', `${JSON.stringify(L.choice)} ${L.label}`);
+  check('phone: no crosshair over the tags while they hang (a tap chooses)', !crossShown);
+  const day0 = await ph.evaluate(() => window.ranch.sim.s.day);
+  const act2 = await centre('.rt-act');
+  await tap(act2[0], act2[1], 9);
+  await ph.waitForTimeout(600);
+  check('phone: one tap on Use sleeps till morning', (await ph.evaluate(() => window.ranch.sim.s.day)) === day0 + 1);
   await b2.close();
 }
 
@@ -392,6 +536,14 @@ await b.close();
     return { p: { l: p.left, t: p.top, r: p.right, b: p.bottom }, box };
   });
   check('desk: the use prompt sits clear of the tags (it lay over their words)', !!pr.box && !(Math.min(pr.p.r, pr.box.x1) > Math.max(pr.p.l, pr.box.x0) && Math.min(pr.p.b, pr.box.y1) > Math.max(pr.p.t, pr.box.y0)), JSON.stringify(pr));
+  // While the tags hang, the crosshair is a pin-prick ring, far smaller than a letter (the 14 px box covered one).
+  const cr = await dk.evaluate(() => {
+    const c = document.querySelector('.rh-cross');
+    const g = c.querySelector(`.x-${c.dataset.s}`);
+    const b = g ? g.getBoundingClientRect() : null;
+    return { s: c.dataset.s, w: b ? b.width : 0, h: b ? b.height : 0 };
+  });
+  check('desk: while tags hang the crosshair is a ring of 5 px or less, smaller than the words on a tag', cr.s === 'tag' && cr.w > 0 && cr.w <= 5 && cr.h <= 5, JSON.stringify(cr));
   await dk.screenshot({ path: '/tmp/ranch-tags-desk.png' });
   await b3.close();
 }

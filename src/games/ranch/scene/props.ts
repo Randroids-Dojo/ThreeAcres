@@ -585,7 +585,9 @@ export function buildProps(boardMat: Material): Props {
   glowMesh.name = 'windows';
   group.add(glowMesh);
 
-  const signMat = new MeshLambertMaterial({ map: atlas.tex, transparent: false });
+  // The painted signs (the ranch gate's arch and its teaching sign, the meadow's signpost, the crate's and
+  // the bench's plates) glow a little at night like the gates' boards, so they read in the dark.
+  const signMat = new MeshLambertMaterial({ map: atlas.tex, transparent: false, emissiveMap: atlas.tex, emissive: new Color(0xffffff), emissiveIntensity: 0.06 });
   const signGeo = mergeGeometries(SIGN, false)!;
   for (const g of SIGN) g.dispose();
   const signMesh = new Mesh(signGeo, signMat);
@@ -607,6 +609,7 @@ export function buildProps(boardMat: Material): Props {
       sails.rotation.z = -t * 0.35;
       glow.emissiveIntensity = 0.15 + night * 1.6;
       for (const m of gateFaces) m.emissiveIntensity = 0.1 + night * 0.4;
+      signMat.emissiveIntensity = 0.06 + night * 0.42;
     },
   };
 }

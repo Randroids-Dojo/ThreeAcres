@@ -24,6 +24,15 @@
 // the thistle goal gives its clue by day and points at the ridge top at dusk;
 // the pause page shows only the goals done and the one you are on; on keys, Q
 // skips empty windows.
+//
+// From the fourth playtest: the pen lesson points at the plot beside the
+// starter garden (where a feed run reaches); the pen-in line says to pull the
+// downy in first while it is loose; the first order is on the board the moment
+// the loop lesson ends, and is taken at the board with one tap (a lone tag
+// comes down chosen, the sleep tag too); the pen limit line stays up until you
+// have stood by the post's count; a thistle in the jar brings the high fence
+// line before it is penned; and on a desktop whose browser refuses pointer
+// lock, the look line falls back to right-drag after the first click.
 //   node scripts/ranch-lessons.mjs [base url]      (or RANCH_URL)
 import fs from 'node:fs';
 import { launch, frames, checker } from './ranch-lib.mjs';
@@ -427,6 +436,8 @@ function only(ui, allowed) {
   check('phone: pen lesson comes next', await k.lessonOn('pen'));
   u = await k.ui();
   check('phone: pen line says what to tap, arrow at an empty pad post with a ring', u.page === 'Tap Post at an empty plot, then Pen.' && u.marker === 'arrow' && (await k.seen()).ring, `${u.page} ${u.marker}`);
+  const penAt = await page.evaluate(() => { const m = window.ranch.tutor.mark; return { post: Math.hypot(m.x - (14.8 + 0.9), m.z - 31.8), ring: Math.hypot(m.rx - 17, m.rz - 26.5) }; });
+  check('phone: the pen lesson points at the plot beside the starter garden, where a feed run reaches (it pointed across the lane)', penAt.post < 0.3 && penAt.ring < 0.1, JSON.stringify(penAt));
   await k.shot('phone-08-pen');
   await k.place(14.8 + 1.2, 31.8 + 2.2, 14.8 + 0.4, 5.6, 31.8);
   await frames(page, 6);
@@ -444,12 +455,27 @@ function only(ui, allowed) {
 
   // ---- 8. puff the downy into the pen
   check('phone: penin lesson comes next', await k.lessonOn('penin'));
-  check('phone: penin line', (await k.ui()).page === 'Blow the downy into the pen.');
+  // With the downy in the jar, the line says to blow it into the pen; blown out beside you, loose, it says to
+  // pull it in first (the fourth playtest's line skipped that step), the arrow on it.
+  const pinAboard = await page.evaluate(() => window.ranch.sim.s.slots.some((q) => q.t === 'clover' && q.n > 0));
+  if (pinAboard) {
+    check('phone: penin line, with the downy in the jar: "Blow the downy into the pen."', (await k.ui()).page === 'Blow the downy into the pen.', (await k.ui()).page);
+    const cw0 = await k.slotOf('clover');
+    if ((await k.st()).sel !== cw0) await tapWindow(cw0);
+    await k.place(-2, 40, -2, 4.6, 44);
+    await frames(page, 3);
+    await press('.rt-puff', 90, 33);
+    await page.waitForTimeout(1500);
+  }
   d = await k.downy('mine');
+  const pinPull = await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; const d = s.downies.find((q) => !q.gone && (q.tame || q.keep) && q.pen < 0); const m = r.tutor.mark; return { line: r.seen().line, at: d && m.on ? Math.hypot(m.x - d.x, m.z - d.z) : -1 }; });
+  check('phone: penin line, with the downy loose: "Pull in the downy." with the arrow on it', !!d && pinPull.line === 'Pull in the downy.' && pinPull.at >= 0 && pinPull.at < 0.4, JSON.stringify(pinPull));
   if (d) {
     await k.place(d.x + 2.4, d.z + 1.4, d.x, d.y + 0.25, d.z);
     await press('.rt-draw', 1400, 14, async () => { const q = await k.downy('mine'); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
   }
+  await page.waitForTimeout(400);
+  check('phone: pulled in, the penin line says to blow it into the pen', (await k.ui()).page === 'Blow the downy into the pen.', (await k.ui()).page);
   const ds = await k.slotOf('clover');
   if (ds >= 0 && (await k.st()).sel !== ds) await tapWindow(ds);
   await k.place(17, 34.5, 17, 6.6, 26.5);
@@ -593,7 +619,8 @@ function only(ui, allowed) {
     await tap(actN[0], actN[1], 27);
     await page.waitForTimeout(700);
     pick = await chosen();
-    check('phone: at the door with no lesson teaching it, the Sleep tag is not chosen for you', pick.id === null && pick.label === 'Tap a tag', JSON.stringify(pick));
+    // (Round 4: a lone tag comes down chosen, so one tap takes it; the playtest's needed two.)
+    check('phone: at the door, the lone Sleep tag comes down chosen, Use saying Sleep', pick.id === 'sleep' && pick.label === 'Sleep', JSON.stringify(pick));
     await takeTag('sleep');
   }
   await page.waitForTimeout(1500);
@@ -626,18 +653,30 @@ function only(ui, allowed) {
   check('phone: six plain sales do not finish the loop lesson', (await k.seen()).lesson === 'farm');
   await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.cycle = (s.learnCount.cycle ?? 0) + 3; });
   check('phone: three turns of the loop finish it', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:farm'), null, 3000), JSON.stringify(await page.evaluate(() => { const s = window.ranch.sim.s; return { from: s.learnCount['farm:from'], cycle: s.learnCount.cycle, now: window.ranch.tutor.current }; })));
-  // ---- the day's orders: the morning after the loop (here, the loop done before noon), the board posts one
-  // and its lesson takes the page, pointing at the board.
+  // ---- the day's orders: the first is on the board the moment the loop lesson ends (the fourth playtest's
+  // came the next dawn), and its lesson takes the page, pointing at the board: take it there.
   check('phone: the first order brings its lesson', await k.lessonOn('order', 4000));
   u = await k.ui();
   const atBoard = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on && m.icon === 'arrow' && Math.hypot(m.x - -4.2, m.z - 37.6) < 0.3; });
   const board = await page.evaluate(() => window.ranch.boardOrders());
-  check("phone: \"Fill today's order on the price board.\", the arrow on the board", u.page === "Fill today's order on the price board." && atBoard, `${u.page} ${atBoard}`);
-  check('phone: the price board chalks the order up: so much clover fluff by dusk, pays double', board.length >= 1 && /^\d+ clover fluff by dusk, pays double$/.test(board[0]), JSON.stringify(board));
-  await k.place(-4.2, 31.9, -4.2, 5.2, 37.6);
-  await frames(page, 4);
+  const sameMorning = await page.evaluate(() => { const s = window.ranch.sim.s; return { day: s.day, hour: s.hour, posted: s.orderDay }; });
+  check('phone: the first order is on the board as soon as the loop lesson ends, the same morning', sameMorning.posted === sameMorning.day && sameMorning.hour < 11, JSON.stringify(sameMorning));
+  check('phone: "Take an order at the price board.", the arrow on the board', u.page === 'Take an order at the price board.' && atBoard, `${u.page} ${atBoard}`);
+  check('phone: the price board chalks the offer up: four clover fluff by dusk, and what it earns', board.length === 1 && /^4 clover fluff by dusk, earns [\d,]+$/.test(board[0]), JSON.stringify(board));
+  await k.place(-4.2, 34.6, -4.2, 5.2, 37.6);
+  await frames(page, 6);
   await k.shot('phone-14a-order');
-  // Its first fluff into the crate, blown for real: the line ticks.
+  // At the board: Use shows (Board), its one tag comes down chosen, one tap on it takes it, and the line ticks.
+  const actB = await centre('.rt-act.show');
+  const actWord = await page.evaluate(() => document.querySelector('.rt-act')?.textContent ?? '');
+  check('phone: at the board the Use button shows, saying Board', !!actB && /Board/.test(actWord), actWord);
+  if (actB) { await tap(actB[0], actB[1], 34); await page.waitForTimeout(800); }
+  pick = await chosen();
+  check('phone: the board\'s one offer comes down chosen, Use saying Take', pick.id === 'order:0' && pick.label === 'Take', JSON.stringify(pick));
+  await k.shot('phone-14a-ordertags');
+  await tapTag('order:0');
+  check('phone: one tap takes the order, and its lesson ends', await k.waitFor(() => { const s = window.ranch.sim.s; return s.learn.includes('lesson:order') && s.orders[0]?.state === 'open'; }, null, 4000), await k.why());
+  // Its first fluff into the crate, blown for real.
   const want0 = await page.evaluate(() => window.ranch.sim.s.orders[0].n);
   await page.evaluate((n) => { const sim = window.ranch.sim; for (let i = 0; i < n; i++) sim.stow('tuft-clover'); }, want0 + 1);
   const fluffSlot = await k.slotOf('tuft');
@@ -645,7 +684,7 @@ function only(ui, allowed) {
   await k.place(-6.5, 32.8, -6.5, 5.7, 36.5);
   await frames(page, 3);
   await press('.rt-puff', 90, 35);
-  check("phone: the order's first fluff into the crate ends its lesson", await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:order'), null, 4000), await k.why());
+  check("phone: the order's first fluff into the crate counts", await k.waitFor(() => window.ranch.sim.s.orders[0].got >= 1, null, 4000), await k.why());
   // With no lesson up, the journal shows the order with its tally, and the next goal under it.
   await page.waitForTimeout(2000);
   const tally = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), goal: window.ranch.sim.openGoals(1)[0]?.text, o: window.ranch.sim.s.orders[0] }));
@@ -675,7 +714,7 @@ function only(ui, allowed) {
   await k.place(15.2, 34.2, 15.0, 5.0, 31.8);
   await frames(page, 4);
   await k.shot('phone-14d-crowd');
-  check('phone: read a moment with no pen over ten, the pen limit line ticks', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:crowd'), null, 6000));
+  check('phone: by the post a moment (its count tag read), with no pen over ten, the pen limit line ticks', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:crowd'), null, 6000));
   await page.evaluate(() => { for (const d of window.ranch.sim.s.downies) if (d.extra) d.gone = true; });
   // No lesson can come yet (150 coins): the journal shows the next goal, calmly, never a blank page.
   await page.waitForTimeout(2200);
@@ -773,6 +812,14 @@ function only(ui, allowed) {
   const after = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.sim.openGoals(1)[0]?.text }));
   check('phone: every lesson done, the journal goes on with the next goal (never blank)', after.lesson === '' && !after.page.includes('Open the gate to Ember') && !!after.goal && after.page.includes(after.goal), JSON.stringify(after));
 
+  // ---- a thistle caught: the high fence line at once, before it is penned (the fourth playtest's left a low
+  // pen in about seven seconds, before the tester reached the post)
+  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.coins = 600; s.hour = 11; r.sim.stow('thistle'); });
+  check('phone: a thistle in the jar brings the high fence line before it is penned', await k.lessonOn('high', 4000));
+  const early = await page.evaluate(() => { const r = window.ranch; const m = r.tutor.mark; return { line: r.seen().line, post: m.on ? Math.hypot(m.x - (14.8 + 0.9), m.z - 31.8) : -1, penned: r.sim.s.downies.some((d) => !d.gone && d.kind === 'thistle') }; });
+  check('phone: "Thistles need a high fence. Buy one." at the pen post, with the thistle still in the jar', early.line === 'Thistles need a high fence. Buy one.' && early.post >= 0 && early.post < 0.3 && !early.penned, JSON.stringify(early));
+  await page.evaluate(() => { const s = window.ranch.sim.s; for (const q of s.slots) if (q.t === 'thistle') { q.t = null; q.n = 0; } });
+  await k.waitFor(() => window.ranch.seen().lesson !== 'high', null, 4000);
   // ---- a thistle behind a low fence: the high fence line, pointing at the post, its tag chosen; one tap buys it
   await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.coins = 600; s.hour = 11; const d = r.sim.spawn('thistle', 17, 26.5, true); d.hunger = 0.1; d.extra = true; });
   check('phone: a thistle in a low pen brings the high fence line', await k.lessonOn('high', 4000));
@@ -833,6 +880,39 @@ function only(ui, allowed) {
   check('phone: nothing appeared before its lesson (checked every frame)', bad.length === 0, bad.slice(0, 6).join(' | '));
   console.log('   first seen during:', Object.entries(first).map(([k2, v]) => `${k2}@${v}`).join(', '));
   check('phone: no console errors', problems.length === 0, problems.slice(0, 4).join(' | '));
+  await ctx.close();
+}
+
+// =================================================================== desktop, a browser that refuses pointer lock
+// (The fourth playtest, in headless Chrome: every click asked for pointer lock again and the line stayed "Click
+// the view to look around." After a refusal it falls back to right-drag, and says so.)
+{
+  console.log('-- desktop, pointer lock refused');
+  const { ctx, page, problems } = await open({ viewport: { width: 1280, height: 800 } }, '&fresh');
+  const k = kit(page);
+  await page.waitForTimeout(400);
+  const before = (await k.ui()).page;
+  // Refused, as this headless browser does (and as a frame that forbids it would).
+  await page.evaluate(() => { HTMLElement.prototype.requestPointerLock = () => Promise.reject(new DOMException('refused', 'NotSupportedError')); });
+  await page.mouse.click(640, 400);
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(() => ({ line: window.ranch.seen().line, avail: window.ranch.input.lockAvailable, hint: document.querySelector('.rh-click')?.classList.contains('on') ?? false }));
+  check('desk, lock refused: the look line falls back to right-drag after the first click (it stayed "Click the view")', before === 'Click the view to look around.' && after.line === 'Right-drag to look around.' && !after.avail && !after.hint, `${before} -> ${JSON.stringify(after)}`);
+  let asked = 0;
+  await page.evaluate(() => { window.__asked = 0; HTMLElement.prototype.requestPointerLock = () => { window.__asked++; return Promise.reject(new DOMException('refused', 'NotSupportedError')); }; });
+  for (let i = 0; i < 3; i++) await page.mouse.click(640 + i * 10, 400);
+  await page.waitForTimeout(300);
+  asked = await page.evaluate(() => window.__asked);
+  check('desk, lock refused: later clicks do not ask for it again', asked === 0, `${asked} asks`);
+  await page.mouse.move(640, 400);
+  await page.mouse.down({ button: 'right' });
+  for (let i = 1; i <= 20; i++) {
+    await page.mouse.move(640 + i * 14, 400);
+    await page.waitForTimeout(16);
+  }
+  await page.mouse.up({ button: 'right' });
+  check('desk, lock refused: right-drag looks and ends the look lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:look'), null, 3000));
+  check('desk, lock refused: no console errors', problems.length === 0, problems.slice(0, 3).join(' | '));
   await ctx.close();
 }
 

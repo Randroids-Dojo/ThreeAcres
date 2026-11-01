@@ -178,6 +178,8 @@ function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
     const fed0 = s.stats.fed;
     while (s.hour < 21) {
       sim.update(dt, idle, aim);
+      // At 7 am the hand takes the board's fluff order (the morning's offers are a choice now; see ranch-orders.ts).
+      if (s.hour >= 7 && sim.offers().length) sim.takeOrder(Math.max(0, sim.offers().findIndex((o) => !o.live)));
       // Crops, onto the gardens' beds or straight into a feeder by a feed run.
       for (const e of sim.events) if (e.t === 'crop') grown += s.pads[e.pad].ups.includes('soil') ? GARDEN_YIELD_SOIL : GARDEN_YIELD;
       for (const e of sim.events) if (e.t === 'order' && e.state === 'filled') day.bonus += e.bonus;
@@ -198,7 +200,7 @@ function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
       if (day.firstOut === null && s.downies.some((d) => !d.gone && d.pen < 0)) day.firstOut = s.hour;
     }
     if (setup.every > 0) tend(sim, setup, day, pool);
-    day.orders = s.orders.length;
+    day.orders = s.orders.filter((o) => o.state !== 'offer').length;
     day.filled = s.orders.filter((o) => o.state === 'filled').length;
     day.grown = grown;
     day.eaten = s.stats.fed - fed0;
@@ -247,7 +249,7 @@ for (const setup of SETUPS) {
 console.log('The order economy (settled days; the hand sells everything, so it fills what the ranch can make by dusk)');
 console.log('   ranch                                                                     income  from orders  orders filled  bare garden rounds');
 for (const r of orderRows) console.log(`   ${r.name.slice(0, 72).padEnd(72)}  ${pad(Math.round(r.coins), 6)}  ${pad(`${Math.round(r.bonus)} (${Math.round((r.bonus / Math.max(1, r.coins)) * 100)}%)`, 11)}  ${pad(`${r.filled} of ${r.posted}`, 13)}  ${pad(`${r.bare} of ${r.rounds}`, 18)}`);
-console.log(`   (Orders close at ${ORDER_BY}:00; an order's fluff sells at the board's price and filling it pays that again, a prized one twice again.)\n`);
+console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close at ${ORDER_BY}:00; an order's fluff sells at the board's price and filling it pays about that again, a prized one twice again.)\n`);
 
 // Sweeping the meadow instead of ranching: the real valley, wild downies foraging the wild food, and a
 // hand that walks the meadow every hour and a half picking up every piece of fluff lying outside the ranch

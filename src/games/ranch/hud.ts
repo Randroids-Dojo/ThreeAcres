@@ -6,12 +6,13 @@
 // the bellows and prices on the Exchange's board; the pause page holds the
 // whole journal, notes and controls.
 
-import { GOALS, fmtCoins, type GoalId } from './defs';
+import { GOALS, fmtCoins, journalGoals, type GoalId } from './defs';
 
 const BOX = `<svg class="box" viewBox="0 0 20 20"><path d="M3 4 Q10 2.6 17 3.6 Q17.6 10 16.6 17 Q9 17.6 3.4 16.8 Q2.6 10 3 4 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="tick" d="M5 10 L9 14.5 L17 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 import { hash2 } from './noise';
 
-type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'sell' | 'pen' | 'feeder';
+/** tag: tags hang and you choose by looking (a pin-prick ring, so it never covers a tag's words); none: tags hang on touch, chosen by tapping. */
+type CrossState = 'idle' | 'target' | 'prickly' | 'tag' | 'none' | 'sell' | 'pen' | 'feeder';
 
 /** What a window holds, as a small icon drawn in it: a downy, one of the three foods, or fluff. */
 export type SlotIcon = 'downy' | 'clover' | 'root' | 'berry' | 'fluff';
@@ -114,7 +115,7 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="-7" y="-5" width="14" height="10" rx="1.5"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
     this.arcDot = this.arc.querySelector('.sun')!;
@@ -403,9 +404,9 @@ export class Hud {
   showPause(when: string, goals: GoalId[], now: string, notes: string[], keys: string): void {
     this.pauseOpen = true;
     this.pauseFocus = 0;
-    const current = GOALS.find((g) => !goals.includes(g.id));
-    const goalRows = GOALS.filter((g) => goals.includes(g.id) || g === current)
-      .map((g) => `<li class="${goals.includes(g.id) ? 'done' : ''}">${g.text}</li>`)
+    // Struck goals in the order you did them, then the one you are on, last.
+    const goalRows = journalGoals(goals)
+      .map((g) => `<li class="${g.done ? 'done' : ''}">${g.text}</li>`)
       .join('');
     const done = GOALS.filter((g) => goals.includes(g.id)).length;
     const nowRow = now ? `<p class="now">${now}</p>` : '';

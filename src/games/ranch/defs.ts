@@ -192,6 +192,18 @@ export const GOALS: { id: GoalId; text: string; reward: number }[] = [
   { id: 'rich', text: 'Earn 10,000 coins in all.', reward: 500 },
 ];
 
+/**
+ * The pause page's journal: the goals done, in the order you did them, then
+ * the one you are on, last (the fourth playtest's page showed goal 6, the
+ * board's order, unstruck between struck goals, as the ridge gate came first).
+ */
+export function journalGoals(done: GoalId[]): { text: string; done: boolean }[] {
+  const rows = done.map((id) => GOALS.find((g) => g.id === id)).filter((g): g is (typeof GOALS)[number] => !!g).map((g) => ({ text: g.text, done: true }));
+  const current = GOALS.find((g) => !done.includes(g.id));
+  if (current) rows.push({ text: current.text, done: false });
+  return rows;
+}
+
 /** The full-pen goals: how many of a kind in one pen. */
 export const FULL_PEN: Partial<Record<GoalId, { kind: DownyKind; n: number }>> = {
   fullclover: { kind: 'clover', n: 10 },
@@ -203,27 +215,42 @@ export const FULL_PEN: Partial<Record<GoalId, { kind: DownyKind; n: number }>> =
 // ---------------------------------------------------------------- orders
 
 /**
- * A day's order from the price board: so much of one kind of fluff by dusk.
- * Its fluff sells at the board's price as usual, and filling it pays that
- * again (a prized order, twice again).
+ * An order from the price board: so much of one kind of fluff by dusk, or so
+ * many live downies of a kind, blown into the sell crate by dusk. Each
+ * morning the board offers two or three, and you take one of them at the
+ * board: the fourth playtest found every day's orders asked for what you
+ * already made, with no choice in them ("after day 4 it's only chores").
  */
 export interface Order {
   kind: DownyKind;
-  /** Fluff wanted. */
+  /** Live downies of the kind (blown into the crate), not its fluff. */
+  live?: boolean;
+  /** Fluff or downies wanted. */
   n: number;
-  /** Fluff sent so far. */
+  /** Sent so far. */
   got: number;
-  /** What the order's fluff has sold for so far: the bonus on filling pays it again (mult - 1 times). */
+  /** What the order's fluff has sold for so far. */
   paid: number;
-  /** 2 pays double; 3 (a prized order) pays triple. */
+  /** 2 a plain order; 3 a prized one. */
   mult: number;
-  state: 'open' | 'filled' | 'missed';
+  /** Coins filling it pays, on top of what its fluff sells for (a fluff order), or for each downy as it goes in (a live order). Set when posted. */
+  pay: number;
+  /** offer: on the board, to take or leave; open: taken, today's order. */
+  state: 'offer' | 'open' | 'filled' | 'missed';
 }
 
 /** Orders close at dusk. */
 export const ORDER_BY = 19;
 /** The board posts the day's orders in the morning (from dawn until noon; a later start waits for the next morning). */
 export const ORDER_POST: [number, number] = [5, 12];
+/**
+ * What a live downy brings in for an order, each: about what a stay-at-home
+ * fluff order adds on top of a day's sales, so going out for downies and
+ * staying in for fluff compete (see scripts/ranch-orders.ts).
+ */
+export const LIVE_EACH: Record<DownyKind, number> = { clover: 55, ember: 95, brook: 120, thistle: 300 };
+/** The fluff window holds this many times what a window of anything else holds: fluff is light. */
+export const FLUFF_ROOM = 2;
 
 export function fmtCoins(n: number): string {
   return Math.floor(n).toLocaleString('en-US');

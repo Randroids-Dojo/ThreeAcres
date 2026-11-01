@@ -21,7 +21,7 @@ import {
 } from 'three';
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
-import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, thingColor, thingName, type DownyKind, type GoalId, type Thing } from './defs';
+import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, type Frame } from './input';
 import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, teachAll, type Say } from './lessons';
@@ -41,8 +41,8 @@ import { TagMenu, type Rail } from './scene/tags';
 import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
 import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from './sim';
-import { capacity, deserialize, serialize, summary, type RanchState } from './state';
-import { DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
+import { capacity, deserialize, serialize, slotCap, summary, type RanchState, type Slot } from './state';
+import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
 import './ranch.css';
 
 const EYE = 1.6;
@@ -56,6 +56,13 @@ const FIRST: Record<DownyKind, [string, string]> = {
 };
 
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
+
+/** What a window holds, in words: the fluff window holding more than one kind is just "fluff". */
+function slotName(q: Slot): string {
+  if (!q.t) return '';
+  if (q.mix && isTuft(q.t) && q.mix.some((m) => m !== q.t)) return 'fluff';
+  return thingName(q.t, q.n);
+}
 
 export interface DebugHooks {
   afterFrame: ((gl: WebGL2RenderingContext) => void) | null;
@@ -575,6 +582,8 @@ export class Ranch {
     this.pads.setCounts(s.pads, this.penN, this.sim.knows('crowd'), night);
     this.props.update(this.t, night);
     this.tags.update(dt, gust);
+    // Hanging tags glow a little at night, like the gates' boards, so they read in the dark.
+    this.tags.setNight(night);
     if (this.sim.drawing && dt > 0) this.fx.drawStream(dt, a.ex, a.ey, a.ez, a.dx, a.dy, a.dz, a.mx, a.my, a.mz, this.sim.range);
     this.fx.update(dt, this.t, this.eye, night);
     // Gates swing open once bought.
@@ -626,7 +635,7 @@ export class Ranch {
       return { name: KIND[k].name.replace(' downy', ''), price: known ? price : null, trend: Math.sign(price - s.market.prev[k]) };
     });
     // Today's orders, chalked under the prices.
-    const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: `${o.n} ${KIND[o.kind].name.replace(' downy', '')} fluff by dusk`, pay: o.mult > 2 ? 'pays triple' : 'pays double', state: o.state })) : [];
+    const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: this.boardText(o), pay: o.state === 'offer' ? `earns ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`, state: o.state })) : [];
     const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}|${orders.map((o) => `${o.text}:${o.state}`).join(',')}`;
     if (key === this.board.key) return;
     this.board.key = key;
@@ -634,10 +643,16 @@ export class Ranch {
     this.board.tex.needsUpdate = true;
   }
 
+  /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk". */
+  private boardText(o: Order): string {
+    const name = KIND[o.kind].name.replace(' downy', '');
+    return o.live ? `${o.n} ${name} downies by dusk` : `${o.n} ${name} fluff by dusk`;
+  }
+
   /** For checks: the orders as the board chalks them. */
   boardOrders(): string[] {
     const s = this.sim.s;
-    return s.orderDay === s.day ? s.orders.map((o) => `${o.n} ${KIND[o.kind].name.replace(' downy', '')} fluff by dusk, ${o.mult > 2 ? 'pays triple' : 'pays double'}${o.state === 'open' ? '' : `, ${o.state}`}`) : [];
+    return s.orderDay === s.day ? s.orders.map((o) => `${this.boardText(o)}, ${o.state === 'offer' ? `earns ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`}${o.state === 'open' || o.state === 'offer' ? '' : `, ${o.state}`}`) : [];
   }
 
   private render(): void {
@@ -701,7 +716,7 @@ export class Ranch {
       case 'empty':
         this.cue('ranch.puff', undefined, undefined, undefined, 0.5, 0.7);
         this.vm.puffKick(false);
-        this.hud.note(`Tipped out ${e.n} ${thingName(e.thing, e.n)}.`);
+        this.hud.note(`Tipped out ${e.n} ${e.mixed ? 'fluff' : thingName(e.thing, e.n)}.`);
         break;
       case 'puff':
         this.cue('ranch.puff', undefined, undefined, undefined, e.thing ? 0.9 : 0.55, e.thing ? 1 : 1.25);
@@ -841,10 +856,19 @@ export class Ranch {
           this.fx.coinPop(e.x, y, e.z, 6);
           this.lastSale = e.bonus;
           // While a lesson is up, the page belongs to it: this page waits for it to tick and go.
-          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} fluff, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
+          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} ${e.live ? 'downies' : 'fluff'}, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
         } else if (e.state === 'missed') this.hud.note('Dusk. The order went unfilled.', 3);
         break;
       }
+      case 'deliver':
+        // A downy for today's live order: into the crate, with coins.
+        this.cue('ranch.sell', e.x, e.y, e.z);
+        this.cue('ranch.coins', e.x, e.y, e.z, 1);
+        this.cue('ranch.chirp', e.x, e.y, e.z, 0.8, CHIRP_PITCH[e.kind]);
+        this.fx.burst(e.x, e.y + 0.3, e.z, KIND[e.kind].body, 18, 1.4);
+        this.fx.coinPop(e.x, e.y, e.z, 5);
+        this.lastSale = e.coins;
+        break;
       case 'feeder':
         // Into the hopper: how much it holds now; bounced off: why.
         if (e.why) {
@@ -1021,6 +1045,7 @@ export class Ranch {
       const cz = WORKBENCH.z + dz * 0.7;
       return { x: cx - ax * half, y: this.props.tagRails.bench.y - 0.05, z: cz - az * half, ax, az, ry };
     }
+    if (it.kind === 'board') return { x: BOARD.x, y: p.floor(BOARD.x, BOARD.z) + 2.3, z: BOARD.z - 0.4, ax: 0, az: 0, ry: Math.PI };
     if (it.kind === 'door') {
       const y = p.floor((PORCH.x0 + PORCH.x1) / 2, (PORCH.z0 + PORCH.z1) / 2) + 2.35;
       return { x: DOOR.x - 0.3, y, z: PORCH.z0 + 0.25, ax: 0, az: 0, ry: Math.PI };
@@ -1069,6 +1094,8 @@ export class Ranch {
     const opts = this.sim.menu(it);
     this.doneHint('use');
     if (!opts.length) return;
+    // A pen post's tags read (its count tag hangs there): the pen limit's line has been seen to.
+    if (it.kind === 'pad' && this.sim.s.pads[it.id as number].kind === 'pen') this.tutor.add(this.sim.s, 'crowd:post');
     // The tags hang as a near grid in front of you, all on screen and large enough to read.
     const cols = this.h > this.w * 1.15 ? 2 : 3;
     const { rail, scale } = this.nearRail(it, opts.length, cols);
@@ -1251,12 +1278,14 @@ export class Ranch {
     this.input.setKnown(knows('draw'), knows('puff'), knows('jump'), knows('pause'));
     // Crosshair.
     this.crossTarget = this.sim.aimTarget(this.aim);
-    if (this.menu) hud.setCross(this.tags.hot >= 0 ? 'tag' : 'idle');
+    // While tags hang: on touch no crosshair at all (a tap chooses); with a mouse or a pad a pin-prick ring
+    // that never covers a tag's words (the 14 px box read "Sleep till▢norning").
+    if (this.menu) hud.setCross(touch ? 'none' : 'tag');
     else hud.setCross(this.crossTarget ?? 'idle');
     const slot = s.slots[s.sel];
     // While tags hang, the count by the crosshair steps aside (it lay over a tag's words).
     const counted = slot.t && !this.menu;
-    hud.setCount(counted ? slot.n : 0, counted ? thingName(slot.t!, slot.n) : '', capacity(s));
+    hud.setCount(counted ? slot.n : 0, counted ? slotName(slot) : '', slotCap(s, slot));
     hud.setCoins(s.coins, dt);
     hud.setHour(s.hour);
     // Use prompt: the key glyph shows until you have used something once.
@@ -1268,7 +1297,7 @@ export class Ranch {
       this.input.setAct(verb);
     } else if (near) {
       hud.setPrompt(near.label, keyGlyph);
-      this.input.setAct(near.kind === 'door' ? 'Door' : near.kind === 'bench' ? 'Bench' : near.kind === 'gate' ? 'Gate' : near.kind === 'chute' ? 'Box' : 'Post');
+      this.input.setAct(near.kind === 'door' ? 'Door' : near.kind === 'bench' ? 'Bench' : near.kind === 'gate' ? 'Gate' : near.kind === 'chute' ? 'Box' : near.kind === 'board' ? 'Board' : 'Post');
     } else {
       hud.setPrompt(null, null);
       this.input.setAct(null);

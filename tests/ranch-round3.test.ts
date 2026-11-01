@@ -130,9 +130,11 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
       expect(s.orders.length).toBeGreaterThanOrEqual(1);
       for (const o of s.orders) {
         expect(o.kind).toBe('clover');
-        expect(o.n).toBeGreaterThanOrEqual(4);
+        // (Round 4: a live order of two to four downies may be offered beside the fluff one.)
+        if (o.live) expect(o.n).toBeLessThanOrEqual(5);
+        else expect(o.n).toBeGreaterThanOrEqual(4);
         expect(o.n).toBeLessThanOrEqual(6 * 2 * (13 / 5));
-        expect(o.state).toBe('open');
+        expect(o.state).toBe('offer');
       }
       // The ridge open, no embers yet and room in a pen: a small ember order may come to send you out.
       // Never a brook (the hollow is shut) and never a thistle (you keep none; they only come at dusk).
@@ -141,22 +143,25 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
       for (const o of s.orders) {
         expect(['clover', 'ember']).toContain(o.kind);
         if (o.kind === 'ember') {
-          expect(o.n).toBe(4);
+          // Round 4: you keep no embers, so it is live downies, to send you out.
+          expect(o.live).toBe(true);
+          expect(o.n).toBeGreaterThanOrEqual(2);
+          expect(o.n).toBeLessThanOrEqual(4);
           emberSeen++;
         }
       }
     });
     expect(emberSeen).toBeGreaterThan(0);
-    // Nothing kept: nothing asked for.
+    // Nothing kept: no fluff asked for.
     const empty = quiet(6);
     empty.postOrders(true);
-    expect(empty.s.orders).toEqual([]);
-    // One downy late in the morning cannot make four by dusk: it is not asked for.
+    expect(empty.s.orders.filter((o) => !o.live)).toEqual([]);
+    // One downy late in the morning cannot make four by dusk: its fluff is not asked for.
     const late = quiet(11.5);
     pen(late, 1);
     fill(late, 1, 'clover', 1);
     late.postOrders(true);
-    expect(late.s.orders).toEqual([]);
+    expect(late.s.orders.filter((o) => !o.live)).toEqual([]);
   });
 
   it('orders grow with the ranch, and a thistle you keep brings a prized order that pays triple', () => {
@@ -166,11 +171,11 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     pen(sim, 2, ['high']);
     fill(sim, 1, 'clover', 3);
     sim.postOrders(true);
-    const small = s.orders[0].n;
+    const small = s.orders.find((o) => !o.live)!.n;
     fill(sim, 1, 'clover', 6);
     s.day++;
     sim.postOrders(true);
-    expect(s.orders[0].n).toBeGreaterThan(small);
+    expect(s.orders.find((o) => !o.live)!.n).toBeGreaterThan(small);
     fill(sim, 2, 'thistle', 2);
     s.day++;
     sim.postOrders(true);
@@ -185,6 +190,8 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     pen(sim, 1);
     fill(sim, 1, 'clover', 4);
     sim.postOrders(true);
+    // (Round 4: the morning's orders are offers; take the fluff one at the board.)
+    expect(sim.takeOrder(s.orders.findIndex((q) => !q.live))).toBe(true);
     const o = s.orders[0];
     expect(o.kind).toBe('clover');
     const evs: Ev[] = [];
@@ -206,9 +213,11 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     expect(o.got).toBe(o.n);
     const filled = orderEvents(evs).find((e) => e.state === 'filled')!;
     expect(filled).toBeTruthy();
-    // The order's fluff sold at the board's price, and filling it paid that again: double.
+    // The order's fluff sold at the board's price, and filling it paid about that again (round 4: the sum
+    // set when it was posted, so the tag can say it, before each sale took its little off the price).
     const market = sellEvents(evs).slice(0, o.n).reduce((a, e) => a + e.coins, 0);
-    expect(filled.bonus).toBe(market);
+    expect(filled.bonus).toBeGreaterThanOrEqual(market);
+    expect(filled.bonus).toBeLessThanOrEqual(market * 1.15);
     expect(s.coins - c0).toBeGreaterThanOrEqual(market * 1.9);
     expect(s.goals).toContain('order');
     // Only the order's n counted: the two extra sold at the market price only.
@@ -222,6 +231,7 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     fill(sim, 1, 'clover', 6);
     sim.postOrders(true);
     expect(s.orders.length).toBeGreaterThan(0);
+    sim.takeOrder(0);
     s.hour = 17.5;
     const evs: Ev[] = [];
     for (let t = 0; t < 2 * HOUR; t += 1 / 20) {
@@ -234,7 +244,7 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     sim.sleep();
     for (let t = 0; t < 1; t += 1 / 20) sim.update(1 / 20, idle, ahead(sim));
     expect(s.orderDay).toBe(s.day);
-    expect(s.orders.some((o) => o.state === 'open')).toBe(true);
+    expect(s.orders.some((o) => o.state === 'offer')).toBe(true);
   });
 
   it('the first order brings one short lesson after the loop, pointing at the board; then the journal keeps the tally', () => {
@@ -248,10 +258,12 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     run(1);
     expect(s.orders.length).toBeGreaterThan(0);
     expect(tutor.current).toBe('order');
-    expect(view().line).toBe("Fill today's order on the price board.");
+    // (Round 4: the order is taken at the board.)
+    expect(view().line).toBe('Take an order at the price board.');
     expect(tutor.mark.on).toBe(true);
     expect(Math.hypot(tutor.mark.x - BOARD.x, tutor.mark.z - BOARD.z)).toBeLessThan(0.2);
-    // The first of its fluff into the crate: the line ticks.
+    // Taken: the line ticks.
+    sim.takeOrder(0);
     sim.sellFluff(s.orders[0].kind);
     run(0.2);
     expect(view().done).toBe(true);
@@ -296,7 +308,11 @@ describe('P1: the pen limit is taught before it bites, and the first ember pen i
     expect(sim.knows('crowd')).toBe(true);
     const post = padSpots(1).post;
     expect(Math.hypot(tutor.mark.x - post.x, tutor.mark.z - post.z)).toBeLessThan(1.2);
+    // (Round 4: it stays up until you have seen the count on the post: the playtest's 3.5 s went by unread.)
     run(4.5);
+    expect(Tutor.finished(s, 'crowd')).toBe(false);
+    stand(sim, post.x + 1, post.z + 1);
+    run(2);
     expect(Tutor.finished(s, 'crowd')).toBe(true);
   });
 
@@ -306,7 +322,7 @@ describe('P1: the pen limit is taught before it bites, and the first ember pen i
     s.night = s.day;
     pen(sim, 1);
     fill(sim, 1, 'clover', 11, 0.1);
-    run(6);
+    run(4);
     expect(tutor.current).toBe('crowd');
     expect(Tutor.finished(s, 'crowd')).toBe(false);
     s.downies.find((d) => d.pen === 1)!.gone = true;
@@ -422,14 +438,15 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
   });
 
   it('a thistle bolts: walking at it on open ground you never get in reach; running, you do', () => {
-    const chase = (run: boolean) => {
+    // (Round 4: until it is winded, after four seconds of bolting; then a walker who keeps after it closes in.)
+    const chase = (run: boolean, secs = 3.8) => {
       const sim = quiet(18.6);
       // Open meadow, gently rising ahead of it, no water or crag in the way.
       const d = sim.spawn('thistle', -20, -3, false);
       d.hunger = 0.2;
       stand(sim, -20, 8);
       let closest = 1e9;
-      for (let t = 0; t < 6; t += 1 / 30) {
+      for (let t = 0; t < secs; t += 1 / 30) {
         const p = sim.s.player;
         p.yaw = Math.atan2(-(d.x - p.x), -(d.z - p.z));
         sim.update(1 / 30, { ...idle, moveZ: 1, sprint: run }, ahead(sim));
@@ -448,6 +465,11 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
     // Pull reaches 7.4 m (and a little give).
     expect(walkMin).toBeGreaterThan(7.8);
     expect(runMin).toBeLessThan(7);
+    let tired = 1e9;
+    seeds(3, () => {
+      tired = Math.min(tired, chase(false, 9));
+    });
+    expect(tired).toBeLessThan(7);
   });
 
   it('a slow catch of a brook by the pond: it slips into the water and is gone', () => {
@@ -634,11 +656,11 @@ describe('P3: the feeder has a crosshair mark and says why it refuses', () => {
 
   it('every new line is eight words or fewer, uses the plain words, and no lesson line names a key on touch', () => {
     const lines = allLines().filter((l) => ['order', 'crowd', 'high', 'farm', 'stray'].includes(l.id)).map((l) => l.line);
-    expect(lines).toContain("Fill today's order on the price board.");
+    expect(lines).toContain('Take an order at the price board.');
     expect(lines).toContain('Keep ten or fewer downies in a pen.');
     expect(lines).toContain('Thistles need a high fence. Buy one.');
     expect(lines).toContain('Blow the downy into a pen.');
-    for (const l of [...lines, ...GOALS.map((g) => g.text), 'Thistles visit the ridge top at dusk.', 'Orders filled. New ones come at dawn.']) {
+    for (const l of [...lines, ...GOALS.map((g) => g.text), 'Thistles visit the ridge top at dusk.', 'Order filled. New ones come at dawn.']) {
       expect(l.split(/\s+/).length, l).toBeLessThanOrEqual(8);
       expect(l, l).not.toMatch(/\b(down|puffs?|draws?|Exchange|pads?|canister|nettlebacks?|tufts?)\b/i);
       expect(l, l).not.toMatch(/[!\u2013\u2014]/);

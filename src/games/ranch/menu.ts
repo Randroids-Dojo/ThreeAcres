@@ -19,11 +19,18 @@ export class TagChoice {
   private dev: PickDev = 'mouse';
   private looked = 0;
 
-  /** Tags just came down: nothing chosen, unless the lesson on screen teaches one of them. */
+  /**
+   * Tags just came down: nothing chosen, unless the lesson on screen teaches
+   * one of them, or there is only one to take (the sleep tag, a gate's): then
+   * it is chosen already, so one tap takes it (the fourth playtest needed two).
+   */
   open(opts: MenuOption[], dev: PickDev, lessonTag: string | null): void {
     this.dev = dev;
     this.looked = 0;
     this.hot = lessonTag ? opts.findIndex((o) => o.id === lessonTag) : -1;
+    // (Pulling a crop up is never chosen for you.)
+    const takeable = opts.filter((o) => o.id !== 'info' && o.id !== 'garden:clear');
+    if (this.hot < 0 && takeable.length === 1) this.hot = opts.indexOf(takeable[0]);
   }
 
   /** The device changed while the tags were down. */
@@ -65,6 +72,7 @@ export class TagChoice {
     const o = this.hot >= 0 ? opts[this.hot] : null;
     if (!o) return this.dev === 'touch' ? 'Tap a tag' : 'Look at a tag';
     if (o.id === 'sleep') return 'Sleep';
+    if (o.id.startsWith('order:')) return 'Take';
     if (o.id.startsWith('silo:')) return 'Pull these';
     if (o.price !== null) return 'Buy';
     if (o.id === 'garden:clear') return 'Pull it';
