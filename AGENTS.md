@@ -44,6 +44,9 @@ node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of ra
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth
+npx tsx scripts/ranch-balance.ts       # Thistledown: coins a game day for typical ranches, against sweeping; neglect and gate timing
+node scripts/deck-board.mjs            # Seedbound: how the board persists (crops standing at dawn, bare dawns, sowings beside standing crops)
+npx tsx scripts/deck-seasons.ts        # Seedbound: per-season clear rates for years 1 to 3 with the decent, strict and guided bots
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
 node scripts/render3d-flash.mjs        # 3D frame readback for black or NaN pixels; also render3d-shots, -perf, -pick, -leak
 node scripts/audio-check.mjs           # audio levels, latency, crossfades, bursts (writes WAVs to /tmp/acres-audio-2)
