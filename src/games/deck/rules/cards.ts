@@ -1,7 +1,7 @@
 // Every card and almanac page: cost, rarity, target and the short rule text the
 // card face shows. The rules themselves live in run.ts and night.ts.
 
-import type { CardId, CardType, PageId, Rarity, SeedId, Target } from './types';
+import type { CardId, CardType, PageId, Rarity, SeedId, Target, Twist } from './types';
 
 export interface CardDef {
   id: CardId;
@@ -55,7 +55,8 @@ export const CARDS: Record<CardId, CardDef> = {
   sunflower: D('sunflower', 'Sunflower', 'seed', 2, 'uncommon', 'empty', 'Tall. It faces the crop below it: +2 bloom.'),
   pumpkin: D('pumpkin', 'Pumpkin', 'seed', 3, 'rare', 'empty', 'x2 bloom with nothing next to it.'),
   strawberry: D('strawberry', 'Strawberry', 'seed', 2, 'uncommon', 'empty', 'Picks for 4 nights. Every pick puts a scoop back.'),
-  mint: D('mint', 'Mint', 'seed', 1, 'common', 'empty', 'Each night it spreads into an empty neighbour.'),
+  // It gave no reason to want it: the sprouts it spreads are free crops, each a harvest and a scoop back.
+  mint: D('mint', 'Mint', 'seed', 1, 'common', 'empty', 'Free crops: each night it spreads to a bare plot beside it.'),
   garlic: D('garlic', 'Garlic', 'seed', 1, 'common', 'empty', 'Pests keep off it and its neighbours.'),
   wheat: D('wheat', 'Wheat', 'seed', 1, 'common', 'empty', '+2 yield for each wheat next to it.'),
   chili: D('chili', 'Chili', 'seed', 2, 'uncommon', 'empty', 'Neighbours get x1.5 bloom.'),
@@ -142,8 +143,8 @@ export interface PageDef {
 
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
-  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom with a partner beside them (a carrot for a radish, a radish for a carrot).' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'A crop a sunflower or a beehive blooms gets x1.5, once.' },
+  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops below a sunflower or near a beehive get x1.5 bloom.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },
@@ -158,3 +159,44 @@ export const PAGE_IDS = Object.keys(PAGES) as PageId[];
 export const MAX_PAGES = 4;
 
 export const SEASON_NAMES = ['spring', 'summer', 'autumn', 'winter'] as const;
+
+/** A crop's name for a crowd of them: "A buyer pays double for carrots." */
+export const PLURALS: Record<SeedId, string> = {
+  radish: 'radishes',
+  carrot: 'carrots',
+  lettuce: 'lettuces',
+  beans: 'beans',
+  corn: 'corn',
+  sunflower: 'sunflowers',
+  pumpkin: 'pumpkins',
+  strawberry: 'strawberries',
+  mint: 'mint',
+  garlic: 'garlic',
+  wheat: 'wheat',
+  chili: 'chilies',
+};
+
+/** A season's twist in one plain line, as the stall, the table and the almanac say it (no colons, no season word, so it reads anywhere). */
+export function twistText(t: Twist): string {
+  const crop = t.crop ? PLURALS[t.crop] : '';
+  switch (t.id) {
+    case 'buyer':
+      return `A buyer pays double for ${crop}.`;
+    case 'glut':
+      return `${crop[0].toUpperCase()}${crop.slice(1)} sell for half.`;
+    case 'company':
+      return 'Crops get +1 yield for each crop beside them.';
+    case 'calm':
+      return 'No new pests.';
+    case 'picks':
+      return 'Beans and strawberries pick one more time.';
+    case 'sunall':
+      return 'Sunflowers bloom every crop beside them.';
+    case 'frost':
+      return 'No sowing on the frosted bottom row.';
+    case 'sunup':
+      return 'Sunflowers face up and bloom the crop above.';
+    case 'crows':
+      return 'Crows come twice as often.';
+  }
+}

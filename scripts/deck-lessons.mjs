@@ -32,6 +32,11 @@
 //     plant it, or the preview differs from a mouse hovering that plot (a radish, beans); held beans mark no plot
 //     where their +2 would land; the can's preview does not give the crop it brings in tonight its moon; giving up
 //     from the almanac does not end the run with its entry, count its seasons and keep its best harvest
+//   - round 5: guided day 6 asks to toss a card while every card in hand has a job; the spent lesson does not wait
+//     for a card with no use, or stays up once there is none; the first crow asks to set out a scarecrow still in
+//     the tin; the stall before year 2 does not offer two twists with its lesson line, lets the way on go with none
+//     picked, or does not take a real tap (or arrows and Enter) on a twist; the season's table does not say the
+//     twist; the pegboard's line is not "Fill the pegboard" (no "brass hole")
 // Screens go to /tmp/deck-lessons/; the step-by-step table to steps-*.json.
 // node scripts/deck-lessons.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -281,7 +286,7 @@ async function session(label, viewport, touch) {
   // ---------------------------------------------------------------- day 2: the pegboard, then a carrot to plant beside
   t = await step('day 2, dawn');
   check(`${label}: day 2 deals a carrot and two radishes`, t.hand.join() === 'carrot,radish,radish', t.hand.join());
-  check(`${label}: the pegboard came for the first harvest`, t.pieces.peg && /brass hole/i.test(t.line), t.line);
+  check(`${label}: the pegboard came for the first harvest, in plain words`, t.pieces.peg && /Fill the pegboard/.test(t.line) && !/brass/i.test(t.line), t.line);
   await shot('6-peg');
   // Taking a card up ends the passive pegboard note; the stakes note follows.
   await tap(...(await cardPoint(await handIndex('carrot'))));
@@ -515,6 +520,7 @@ async function session(label, viewport, touch) {
   // One new card a day: the beans (day 4, above), then the can, then the sunflower, never all at once.
   const met = new Set(['radish', 'carrot', 'lettuce', 'beans']);
   const newByDay = {};
+  const day6Spent = [];
   for (let guard = 0; guard < 40; guard++) {
     const st = await p.evaluate(() => ({ phase: window.deck.state().phase, day: window.deck.state().day }));
     if (st.phase !== 'day') break;
@@ -525,6 +531,8 @@ async function session(label, viewport, touch) {
       check(`${label}: day ${st.day} brings one new card at most`, newByDay[st.day].length <= 1, `new: ${newByDay[st.day].join(', ') || 'none'}; hand ${t.hand.join(', ')}`);
     }
     const l = t.lesson;
+    // Round 5: day 6 deals the sunflower, the lettuce and a radish, each with a job: no "Drag a spare card to Spent."
+    if (st.day === 6 && l === 'spent') day6Spent.push(t.hand.join(', '));
     if (l === 'tin') {
       await shot(`14-tin-day${st.day}`);
       if (touch || guard % 2) await tap(...(await center('.sb-tin')));
@@ -630,6 +638,7 @@ async function session(label, viewport, touch) {
     await wait(200);
   }
   nightBrought.add('coins');
+  check(`${label}: guided day 6 does not ask to toss a card while every card has a job`, day6Spent.length === 0, day6Spent.length ? `with ${day6Spent[0]}` : 'no spent lesson on day 6');
   await wait(400);
 
   // ---------------------------------------------------------------- the season's end: coins and the stall
@@ -876,6 +885,147 @@ async function returning() {
 }
 
 /**
+ * Round 5, on the phone with real touch and on the desktop with the mouse and keys: the season's twist at the stall
+ * (its lesson line, the way on asking for a pick, a real tap or arrows and Enter picking one, the table saying it),
+ * the spent lesson waiting for a card with no use and going away once there is none, and the first crow naming the
+ * scarecrow only once it is in the hand.
+ */
+async function round5(label, viewport, touch) {
+  const ctx = await b.newContext({ viewport, deviceScaleFactor: 2, hasTouch: touch, isMobile: touch });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  const cdp = await ctx.newCDPSession(p);
+  const wait = (ms) => p.waitForTimeout(ms);
+  const tap = async (x, y) => {
+    if (touch) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 9, radiusX: 6, radiusY: 6, force: 1 }] });
+      await wait(45);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else await p.mouse.click(x, y);
+    await wait(300);
+  };
+  const at = (sel, n = 0) => p.evaluate(([sel, n]) => { const e = document.querySelectorAll(sel)[n]; if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, [sel, n]);
+  const lesson = () => p.evaluate(() => ({ id: window.deck.lesson()?.id ?? null, text: window.deck.lesson()?.text ?? '' }));
+  await p.goto(`${base}/?game=deck&fresh`);
+  await p.waitForFunction(() => window.deck && window.deck.frames() > 5, null, { timeout: 20000 });
+  if (touch) await tap(200, 40);
+  // A returning player who has not yet met a twist: year 1 winter met, at the stall before year 2.
+  await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    d.seed(616);
+    d.learnAll();
+    const t = d.table;
+    t.tutor.learn.done = t.tutor.learn.done.filter((x) => x !== 'twist' && x !== 'spent' && x !== 'crows');
+    t.tutor.drop();
+    d.state().season = 3;
+    while (d.state().phase === 'day') {
+      d.state().earned = 99999;
+      d.endDay();
+      d.skip();
+      await w(30);
+    }
+  });
+  await wait(500);
+  const l1 = await lesson();
+  const twists = await p.evaluate(() => [...document.querySelectorAll('.sb-twistcard')].map((e) => e.textContent.trim()));
+  await p.screenshot({ path: `${out}/${label}-r5-twists.png` });
+  check(`${label}: the stall before year 2 offers two twists, with its lesson line`, twists.length === 2 && l1.id === 'twist' && /Pick one of the two for spring/.test(l1.text), `${twists.join(' | ')}; "${l1.text}"`);
+  // The way on asks for a pick first.
+  await tap(...(await at('.sb-signpost')));
+  const held = await p.evaluate(() => ({ phase: window.deck.state().phase, slip: document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '' }));
+  check(`${label}: the way on with no twist picked stays at the stall and asks for one`, held.phase === 'shop' && /Pick one/.test(held.slip), JSON.stringify(held));
+  // Pick the second by a real tap, or on the desktop by arrows and Enter.
+  if (touch) await tap(...(await at('.sb-twistcard', 1)));
+  else {
+    for (let k = 0; k < 30; k++) {
+      if (await p.evaluate(() => document.activeElement === document.querySelectorAll('.sb-twistcard')[1])) break;
+      await p.keyboard.press('ArrowRight');
+    }
+    await p.keyboard.press('Enter');
+    await wait(300);
+  }
+  const picked = await p.evaluate(() => ({ i: window.deck.state().shop.twist, tw: window.deck.state().shop.twists[1], text: document.querySelectorAll('.sb-twistcard')[1]?.textContent.trim(), done: window.deck.table.tutor.learn.done.includes('twist') }));
+  check(`${label}: a ${touch ? 'tap' : 'keypress'} picks a twist, and its lesson ends`, picked.i === 1 && picked.done, JSON.stringify(picked));
+  await tap(...(await at('.sb-signpost')));
+  await wait(400);
+  const line = await p.evaluate(() => ({ phase: window.deck.state().phase, twist: window.deck.state().twist, text: window.deck.twist() }));
+  await p.screenshot({ path: `${out}/${label}-r5-twist-line.png` });
+  check(`${label}: the season takes the twist picked and the table says it`, line.phase === 'day' && JSON.stringify(line.twist) === JSON.stringify(picked.tw) && line.text === picked.text, `"${line.text}"`);
+  // The spent lesson: not while every card has a job; up with a card the scoops cannot pay for; away once none is left.
+  const spent = await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = d.state();
+    s.twist = null;
+    s.crow = false;
+    for (const pl of s.plots) pl.crop = null;
+    d.hand(['sunflower', 'lettuce', 'radish']);
+    s.energy = 5;
+    s.tossed = false;
+    await w(200);
+    const jobs = d.lesson()?.id ?? null;
+    s.energy = 1;
+    d.table.renderAll();
+    await w(200);
+    const spare = d.lesson()?.id ?? null;
+    const text = d.lesson()?.text ?? '';
+    d.hand([]);
+    await w(200);
+    const empty = d.lesson()?.id ?? null;
+    return { jobs, spare, text, empty, done: d.table.tutor.learn.done.includes('spent') };
+  });
+  check(`${label}: the spent lesson waits for a card with no use, and goes away when the hand is empty`, spent.jobs !== 'spent' && spent.spare === 'spent' && spent.empty !== 'spent' && !spent.done, JSON.stringify(spent));
+  // Then a real toss of a spare card ends it.
+  await p.evaluate(async () => {
+    const d = window.deck;
+    d.hand(['pumpkin', 'radish', 'lettuce']);
+    d.state().energy = 1;
+    d.table.renderAll();
+    await new Promise((r) => setTimeout(r, 250));
+  });
+  const before = await lesson();
+  const cp = await p.evaluate(() => { const t = window.deck.table; const el = t.handEls.get(t.run.hand[0].uid).el; const r = el.getBoundingClientRect(); return [r.left + r.width * 0.3, r.top + r.height * 0.35]; });
+  const heap = await at('.sb-heap');
+  if (touch) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cp[0], y: cp[1], id: 10 }] });
+    for (let i = 1; i <= 12; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cp[0] + ((heap[0] - cp[0]) * i) / 12, y: cp[1] + ((heap[1] - cp[1]) * i) / 12, id: 10 }] });
+      await wait(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } else {
+    await p.keyboard.press('Shift+Digit1');
+    await p.keyboard.press('KeyX');
+  }
+  await wait(400);
+  const after = await p.evaluate(() => ({ tossed: window.deck.state().tossed, done: window.deck.table.tutor.learn.done.includes('spent') }));
+  check(`${label}: with a spare card the line asks for a toss, and a real toss ends it`, before.id === 'spent' && after.tossed && after.done, JSON.stringify({ before, after }));
+  // The first crow names the scarecrow only once it is in the hand.
+  const crow = await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = d.state();
+    s.crow = true;
+    s.draw = s.draw.filter((c) => c.id !== 'scarecrow');
+    s.draw.push({ uid: 9901, id: 'scarecrow', up: false });
+    d.hand(['radish', 'carrot']);
+    await w(250);
+    const tin = d.lesson()?.text ?? '';
+    d.table.tutor.drop();
+    d.table.tutor.learn.done = d.table.tutor.learn.done.filter((x) => x !== 'crows');
+    s.draw = s.draw.filter((c) => c.id !== 'scarecrow');
+    d.hand(['scarecrow', 'radish']);
+    await w(250);
+    return { tin, hand: d.lesson()?.text ?? '' };
+  });
+  check(`${label}: the first crow does not ask to set out a scarecrow still in the tin, and does once it is in hand`, /crow/i.test(crow.tin) && !/Set out/i.test(crow.tin) && /Set out the scarecrow/.test(crow.hand), JSON.stringify(crow));
+  check(`${label}: round 5 without page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+  await ctx.close();
+}
+
+/**
  * Round 4: giving up from the almanac, by real touch, ends the run the way a missed quota does: the entry follows,
  * the seasons met count for the catalogue and the best harvest is kept (it used to start a new run, recording nothing).
  */
@@ -939,6 +1089,8 @@ if (!process.env.P1_ONLY) {
 }
 await p1('phone', { width: 412, height: 838 }, true);
 await p1('desk', { width: 1280, height: 800 }, false);
+await round5('phone', { width: 412, height: 838 }, true);
+await round5('desk', { width: 1280, height: 800 }, false);
 for (const tool of ['can', 'compost', 'radish', 'beans']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
 if (!process.env.P1_ONLY) {
   await returning();

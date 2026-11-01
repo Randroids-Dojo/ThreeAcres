@@ -288,7 +288,7 @@ async function run(label, viewport, touch) {
       if (q.heap < want.heap) extra.push(`the spent heap is ${q.heap.toFixed(0)} px wide`);
       if (q.scoop < want.scoop) extra.push(`a scoop is ${q.scoop.toFixed(0)} px wide`);
       if (q.bench.h < want.bench) extra.push(`the bench is ${q.bench.h.toFixed(0)} px tall`);
-      console.log(`       ${label} bench: ${q.bench.h.toFixed(0)} px tall, labels ${q.labels.map((x) => `${x.text} ${x.size} px`).join(', ')}, heap ${q.heap.toFixed(0)} px, tin ${q.tin.toFixed(0)} px, lantern ${q.lantern.toFixed(0)} px, scoops ${q.scoop.toFixed(0)} px${label === 'desk' ? `, bare table between the pegboard and the bench ${Math.round(q.bench.t - q.peg)} px (52 of it the lesson strip)` : ''}`);
+      console.log(`       ${label} bench: ${q.bench.h.toFixed(0)} px tall, labels ${q.labels.map((x) => `${x.text} ${x.size} px`).join(', ')}, heap ${q.heap.toFixed(0)} px, tin ${q.tin.toFixed(0)} px, lantern ${q.lantern.toFixed(0)} px, scoops ${q.scoop.toFixed(0)} px${label === 'desk' ? `, ${Math.round(q.bench.t - q.peg)} px between the pegboard and the bench (round 5: the lesson strip and the kept pages fill it; the longest bare stretch is measured below)` : ''}`);
     }],
     ['a card taken up by keys: its number stays off the plate caption', async () => {
       if (label !== 'desk') return;
@@ -654,7 +654,7 @@ async function run(label, viewport, touch) {
         return { won: window.deck.state().end?.won, wins: window.deck.table.meta.wins, text: e?.textContent ?? '', seal: !!document.querySelector('.sb-seal'), btn: r ? [r.top, r.bottom] : null, H: innerHeight, kind: window.deck.table.sheets.kind };
       });
       if (!q.won || q.kind !== 'entry') extra.push(`no win page: won ${q.won}, sheet ${q.kind}`);
-      if (!/The run is won/.test(q.text) || !/Runs won: \d/.test(q.text) || !q.seal) extra.push(`the win page does not say so: "${q.text.slice(0, 120)}"`);
+      if (!/The run is won/.test(q.text) || !/Runs won\s*\d+ of \d+ runs?/.test(q.text) || !q.seal) extra.push(`the win page does not say so: "${q.text.slice(0, 120)}"`);
       if (!q.btn || q.btn[1] > q.H || q.btn[0] < 0) extra.push('"Turn to a fresh page" is off the screen on the win page');
       console.log(`       ${label} win page: won ${q.won}, runs won ${q.wins}, seal ${q.seal}`);
     }],
@@ -667,6 +667,291 @@ async function run(label, viewport, touch) {
       });
       if (label === 'desk' && q.goods < 115) extra.push(`desktop goods are ${q.goods.toFixed(0)} px wide`);
       console.log(`       ${label} stall: goods ${q.goods.toFixed(0)} px and up, the stall ${Math.round((q.stall / q.W) * 100)}% of the screen's width`);
+    }],
+    // Round 5: the season's twist at the stall and on the table, frost, fresh packets that differ, the won run's own
+    // page, a hand that stays still, the aim note for the first few aims, the desktop hand and side panel, the stall's
+    // scroll shade, and the year's first stall with new stock and the twists on a phone.
+    ['round 5: the stall offers two twists, and the way on asks for one', async () => {
+      await toStall(97, 900, (s) => {
+        s.season = 3;
+      });
+      const q = await p.evaluate(() => ({ cards: [...document.querySelectorAll('.sb-twistcard')].map((e) => e.textContent.trim()), twists: window.deck.state().shop.twists }));
+      if (q.cards.length !== 2 || q.twists?.length !== 2) extra.push(`the stall before year 2 shows ${q.cards.length} twists (${JSON.stringify(q.twists)})`);
+      await tapAt('.sb-signpost');
+      const held = await p.evaluate(() => ({ phase: window.deck.state().phase, slip: document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '' }));
+      if (held.phase !== 'shop' || !/Pick one of the two for spring/.test(held.slip)) extra.push(`the way on with no twist picked: phase ${held.phase}, slip "${held.slip}"`);
+      console.log(`       ${label} twists offered: ${q.cards.join(' | ')}; the way on with none picked says "${held.slip}"`);
+    }],
+    ['round 5: a twist picked by a tap', async () => {
+      await tapAt('.sb-twistcard', 1);
+      const q = await p.evaluate(() => ({ picked: window.deck.state().shop.twist, aria: [...document.querySelectorAll('.sb-twistcard')].map((e) => e.getAttribute('aria-checked')) }));
+      if (q.picked !== 1 || q.aria.join() !== 'false,true') extra.push(`a tap did not pick the second twist: ${JSON.stringify(q)}`);
+    }],
+    ['round 5: the twist line on the table', async () => {
+      const want = await p.evaluate(() => window.deck.state().shop.twists[1]);
+      const wantText = await p.evaluate(() => document.querySelectorAll('.sb-twistcard')[1]?.textContent.trim());
+      await tapAt('.sb-signpost');
+      await settle(500);
+      const q = await p.evaluate(() => ({ phase: window.deck.state().phase, twist: window.deck.state().twist, line: window.deck.twist() }));
+      if (q.phase !== 'day' || JSON.stringify(q.twist) !== JSON.stringify(want)) extra.push(`the season did not take the twist picked: ${JSON.stringify(q.twist)} for ${JSON.stringify(want)}`);
+      if (!q.line || q.line !== wantText) extra.push(`the table's twist line "${q.line}" is not the twist picked, "${wantText}"`);
+      console.log(`       ${label} the table says "${q.line}"`);
+    }],
+    ['round 5: frost on the bottom row', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        t.run.twist = { id: 'frost' };
+        t.syncAll();
+        const seed = t.run.hand.find((c) => ['radish', 'carrot', 'lettuce', 'beans', 'strawberry', 'sunflower'].includes(c.id));
+        t.pickUp(seed.uid);
+        const valid = [...t.board.hl.valid];
+        const rows = t.run.rows;
+        return { valid, bottom: Array.from({ length: t.run.cols }, (_, c) => (rows - 1) * t.run.cols + c), uid: seed.uid };
+      });
+      if (q.valid.some((i) => q.bottom.includes(i)) || !q.valid.length) extra.push(`a held seed may go on the frosted row: ${q.valid.join(',')}`);
+      // A real tap on a frosted plot plants nothing.
+      const pt = await p.evaluate((i) => { const r = window.deck.rects().plots[i]; return [r.left + r.width / 2, r.top + r.height / 2]; }, q.bottom[1]);
+      for (let k = 0; k < 2; k++) {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pt[0], y: pt[1], id: 5 }] });
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(pt[0], pt[1]);
+        await settle(200);
+      }
+      const after = await p.evaluate((i) => ({ crop: window.deck.state().plots[i].crop, note: document.querySelector('.sb-note.on')?.textContent ?? '' }), q.bottom[1]);
+      if (after.crop) extra.push('a seed was sown on the frosted row');
+      console.log(`       ${label} frost: the held seed may go on ${q.valid.length} plots, none on the bottom row; a tap there says "${after.note}"`);
+      await p.evaluate(() => window.deck.table.putDown(true));
+    }],
+    ['round 5: a radish and a strawberry sown today look different', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const t = window.deck.table;
+        const crop = (uid, kind, days) => ({ uid, kind, age: 0, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        for (const pl of t.run.plots) pl.crop = null;
+        t.run.plots[5].crop = crop(9101, 'radish', 1);
+        t.run.plots[6].crop = crop(9102, 'strawberry', 3);
+        t.run.plots[9].crop = crop(9103, 'radish', 1);
+        t.syncAll();
+        await new Promise((r) => setTimeout(r, 400));
+        const c = t.board.canvas;
+        const g = c.getContext('2d');
+        const k = c.width / c.getBoundingClientRect().width;
+        // The packet stands upper right of the mound: read that corner of each plot.
+        const patch = (i) => {
+          const r = t.board.plotRect(i);
+          const d = g.getImageData(Math.round((r.x + r.w * 0.5) * k), Math.round((r.y + r.h * 0.05) * k), Math.round(r.w * 0.45 * k), Math.round(r.h * 0.45 * k)).data;
+          return d;
+        };
+        const diff = (a, b) => {
+          let s = 0;
+          for (let j = 0; j < a.length; j += 4) s += Math.abs(a[j] - b[j]) + Math.abs(a[j + 1] - b[j + 1]) + Math.abs(a[j + 2] - b[j + 2]);
+          return s / (a.length / 4) / 3;
+        };
+        const r1 = patch(5);
+        return { radishStrawberry: diff(r1, patch(6)), radishRadish: diff(r1, patch(9)) };
+      });
+      // Two radishes differ only by the soil under them; a radish and a strawberry must differ clearly more.
+      if (q.radishStrawberry < q.radishRadish + 6) extra.push(`fresh radish and strawberry packets look alike: ${q.radishStrawberry.toFixed(1)} against ${q.radishRadish.toFixed(1)} for two radishes`);
+      console.log(`       ${label} fresh packets: radish against strawberry differ by ${q.radishStrawberry.toFixed(1)} a channel, radish against radish ${q.radishRadish.toFixed(1)}`);
+    }],
+    ['round 5: the won run has its own page', async () => {
+      await fresh(4243);
+      await p.evaluate(async () => {
+        const d = window.deck;
+        const w = (ms) => new Promise((r) => setTimeout(r, ms));
+        const t = d.table;
+        const s = t.run;
+        s.year = 3;
+        s.season = 3;
+        s.quota = 40;
+        s.earned = 0;
+        s.pages = ['cellar', 'bees', 'market', 'thumb'];
+        s.stats.log = Array.from({ length: 11 }, (_, k) => ({ year: Math.floor(k / 4) + 1, season: k % 4, earned: 300 + k * 140, quota: 280 + k * 110, cleared: true, carried: k ? 30 : 0, twist: k >= 4 ? { id: 'buyer', crop: 'carrot' } : null }));
+        s.stats.seasonsCleared = 11;
+        s.stats.byKind = { carrot: 7000, radish: 3000, chili: 2000 };
+        s.stats.bestHarvest = 380;
+        s.stats.bestKind = 'carrot';
+        s.plots[0].crop = { uid: 9201, kind: 'pumpkin', age: 5, days: 5, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        t.syncAll();
+        d.endDay();
+        await w(60);
+        d.skip();
+        await w(200);
+      });
+      await settle(500);
+      const q = await p.evaluate(() => {
+        const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const b = [...document.querySelectorAll('.sb-entry button')].find((x) => /fresh page/.test(x.textContent))?.getBoundingClientRect();
+        return {
+          won: window.deck.state().end?.won,
+          metDay: window.deck.state().end?.metDay,
+          day: window.deck.state().day,
+          title: document.querySelector('.sb-win-title h2')?.textContent ?? '',
+          seal: r('.sb-win-top .sb-seal'),
+          sum: r('.sb-win-sum'),
+          best: !!document.querySelector('.sb-win-best img'),
+          crops: document.querySelectorAll('.sb-win-crop').length,
+          record: document.querySelector('.sb-win-record')?.textContent ?? '',
+          ledger: !!document.querySelector('.sb-win-record ~ .sb-entries') || !!document.querySelector('.sb-win-head'),
+          btn: b ? [b.top, b.bottom] : null,
+          H: innerHeight,
+        };
+      });
+      if (!q.won || q.title !== 'The run is won' || !q.seal) extra.push(`no won page: won ${q.won}, title "${q.title}"`);
+      // The summary sits at the top, above the fold, not below the season ledger.
+      if (!q.sum || q.sum.bottom > q.H * 0.5) extra.push(`the summary is not at the top (${q.sum ? Math.round(q.sum.bottom) : 'none'} of ${q.H})`);
+      if (!q.best || q.crops < 1 || !/\d+ of \d+ runs?/.test(q.record) || !q.ledger) extra.push(`the won page lacks a part: best ${q.best}, crops ${q.crops}, record "${q.record}", ledger ${q.ledger}`);
+      if (q.metDay !== 1 || q.day !== 1) extra.push(`the last winter did not end on the night it was met (met day ${q.metDay}, day ${q.day})`);
+      if (!q.btn || q.btn[1] > q.H || q.btn[0] < 0) extra.push('"Turn to a fresh page" is off the screen on the won page');
+      console.log(`       ${label} won page: summary ends at ${Math.round(q.sum?.bottom ?? 0)} of ${q.H}, ${q.crops} crops in the build, record "${q.record.replace(/\s+/g, ' ').slice(0, 60)}"`);
+    }],
+    ['round 5: the hand stays still after a play', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+      const before = await p.evaluate(() => {
+        const t = window.deck.table;
+        const out = {};
+        for (const c of t.run.hand) {
+          const r = t.handEls.get(c.uid).el.getBoundingClientRect();
+          out[c.uid] = [r.left, r.top];
+        }
+        const i = t.run.hand.findIndex((c) => c.id === 'radish');
+        return { out, i, uid: t.run.hand[i]?.uid };
+      });
+      const cp = await p.evaluate((uid) => { const r = window.deck.table.handEls.get(uid).el.getBoundingClientRect(); return [r.left + r.width * 0.3, r.top + r.height * 0.35]; }, before.uid);
+      const pp = await p.evaluate(() => { const r = window.deck.rects().plots[5]; return [r.left + r.width / 2, r.top + r.height / 2]; });
+      const tap = async ([x, y]) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 6 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(200);
+      };
+      await tap(cp);
+      await tap(pp);
+      if (touch) await tap(pp);
+      await settle(600);
+      const after = await p.evaluate(() => {
+        const t = window.deck.table;
+        const out = {};
+        for (const c of t.run.hand) {
+          const r = t.handEls.get(c.uid).el.getBoundingClientRect();
+          out[c.uid] = [r.left, r.top];
+        }
+        return { out, planted: !!t.run.plots[5].crop };
+      });
+      const moved = Object.entries(after.out).map(([uid, [x, y]]) => Math.hypot(x - before.out[uid][0], y - before.out[uid][1]));
+      if (!after.planted) extra.push('the radish was not planted by taps');
+      if (Math.max(0, ...moved) > 1) extra.push(`cards left in the hand moved after a play by up to ${Math.max(...moved).toFixed(0)} px`);
+      console.log(`       ${label} after a play the other ${moved.length} cards moved at most ${Math.max(0, ...moved).toFixed(1)} px`);
+    }],
+    ['round 5: the aim note shows for the first few aims, off the plot, and goes on planting', async () => {
+      if (!touch) return;
+      await fresh(4242);
+      const seen = [];
+      for (let k = 0; k < 4; k++) {
+        const q = await p.evaluate((k) => {
+          const t = window.deck.table;
+          if (k === 0) t.tutor.learn.n.aimNote = 0;
+          t.run.energy = 9;
+          const seed = t.run.hand.find((c) => c.id === 'radish') ?? t.run.hand.find((c) => ['carrot', 'lettuce'].includes(c.id));
+          if (!seed) t.run.hand.push({ uid: 9300 + k, id: 'radish', up: false });
+          t.syncAll();
+          const s2 = t.run.hand.find((c) => c.id === 'radish' || ['carrot', 'lettuce'].includes(c.id));
+          const r = t.handEls.get(s2.uid).el.getBoundingClientRect();
+          const plot = t.run.plots.findIndex((pl, i) => !pl.crop && !pl.obj && i < 4);
+          const pr = window.deck.rects().plots[plot];
+          return { card: [r.left + r.width * 0.3, r.top + r.height * 0.35], plot: [pr.left + pr.width / 2, pr.top + pr.height / 2], rect: [pr.left, pr.top, pr.right, pr.bottom], i: plot };
+        }, k);
+        const tap = async ([x, y]) => {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 7 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          await settle(220);
+        };
+        await tap(q.card);
+        await tap(q.plot);
+        const aimed = await p.evaluate(() => {
+          const n = document.querySelector('.sb-note');
+          const on = n.classList.contains('on') && /again/.test(n.textContent);
+          const r = n.getBoundingClientRect();
+          return { on, box: [r.left, r.top, r.right, r.bottom] };
+        });
+        await tap(q.plot);
+        const gone = await p.evaluate(() => !document.querySelector('.sb-note').classList.contains('on') || !/again/.test(document.querySelector('.sb-note').textContent));
+        const over = aimed.on && !(aimed.box[2] <= q.rect[0] || aimed.box[0] >= q.rect[2] || aimed.box[3] <= q.rect[1] || aimed.box[1] >= q.rect[3]);
+        seen.push({ k, on: aimed.on, over, gone });
+      }
+      if (!seen[0].on || !seen[2].on || seen[3].on) extra.push(`the aim note should show for the first three aims only: ${JSON.stringify(seen.map((x) => x.on))}`);
+      if (seen.some((x) => x.over)) extra.push('the aim note covers the aimed plot');
+      if (seen.some((x) => !x.gone)) extra.push('the aim note stays up after planting');
+      console.log(`       ${label} aim note on aims 1 to 4: ${seen.map((x) => (x.on ? 'shown' : 'none')).join(', ')}; over the plot ${seen.filter((x) => x.over).length}; still up after planting ${seen.filter((x) => !x.gone).length}`);
+    }],
+    ['round 5: the desktop hand clears the screen foot; the side panel has no long bare stretch', async () => {
+      if (touch) return;
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const cards = [...document.querySelectorAll('.sb-hand .sb-card:not(.flying)')].map((e) => e.getBoundingClientRect().bottom);
+        const panel = document.querySelector('.sb-bench').getBoundingClientRect();
+        const vis = (e) => { const s = getComputedStyle(e); return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) > 0.05 && !e.closest('.sb-off'); };
+        const parts = ['.sb-ledger', '.sb-peg', '.sb-hint.on', '.sb-twist.on', '.sb-pages h4', '.sb-pages .sb-pagesheet', '.sb-pageslot', '.sb-scoops img', '.sb-tin img', '.sb-lantern img']
+          .flatMap((sel) => [...document.querySelectorAll(sel)].filter(vis).map((e) => e.getBoundingClientRect()))
+          .filter((r) => r.left >= panel.left - 4 && r.width > 2)
+          .sort((a, b) => a.top - b.top);
+        let gap = 0;
+        let bottom = parts[0]?.bottom ?? 0;
+        for (const r of parts.slice(1)) {
+          gap = Math.max(gap, r.top - bottom);
+          bottom = Math.max(bottom, r.bottom);
+        }
+        return { lowest: Math.max(...cards), H: innerHeight, gap: Math.round(gap) };
+      });
+      if (q.lowest > q.H - 8) extra.push(`the hand reaches ${Math.round(q.lowest)} of ${q.H}: it runs off the foot`);
+      if (q.gap > 150) extra.push(`the side panel has ${q.gap} px of bare table in one stretch`);
+      console.log(`       ${label} the hand's lowest point ${Math.round(q.lowest)} of ${q.H}; the side panel's longest bare stretch ${q.gap} px (the round 4 build: about 320 between the pegboard and the scoops)`);
+    }],
+    ['round 5: the year\'s first stall: new stock, the twists and a full almanac on one screen', async () => {
+      await toStall(98, 4000, (s) => {
+        s.year = 2;
+        s.season = 0;
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
+        s.stock = [{ card: 'corn', up: true }, { card: 'chili', up: true }];
+        s.select = ['corn', 'chili'];
+      });
+      const q = await p.evaluate(() => ({
+        stock: document.querySelector('.sb-stock')?.textContent ?? '',
+        improved: [...document.querySelectorAll('.sb-good img')].filter((e) => /improved/.test(e.alt)).length,
+        twists: document.querySelectorAll('.sb-twistcard').length,
+        thing: [...document.querySelectorAll('.sb-thing')].map((e) => e.textContent),
+        scroll: (() => { const b = document.querySelector('.sb-stall-body'); return b.scrollHeight - b.clientHeight; })(),
+      }));
+      if (!/New stock this year: improved corn and chili/.test(q.stock) || q.improved !== 2) extra.push(`new stock: "${q.stock}", ${q.improved} improved goods on the tray`);
+      if (q.twists !== 2) extra.push(`${q.twists} twists at the year's first stall`);
+      console.log(`       ${label} year's first stall: "${q.stock}", ${q.improved} improved goods, ${q.twists} twists, services ${q.thing.join(' / ')}, the body scrolls ${q.scroll} px`);
+    }],
+    ['round 5: a stall body that has to scroll says so', async () => {
+      const q = await p.evaluate(async () => {
+        const body = document.querySelector('.sb-stall-body');
+        const st = document.querySelector('.sb-stall');
+        st.style.height = '420px';
+        body.dispatchEvent(new Event('scroll'));
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const can = body.scrollHeight > body.clientHeight + 2;
+        const more = body.classList.contains('more');
+        body.scrollTop = body.scrollHeight;
+        body.dispatchEvent(new Event('scroll'));
+        await new Promise((r) => setTimeout(r, 50));
+        const end = body.classList.contains('more');
+        st.style.height = '';
+        body.scrollTop = 0;
+        body.dispatchEvent(new Event('scroll'));
+        return { can, more, end };
+      });
+      if (!q.can || !q.more || q.end) extra.push(`the scroll shade: can scroll ${q.can}, shaded ${q.more}, shaded at the end ${q.end}`);
+      await p.evaluate(() => window.deck.table.sheets.stall());
     }],
     ['stall', async () => {
       await toStall(91, 400);

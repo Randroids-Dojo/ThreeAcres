@@ -190,6 +190,7 @@
 .sb-pages h4 { width: 100%; margin: 0 0 2px; font-size: 13px; font-style: italic; font-weight: 600; color: #f0dfb8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-pages .sb-pagesheet { width: calc(50% - 6px); font-size: 11px; padding: 14px 8px 8px; }
 .sb-pages .sb-pagesheet b { margin: 0 -8px; padding: 0 8px 2px; }
+.sb-pageslot { width: calc(50% - 6px); box-sizing: border-box; min-height: 72px; display: grid; place-items: center; border: 1.5px dashed rgba(240, 223, 184, 0.35); color: rgba(240, 223, 184, 0.6); font-size: 12px; font-style: italic; }
 
 /* ---------------------------------------------------------------- hand */
 .sb-hand { pointer-events: none; }
@@ -290,6 +291,16 @@
   background: #c9952e; box-shadow: inset -2px -2px 0 #7a5418, 0 2px 2px rgba(0, 0, 0, 0.4);
 }
 .sb-hint.on { opacity: 1; visibility: visible; transition: opacity 0.25s ease; }
+/* The season's twist, quietly in the lesson strip while no lesson is up: its picture and one line, like a clipping. */
+.sb-twist {
+  position: absolute; z-index: 6; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 4px 10px; font-size: 13.5px; font-style: italic; font-weight: 560; line-height: 1.2; color: var(--ink);
+  background: #eef2f4; border-left: 3px solid #3a6a9a; transform: rotate(0.4deg);
+  box-shadow: 0 1px 0 rgba(42, 30, 18, 0.3); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+}
+.sb-twist img { height: 24px; width: auto; flex: 0 0 auto; }
+.sb-twist.on { opacity: 1; visibility: visible; transition: opacity 0.25s ease; }
+.sb[data-layout='wide'] .sb-twist { font-size: 15px; }
 
 /* ---------------------------------------------------------------- sheets */
 /* Sheets and the close-up sit just under the shell's corner button (z 20), so it always takes a tap. */
@@ -426,7 +437,7 @@
 }
 .sb-sign { padding: 4px 16px 6px; }
 .sb-sign span { color: #f6e8c4; font-size: 21px; font-style: italic; font-weight: 720; letter-spacing: 0.02em; }
-.sb-closed { margin: 4px 0 0; max-width: 520px; color: #f6e8c4; font-size: 15px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.sb-closed { margin: 4px 0 0; max-width: 520px; color: #f6e8c4; font-size: 14.5px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-purse-line { margin: 0; color: #e8d8b0; font-size: 14px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-purse-line b { font-size: 18px; color: #fff3cc; }
 .sb-cork {
@@ -455,6 +466,8 @@
 .sb-pagesheet b { font-size: 15px; font-style: italic; margin: 0 -12px; padding: 0 12px 3px; border-bottom: 1px solid rgba(42, 30, 18, 0.5); }
 .sb-pinimg { position: absolute; left: 50%; top: -6px; width: 16px; height: 16px; margin-left: -8px; }
 .sb-pencil { font-style: italic; color: #4a4a52; font-size: 14px; justify-self: end; transform: rotate(-3deg); }
+/* A page for sale has its price pencilled on its title line, right, so the sheet is a line shorter. */
+.sb-pagesheet b .sb-pencil { float: right; font-weight: 500; margin-left: 6px; transform: rotate(-3deg) translateY(1px); }
 .sb-pagesheet.sold { opacity: 0.5; }
 .sb-pagebtn.lifted .sb-pagesheet { transform: rotate(0deg) translateY(-6px) scale(1.03); box-shadow: 0 14px 14px -6px rgba(0, 0, 0, 0.6); }
 .sb-ask {
@@ -504,15 +517,57 @@
   background: #fbf4dc; transform: rotate(-0.8deg); box-shadow: 0 1px 0 rgba(42, 30, 18, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 }
 .sb-stall-lesson:empty { display: none; }
+/* The season ahead: two twists as clippings, pick one. The one picked is pinned; the other fades a little. */
+.sb-twists { flex: 0 0 auto; display: flex; justify-content: center; gap: 10px; padding-top: 4px; }
+.sb .sb-twistcard {
+  position: relative; flex: 1 1 0; max-width: 300px; border: 0; padding: 5px 8px 6px; display: grid; justify-items: center; align-content: start; gap: 2px;
+  background: #eef2f4; color: var(--ink); text-align: center;
+  border-left: 3px solid #3a6a9a; box-shadow: 0 4px 6px -3px rgba(0, 0, 0, 0.55); transform: rotate(-0.6deg); transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.sb .sb-twistcard span { font-size: 13px; font-style: italic; font-weight: 580; line-height: 1.22; }
+.sb .sb-twistcard:nth-child(2) { transform: rotate(0.7deg); }
+.sb-twistcard img:first-child { height: 26px; width: auto; }
+.sb-twistcard .sb-pinimg { top: -7px; }
+.sb .sb-twistcard.picked { background: #fbf4dc; border-left-color: #b8352a; transform: translateY(-2px) rotate(0deg); box-shadow: 0 0 0 2px #b8352a, 0 8px 10px -4px rgba(0, 0, 0, 0.6); }
+.sb .sb-twistcard.other { opacity: 0.62; }
+.sb-twists.ask .sb-twistcard { animation: sb-cue 1.2s ease-in-out 2; }
+.sb[data-layout='wide'] .sb-twistcard { max-width: 380px; }
+.sb[data-layout='wide'] .sb-twistcard span { font-size: 15.5px; }
+.sb[data-layout='wide'] .sb-twistcard img:first-child { height: 32px; }
+/* A stall body with more below it says so, with a soft shade at its foot. */
+.sb-stall-body.more { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.35)); mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.35)); }
 /* A phone holds all four goods in one row. */
-.sb[data-layout='phone'] .sb-good.s { width: 74px; height: 104px; }
-.sb[data-layout='phone'] .sb-good.m { width: 78px; height: 109px; }
-.sb[data-layout='phone'] .sb-good.l { width: 84px; height: 118px; }
+.sb[data-layout='phone'] .sb-good.s { width: 71px; height: 99px; }
+.sb[data-layout='phone'] .sb-good.m { width: 75px; height: 105px; }
+.sb[data-layout='phone'] .sb-good.l { width: 80px; height: 112px; }
 .sb[data-layout='phone'] .sb-goods { gap: 8px; }
 .sb[data-layout='phone'] .sb-pricetag { font-size: 14px; padding: 2px 6px 2px 10px; }
 .sb[data-layout='phone'] .sb-tray { padding-top: 26px; border-width: 6px 6px 0; }
 .sb[data-layout='phone'] .sb-lip { margin: 0 -14px; }
 .sb[data-layout='phone'] .sb-pagebtn { width: min(47%, 230px); }
+/* Round 5: the phone stall holds the season's two twists too, so its pieces are a little tighter: the services
+   lip (it was 92 px tall), the kept pages on one line, a page's price on its title line. */
+.sb[data-layout='phone'] .sb-stall { gap: 6px; }
+.sb[data-layout='phone'] .sb-lip { padding: 4px 6px 5px; }
+.sb[data-layout='phone'] .sb-thing img { width: 32px; height: 32px; }
+.sb[data-layout='phone'] .sb-thing span { font-size: 13px; line-height: 1.15; }
+.sb[data-layout='phone'] .sb-thing em { font-size: 12px; line-height: 1.15; }
+.sb[data-layout='phone'] .sb-kept { gap: 3px 4px; margin-top: 6px; }
+.sb[data-layout='phone'] .sb-keptpage { font-size: 11.5px; padding: 1px 4px; }
+.sb[data-layout='phone'] .sb-sign span { font-size: 19px; }
+.sb[data-layout='phone'] .sb-slot { margin-top: 4px; }
+.sb[data-layout='phone'] .sb-stall { gap: 5px; }
+.sb[data-layout='phone'] .sb-stall-head .sb-purse-line { margin: 0 -48px; }
+.sb[data-layout='phone'] .sb-twistcard { padding: 4px 7px 5px; }
+.sb[data-layout='phone'] .sb-twistcard img:first-child { height: 21px; }
+.sb[data-layout='phone'] .sb-twistcard span { font-size: 12px; line-height: 1.2; }
+.sb[data-layout='phone'] .sb-cork { padding: 6px 8px 6px; border-width: 4px; }
+.sb[data-layout='phone'] .sb-cork h3 { margin-bottom: 4px; }
+.sb[data-layout='phone'] .sb-kept { margin-top: 4px; }
+.sb[data-layout='phone'] .sb-pins .sb-pagesheet { padding: 10px 9px 6px; font-size: 12px; }
+.sb[data-layout='phone'] .sb-thing img { width: 28px; height: 28px; }
+.sb[data-layout='phone'] .sb-lip { padding: 3px 6px 4px; }
+.sb[data-layout='phone'] .sb-tray { padding-top: 24px; }
 
 /* The desktop stall reads from arm's length: wider, its goods and words larger (goods were about 90 px wide and
    the rule pictures on them about 10 px, with over half the screen bare). --sbk is set by the table from the
@@ -574,6 +629,29 @@
 }
 .sb-seal span { color: #fbe6c8; font-size: 15px; font-style: italic; font-weight: 720; letter-spacing: 0.04em; }
 .sb-stock { font-style: italic; }
+/* A won run's own page: the seal and the summary first, the best harvest, the build that won, the record of wins. */
+.sb-entry.won { width: min(480px, 100%); }
+.sb-entry.won .sb-entry-body { background-image: none; }
+.sb-win-top { display: flex; align-items: center; gap: 14px; }
+.sb-win-top .sb-seal { width: 66px; height: 66px; margin: 0; }
+.sb-win-title h2 { margin: 0; }
+.sb-win-title .sb-sub { line-height: 1.35 !important; }
+.sb-win-sum { display: flex; justify-content: space-between; gap: 8px; margin: 12px 0 10px; padding: 8px 0; border-top: 1px solid rgba(42, 30, 18, 0.35); border-bottom: 1px solid rgba(42, 30, 18, 0.35); }
+.sb-win-stat { display: grid; justify-items: center; flex: 1 1 0; }
+.sb-win-stat b { font-size: 22px; line-height: 1.1; }
+.sb-win-stat span { font-size: 12.5px; font-style: italic; color: var(--ink-soft); }
+.sb-win-best { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+.sb-win-best img { width: 58px; height: 81px; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
+.sb-win-best p { margin: 0; font-size: 15px; line-height: 1.35 !important; }
+.sb-win-best b { display: block; font-size: 13px; font-style: italic; color: var(--ink-soft); }
+.sb-entry.won h3 { margin: 10px 0 4px; font-size: 16px; font-style: italic; border-bottom: 1px solid rgba(42, 30, 18, 0.3); }
+.sb-win-crops { display: flex; gap: 10px; }
+.sb-win-crop { display: grid; justify-items: center; gap: 2px; }
+.sb-win-crop img { width: 52px; height: 73px; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4)); }
+.sb-win-crop span { font-size: 13px; font-weight: 600; }
+.sb-entry.won .sb-win-pages, .sb-entry.won .sb-win-record p { font-size: 14px; line-height: 1.4; margin: 4px 0 0; }
+.sb-win-log { margin: 4px 0 0; padding-left: 0; list-style: none; font-size: 13.5px; line-height: 1.45; color: var(--ink-soft); }
+.sb-entry.won .sb-entries li { font-size: 13.5px; line-height: 1.45; }
 .sb-new img { width: 74px; height: 104px; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
 
 @media (prefers-reduced-motion: reduce) {

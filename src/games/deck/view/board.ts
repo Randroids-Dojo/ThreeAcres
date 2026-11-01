@@ -10,10 +10,11 @@ import { PALETTES, type Palette } from '../../../render2d/palette';
 import { makePaper } from '../../../render2d/paper';
 import { paintScarecrow } from '../../../render2d/props';
 import { hash3, Rng } from '../../../render2d/rng';
-import { stageOf, type Crop, type Mark, type Plot, type Season, type SeedId } from '../rules';
-import { paintSeedCrop } from './crops';
+import { stageOf, type Crop, type Mark, type Plot, type Season, type SeedId, type Twist } from '../rules';
+import { CROP_SCALE } from '../../../render2d/crops';
+import { CROP_COLOR, paintSeedCrop, paintSeedProduce } from './crops';
 import { paintHiveOnPlot, paintPests } from './glyphs';
-import { basket, bloom, BLOOM, bug, moon, num, numWidth } from './icons';
+import { basket, bloom, BLOOM, bug, coin, moon, num, numWidth } from './icons';
 
 export type PreviewMark = Mark;
 
@@ -135,6 +136,10 @@ export class Board {
   preview: Preview | null = null;
   /** A crow sits on the bed's corner: one comes tonight. */
   crow = false;
+  /** This season's twist: frost paints the bottom row; a buyer or a glut stamps a coin by each crop of its kind. */
+  twist: Twist | null = null;
+  /** Coin stamps painted this frame, for checks. */
+  coins: { x: number; y: number; w: number; h: number }[] = [];
   /** Checks only: paint the printed frame's rules in this colour, to find them in the pixels. */
   ruleInk: string | null = null;
   frames = 0;
@@ -410,7 +415,41 @@ export class Board {
       g.save();
       paintSeedCrop(g, kind, stage, this.pal, px, 1000 + variant * 37 + stage);
       g.restore();
+      if (stage === 0) this.paintPacket(g, kind, px);
     });
+  }
+
+  /**
+   * A just-sown seed's packet, larger, with the crop painted on it, so a radish sown today and a strawberry sown today
+   * no longer look the same (the fifth playtest: "the same red packet on a stake"). It covers the shared packet the
+   * almanac renderer paints at (0.17, -0.42).
+   */
+  private paintPacket(g: Ctx, kind: SeedId, px: number): void {
+    const pal = this.pal;
+    // The renderer scales each crop (mint, garlic, wheat and chili borrow the radish's mound): match it, to cover its packet.
+    const sc = CROP_SCALE[kind as keyof typeof CROP_SCALE] ?? CROP_SCALE.radish;
+    g.save();
+    g.scale(sc, sc);
+    px /= sc;
+    g.translate(0.17, -0.43);
+    g.rotate(0.06);
+    const w = 0.25;
+    const h = 0.28;
+    g.beginPath();
+    g.rect(-w / 2, -h / 2, w, h);
+    fill(g, '#f6eedb');
+    ink(g, pal.ink, Math.max(px * 1.3, 0.012), 0.9);
+    g.beginPath();
+    g.rect(-w / 2, -h / 2, w, h * 0.24);
+    fill(g, CROP_COLOR[kind]);
+    ink(g, pal.ink, Math.max(px, 0.008), 0.7);
+    // The crop itself, as on the card's packet.
+    g.save();
+    g.translate(0, h * 0.12);
+    g.scale(0.5, 0.5);
+    paintSeedProduce(g, kind, pal, px / 0.5);
+    g.restore();
+    g.restore();
   }
 
   /** Paint sprites a crop will need soon (its next stages), a few per frame, so growth never stalls a frame. */
@@ -453,6 +492,8 @@ export class Board {
 
     this.drawHighlights(plots);
 
+    // Frost on the bottom row (a twist): an icy wash and rime on its bare plots; nothing can be sown there.
+    if (this.twist?.id === 'frost') this.drawFrost(plots);
     // The soil's washes first: a passing splash, and the sickly wash of pests.
     for (let i = 0; i < plots.length; i++) {
       const c = this.centre(i);
@@ -512,11 +553,14 @@ export class Board {
     const day = this.night < 0.05;
     const comes = day && this.preview ? this.preview.tonight : [];
     const market = day ? (this.preview ? this.preview.market : this.market) : [];
+    this.coins = [];
     for (let i = 0; i < plots.length; i++) {
       const c = plots[i].crop;
       if (!c) continue;
       const ctr = this.centre(i);
       if ((this.tonight[i] || comes.includes(i)) && day) this.moon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085, comes.includes(i) && !this.tonight[i]);
+      const tw = this.twist;
+      if (day && tw && (tw.id === 'buyer' || tw.id === 'glut') && tw.crop === c.kind) this.coinStamp(i, tw.id === 'glut', c.pest > 0);
       if (market.includes(i)) this.marketStamp(ctr.x + T * 0.36 - T * 0.12, ctr.y + T * 0.36);
       if (c.pest) {
         const a = this.anims.get(c.uid);
@@ -637,6 +681,48 @@ export class Board {
     ctx.lineTo(s * 0.08, 0);
     ctx.stroke();
     ctx.restore();
+  }
+
+  /** The bottom row under frost: a pale icy wash and a few rime stars, so it reads as no place to sow. */
+  private drawFrost(plots: readonly Plot[]): void {
+    const { ctx, T } = this;
+    const r = this.rows - 1;
+    for (let c = 0; c < this.cols; c++) {
+      const i = r * this.cols + c;
+      const x = this.bx + c * T;
+      const y = this.by + r * T;
+      ctx.fillStyle = plots[i]?.crop || plots[i]?.obj ? 'rgba(214, 232, 246, 0.32)' : 'rgba(222, 238, 250, 0.62)';
+      ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(70, 120, 170, 0.75)';
+      ctx.lineWidth = Math.max(1, T * 0.012);
+      for (const [fx, fy, fr] of [[0.25, 0.3, 0.07], [0.7, 0.22, 0.05], [0.55, 0.7, 0.08], [0.18, 0.78, 0.05]] as const) {
+        const cx = x + fx * T;
+        const cy = y + fy * T;
+        const rr = fr * T;
+        ctx.beginPath();
+        for (let k = 0; k < 3; k++) {
+          const a = (k * Math.PI) / 3;
+          ctx.moveTo(cx - Math.cos(a) * rr, cy - Math.sin(a) * rr);
+          ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  /** A buyer's gold coin (or a glut's grey one) in a crop's top left, after its pest badge if it has one. */
+  private coinStamp(i: number, grey: boolean, pested: boolean): void {
+    const { ctx, T } = this;
+    const c = this.centre(i);
+    const size = Math.max(11, Math.round(T * 0.15));
+    const d = size + 4;
+    const x = c.x - T / 2 + 3 + (pested ? size * 2.6 + 8 : 0);
+    const y = c.y - T / 2 + 3;
+    coin(ctx, x + d / 2, y + d / 2, d, grey);
+    num(ctx, grey ? '½' : '2', x + d / 2 - numWidth(ctx, grey ? '½' : '2', size * 0.7) / 2, y + d / 2, size * 0.7, grey ? '#3a3630' : '#5a3a0a');
+    this.coins.push({ x, y, w: d, h: d });
   }
 
   /** Pests on a crop: a badge in the plot's top left with a bug and the nights they stay. */

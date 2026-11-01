@@ -11,7 +11,9 @@ import {
   buyPage,
   buyScoop,
   buySlot,
+  bySeason,
   canBuyScoop,
+  chooseTwist,
   canBuySlot,
   maxPages,
   slotPrice,
@@ -42,6 +44,7 @@ import {
   type PageId,
   type RunState,
   type SeedId,
+  type Twist,
 } from './rules';
 
 export interface BotOpts {
@@ -234,6 +237,48 @@ function pageValue(s: RunState, id: PageId): number {
   return PAGE_VALUE[id];
 }
 
+/**
+ * What a twist is worth to the bot's deck, roughly: a buyer for crops it holds many of, good company, long picks for
+ * its perennials, sunflowers all round for its sunflowers; frost, a glut of its own crop and crows cost it. Its days
+ * then play to the twist on their own, since every play is scored by the rules.
+ */
+export function twistWorth(s: RunState, t: Twist): number {
+  const cards = allCards(s);
+  const n = (id: CardId) => cards.filter((c) => c.id === id).length;
+  const crop = (k?: SeedId) => (k ? n(k) * SEEDS[k].base * SEEDS[k].picks * 0.35 : 0);
+  switch (t.id) {
+    case 'buyer':
+      return 1 + crop(t.crop);
+    case 'glut':
+      return -1 - crop(t.crop);
+    case 'company':
+      return 4;
+    case 'calm':
+      return 1 + bySeason(TUNING.pestChance, s) * 8;
+    case 'picks':
+      return n('beans') * 1.5 + n('strawberry') * 2;
+    case 'sunall':
+      return n('sunflower') * 2.5;
+    case 'sunup':
+      return -n('sunflower');
+    case 'frost':
+      return -3;
+    case 'crows':
+      return s.plots.some((p) => p.obj === 'scarecrow') ? -0.5 : -2.5;
+  }
+}
+
+/** Pick the twist worth the most to the bot (the first on a tie). */
+export function botTwist(s: RunState): void {
+  const tw = s.shop?.twists;
+  if (!tw?.length) return;
+  let best = 0;
+  tw.forEach((t, i) => {
+    if (twistWorth(s, t) > twistWorth(s, tw[best])) best = i;
+  });
+  chooseTwist(s, best);
+}
+
 /** Spend in the shop by a simple preference list, then leave. */
 export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
   const sh = s.shop;
@@ -274,6 +319,7 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
     if (!did && s.coins > 60 && sh.rerolls < 2 && !saving && sh.cards.every((c) => c.sold || cardValue(s, c.card) < 4.5) && reroll(s)) did = true;
     if (!did) break;
   }
+  botTwist(s);
   leaveShop(s);
 }
 

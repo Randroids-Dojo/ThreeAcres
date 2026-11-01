@@ -16,7 +16,9 @@ import {
   endDay,
   energyMax,
   giveUp,
+  isFinal,
   marketTonight,
+  maxPages,
   moveTargets,
   newMeta,
   newRun,
@@ -31,6 +33,7 @@ import {
   targetsFor,
   toss,
   TUNING,
+  twistText,
   UNLOCK_ORDER,
   whyNot,
   type Card,
@@ -47,7 +50,7 @@ import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
 import { Board, type PreviewMark } from './view/board';
 import { costBoxes, faceBonus, faceBoxes, faceUrl } from './view/faces';
-import { iconUrl } from './view/icons';
+import { iconUrl, twistUrl } from './view/icons';
 import { Sheets } from './sheets';
 
 export interface Prefs {
@@ -99,6 +102,8 @@ const SHOWN = 0.87;
 const AIM_VERB: Partial<Record<CardId, string>> = { can: 'water', compost: 'lay it', fertiliser: 'feed it', shears: 'cut it', scarecrow: 'set it up', beehive: 'set it up' };
 /** Seeds whose name is a plural: "The beans are pulled before the sunflower ripens." */
 const PLURAL: readonly CardId[] = ['beans'];
+/** "Tap again to plant it." shows for this many aims, then the player knows. */
+const AIM_NOTES = 3;
 export function ladder(n: number): number {
   return PENTA[n % 5] * Math.pow(2, Math.floor(n / 5) * 0.5);
 }
@@ -126,6 +131,12 @@ function migrateRun(r: RunState): void {
   r.guided ??= false;
   r.stats.pests ??= 0;
   r.stats.crows ??= 0;
+  r.stats.byKind ??= {};
+  r.twist ??= null;
+  r.carry ??= 0;
+  r.carried ??= 0;
+  r.stock ??= [];
+  r.select ??= [];
   for (const p of r.plots as (Plot & { wet?: boolean; mulch?: number })[]) {
     delete p.wet;
     delete p.mulch;
@@ -168,6 +179,8 @@ export class Table {
   private handEl = el('div', 'sb-hand');
   private fx = el('div', 'sb-fx');
   private hint = el('div', 'sb-hint');
+  /** This season's twist, in the lesson strip whenever no lesson is up: its picture and its one line. */
+  private twistEl = el('div', 'sb-twist');
   private note = el('div', 'sb-note');
   private dark = el('div', 'sb-night');
   readonly sheets: Sheets;
@@ -252,7 +265,8 @@ export class Table {
     this.hint.setAttribute('role', 'status');
     this.hint.setAttribute('aria-live', 'polite');
     this.bench.append(this.scoops, this.tonightEl, this.tin, this.heap, this.lantern);
-    t.append(this.ledger, this.purse, this.book, this.peg, this.boardWrap, this.pages, this.bench, this.handEl, this.dark, this.fx, this.hint, this.note);
+    this.twistEl.setAttribute('role', 'note');
+    t.append(this.ledger, this.purse, this.book, this.peg, this.boardWrap, this.pages, this.bench, this.handEl, this.dark, this.fx, this.twistEl, this.hint, this.note);
     this.el.append(t, this.sheets.el);
     ctx.root.append(this.el);
 
@@ -359,6 +373,7 @@ export class Table {
 
   /** Put the display back in step with the rules. */
   syncAll(): void {
+    this.resetSlots();
     this.shown = clonePlots(this.run.plots);
     this.shownEarned = this.run.earned;
     this.shownCoins = this.run.coins;
@@ -438,8 +453,9 @@ export class Table {
     for (const p of PIECES) {
       let on = this.seen(p);
       if (p === 'tonight') on = on || this.run.tonight.length > 0;
-      // Kept pages have a panel on the desktop only; on a phone they live in the almanac.
-      if (p === 'pages') on = on && this.run.pages.length > 0 && this.layout === 'wide';
+      // Kept pages have a panel on the desktop only; on a phone they live in the almanac. Once pages are brought in it
+      // shows the room left too, as empty leaves.
+      if (p === 'pages') on = on && this.layout === 'wide';
       for (const e of this.pieceEls(p)) {
         e.classList.toggle('sb-off', !on);
         if (arrive.includes(p)) {
@@ -497,7 +513,26 @@ export class Table {
     }
     this.sheets.lesson(line && line.where === 'stall' ? line : null);
     this.placeHint();
+    this.renderTwist();
     this.cue();
+  }
+
+  /** The season's twist in the lesson strip, while no lesson is up: its picture and "Crows come twice as often." */
+  private renderTwist(): void {
+    const s = this.run;
+    const tw = s?.phase === 'day' ? (s.twist ?? null) : null;
+    const on = !!tw && !this.hint.classList.contains('on');
+    const key = tw ? `${tw.id}:${tw.crop ?? ''}:${s.season}` : '';
+    if (this.twistEl.dataset.k !== key) {
+      this.twistEl.dataset.k = key;
+      this.twistEl.innerHTML = tw ? `<img src="${twistUrl(tw, 24)}" alt=""><span>${twistText(tw)}</span>` : '';
+    }
+    this.twistEl.classList.toggle('on', on);
+  }
+
+  /** The words the twist line shows, for checks. */
+  get twistLine(): string {
+    return this.twistEl.classList.contains('on') ? (this.twistEl.textContent ?? '') : '';
   }
 
   /** The thing a lesson is about glows softly. */
@@ -533,11 +568,12 @@ export class Table {
 
   private placeHint(): void {
     const b = this.hintBox;
-    const h = this.hint;
-    h.style.left = `${b.x}px`;
-    h.style.top = `${b.y}px`;
-    h.style.width = `${b.w}px`;
-    h.style.minHeight = `${b.h}px`;
+    for (const h of [this.hint, this.twistEl]) {
+      h.style.left = `${b.x}px`;
+      h.style.top = `${b.y}px`;
+      h.style.width = `${b.w}px`;
+      h.style.minHeight = `${b.h}px`;
+    }
   }
 
   /** The stall's lesson line, for the sheets. */
@@ -588,7 +624,7 @@ export class Table {
       this.handRect = { x: 0, y: handY, w: W, h: handH + safeB };
     } else {
       const sx = W - P - 18;
-      this.cardW = Math.round(Math.min(150, Math.max(76, H * 0.17)));
+      this.cardW = Math.round(Math.min(150, Math.max(76, H * 0.16)));
       this.cardH = Math.round(this.cardW * 1.4);
       const handH = Math.round(Math.max(this.cardH + 30, Math.min(250, H * 0.28)));
       place(this.ledger, sx, 12, P - 66, 94);
@@ -599,8 +635,10 @@ export class Table {
       // finds at once (it was 200 px tall, its labels 11.5 px, with 500 px of bare table above it).
       const benchH = Math.round(Math.max(260, Math.min(380, H * 0.45)));
       const benchY = H - benchH - 10;
-      this.hintBox = { x: sx, y: benchY - 66, w: P, h: 52 };
-      place(this.pages, sx, 160, P, Math.max(60, benchY - 76 - 160));
+      // The lesson strip (and the season's twist) right under the pegboard, the pages kept under it, the bench at the
+      // foot: the fifth playtest found about 330 px of bare table between the pegboard and the scoops.
+      this.hintBox = { x: sx, y: 158, w: P, h: 52 };
+      place(this.pages, sx, 220, P, Math.max(60, benchY - 10 - 220));
       place(this.bench, sx, benchY, P, benchH);
       boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
       this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
@@ -616,7 +654,8 @@ export class Table {
       // to stand over them); with no room there, at the top of the side panel, above the lesson strip.
       const right = boardBox.x + this.board.px0 + this.board.pw + 10;
       const room = W - P - 18 - 10 - right;
-      const box = room >= 150 ? { x: right, y: 12, w: Math.min(230, room), h: this.handRect.y - 20 } : { x: W - P - 18, y: 12, w: P, h: this.hintBox.y - 20 };
+      const pagesTop = this.hintBox.y + this.hintBox.h + 8;
+      const box = room >= 150 ? { x: right, y: 12, w: Math.min(230, room), h: this.handRect.y - 20 } : { x: W - P - 18, y: pagesTop, w: P, h: (parseFloat(this.bench.style.top) || H) - pagesTop - 10 };
       const st = this.el.style;
       st.setProperty('--sb-dx', `${Math.round(box.x)}px`);
       st.setProperty('--sb-dy', `${Math.round(box.y)}px`);
@@ -644,6 +683,7 @@ export class Table {
     this.renderBench();
     this.renderPages();
     this.renderHand();
+    this.renderTwist();
   }
 
   private renderLedger(): void {
@@ -781,13 +821,28 @@ export class Table {
   }
 
   private renderPages(): void {
-    const key = this.run.pages.join();
+    const room = maxPages(this.run);
+    const key = `${this.run.pages.join()}|${room}`;
     if (this.pages.dataset.k === key) return;
     this.pages.dataset.k = key;
     this.pages.innerHTML = '';
     this.pages.append(el('h4', '', 'Almanac pages kept'));
     for (const p of this.run.pages) this.pages.append(this.sheets.pageEl(p, null));
+    // The room left, as empty leaves: the stall sells pages to fill them.
+    for (let k = this.run.pages.length; k < room; k++) this.pages.append(el('div', 'sb-pageslot', '<span>Room for a page</span>'));
     this.applyPieces();
+  }
+
+  /**
+   * Each card keeps its place in the fan through the day: a card played leaves a gap and the rest stay where they were,
+   * so a second tap lands on the card that was there (the fan re-centred after every play, and a tap at the old spot
+   * missed twice). A card drawn in the day (a toss) takes the first gap. The fan closes up at dawn.
+   */
+  private slots = new Map<number, number>();
+  private slotN = 0;
+  resetSlots(): void {
+    this.slots.clear();
+    this.slotN = 0;
   }
 
   /** Fan the hand. */
@@ -800,7 +855,18 @@ export class Table {
         this.cards.delete(uid);
       }
     }
-    const n = hand.length;
+    for (const uid of [...this.slots.keys()]) if (!live.has(uid)) this.slots.delete(uid);
+    const used = new Set(this.slots.values());
+    for (const c of hand) {
+      if (this.slots.has(c.uid)) continue;
+      let k = 0;
+      while (used.has(k)) k++;
+      this.slots.set(c.uid, k);
+      used.add(k);
+    }
+    if (!hand.length) this.slotN = 0;
+    this.slotN = Math.max(this.slotN, hand.length, ...[...used].map((k) => k + 1));
+    const n = this.slotN;
     let { cardW: cw, cardH: ch } = this;
     const R = this.handRect;
     // On the desktop the bench stands right of the hand: leave room for the outer cards' tilt.
@@ -878,12 +944,14 @@ export class Table {
       c.el.style.width = `${cw}px`;
       c.el.style.height = `${ch}px`;
       const mid = (n - 1) / 2;
-      const off = i - mid;
+      const slot = this.slots.get(card.uid) ?? i;
+      const off = slot - mid;
       const held = this.held?.uid === card.uid;
       const hov = this.hoverCard === card.uid && !this.held;
-      let x = x0 + i * gap;
+      let x = x0 + slot * gap;
       // A full hand fans flatter, so the outer cards' tilt neither hides a neighbour's name nor reaches the bench.
-      let y = R.h - ch - (this.layout === 'phone' ? 12 : 18) + off * off * (n > 4 ? 1.2 : 2.2);
+      // On the desktop the fan keeps clear of the screen's foot, tilted corners and all (it ran off the bottom edge).
+      let y = R.h - ch - (this.layout === 'phone' ? 12 : 30) + off * off * (n > 4 ? 1.2 : 2.2);
       let rot = off * (n > 4 ? 1.8 : 3.2);
       let sc = 1;
       if (held) {
@@ -899,7 +967,7 @@ export class Table {
         rot *= 0.4;
       }
       if (!c.el.classList.contains('dragging')) c.el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${sc})`;
-      c.el.style.zIndex = String(held ? 50 : hov ? 40 : 10 + i);
+      c.el.style.zIndex = String(held ? 50 : hov ? 40 : 10 + slot);
       c.el.classList.toggle('held', held);
       c.el.classList.toggle('dear', !afford && showCost);
       c.el.dataset.key = String(i + 1);
@@ -955,6 +1023,7 @@ export class Table {
     this.board.market = this.busy || this.run.phase !== 'day' ? [] : marketTonight(this.run);
     this.board.boost = this.busy ? [] : this.run.plots.map((p) => p.boost);
     this.board.crow = !this.busy && this.run.phase === 'day' && this.run.crow;
+    this.board.twist = this.run.phase === 'day' || this.busy ? (this.run.twist ?? null) : null;
     const nk = this.board.night.toFixed(3);
     if (this.dark.dataset.k !== nk) {
       this.dark.dataset.k = nk;
@@ -1008,8 +1077,13 @@ export class Table {
           this.hover = i;
           this.updateHighlight();
           this.ctx.audio.cue('deck.hover', { gain: 0.6 });
-          // The first lesson says what the second tap does itself; otherwise a note by the plot.
-          if (this.line?.id !== 'sow') this.say(`Tap again to ${CARDS[card.id].type === 'seed' ? 'plant it' : (AIM_VERB[card.id] ?? 'play it')}.`, i);
+          // The first lesson says what the second tap does itself; otherwise, for the first few aims, a note in the
+          // lesson strip (it showed on every play forever, over the aimed plot's bonus chip on the top row).
+          if (this.line?.id !== 'sow' && this.tutor.n('aimNote') < AIM_NOTES) {
+            this.tutor.count('aimNote');
+            this.say(`Tap again to ${CARDS[card.id].type === 'seed' ? 'plant it' : (AIM_VERB[card.id] ?? 'play it')}.`, null);
+            this.aimNote = true;
+          }
         } else if (i !== null) this.tryPlay(i);
       } else if (i !== null) {
         this.cursor = i;
@@ -1406,6 +1480,11 @@ export class Table {
     const before = clonePlots(this.run.plots);
     const ev = playCard(this.run, idx, plot, to)!;
     for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
+    // "Tap again to plant it." is done with once it is planted.
+    if (this.aimNote) {
+      this.aimNote = false;
+      this.note.classList.remove('on');
+    }
     this.held = null;
     if (this.aimed !== null) {
       this.aimed = null;
@@ -1614,6 +1693,7 @@ export class Table {
    */
   say(text: string, plot: number | null): void {
     const n = this.note;
+    this.aimNote = false;
     n.textContent = text;
     const br = this.boardWrap.getBoundingClientRect();
     const tr = this.tableEl.getBoundingClientRect();
@@ -1630,7 +1710,9 @@ export class Table {
     // caption, whose words showed round it in pieces); with a lesson up, just inside the bed's top edge.
     const strip = this.hintBox;
     let y = oy + b.by + h + 6;
-    if (plot === null && !this.hint.classList.contains('on')) {
+    // The strip is taken by a lesson or by the season's twist: then just inside the bed's top edge.
+    const busy = this.hint.classList.contains('on') || this.twistEl.classList.contains('on');
+    if (plot === null && !busy) {
       x = strip.x + strip.w / 2;
       y = strip.y + strip.h / 2 + h / 2;
     }
@@ -1640,7 +1722,7 @@ export class Table {
       y = Math.max(oy + c.y - b.T * 0.7, oy + b.by + h + 4);
     }
     // Inside the bed's width where it fits, so the numbers down the side stay clear too.
-    if (w <= bedR - bedL && (plot !== null || this.hint.classList.contains('on'))) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
+    if (w <= bedR - bedL && (plot !== null || busy)) x = Math.max(bedL + w / 2, Math.min(bedR - w / 2, x));
     x = Math.max(w / 2 + 4, Math.min(this.W - w / 2 - 4, x));
     n.style.left = `${Math.round(x)}px`;
     n.style.top = `${Math.round(Math.max(60 + h, y))}px`;
@@ -1651,6 +1733,16 @@ export class Table {
     this.noteTimer = window.setTimeout(() => n.classList.remove('on'), 2200);
   }
   private noteTimer = 0;
+  /** The note on screen is "Tap again to plant it.": it goes when the card is played. */
+  private aimNote = false;
+
+  /** A season has begun from the stall: say what carried over, or that this is the last winter. */
+  seasonStart(): void {
+    const s = this.run;
+    const last = s.stats.log[s.stats.log.length - 1];
+    if (isFinal(s)) this.say('The last winter: meet it to win.', null);
+    else if (s.carried && last) this.say(`${s.carried} carried over from ${SEASON_NAMES[last.season]}.`, null);
+  }
 
   /**
    * Read a plot: what stands there, what it will pay and when ("C4: carrot pays 15 in 2 nights."), in eight words
@@ -1720,6 +1812,7 @@ export class Table {
   /** Dawn: the rules' state is the truth from here. */
   private dawn(): void {
     const from = this.shownEnergy;
+    this.resetSlots();
     this.shown = clonePlots(this.run.plots);
     this.shownEarned = this.run.earned;
     this.shownCoins = this.run.coins;

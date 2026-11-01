@@ -7,7 +7,7 @@
 // so a run that strays from the guided deals still gets each one when it
 // first matters.
 
-import { CARDS, costOf, energyMax, extraGrowth, isRipe, neighbours, ripeTonight, TUNING, type Card, type CardId, type RunState } from './rules';
+import { CARDS, costOf, energyMax, extraGrowth, isRipe, neighbours, nextSeason, ripeTonight, SEASON_NAMES, targetsFor, TUNING, type Card, type CardId, type RunState } from './rules';
 
 /** Pieces of the table that arrive with a lesson. The plot, the hand and the almanac are always there. */
 export type Piece = 'lantern' | 'peg' | 'scoops' | 'bloom' | 'coins' | 'tin' | 'spent' | 'tonight' | 'pages' | 'services';
@@ -52,6 +52,8 @@ interface Lesson {
   /** Finished? Passive lessons also finish on their own after `passive` seconds on screen. */
   done(v: View): boolean;
   passive?: number;
+  /** Put away unfinished, to come back when it next matters (the hand no longer has a spare card). */
+  away?(v: View): boolean;
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
@@ -66,8 +68,19 @@ const nightPassed = (v: View, id: string) => v.n('night') > v.n(`at:${id}`);
 const carrots = (s: RunState) => s.plots.map((p, i) => (p.crop?.kind === 'carrot' ? i : -1)).filter((i) => i >= 0);
 const radishesBy = (s: RunState, i: number) => neighbours(s, i).filter((j) => s.plots[j].crop?.kind === 'radish').length;
 const seedKey = (v: View, c: Card) => `Press ${v.s.hand.indexOf(c) + 1} to take up a ${name(c.id)}.`;
-/** A card the player can still bring out: in the hand or the tin. A scarecrow already standing on the plot is not one (the third playtest was told to set out the one on C2). */
-const toHand = (s: RunState, id: CardId) => [...s.hand, ...s.draw].some((c) => c.id === id);
+/**
+ * A card the player can bring out now: in the hand. Not one still in the tin (the fifth playtest's first crow said
+ * "Set out the scarecrow." with the scarecrow in the tin), nor one already standing on the plot (the third playtest
+ * was told to set out the one on C2).
+ */
+const toHand = (s: RunState, id: CardId) => s.hand.some((c) => c.id === id);
+/**
+ * A card in hand with no use today: nowhere it can go, or more scoops than are left. The spent lesson waits for one
+ * (guided day 6 said "Drag a spare card to Spent." with all three cards needed, and stayed up with the hand empty).
+ */
+export function spareCard(s: RunState): Card | undefined {
+  return s.hand.find((c, i) => costOf(c.id, c.up) > s.energy || (CARDS[c.id].target !== 'board' && targetsFor(s, i).length === 0));
+}
 const standing = (s: RunState, obj: 'scarecrow' | 'beehive') => s.plots.some((p) => p.obj === obj);
 /** A dear card in hand the scoops can pay for: two scoops or more. */
 const dear = (v: View) => v.s.hand.find((c) => costOf(c.id, c.up) >= 2 && affordable(v, c));
@@ -118,7 +131,7 @@ const LESSONS: Lesson[] = [
     unlocks: ['peg'],
     where: 'table',
     ready: (v) => v.s.phase === 'day' && (v.learn.seen.includes('peg') || v.n('harvest') >= 1),
-    text: () => `Reach the brass hole by day ${WORDS[TUNING.days] ?? TUNING.days}.`,
+    text: () => `Fill the pegboard by day ${WORDS[TUNING.days] ?? TUNING.days}.`,
     point: () => 'peg',
     done: (v) => v.n('pick') > v.n('at:peg:pick') || nightPassed(v, 'peg'),
     passive: 5,
@@ -234,10 +247,12 @@ const LESSONS: Lesson[] = [
     after: ['tin'],
     unlocks: ['spent'],
     where: 'table',
-    ready: (v) => v.s.phase === 'day' && !v.s.tossed && v.s.hand.length >= 3 && (v.s.day >= 6 || v.s.season > 0 || v.s.year > 1),
+    ready: (v) => v.s.phase === 'day' && !v.s.tossed && v.s.hand.length >= 2 && !!spareCard(v.s) && (v.s.day >= 6 || v.s.season > 0 || v.s.year > 1),
     text: (v) => (v.dev === 'key' ? 'Take a card up, then press X.' : 'Drag a spare card to Spent.'),
     point: () => 'heap',
     done: (v) => v.n('toss') >= 1 || nightPassed(v, 'spent'),
+    // No spare card left in the hand (played, or the hand empty): put away until one comes.
+    away: (v) => !spareCard(v.s) && !v.s.tossed,
   },
   {
     id: 'newcard',
@@ -268,6 +283,7 @@ const LESSONS: Lesson[] = [
     where: 'table',
     // Only a card the player can still bring out is named.
     ready: (v) => v.s.phase === 'day' && v.s.plots.some((p) => p.crop?.pest) && (toHand(v.s, 'ladybirds') || toHand(v.s, 'garlic')),
+    away: (v) => !toHand(v.s, 'ladybirds') && !toHand(v.s, 'garlic'),
     text: (v) => (toHand(v.s, 'ladybirds') ? 'Clear the pests with ladybirds.' : 'Garlic keeps pests off its neighbours.'),
     point: () => 'board',
     done: (v) => nightPassed(v, 'pestfix'),
@@ -284,6 +300,17 @@ const LESSONS: Lesson[] = [
     point: () => 'board',
     done: (v) => nightPassed(v, 'crows'),
     passive: 6,
+  },
+  {
+    // The season's twist: from year 2 each stall offers two plain rules for the season ahead; pick one.
+    id: 'twist',
+    after: ['coins'],
+    unlocks: [],
+    where: 'stall',
+    ready: (v) => v.s.phase === 'shop' && !!v.s.shop?.twists?.length,
+    text: (v) => `Pick one of the two for ${SEASON_NAMES[nextSeason(v.s).season]}.`,
+    point: () => 'stall',
+    done: (v) => v.s.shop?.twist !== undefined || v.n('leave') > v.n('at:twist:leave'),
   },
   {
     id: 'coins',
@@ -320,7 +347,7 @@ const LESSONS: Lesson[] = [
 export const LESSON_IDS = LESSONS.map((l) => l.id);
 
 /** Lessons a returning player sees again: the watering can and the weather no longer work as they did, and scoops come back from pulled crops. */
-export const REFRESH = ['can', 'weather', 'saved'];
+export const REFRESH = ['can', 'weather', 'saved', 'twist'];
 
 export function newLearn(): Learn {
   return { seen: [], done: [], n: {}, cards: [] };
@@ -397,7 +424,7 @@ export class Tutor {
         this.learn.done.push(l.id);
         if (l.id === 'newcard') this.meet(s);
         this.active = null;
-      }
+      } else if (l.away?.(view)) this.active = null;
     }
     if (!this.active) {
       const done = (id: string) => this.learn.done.includes(id);

@@ -5,9 +5,11 @@
 // (noise 0.15), the strict bot (0) and the guided first run side by side, so a
 // change to the rules reads against all three at once. It only uses the bot
 // and the rules' public calls, so the same file runs against an older build.
-// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided]
+// Round 5 adds the second run: the decent bot on the first run after the
+// guided one (a record of one run finished), whose first spring is softer.
+// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|second]
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
-import { newRun, SEASON_NAMES } from '../src/games/deck/rules';
+import { newMeta, newRun, SEASON_NAMES } from '../src/games/deck/rules';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 200);
@@ -33,7 +35,7 @@ interface Tally {
   traySlots: number;
 }
 
-function play(noise: number, guided: boolean): Tally {
+function play(noise: number, guided: boolean, second = false): Tally {
   const t: Tally = {
     played: new Array(K).fill(0),
     cleared: new Array(K).fill(0),
@@ -54,7 +56,8 @@ function play(noise: number, guided: boolean): Tally {
   for (let i = 0; i < runs; i++) {
     const seed = 1000 + i * 7919;
     const o = { noise, seed: 77 + i, guided };
-    const { s } = newRun(seed, null, guided);
+    const meta = second ? { ...newMeta(), runs: 1 } : null;
+    const { s } = newRun(seed, meta, guided);
     const dice = new Dice(o.seed ^ seed);
     const offered = new Set<string>();
     let last: string[] = [];
@@ -105,16 +108,17 @@ const med = (a: number[]) => {
   return s.length ? s[Math.floor(s.length / 2)] : 0;
 };
 
-const bots: [string, number, boolean][] = [
-  ['decent', 0.15, false],
-  ['strict', 0, false],
-  ['guided', 0.15, true],
+const bots: [string, number, boolean, boolean][] = [
+  ['decent', 0.15, false, false],
+  ['strict', 0, false, false],
+  ['guided', 0.15, true, false],
+  ['second', 0.15, false, true],
 ];
-for (const [name, noise, guided] of bots) {
+for (const [name, noise, guided, second] of bots) {
   if (only && only !== name) continue;
   const t0 = performance.now();
-  const t = play(noise, guided);
-  console.log(`\n${name} bot (noise ${noise}${guided ? ', guided first run' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
+  const t = play(noise, guided, second);
+  console.log(`\n${name} bot (noise ${noise}${guided ? ', guided first run' : ''}${second ? ', the first run after the guided one' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
   console.log('season            played  pass  quota  median take  earned/quota  crops at first dawn  night 1  night 2');
   for (let k = 0; k < K; k++) {
     if (!t.played[k]) continue;

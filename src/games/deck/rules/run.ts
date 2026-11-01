@@ -3,10 +3,10 @@
 // mutates the run and returns what happened as events.
 
 import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT, UNLOCK_ORDER } from './cards';
-import { bySeason, emptyPlot, energyMax, handSize, isEmpty, isFinal, isRipe, neighbours, nextSeason, quotaFor, TUNING } from './board';
+import { bySeason, emptyPlot, energyMax, frosted, handSize, isEmpty, isFinal, isRipe, neighbours, nextSeason, runQuota, seasonIndex, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
-import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, Shop } from './types';
+import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, SeedId, Shop, Twist, TwistId } from './types';
 
 export function newMeta(): Meta {
   return { v: 1, unlocked: [], runs: 0, seasons: 0, best: { seasons: 0, harvest: 0, coins: 0, year: 1, season: 0 }, wins: 0, bestWin: 0 };
@@ -64,8 +64,15 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     guided,
     script: guided ? GUIDED_DEALS.map((d) => [...d]) : [],
     pool: [...START_POOL, ...(meta?.unlocked ?? []).filter((c) => !START_POOL.includes(c))],
-    stats: { bestHarvest: 0, bestKind: null, totalEarned: 0, harvests: 0, seasonsCleared: 0, bestDay: 0, pests: 0, crows: 0, log: [] },
+    stats: { bestHarvest: 0, bestKind: null, totalEarned: 0, harvests: 0, seasonsCleared: 0, bestDay: 0, pests: 0, crows: 0, log: [], byKind: {} },
     end: null,
+    twist: null,
+    carry: 0,
+    carried: 0,
+    // The first run after the guided one has a softer first spring: the guided spring asked 70, the next one 170.
+    soft: !guided && !!meta && meta.runs === 1,
+    stock: [],
+    select: [],
   };
   for (const id of START_DECK) s.draw.push(newCard(s, id));
   const ev: Ev[] = [];
@@ -90,8 +97,8 @@ export function cloneRun(s: RunState): RunState {
     tonight: [...s.tonight],
     pool: [...s.pool],
     script: s.script.map((d) => [...d]),
-    stats: { ...s.stats, log: s.stats.log },
-    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })) } : null,
+    stats: { ...s.stats, log: s.stats.log, byKind: { ...s.stats.byKind } },
+    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })), twists: s.shop.twists?.map((t) => ({ ...t })) } : null,
     end: s.end ? { ...s.end } : null,
   };
 }
@@ -116,11 +123,14 @@ export function startSeason(s: RunState, ev: Ev[]): void {
   shuffle(s, s.draw);
   s.tonight = [];
   s.shop = null;
-  s.earned = 0;
-  s.quota = quotaFor(s.year, s.season, s.pages, s.guided);
+  s.quota = runQuota(s, s.year, s.season);
+  // Part of the last season's surplus starts this season's take, up to a share of its quota.
+  s.carried = Math.min(s.carry ?? 0, Math.round(TUNING.carryCap * s.quota));
+  s.carry = 0;
+  s.earned = s.carried;
   s.day = 1;
   s.phase = 'day';
-  ev.push({ t: 'season', year: s.year, season: s.season, quota: s.quota });
+  ev.push({ t: 'season', year: s.year, season: s.season, quota: s.quota, carried: s.carried, twist: s.twist ?? null });
   startDay(s, ev);
 }
 
@@ -146,8 +156,8 @@ export function startDay(s: RunState, ev: Ev[]): void {
   s.dayHarvests = 0;
   if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].boost += 1;
   ev.push({ t: 'dawn', day: s.day });
-  // A crow comes to the plate's edge at dawn, so the day has time to answer it.
-  const crow = bySeason(TUNING.crowChance, s);
+  // A crow comes to the plate's edge at dawn, so the day has time to answer it (twice as often in a season of crows).
+  const crow = Math.min(0.9, bySeason(TUNING.crowChance, s) * (s.twist?.id === 'crows' ? TUNING.crowTimes : 1));
   s.crow = crow > 0 && rand(s) < crow;
   if (s.crow) {
     s.stats.crows++;
@@ -198,10 +208,11 @@ export function targetsFor(s: RunState, handIdx: number): number[] {
   if (!card) return [];
   const t = CARDS[card.id].target;
   const out: number[] = [];
+  const seed = isSeed(card.id);
   s.plots.forEach((p, i) => {
     const c = p.crop;
     const ok =
-      t === 'empty' ? isEmpty(p) :
+      t === 'empty' ? isEmpty(p) && !(seed && frosted(s, i)) :
       t === 'plot' ? true :
       t === 'crop' ? !!c :
       t === 'growing' ? !!c && !isRipe(c) :
@@ -231,6 +242,7 @@ export function whyNot(s: RunState, handIdx: number, plot: number | null, to?: n
   if (def.target === 'board') return null;
   if (plot === null || plot < 0 || plot >= s.plots.length) return 'Pick a plot.';
   if (!targetsFor(s, handIdx).includes(plot)) {
+    if (def.type === 'seed' && isEmpty(s.plots[plot]) && frosted(s, plot)) return 'Frost: nothing grows there now.';
     switch (def.target) {
       case 'empty':
         return 'That plot is taken.';
@@ -359,7 +371,8 @@ export function endDay(s: RunState): Ev[] {
     ev.push({ t: 'discardExcess', cards: extra });
   }
   night(s, ev);
-  if (s.day >= TUNING.days) seasonEnd(s, ev);
+  // The last winter met ends the run that night: the days after it were busywork (959 of 960 after day 4, then two more).
+  if (s.day >= TUNING.days || (isFinal(s) && s.earned >= s.quota)) seasonEnd(s, ev);
   else {
     s.day++;
     startDay(s, ev);
@@ -369,7 +382,7 @@ export function endDay(s: RunState): Ev[] {
 
 function seasonEnd(s: RunState, ev: Ev[]): void {
   const cleared = s.earned >= s.quota;
-  s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared });
+  s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared, carried: s.carried ?? 0, twist: s.twist ?? null });
   ev.push({ t: 'seasonEnd', cleared, earned: s.earned, quota: s.quota, year: s.year, season: s.season });
   // The cards come home; the plot stands as it is into the next season.
   s.draw = [...s.draw, ...s.hand, ...s.discard];
@@ -381,15 +394,20 @@ function seasonEnd(s: RunState, ev: Ev[]): void {
     if (isFinal(s)) {
       // The last winter is met: the run is won, and ends here.
       s.phase = 'over';
-      s.end = { year: s.year, season: s.season, earned: s.earned, quota: s.quota, unlocked: [], recorded: false, won: true };
+      s.end = { year: s.year, season: s.season, earned: s.earned, quota: s.quota, unlocked: [], recorded: false, won: true, metDay: s.day };
+      s.twist = null;
       ev.push({ t: 'over', end: s.end });
       return;
     }
+    // A share of the surplus carries into the next season's take, so a strong season buffers a bad draw.
+    s.carry = cleared ? Math.round(TUNING.carryShare * Math.max(0, s.earned - s.quota)) : 0;
     s.phase = 'shop';
     s.shop = makeShop(s);
+    s.twist = null;
     ev.push({ t: 'shop' });
   } else {
     s.phase = 'over';
+    s.twist = null;
     s.end = { year: s.year, season: s.season, earned: s.earned, quota: s.quota, unlocked: [], recorded: false };
     ev.push({ t: 'over', end: s.end });
   }
@@ -407,7 +425,7 @@ export function giveUp(s: RunState): Ev[] | null {
   const ev: Ev[] = [];
   const day = s.phase === 'day' ? s.day : 0;
   if (s.phase === 'day') {
-    s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared: false });
+    s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared: false, carried: s.carried ?? 0, twist: s.twist ?? null });
     s.draw = [...s.draw, ...s.hand, ...s.discard];
     s.hand = [];
     s.discard = [];
@@ -433,8 +451,9 @@ export function priceScale(s: RunState): number {
   return 1 + TUNING.priceYear * (s.year - 1);
 }
 
-export function cardPrice(s: RunState, id: CardId): number {
-  return Math.round(PRICE[CARDS[id].rarity] * priceScale(s));
+/** A card's price at the stall: improved stock costs a share more. */
+export function cardPrice(s: RunState, id: CardId, up = false): number {
+  return Math.round((PRICE[CARDS[id].rarity] + (up ? TUNING.selectPrice : 0)) * priceScale(s));
 }
 
 function rollRarity(s: RunState): Rarity {
@@ -486,6 +505,8 @@ function rollCards(s: RunState, fresh = false): CardId[] {
     if (pool.length) out.push(pick(s, pool));
   };
   if (!fresh) {
+    // The year's first stall lays out the year's new stock.
+    if (s.season === 0) for (const o of s.stock ?? []) if (!out.includes(o.card) && out.length < TUNING.goods) out.push(o.card);
     const answers = hazardAnswers(s);
     // A hazard coming for the first time wins the one slot (the stall before autumn stocks the scarecrow); else one
     // already met, at random. An earlier stall offered the other.
@@ -518,14 +539,24 @@ function rollPages(s: RunState): PageId[] {
   return opts.slice(0, 2);
 }
 
+/** Tray goods: a card the merchant sells improved (new stock, once the catalogue holds every card) comes improved. */
+function goods(s: RunState, cards: CardId[]): Shop['cards'] {
+  return cards.map((card) => {
+    const up = (s.select ?? []).includes(card);
+    return up ? { card, price: cardPrice(s, card, true), sold: false, up } : { card, price: cardPrice(s, card), sold: false };
+  });
+}
+
 function makeShop(s: RunState): Shop {
+  const twists = twistsDue(s) ? offerTwists(s) : undefined;
   return {
-    cards: rollCards(s).map((card) => ({ card, price: cardPrice(s, card), sold: false })),
+    cards: goods(s, rollCards(s)),
     pages: rollPages(s).map((page) => ({ page, price: Math.round(PAGES[page].price * priceScale(s)), sold: false })),
     reroll: TUNING.rerollBase,
     rerolls: 0,
     removed: 0,
     upgraded: 0,
+    ...(twists ? { twists } : {}),
   };
 }
 
@@ -534,8 +565,54 @@ export function buyCard(s: RunState, i: number): Ev[] | null {
   if (s.phase !== 'shop' || !o || o.sold || s.coins < o.price) return null;
   s.coins -= o.price;
   o.sold = true;
-  s.draw.push(newCard(s, o.card));
+  s.draw.push(newCard(s, o.card, !!o.up));
   return [{ t: 'buy', card: o.card }];
+}
+
+// ---------------------------------------------------------------- the season's twist
+
+/** Twists that help, and twists that get in the way. A stall offers one of each, to pick one. */
+export const BOONS: readonly TwistId[] = ['buyer', 'company', 'calm', 'picks', 'sunall'];
+export const HITCHES: readonly TwistId[] = ['frost', 'glut', 'sunup', 'crows'];
+
+/** Does the season the stall leads to have a twist? From year 2 spring, the last winter too. */
+export function twistsDue(s: RunState): boolean {
+  return TUNING.twists && seasonIndex(nextSeason(s)) >= TUNING.twistFrom;
+}
+
+/**
+ * Two twists for the coming season, one that helps and one that gets in the way, in a random order. A buyer pays for
+ * a crop the player owns but has not leaned on (not the crop that has taken the most this run, nor the free radish),
+ * and a glut hits the crop that has taken the most: the fifth playtest's every day was one improved carrot ringed by
+ * radishes, so the twists push away from the run's own solve. A sunflower twist only comes to a player with a
+ * sunflower, long picks only with a perennial; neither twist repeats the season just played.
+ */
+export function offerTwists(s: RunState): Twist[] {
+  const owned = [...new Set(allCards(s).map((c) => c.id).filter(isSeed))].filter((k) => k !== 'radish') as SeedId[];
+  const lean = topCrops(s).find((k) => owned.includes(k));
+  const others = owned.filter((k) => k !== lean);
+  const last = s.twist?.id;
+  const usable = (id: TwistId) => {
+    if (id === last) return false;
+    if (id === 'buyer' || id === 'glut') return owned.length > 0;
+    if (id === 'sunall' || id === 'sunup') return owned.includes('sunflower');
+    if (id === 'picks') return owned.some((k) => SEEDS[k].picks > 1);
+    return true;
+  };
+  const boon = pick(s, BOONS.filter(usable));
+  const hitch = pick(s, HITCHES.filter(usable));
+  const a: Twist = boon === 'buyer' ? { id: boon, crop: pick(s, others.length ? others : owned) } : { id: boon };
+  const glut = lean && lean !== a.crop ? lean : pick(s, owned.filter((k) => k !== a.crop).length ? owned.filter((k) => k !== a.crop) : owned);
+  const b: Twist = hitch === 'glut' ? { id: hitch, crop: glut } : { id: hitch };
+  return rand(s) < 0.5 ? [a, b] : [b, a];
+}
+
+/** Pick one of the two twists offered for the coming season. Free, and it can be changed until the stall is left. */
+export function chooseTwist(s: RunState, i: number): Ev[] | null {
+  const sh = s.shop;
+  if (s.phase !== 'shop' || !sh?.twists || !sh.twists[i]) return null;
+  sh.twist = i;
+  return [{ t: 'twist', i }];
 }
 
 /** How many almanac pages the player may keep: five, and one more for each slot bought. */
@@ -636,13 +713,16 @@ export function reroll(s: RunState): Ev[] | null {
   sh.reroll += TUNING.rerollStep;
   sh.rerolls++;
   // Fresh stock is new cards: it does not force a hazard's answer again.
-  sh.cards = rollCards(s, true).map((card) => ({ card, price: cardPrice(s, card), sold: false }));
+  sh.cards = goods(s, rollCards(s, true));
   return [{ t: 'reroll' }];
 }
 
 export function leaveShop(s: RunState): Ev[] | null {
   if (s.phase !== 'shop') return null;
   const ev: Ev[] = [];
+  // The season's twist: the one picked, or the first offered if none was.
+  const tw = s.shop?.twists;
+  s.twist = tw?.length ? { ...tw[s.shop!.twist ?? 0] } : null;
   if (s.season === 3) {
     s.year++;
     s.season = 0;
@@ -662,9 +742,17 @@ export function leaveShop(s: RunState): Ev[] | null {
 function newStock(s: RunState, ev: Ev[]): void {
   const locked = UNLOCK_ORDER.filter((c) => !s.pool.includes(c));
   const cards = shuffle(s, locked).slice(0, TUNING.newStock);
-  if (!cards.length) return;
+  // Once the catalogue holds every card the merchant brings improved stock instead, so new stock never runs dry (by
+  // a fourth run the stall said "New stock this year: storm." and in year 3 nothing). Uncommon and rare cards first.
+  const held = s.select ?? [];
+  const opts = s.pool.filter((c) => c !== 'radish' && !held.includes(c) && !cards.includes(c));
+  const strong = shuffle(s, opts.filter((c) => CARDS[c].rarity !== 'common'));
+  const plain = shuffle(s, opts.filter((c) => CARDS[c].rarity === 'common'));
+  const select = [...strong, ...plain].slice(0, TUNING.newStock - cards.length);
   s.pool.push(...cards);
-  ev.push({ t: 'stock', cards });
+  s.select = [...held, ...select];
+  s.stock = [...cards.map((card) => ({ card, up: false })), ...select.map((card) => ({ card, up: true }))];
+  if (s.stock.length) ev.push({ t: 'stock', cards, select });
 }
 
 // ---------------------------------------------------------------- meta
@@ -699,6 +787,7 @@ export function recordRun(meta: Meta, s: RunState, order: readonly CardId[]): Ca
   if (s.end.won) {
     meta.wins = (meta.wins ?? 0) + 1;
     meta.bestWin = Math.max(meta.bestWin ?? 0, s.stats.totalEarned);
+    meta.winLog = [...(meta.winLog ?? []), { run: meta.runs, coins: s.stats.totalEarned, best: s.stats.bestHarvest, bestKind: s.stats.bestKind, top: topCrops(s), pages: [...s.pages] }].slice(-TUNING.winsKept);
   }
   const b = meta.best;
   if (s.stats.seasonsCleared > b.seasons) {
@@ -711,6 +800,23 @@ export function recordRun(meta: Meta, s: RunState, order: readonly CardId[]): Ca
   s.end.unlocked = fresh;
   s.end.recorded = true;
   return fresh;
+}
+
+/** The crops that took the most this run, most first (three at most): the build that won. */
+export function topCrops(s: Pick<RunState, 'stats'>, n = 3): SeedId[] {
+  const by = s.stats.byKind ?? {};
+  return (Object.keys(by) as SeedId[]).sort((a, b) => (by[b] ?? 0) - (by[a] ?? 0)).slice(0, n);
+}
+
+/** The quota the next season will ask, as things stand at the stall (Cold Frame and all). */
+export function nextQuota(s: RunState): number {
+  const n = nextSeason(s);
+  return runQuota(s, n.year, n.season);
+}
+
+/** What the next season's take starts from: the surplus carried, up to its share of the next quota. */
+export function nextCarry(s: RunState): number {
+  return Math.min(s.carry ?? 0, Math.round(TUNING.carryCap * nextQuota(s)));
 }
 
 export function canAffordAny(s: RunState): boolean {

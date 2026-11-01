@@ -4,7 +4,7 @@
 
 import type { GameModule } from '../../shell/types';
 import './deck.css';
-import { buyCard, buyPage, CARD_IDS, CARDS, cardText, leaveShop, reroll, type RunState } from './rules';
+import { buyCard, buyPage, CARD_IDS, CARDS, cardText, chooseTwist, leaveShop, reroll, type RunState } from './rules';
 import { bestPlay, type Play } from './bot';
 import { Table, type SaveData } from './table';
 import { newLearn, Tutor, type Piece } from './lessons';
@@ -45,7 +45,9 @@ export interface DeckDebug {
   shownScores(): number[];
   frames(): number;
   frameMs(): number[];
-  shop: { buy(i: number): boolean; page(i: number, replace?: string): boolean; reroll(): boolean; leave(): boolean };
+  shop: { buy(i: number): boolean; page(i: number, replace?: string): boolean; reroll(): boolean; twist(i: number): boolean; leave(): boolean };
+  /** The season's twist line in the lesson strip, as shown (empty when none or a lesson covers it). */
+  twist(): string;
   /** What the balance bot would play now (null: end the day). */
   suggest(): Play | null;
   /** Harvest scores the rules reported this session, in order. */
@@ -157,16 +159,23 @@ export const game: GameModule = {
           after();
           return ok;
         },
+        twist: (i) => {
+          const ok = !!chooseTwist(t.run, i);
+          after();
+          return ok;
+        },
         leave: () => {
           const ok = !!leaveShop(t.run);
           if (ok) {
             t.save();
             t.sheets.close();
             t.syncAll();
+            t.seasonStart();
           }
           return ok;
         },
       },
+      twist: () => t.twistLine,
     };
     return {
       pause: () => t.stop(),

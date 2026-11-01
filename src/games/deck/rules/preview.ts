@@ -159,7 +159,9 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     // Before the play: the new seed starts from its bare base; a standing crop from what it would get anyway.
     // The Root Cellar is printed on the card's face, so it is part of the bare base, not a bonus from this plot.
     const cellar = paid1.chips.filter((st) => st.icon === 'cellar').reduce((a, st) => a + st.v, 0);
-    const bare = { chips: paid1.base + cellar, add: 0, times: 1 };
+    // So is a buyer's or a glut's multiplier (a season's twist): it is the crop's, wherever it goes, not a bonus from the plot.
+    const market = paid1.mult.filter((st) => st.icon === 'buyer' || st.icon === 'glut').reduce((a, st) => a * st.v, 1);
+    const bare = { chips: paid1.base + cellar, add: 0, times: market };
     const paid0 = j < 0 ? bare : totals(scoreFor(s, j, f0, true));
     const seen0 = j < 0 ? bare : totals(scoreFor(s, j, f0, false));
     const shown = gains(seen1, seen0);

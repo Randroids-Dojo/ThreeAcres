@@ -6,7 +6,7 @@
 
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
-import { CARDS, TUNING, type CardId, type SeedId } from '../rules';
+import { CARDS, TUNING, type CardId, type SeedId, type Twist } from '../rules';
 import { paintScoop } from './art';
 import { paintSeedProduce } from './crops';
 import { paintGlyph } from './glyphs';
@@ -168,7 +168,7 @@ export function loop(g: Ctx, x: number, y: number, s: number): void {
   g.restore();
 }
 
-export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' | 'all' | 'area' | 'one' | 'move' | 'moveany' | 'scare' | 'below';
+export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' | 'all' | 'area' | 'one' | 'move' | 'moveany' | 'scare' | 'below' | 'above' | 'frost';
 
 /**
  * A little map of plots, s across, centred on (x, y): the crop in the middle
@@ -176,11 +176,12 @@ export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' |
  * 'area' the 3 by 3, 'row' a row, 'all' the whole plot.
  */
 export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, lit = '#e9c46a'): void {
-  const n = kind === 'row' || kind === 'rowcol' || kind === 'all' ? 4 : 3;
+  const four = kind === 'row' || kind === 'rowcol' || kind === 'all' || kind === 'frost';
+  const n = four ? 4 : 3;
   const c = s / n;
   const x0 = x - s / 2;
   const y0 = y - s / 2;
-  const mid = kind === 'row' || kind === 'rowcol' || kind === 'all' ? -1 : 1;
+  const mid = four ? -1 : 1;
   for (let r = 0; r < n; r++) {
     for (let k = 0; k < n; k++) {
       const edge = Math.abs(r - mid) + Math.abs(k - mid) === 1;
@@ -188,6 +189,8 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
       let on = false;
       if (kind === 'next' || kind === 'spread' || kind === 'guard') on = edge;
       else if (kind === 'below') on = r === 2 && k === 1;
+      else if (kind === 'above') on = r === 0 && k === 1;
+      else if (kind === 'frost') on = r === 3;
       else if (kind === 'area' || kind === 'scare') on = !centre;
       else if (kind === 'row') on = r === 1;
       else if (kind === 'rowcol') on = r === 1 || k === 1;
@@ -198,7 +201,7 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
       if ((kind === 'move' || kind === 'moveany') && r !== 1) continue;
       g.beginPath();
       g.rect(x0 + k * c + c * 0.08, y0 + r * c + c * 0.08, c * 0.84, c * 0.84);
-      fill(g, centre && kind !== 'one' ? '#6a4a2a' : on ? lit : '#efe6cc');
+      fill(g, centre && kind !== 'one' ? '#6a4a2a' : on ? (kind === 'frost' ? '#cfe4f2' : lit) : '#efe6cc');
       ink(g, INK, Math.max(0.5, c * 0.07), 0.85);
     }
   }
@@ -232,6 +235,17 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
     g.lineTo(cx(2) - c * 0.08, cy(1));
     g.lineTo(cx(2) - c * 0.35, cy(1) + c * 0.22);
     ink(g, '#f6eed6', Math.max(0.7, c * 0.13), 1);
+  }
+  if (kind === 'frost') {
+    // A frosted bottom row, crossed out: nothing sown there.
+    g.beginPath();
+    for (let k = 0; k < 4; k++) {
+      g.moveTo(cx(k) - c * 0.24, cy(3) - c * 0.24);
+      g.lineTo(cx(k) + c * 0.24, cy(3) + c * 0.24);
+      g.moveTo(cx(k) + c * 0.24, cy(3) - c * 0.24);
+      g.lineTo(cx(k) - c * 0.24, cy(3) + c * 0.24);
+    }
+    ink(g, '#3a6a9a', Math.max(0.6, c * 0.12), 1);
   }
   if (kind === 'guard' || kind === 'scare') {
     // A red bar across the centre: kept off.
@@ -333,8 +347,10 @@ export type Bit =
   | { t: 'bloom' }
   | { t: 'map'; k: Diagram }
   | { t: 'nocrow' }
+  | { t: 'crow' }
   | { t: 'nobug' }
   | { t: 'scoop' }
+  | { t: 'coin' }
   | { t: 'text'; s: string; c: 'y' | 'b' | 'i' };
 
 const Y = (s: string): Bit => ({ t: 'text', s, c: 'y' });
@@ -412,7 +428,9 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
         return numWidth(g, b.s, h * 0.78);
       case 'map':
       case 'nocrow':
+      case 'crow':
       case 'nobug':
+      case 'coin':
         return h;
       case 'basket':
       case 'bloom':
@@ -461,6 +479,12 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
       case 'nocrow':
         crow(g, mx, cy, h, true);
         break;
+      case 'crow':
+        crow(g, mx, cy, h, false);
+        break;
+      case 'coin':
+        coin(g, mx, cy, h * 0.8);
+        break;
       case 'nobug':
         noBug(g, mx, cy, h);
         break;
@@ -474,6 +498,68 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
     x += w + gap;
   }
   return total;
+}
+
+/** A gold coin: what a buyer pays, or (grey) what a glut does to it. s across. */
+export function coin(g: Ctx, x: number, y: number, s: number, grey = false): void {
+  g.save();
+  g.beginPath();
+  g.arc(x, y, s / 2, 0, Math.PI * 2);
+  fill(g, grey ? '#b8b0a0' : '#e2b53a');
+  ink(g, grey ? '#6a6458' : '#7a5414', Math.max(0.7, s * 0.07), 1);
+  g.beginPath();
+  g.arc(x, y, s * 0.32, 0, Math.PI * 2);
+  ink(g, grey ? '#8a8476' : '#a8781e', Math.max(0.5, s * 0.05), 1);
+  g.restore();
+}
+
+/** A season's twist as a line of pictures, like a card's rule: a buyer's crop and its x2, a frosted row, a crow and x2. */
+export function twistBits(t: Twist): Bit[] {
+  const k = t.crop ?? 'carrot';
+  switch (t.id) {
+    case 'buyer':
+      return [prod(k), { t: 'coin' }, B(`×${TUNING.buyerTimes}`)];
+    case 'glut':
+      return [prod(k), { t: 'coin' }, B('×½')];
+    case 'company':
+      return [map('next'), Y('+1'), BASKET];
+    case 'calm':
+      return [{ t: 'nobug' }, map('all')];
+    case 'picks':
+      return [prod('beans'), { t: 'loop' }, I('+1')];
+    case 'sunall':
+      return [prod('sunflower'), map('next'), B(`+${TUNING.sunAll}`), BLOOMB];
+    case 'frost':
+      return [map('frost')];
+    case 'sunup':
+      return [prod('sunflower'), map('above'), B(`+${TUNING.sunBloom}`), BLOOMB];
+    case 'crows':
+      return [{ t: 'crow' }, I('×2')];
+  }
+}
+
+const twistUrls = new Map<string, string>();
+
+/** A twist's picture as an image, h CSS px tall (painted at twice that for sharpness). */
+export function twistUrl(t: Twist, h = 30): string {
+  const key = `${t.id}:${t.crop ?? ''}:${h}`;
+  let u = twistUrls.get(key);
+  if (u) return u;
+  const bits = twistBits(t);
+  const k = 2;
+  const probe = document.createElement('canvas').getContext('2d')!;
+  probe.font = `700 ${h * 0.78}px ${SERIF}`;
+  const c = document.createElement('canvas');
+  // Measure by drawing once off screen, then size to fit.
+  const w = Math.ceil(drawBits(probe, bits, -9999, -9999, h, 1 / h) + 6);
+  c.width = w * k;
+  c.height = Math.ceil(h * 1.15) * k;
+  const g = c.getContext('2d')!;
+  g.scale(k, k);
+  drawBits(g, bits, w / 2, (h * 1.15) / 2, h, 1 / (h * k));
+  u = c.toDataURL();
+  twistUrls.set(key, u);
+  return u;
 }
 
 // ---------------------------------------------------------------- images for the table's own slips and notes
@@ -505,6 +591,8 @@ export function iconUrl(key: string, size = 40): string {
   else if (key === 'tall') tall(g, m, m, size);
   else if (key === 'pest') bug(g, m, m, size * 0.3);
   else if (key === 'scoop') scoop(g, m, m, size * 0.95, true);
+  else if (key === 'buyer' || key === 'glut') coin(g, m, m, size * 0.8, key === 'glut');
+  else if (key === 'company') diagram(g, 'next', m, m, size * 0.9);
   else {
     // An almanac page: a ruled leaf with a red ribbon.
     g.save();

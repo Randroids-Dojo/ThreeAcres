@@ -16,12 +16,16 @@ import {
   canUpgrade,
   CARDS,
   cardText,
+  chooseTwist,
   costOf,
   isFinal,
   leaveShop,
   maxPages,
+  nextCarry,
+  nextQuota,
   nextSeason,
   PAGES,
+  PLURALS,
   removeCard,
   removePrice,
   reroll,
@@ -29,10 +33,11 @@ import {
   SEASON_NAMES,
   seasonsToNext,
   SEEDS,
-  START_POOL,
   slotOnSale,
   slotPrice,
+  topCrops,
   TUNING,
+  twistText,
   upgradeCard,
   upgradeNote,
   upgradePrice,
@@ -47,6 +52,7 @@ import type { Table } from './table';
 import { pinUrl, scoopUrl, thingUrl } from './view/art';
 import { faceUrl, VARIETY } from './view/faces';
 import { paintBell, paintStamp } from './view/glyphs';
+import { twistUrl } from './view/icons';
 
 const NUMS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
 
@@ -177,6 +183,7 @@ export class Sheets {
     this.kind = null;
     this.picked = null;
     this.done = null;
+    this.needTwist = false;
   }
 
   private get touch(): boolean {
@@ -233,6 +240,7 @@ export class Sheets {
       ),
     );
     // Keys only for a keyboard: a phone has none.
+    if (s.twist && s.phase === 'day') page.append(el('p', 'sb-foot', `<b>This season.</b> ${esc(twistText(s.twist))}`));
     if (keys) page.append(el('p', 'sb-keys', 'Keys: 1 to 7 take up a card (Shift for one you cannot pay for), arrows pick a plot, Enter plays, I reads, E ends the day, X tosses, D opens the tin, Esc puts down.'));
     this.show('menu', page);
   }
@@ -243,12 +251,16 @@ export class Sheets {
     page.append(el('i', 'sb-ribbon'));
     page.append(el('h2', '', 'The rules in brief'));
     const lines = [
+      'A run is three years of four seasons. Meet the last winter to win; the run ends the night you do.',
       'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner: a radish is free, corn and the pumpkin take three.',
       'Every crop pulled up puts a scoop back on the next morning\'s bench, two at most a night. A strawberry puts one back with every pick.',
       'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. Beans and strawberries stay and pick night after night. The watering can and rain add a night.',
       'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
-      'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
+      'Fill the pegboard by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
+      'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
+      'From year 2, the stall offers two twists for the season ahead, such as frost on the bottom row or a buyer for one crop. Pick one; it holds all season.',
+      "Year 3 asks more of a strong plot: each quota is at least a share more than your year 2 seasons took.",
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
       'From summer, pests settle on crops: a pested crop pays half for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
@@ -403,7 +415,8 @@ export class Sheets {
     const tilt = ((id.charCodeAt(0) * 7 + id.length * 3) % 7) - 3;
     const d = el('div', `sb-pagesheet${sold ? ' sold' : ''}`);
     d.style.setProperty('--tilt', `${tilt * 0.6}deg`);
-    d.innerHTML = `<img class="sb-pinimg" src="${pinUrl()}" alt=""><b>${esc(p.name)}</b><span>${esc(p.text)}</span>${price !== null ? `<em class="sb-pencil">${sold ? 'taken' : `${price} coins`}</em>` : ''}`;
+    const pencil = price !== null ? `<em class="sb-pencil">${sold ? 'taken' : `${price} coins`}</em>` : '';
+    d.innerHTML = `<img class="sb-pinimg" src="${pinUrl()}" alt=""><b>${pencil}${esc(p.name)}</b><span>${esc(p.text)}</span>`;
     return d;
   }
 
@@ -448,23 +461,48 @@ export class Sheets {
     const last = s.stats.log[s.stats.log.length - 1];
     const head = el('div', 'sb-stall-head');
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}'s harvest is in: ${last.earned} of ${last.quota}.`));
-    head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
-    // Each new year the merchant brings cards the catalogue does not hold yet, for this run: said at the year's first stall.
-    if (s.season === 0 && s.year >= 2) {
-      const visiting = s.pool.filter((c) => !START_POOL.includes(c) && !this.t.meta.unlocked.includes(c));
-      const fresh = visiting.slice((s.year - 2) * TUNING.newStock, (s.year - 1) * TUNING.newStock);
-      if (fresh.length) head.append(el('p', 'sb-purse-line sb-stock', `New stock this year: ${listOf(fresh.map((c) => lower(c)))}.`));
+    // The season just closed, and the share of its surplus that carries into the next one.
+    const carry = nextCarry(s);
+    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}: ${last.earned} of ${last.quota}.${carry ? ` ${carry} carries over.` : ''}`));
+    const coming = nextSeason(s);
+    head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins. ${cap(SEASON_NAMES[coming.season])} asks ${nextQuota(s)}.`));
+    // Each new year the merchant brings new stock for this run, laid on the year's first tray: said at that stall.
+    if (s.season === 0 && s.year >= 2 && s.stock?.length) {
+      const plain = s.stock.filter((o) => !o.up).map((o) => lower(o.card));
+      const up = s.stock.filter((o) => o.up).map((o) => lower(o.card));
+      const words = plain.length && up.length ? `${listOf(plain)}, and improved ${listOf(up)}` : up.length ? `improved ${listOf(up)}` : listOf(plain);
+      head.append(el('p', 'sb-purse-line sb-stock', `New stock this year: ${words}.`));
     }
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
+    // The season ahead: two twists, pick one. It holds all season; it can be changed until the stall is left.
+    if (sh.twists?.length) {
+      const row = el('div', `sb-twists${this.needTwist ? ' ask' : ''}`);
+      row.setAttribute('role', 'radiogroup');
+      row.setAttribute('aria-label', `${cap(SEASON_NAMES[coming.season])} brings one of these`);
+      sh.twists.forEach((tw, i) => {
+        const on = sh.twist === i;
+        const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
+          if (!chooseTwist(s, i)) return;
+          this.t.tutor.count('twist');
+          this.needTwist = false;
+          this.ctx.audio.cue('deck.page', { gain: 0.6 });
+          this.t.save();
+          this.stall();
+        });
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(on));
+        row.append(b);
+      });
+      wrap.append(row);
+    }
     const body = el('div', 'sb-stall-body');
 
     // Pages pinned on the back board, once the almanac pages have been brought in.
     const cork = el('div', 'sb-cork');
     const room = maxPages(s);
     const full = s.pages.length >= room;
-    cork.append(el('h3', '', full ? `Almanac pages. Yours is full: a new page takes a kept one's place.` : `Almanac pages. You keep up to ${room}.`));
+    cork.append(el('h3', '', full ? 'Almanac pages. Yours is full.' : `Almanac pages. You keep up to ${room}.`));
     const pins = el('div', 'sb-pins');
     const pickedPage = this.picked?.startsWith('page') ? Number(this.picked.slice(4)) : -1;
     sh.pages.forEach((o, i) => {
@@ -547,19 +585,19 @@ export class Sheets {
         b.innerHTML = '<span class="sb-chalk">sold</span>';
         b.disabled = true;
       } else {
-        b.innerHTML = `<img src="${faceUrl(o.card, false)}" alt="${esc(def.name)}"><span class="sb-pricetag">${o.price}</span>`;
-        if (this.picked === key) read = `<b>${esc(def.name)}</b>, ${esc(cardWords(o.card, false))} ${ask(o.price)}`;
-        b.setAttribute('aria-label', `${def.name}, ${o.price} coins. ${def.text}`);
+        b.innerHTML = `<img src="${faceUrl(o.card, !!o.up)}" alt="${esc(def.name)}${o.up ? ', improved' : ''}"><span class="sb-pricetag">${o.price}</span>`;
+        if (this.picked === key) read = `<b>${o.up ? 'Improved ' : ''}${esc(o.up ? lower(o.card) : def.name)}</b>, ${esc(cardWords(o.card, !!o.up))} ${ask(o.price)}`;
+        b.setAttribute('aria-label', `${o.up ? 'Improved ' : ''}${def.name}, ${o.price} coins. ${cardText(o.card, !!o.up)}`);
       }
       b.onclick = () =>
         this.lift(key, () => {
-          if (buyCard(s, i)) this.bought('buy', `The ${lower(o.card)} goes in your tin.`);
+          if (buyCard(s, i)) this.bought('buy', `The ${o.up ? 'improved ' : ''}${lower(o.card)} goes in your tin.`);
           else this.ctx.audio.cue('deck.deny');
           this.stall();
         });
       b.oncontextmenu = (e) => {
         e.preventDefault();
-        this.detail({ uid: -1, id: o.card, up: false });
+        this.detail({ uid: -1, id: o.card, up: !!o.up });
       };
       goods.append(b);
     });
@@ -609,6 +647,7 @@ export class Sheets {
     // The slip's own place: what the lifted thing is, else what was just done, else the stall's lesson.
     const foot = el('div', 'sb-stall-foot');
     const spot = el('div', 'sb-slipspot');
+    if (!read && this.needTwist && sh.twists?.length && sh.twist === undefined) read = `<em>Pick one of the two for ${SEASON_NAMES[coming.season]} first.</em>`;
     if (read) spot.append(this.readSlip(read));
     else if (this.done) {
       const d = el('div', 'sb-done');
@@ -620,6 +659,15 @@ export class Sheets {
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : isFinal(nextSeason(s)) ? 'On to the last winter' : `On to ${SEASON_NAMES[s.season + 1]}`;
     foot.append(
       btn('sb-signpost', `<span>${next}</span>`, () => {
+        // The season's twist is a choice: the way on asks for one first.
+        if (sh.twists?.length && sh.twist === undefined) {
+          this.needTwist = true;
+          this.picked = null;
+          this.done = null;
+          this.ctx.audio.cue('deck.deny');
+          this.stall();
+          return;
+        }
         const ev = leaveShop(s);
         if (!ev) return;
         this.t.save();
@@ -627,18 +675,24 @@ export class Sheets {
         this.t.syncAll();
         this.t.relayout();
         this.ctx.audio.cue('deck.shuffle');
-        if (isFinal(s)) this.t.say('The last winter: meet it to win.', null);
+        this.t.seasonStart();
       }),
     );
     wrap.append(foot);
     const scroll = this.el.querySelector('.sb-stall-body')?.scrollTop ?? 0;
     // Keep the keyboard where it was: on the lifted thing, or on what was focused before.
     const was = document.activeElement?.closest('.sb-stall') ? [...this.el.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement) : -1;
-    this.show('stall', wrap, this.picked ? '.lifted' : undefined);
-    if (!this.picked && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
+    this.show('stall', wrap, this.picked ? '.lifted' : this.needTwist ? '.sb-twistcard' : undefined);
+    if (!this.picked && !this.needTwist && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
     body.scrollTop = scroll;
+    // A body that scrolls says so: a soft shade at its foot while there is more below (it scrolled 16 px with no sign).
+    const more = () => body.classList.toggle('more', body.scrollHeight - body.clientHeight - body.scrollTop > 2);
+    body.addEventListener('scroll', more, { passive: true });
+    requestAnimationFrame(more);
   }
   private swapFor: number | null = null;
+  /** The way on was tried with no twist picked: the slip asks for one and the two clippings call for a tap. */
+  private needTwist = false;
 
   /** After a purchase: count it for the lessons, voice it, save, and tick the purse down. */
   private bought(kind: 'buy' | 'page' | 'service', words: string): void {
@@ -665,6 +719,10 @@ export class Sheets {
   // ---------------------------------------------------------------- the almanac entry at the end
 
   entry(): void {
+    if (this.t.run.end?.won) {
+      this.winPage();
+      return;
+    }
     const s = this.t.run;
     const m = this.t.meta;
     const end = s.end;
@@ -680,7 +738,7 @@ export class Sheets {
       const li = el('li');
       const last = k === s.stats.log.length - 1;
       const how = l.cleared ? 'Met.' : last && end?.gaveUp ? `Given up${end.day ? ` on day ${end.day}` : ''}.` : `Short by ${l.quota - l.earned}. The run ends here.`;
-      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned} against a quota of ${l.quota}. ${how}`;
+      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned}${l.carried ? `, ${l.carried} of it carried in,` : ''} against a quota of ${l.quota}. ${how}`;
       list.append(li);
     });
     // Given up at the stall, between seasons: the run ends before the next one starts.
@@ -715,6 +773,84 @@ export class Sheets {
     sheet.append(foot);
     this.show('entry', sheet);
     this.ctx.audio.cue(end?.won ? 'deck.big' : 'deck.fail');
+  }
+
+  /**
+   * A won run's own page, not the loss ledger with a seal: the seal and the summary at the top, the best harvest with
+   * its card, the build that won (the crops that took the most and the pages kept), and the record of wins. The season
+   * by season account follows, below the fold if it must be.
+   */
+  private winPage(): void {
+    const s = this.t.run;
+    const m = this.t.meta;
+    const end = s.end!;
+    const sheet = el('div', 'sb-entry won');
+    const page = el('div', 'sb-entry-body');
+    sheet.append(page);
+    const top = el('div', 'sb-win-top');
+    top.append(el('div', 'sb-seal', '<span>Won</span>'));
+    const title = el('div', 'sb-win-title');
+    title.append(el('h2', '', 'The run is won'));
+    const day = end.metDay && end.metDay < TUNING.days ? ` The last winter was met on day ${end.metDay}.` : '';
+    title.append(el('p', 'sb-sub', `${cap(NUMS[TUNING.years] ?? String(TUNING.years))} years on the kitchen plot, every quota met.${day}`));
+    top.append(title);
+    page.append(top);
+    // The summary: three numbers.
+    const sum = el('div', 'sb-win-sum');
+    const stat = (n: string, label: string) => sum.append(el('div', 'sb-win-stat', `<b>${n}</b><span>${label}</span>`));
+    stat(s.stats.totalEarned.toLocaleString('en-GB'), 'coins in all');
+    stat(`${s.stats.seasonsCleared} of ${TUNING.years * 4}`, 'seasons met');
+    stat(String(s.stats.harvests), 'harvests');
+    page.append(sum);
+    // The best harvest, with its card.
+    if (s.stats.bestKind) {
+      const best = el('div', 'sb-win-best');
+      best.append(Object.assign(el('img'), { src: faceUrl(s.stats.bestKind, false), alt: CARDS[s.stats.bestKind].name }));
+      best.append(el('p', '', `<b>Best harvest</b>${esc(cap(lower(s.stats.bestKind)))}, for ${s.stats.bestHarvest}.`));
+      page.append(best);
+    }
+    // The build that won: the crops that took the most, and the pages kept.
+    const by = s.stats.byKind ?? {};
+    const total = Math.max(1, Object.values(by).reduce((a, v) => a + (v ?? 0), 0));
+    const crops = topCrops(s);
+    if (crops.length) {
+      const build = el('div', 'sb-win-build');
+      build.append(el('h3', '', 'The build that won'));
+      const row = el('div', 'sb-win-crops');
+      for (const k of crops) {
+        const c = el('div', 'sb-win-crop');
+        c.append(Object.assign(el('img'), { src: faceUrl(k, false), alt: '' }));
+        c.append(el('span', '', `${cap(PLURALS[k])} ${Math.round(((by[k] ?? 0) / total) * 100)}%`));
+        row.append(c);
+      }
+      build.append(row);
+      if (s.pages.length) build.append(el('p', 'sb-win-pages', `Pages kept: ${listOf(s.pages.map((p) => PAGES[p].name))}.`));
+      page.append(build);
+    }
+    // The record of wins.
+    const rec = el('div', 'sb-win-record');
+    rec.append(el('h3', '', 'Runs won'));
+    const wins = m.wins ?? 0;
+    rec.append(el('p', '', `${wins} of ${m.runs} ${m.runs === 1 ? 'run' : 'runs'}.${m.bestWin === s.stats.totalEarned && wins > 1 ? ' This one took the most.' : m.bestWin ? ` The most a won run took: ${m.bestWin.toLocaleString('en-GB')}.` : ''}`));
+    const log = [...(m.winLog ?? [])].reverse();
+    if (log.length) {
+      const ol = el('ol', 'sb-win-log');
+      for (const w of log) ol.append(el('li', '', `Run ${w.run}: ${w.coins.toLocaleString('en-GB')} coins, ${listOf(w.top.slice(0, 2).map((k) => PLURALS[k]))}.`));
+      rec.append(ol);
+    }
+    page.append(rec);
+    // The account, season by season.
+    page.append(el('h3', 'sb-win-head', 'Season by season'));
+    const list = el('ol', 'sb-entries');
+    for (const l of s.stats.log) list.append(el('li', '', `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> ${l.earned} of ${l.quota}${l.twist ? `. ${esc(twistText(l.twist))}` : '.'}`));
+    page.append(list);
+    const fresh: CardId[] = end.unlocked ?? [];
+    if (fresh.length) page.append(el('p', '', `New in the merchant's catalogue: ${listOf(fresh.map((c) => lower(c)))}.`));
+    const foot = el('div', 'sb-entry-foot');
+    foot.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    sheet.append(foot);
+    this.show('entry', sheet);
+    this.ctx.audio.cue('deck.big');
   }
 
   // ---------------------------------------------------------------- keys

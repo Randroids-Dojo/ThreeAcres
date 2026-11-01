@@ -10,6 +10,19 @@ export type CardType = 'seed' | 'tool' | 'object' | 'weather';
 export type Rarity = 'common' | 'uncommon' | 'rare';
 export type PageId = 'barrel' | 'cellar' | 'bees' | 'thumb' | 'basket' | 'rotation' | 'market' | 'clover' | 'furrow' | 'coldframe';
 
+/**
+ * A season's twist: one plain rule for the coming season, picked at the stall from two. Boons nudge the plot one way
+ * (a buyer for one crop, good company, no pests, longer picks, sunflowers all round), hitches another (frost on the
+ * bottom row, a glut of one crop, sunflowers facing up, crows twice as often).
+ */
+export type TwistId = 'buyer' | 'company' | 'calm' | 'picks' | 'sunall' | 'frost' | 'glut' | 'sunup' | 'crows';
+
+export interface Twist {
+  id: TwistId;
+  /** The crop a buyer or a glut is about. */
+  crop?: SeedId;
+}
+
 /** 0 spring, 1 summer, 2 autumn, 3 winter. */
 export type Season = 0 | 1 | 2 | 3;
 
@@ -91,6 +104,8 @@ export interface ShopCard {
   card: CardId;
   price: number;
   sold: boolean;
+  /** Improved stock: the card comes improved (new stock once the catalogue holds every card). */
+  up?: boolean;
 }
 
 export interface ShopPage {
@@ -106,6 +121,9 @@ export interface Shop {
   rerolls: number;
   removed: number;
   upgraded: number;
+  /** The two twists offered for the coming season (from year 2), and the one picked. */
+  twists?: Twist[];
+  twist?: number;
 }
 
 export interface RunStats {
@@ -118,8 +136,10 @@ export interface RunStats {
   /** Pests landed and crows seen this run: the merchant stocks an answer once a hazard has shown. */
   pests: number;
   crows: number;
-  /** Every season played, for the almanac entry at the end. */
-  log: { year: number; season: Season; earned: number; quota: number; cleared: boolean }[];
+  /** Every season played, for the almanac entry at the end. `carried`: the part of `earned` carried in from the season before. */
+  log: { year: number; season: Season; earned: number; quota: number; cleared: boolean; carried?: number; twist?: Twist | null }[];
+  /** Coins each crop took this run: the build that won. */
+  byKind?: Partial<Record<SeedId, number>>;
 }
 
 export interface RunEnd {
@@ -135,6 +155,8 @@ export interface RunEnd {
   /** The player gave the run up (on this day, or at the stall: day 0). It ends like a missed quota. */
   gaveUp?: boolean;
   day?: number;
+  /** A won run: the day of the last winter its quota was met (the run ends that night). */
+  metDay?: number;
 }
 
 export type Phase = 'day' | 'shop' | 'over';
@@ -188,6 +210,18 @@ export interface RunState {
   pool: CardId[];
   /** Cards on the last tray the merchant laid out, so the next tray brings different ones where it can. */
   lastTray?: CardId[];
+  /** This season's twist, picked at the stall before it (from year 2); null for none. */
+  twist?: Twist | null;
+  /** Part of the last season's surplus, waiting to be carried into the next season's take. */
+  carry?: number;
+  /** What this season's take started from: carried in from the season before. */
+  carried?: number;
+  /** The first run after the guided one: its first spring asks less. */
+  soft?: boolean;
+  /** This year's new stock, laid on the year's first tray. */
+  stock?: { card: CardId; up: boolean }[];
+  /** Cards the merchant sells improved, once the catalogue holds every card (new stock never runs dry). */
+  select?: CardId[];
   stats: RunStats;
   end: RunEnd | null;
 }
@@ -204,6 +238,19 @@ export interface Meta {
   wins?: number;
   /** The most coins a won run took in all. */
   bestWin?: number;
+  /** Won runs, latest last (a few kept): what took them there. */
+  winLog?: WinRecord[];
+}
+
+export interface WinRecord {
+  /** Which run it was, counting every run finished. */
+  run: number;
+  coins: number;
+  best: number;
+  bestKind: SeedId | null;
+  /** The crops that took the most, most first. */
+  top: SeedId[];
+  pages: PageId[];
 }
 
 export interface NightGrowth {
@@ -242,11 +289,12 @@ export type Ev =
   | { t: 'dawn'; day: number }
   /** A crow sits on the plate's edge at dawn: it takes one ripe, unguarded crop tonight. */
   | { t: 'crowAbout' }
-  | { t: 'season'; year: number; season: Season; quota: number }
+  | { t: 'season'; year: number; season: Season; quota: number; carried: number; twist: Twist | null }
   | { t: 'shop' }
   | { t: 'over'; end: RunEnd }
   /** The merchant has new stock this year, for this run: cards the catalogue does not hold yet. */
-  | { t: 'stock'; cards: CardId[] }
+  | { t: 'stock'; cards: CardId[]; select: CardId[] }
+  | { t: 'twist'; i: number }
   | { t: 'buy'; card: CardId }
   | { t: 'page'; page: PageId }
   | { t: 'remove'; card: Card }
