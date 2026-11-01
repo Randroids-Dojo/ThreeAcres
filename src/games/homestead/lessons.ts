@@ -9,6 +9,8 @@ import type { Command } from '../../sim/commands';
 import { BUILD_COST, TOOL_UPGRADES } from '../../sim/constants';
 import { CROPS, cropWord } from '../../sim/crops';
 import { nightsToTurn } from '../../sim/actions';
+import { guarded } from '../../sim/day';
+import { begun } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
 import { season, SEASON_NAMES } from '../../sim/world';
 import type { Crop, SimEvent, WorldState } from '../../sim/types';
@@ -24,9 +26,17 @@ interface Lesson {
   ready(s: WorldState): boolean;
   /** Eight words or fewer: one action. The world shows the rest. */
   text(s: WorldState, touch: boolean): string;
-  /** Finished? `n` reads the counts the tutor keeps. Passive lessons finish on their own after `passive` seconds. */
-  done?(s: WorldState, n: (k: string) => number): boolean;
+  /**
+   * Finished? `n` reads the counts the tutor keeps; `acted` says the farmer has done the lesson's `act` since its
+   * line came up. Passive lessons finish on their own after `passive` seconds, or sooner when they have a `done`.
+   */
+  done?(s: WorldState, n: (k: string) => number, acted: boolean): boolean;
   passive?: number;
+  /**
+   * Brings something new onto the screen, so it waits for a day when nothing else has: the crow, the Build tool, the
+   * forecast and the smith come one a day, each with its own line.
+   */
+  stagger?: boolean;
   /**
    * Takes over from a calm lesson when it becomes ready (a crow will not wait), which comes back after. Urgent
    * lessons have a clear order: a higher one takes over from a lower one (a crow from bugs, bugs from the new field).
@@ -87,6 +97,16 @@ const prop = (kind: string): Point => {
   const p = PROPS.find((q) => q.kind === kind)!;
   return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
 };
+
+/** Two requests offered together and nothing sown for either yet: the morning's choice. */
+const thePair = (s: WorldState) => {
+  const open = s.orders.filter((o) => o.pair !== undefined && !begun(s, o));
+  return open.find((o) => open.some((q) => q !== o && q.pair === o.pair)) ?? null;
+};
+/** The day a lesson finished (0 for a farm that finished it before days were kept). */
+const doneOn = (s: WorldState, id: string) => s.learnCount[`done:${id}`] ?? 0;
+/** The growing crop nearest the farmer that no scarecrow watches over. */
+const unguarded = (s: WorldState) => nearest(s, (c, i) => live(c) && c.stage >= 1 && !guarded(s, i % s.W, Math.floor(i / s.W)));
 
 /** Features that arrive with no line of their own: crows and bugs start coming from day 5, once a request is understood. */
 const QUIET: { what: string; after: string[]; when(s: WorldState): boolean }[] = [{ what: 'pests', after: ['deliver'], when: (s) => s.day >= 5 }];
@@ -190,6 +210,18 @@ const LESSONS: Lesson[] = [
     point: (s) => theRequest(s)?.ripe ?? prop('crate'),
   },
   {
+    // The first pair of requests: only one of them can be met. Points at the board until it has been read, then
+    // at bare soil; ends when seed goes in for one of them (or the pair has gone).
+    id: 'choose',
+    after: ['deliver'],
+    unlocks: [],
+    act: 'board',
+    ready: (s) => !!thePair(s),
+    text: () => 'Two requests on the board. Plant for one.',
+    done: (s) => !thePair(s),
+    point: (s) => (s.learnCount['board'] ?? 0) > (s.learnCount['board@choose'] ?? Infinity) ? nearest(s, (c, i) => !c && s.plots[i].tilled && !s.builds.some((b) => b.y * s.W + b.x === i)) : { x: prop('board').x, y: prop('board').y + 0.1 },
+  },
+  {
     id: 'field',
     after: ['deliver'],
     unlocks: [],
@@ -209,7 +241,8 @@ const LESSONS: Lesson[] = [
     urgent: 3,
     act: 'scare',
     after: ['deliver'],
-    unlocks: ['build', 'forecast'],
+    // Only the line: the Build tool comes the next day, and the forecast the day after (one new thing a day).
+    unlocks: [],
     ready: (s) => crowHere(s),
     // Names what it is after, so you know where to look.
     text: (s) => {
@@ -225,14 +258,29 @@ const LESSONS: Lesson[] = [
     done: (s) => !crowHere(s),
   },
   {
+    // The morning after the first crow: the Build tool arrives, with its own line, and points at crops a crow could
+    // take. It ends when a scarecrow goes up, or after a while.
     id: 'scarecrow',
-    urgent: 2,
     after: ['pests'],
-    unlocks: [],
-    ready: () => true,
+    unlocks: ['build'],
+    stagger: true,
+    act: 'build',
+    ready: (s) => s.day > doneOn(s, 'pests'),
     // Never "build one" to a farmer who cannot pay for it.
     text: (s) => (s.coins >= BUILD_COST.scarecrow ? 'Scarecrows keep crows away. Build one.' : `Scarecrows keep crows away. They cost ${BUILD_COST.scarecrow}.`),
-    passive: 9,
+    passive: 12,
+    done: (_s, _n, acted) => acted,
+    point: (s) => unguarded(s),
+  },
+  {
+    // The day after the Build tool: the forecast joins the day card.
+    id: 'forecast',
+    after: ['scarecrow'],
+    unlocks: ['forecast'],
+    stagger: true,
+    ready: (s) => s.day > doneOn(s, 'scarecrow'),
+    text: () => 'Check the forecast for rain and heat.',
+    passive: 8,
   },
   {
     // Bugs come with the crows, quietly. Like the crow, the line waits for real
@@ -268,14 +316,18 @@ const LESSONS: Lesson[] = [
     after: ['plant'],
     unlocks: ['wide'],
     keys: true,
+    act: 'wide',
     ready: (s) => s.day >= 2,
     text: () => 'Press C to see the whole farm.',
     passive: 7,
+    // Pressing C does what it says: the line goes.
+    done: (_s, _n, acted) => acted,
   },
   {
     id: 'smith',
     after: ['deliver'],
     unlocks: ['smith'],
+    stagger: true,
     ready: (s) => s.rep >= Math.min(TOOL_UPGRADES.can[0].rep, TOOL_UPGRADES.hoe[0].rep),
     text: () => 'The smith has better tools now.',
     passive: 9,
@@ -294,6 +346,14 @@ const NUDGES: { id: string; after: string; ready(s: WorldState): boolean; text: 
     ready: (s) => s.water <= 0 && s.tool === 'can' && anyThirsty(s),
     text: 'Can empty. Fill the can at the well.',
     point: () => prop('well'),
+  },
+  {
+    // A heat wave withers a crop left dry tonight: while one is still thirsty, the line says so and points at it.
+    id: 'heat',
+    after: 'water',
+    ready: (s) => s.weather === 'heat' && anyThirsty(s),
+    text: 'Heat wave. Water every crop today.',
+    point: (s) => nearest(s, (c, i) => thirsty(s, c, i)),
   },
 ];
 
@@ -338,6 +398,9 @@ export class Tutor {
       case 'crowScared':
         bump('scare');
         break;
+      case 'rules':
+        if (e.changed.includes('camera')) bump('wide');
+        break;
     }
   }
 
@@ -368,6 +431,7 @@ export class Tutor {
     const finish = (l: Lesson) => {
       cmds.push({ type: 'unlock', what: `lesson:${l.id}` });
       s.learn.push(`lesson:${l.id}`);
+      s.learnCount[`done:${l.id}`] = s.day;
       if (this.active === l) this.active = null;
     };
     const awake = s.turnover < 0;
@@ -381,14 +445,17 @@ export class Tutor {
     if (this.active) {
       const l = this.active;
       const seen = n(`seen:${l.id}`);
-      if (l.passive ? seen >= l.passive : l.done!(s, n)) {
-        const acted = !!l.act && n(l.act) > (this.base.get(l.id) ?? Infinity);
+      const acted = !!l.act && n(l.act) > (this.base.get(l.id) ?? Infinity);
+      const met = !!l.done && l.done(s, n, acted);
+      if (l.passive ? seen >= l.passive || (met && seen > 0) : met) {
         if (l.passive || (l.urgent ? seen >= SEEN || (acted && seen > 0) : seen > 0)) finish(l);
         // Its trouble went before anyone saw the line: not done, and the line steps aside until it comes back.
         else if (l.urgent) this.active = null;
       }
     }
-    const eligible = (l: Lesson) => !finished(l.id) && l.after.every(finished) && l.ready(s);
+    // One new thing on the screen a day: a staggered lesson waits for a day when no other has brought anything.
+    const quietDay = (l: Lesson) => LESSONS.every((o) => o === l || !o.stagger || s.learnCount[`arrived:${o.id}`] !== s.day);
+    const eligible = (l: Lesson) => !finished(l.id) && l.after.every(finished) && l.ready(s) && (!l.stagger || quietDay(l));
     const rank = (l: Lesson | null) => l?.urgent ?? 0;
     const urgentNow = () => LESSONS.filter((l) => l.urgent && eligible(l)).sort((a, b) => rank(b) - rank(a))[0];
     // An urgent lesson takes the line from a calm one, or from a lower urgent one (a crow over bugs); the one it
@@ -408,10 +475,12 @@ export class Tutor {
       this.active = next;
       if (next) {
         s.learnCount[`since:${next.id}`] = s.day;
+        if (next.stagger) s.learnCount[`arrived:${next.id}`] ??= s.day;
         if (next.act && !this.base.has(next.id)) this.base.set(next.id, n(next.act));
+        if (next.act) s.learnCount[`${next.act}@${next.id}`] ??= n(next.act);
         for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
         // A calm lesson already satisfied before its line ever showed (rain watered the carrots) passes quietly.
-        if (!next.passive && !next.urgent && n(`seen:${next.id}`) === 0 && next.done!(s, n)) {
+        if (!next.passive && !next.urgent && n(`seen:${next.id}`) === 0 && next.done!(s, n, false)) {
           finish(next);
           return { line: '', cmds, point: null };
         }
@@ -426,7 +495,10 @@ export class Tutor {
     const l = this.active;
     if (l && visible && dt > 0) s.learnCount[`seen:${l.id}`] = n(`seen:${l.id}`) + dt;
     let point = l ? (l.point?.(s) ?? null) : null;
-    // After their lesson, bugs still arrive now and then: the pointer keeps finding them, without a word.
+    // After their lessons, crows and bugs still arrive now and then: the pointer keeps finding them, without a word
+    // (a crow first: it will not wait).
+    const crow = theCrow(s);
+    if (!point && finished('pests') && crow) point = { x: crow.x + 0.5, y: crow.y + 0.5 };
     if (!point && finished('bugs')) point = theBugs(s);
     return { line: l ? l.text(s, touch) : '', cmds, point };
   }

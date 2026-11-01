@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { CROP_IDS, CROPS, inSeason } from '../src/sim/crops';
 import { nightfall } from '../src/sim/day';
-import { fillRequests, makeRequest } from '../src/sim/goals';
+import { fillRequests, offerRequests, requestHave } from '../src/sim/goals';
 import { step } from '../src/sim/step';
 import { season } from '../src/sim/world';
 import { smithLine } from '../src/ui/dialogs';
@@ -79,7 +79,7 @@ describe('requests fit the season', () => {
         s.rep = 3;
         s.requested = 5;
         for (let k = 0; k < 3; k++) {
-          const o = makeRequest(s) as ReturnType<typeof makeRequest> | undefined;
+          const o = offerRequests(s)[0];
           if (!o) continue;
           s.orders.push(o);
           made++;
@@ -95,61 +95,65 @@ describe('requests fit the season', () => {
         }
       }
     }
-    expect(made).toBeGreaterThan(1000);
+    expect(made).toBeGreaterThan(600);
   });
 
-  // Round 2: requests were constant (a filled one replaced at once, three open from reputation 4). Now they are
-  // few: one until the first is filled, then two at most, and new ones come only with the mornings.
-  it('come one at a time until the first is filled, then two at most, and only with the mornings', () => {
+  // Round 2: requests were constant (a filled one replaced at once, three open from reputation 4). Round 3: one
+  // until the first is filled; after that they come with the mornings, a pair at a time, and no new pair while one
+  // still waits to be chosen.
+  it('come one at a time until the first is filled, then a pair with the mornings, and none while a pair waits', () => {
     const s = onDay3(9);
     s.learn.push('requests');
     step(s, 0.016);
     expect(s.orders.length).toBe(1);
-    // Mornings bring no second while the first is unfilled.
+    // Mornings bring nothing more while the first is unfilled.
     for (let k = 0; k < 5; k++) fillRequests(s, true);
     expect(s.orders.length).toBe(1);
+    s.orders = [];
     s.rep = 1;
+    s.coins = 400;
     step(s, 0.016);
-    expect(s.orders.length).toBe(1);
-    for (let k = 0; k < 20 && s.orders.length < 2; k++) fillRequests(s, true);
+    expect(s.orders.length).toBe(0);
+    fillRequests(s, true);
     expect(s.orders.length).toBe(2);
-    s.rep = 9;
-    for (let k = 0; k < 20; k++) fillRequests(s, true);
+    for (let k = 0; k < 5; k++) fillRequests(s, true);
     expect(s.orders.length).toBe(2);
-    const it0 = s.orders[0].items[0];
-    s.stock[it0.crop][0] = it0.n;
-    step(s, 0.016, [{ type: 'deliver', id: s.orders[0].id }]);
-    expect(s.orders.length).toBe(1);
   });
 
-  it('the board says how far the town’s good word is from the smith’s next tool', () => {
+  it('the board says how far reputation is from the smith’s next tool', () => {
     const s = onDay3(1);
-    expect(smithLine(s)).toBe('Each request filled is a good word in town. None yet. Two more and the smith makes you a copper hoe.');
+    s.learn.push('hoe');
+    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 0. Two more and the smith makes you a copper hoe.');
     s.rep = 2;
-    expect(smithLine(s)).toBe('Each request filled is a good word in town. Two so far. One more and the smith makes you a copper can.');
+    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 2. One more and the smith makes you a copper can.');
   });
 
-  it('counts what is already growing: a big enough crop in the ground can be asked for sooner than seed would take', async () => {
+  // Round 3: requests asked for what was already growing (eight of the tester's ten). A farm that grows every crop
+  // that can go in now still gets requests, but for that many more, sown fresh.
+  it('a request for a crop already growing asks for at least three more than the farm has', async () => {
     const { plant } = await import('../src/sim/world');
-    const s = onDay3(11);
-    s.rep = 3;
-    s.requested = 4;
-    s.day = 9; // two nights to the turn: carrots from seed are out of time, but these are nearly ripe
-    for (let x = 2; x < 6; x++) plant(s, x, 7, 'carrot', 4);
-    for (let i = 0; i < 40; i++) {
-      s.orders = [];
-      const o = makeRequest(s);
-      if (!o || o.items[0].crop !== 'carrot') continue;
-      expect(o.items[0].n).toBeLessThanOrEqual(4);
-      expect(o.due).toBeLessThanOrEqual(10);
-      expect(o.due).toBeGreaterThanOrEqual(10);
-      return;
+    let n = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = onDay3(seed * 3);
+      s.rep = 3;
+      s.requested = 4;
+      s.day = 5;
+      s.coins = 500;
+      let x = 2;
+      for (const crop of ['radish', 'lettuce', 'carrot', 'strawberry'] as const) plant(s, x++, 5, crop, 0);
+      for (const o of offerRequests(s)) {
+        expect(o.items[0].n - requestHave(s, o), `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(3);
+        n++;
+      }
     }
-    throw new Error('never asked for the carrots in the ground');
+    expect(n).toBeGreaterThan(20);
   });
 
   it('every crop a request can ask for is one Sunup grows', () => {
     const s = onDay3(3);
-    for (let i = 0; i < 50; i++) expect(CROP_IDS).toContain(makeRequest(s)!.items[0].crop);
+    s.rep = 1;
+    s.requested = 1;
+    s.coins = 300;
+    for (let i = 0; i < 50; i++) for (const o of offerRequests(s)) expect(CROP_IDS).toContain(o.items[0].crop);
   });
 });

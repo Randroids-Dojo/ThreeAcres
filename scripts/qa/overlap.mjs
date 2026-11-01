@@ -14,6 +14,11 @@
 // Enter closes it without a sleep question, Escape closes it without the game
 // switcher, Enter on a seed reached with Tab picks it); harvest words stay
 // narrow; the view button keeps clear of everything.
+// Round 3: the board with a pair of requests ("or" between them) on a phone
+// and a desktop; B puts the keyboard on the board and Tab and Shift+Tab go
+// round the board's own buttons only (they used to cycle eleven HUD pieces
+// behind it), and Escape gives the keyboard back to the farm; the forecast's
+// words stay inside the day card.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -109,7 +114,19 @@ async function run(label, viewport, touch) {
     // Fields you cannot afford: the stamp says what it needs and looks it.
     ['board fields, short of coins', async () => p.evaluate(() => { window.sunup.state.coins = 120; window.sunup.dialogs.board('fields'); })],
     // A toast while the board is open shows over it, below the board.
-    ['board with a toast', async () => p.evaluate(() => { window.sunup.dialogs.board('requests'); window.sunup.hud.toast('<b>Mabel\u2019s bakery</b> took the crops. +80 coins and a good word.', 'big', 5000); })],
+    ['board with a toast', async () => p.evaluate(() => { window.sunup.dialogs.board('requests'); window.sunup.hud.toast('<b>Mabel\u2019s bakery</b> took the crops. +80 coins, +1 reputation.', 'big', 5000); })],
+    // Round 3: a pair of requests to choose between, as a morning pins them.
+    ['board requests, a pair', async () => p.evaluate(async () => {
+      const st = window.sunup.state;
+      window.sunup.dialogs.close(true);
+      Object.assign(st, { day: 6, rep: 1, requested: 1, orders: [], coins: 300 });
+      for (const q of st.plots) if (q.crop && q.crop.stage < 4) q.crop = null;
+      const g = await import('/src/sim/goals.ts');
+      g.fillRequests(st, true);
+      window.sunup.dialogs.board('requests');
+    })],
+    // The forecast's three words sit inside the day card.
+    ['forecast words', async () => p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.weather = 'storm'; st.forecast = ['cloud', 'storm', 'heat']; })],
     ['sleep question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmSleep(150, () => {}); })],
     ['empty can', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.state.water = 0; window.sunup.hud.pickTool('can'); })],
     // The seed picker opens away from the plot being worked: below when the plot is high on the screen, up top when it is low.
@@ -153,6 +170,27 @@ async function run(label, viewport, touch) {
       });
       if (!t.onTop) hits.push('toast is behind the board');
       if (!t.clear) hits.push('toast covers the board');
+    }
+    // The pair hangs together: two notes and "or" between them, all inside the board.
+    if (name === 'board requests, a pair') {
+      const q = await p.evaluate(() => {
+        const notes = [...document.querySelectorAll('.dialog .pair .item.req')].map((e) => e.getBoundingClientRect());
+        const or = document.querySelector('.dialog .pair .or')?.getBoundingClientRect();
+        const d = document.querySelector('.dialog.on .body').getBoundingClientRect();
+        const cross = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+        return { n: notes.length, or: !!or, inside: notes.every((r) => r.left >= d.left - 1 && r.right <= d.right + 1), clash: notes.length === 2 && or ? cross(notes[0], notes[1]) || notes.some((r) => cross(r, or)) : true };
+      });
+      if (q.n !== 2 || !q.or) hits.push(`the pair is not shown (${JSON.stringify(q)})`);
+      if (!q.inside) hits.push('a request note runs off the board');
+      if (q.clash) hits.push('the two notes or the "or" overlap');
+    }
+    if (name === 'forecast words') {
+      const q = await p.evaluate(() => {
+        const card = document.querySelector('.daycard').getBoundingClientRect();
+        const words = [...document.querySelectorAll('.daycard .fc .fl')].map((e) => e.getBoundingClientRect());
+        return { n: words.length, inside: words.every((r) => r.left >= card.left - 1 && r.right <= card.right + 1 && r.bottom <= card.bottom + 1) };
+      });
+      if (q.n !== 3 || !q.inside) hits.push(`forecast words ${JSON.stringify(q)}`);
     }
     // Stamps you cannot afford are dashed and upright and say what they need.
     if (name === 'board fields, short of coins') {
@@ -265,6 +303,42 @@ async function keyboardChecks(p, label) {
   const back = await p.evaluate(() => window.sunup.state.rules.camera);
   report('C shows the whole farm and the view button brings the close view back', wide === 'wide' && back === 'close', `${wide}, then ${back}`);
   await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+
+  // Round 3: B left the keyboard outside the board, and Tab went round eleven HUD pieces behind it. Now B puts the
+  // keyboard on the board, Tab and Shift+Tab stay on it, Enter on a tab changes tab and keeps the keyboard there, and
+  // Escape closes it and gives the keyboard back to the farm.
+  await p.evaluate(() => { window.sunup.dialogs.close(true); document.activeElement?.blur(); });
+  await p.keyboard.press('KeyB');
+  await p.waitForTimeout(400);
+  const focusAt = () => p.evaluate(() => {
+    const a = document.activeElement;
+    return { inBoard: !!a && !!a.closest('.dialog.on'), text: a?.textContent?.trim().slice(0, 24) ?? '', tag: a?.tagName ?? '' };
+  });
+  const first = await focusAt();
+  report('B opens the board with the keyboard on it', first.inBoard && first.text === 'Requests', JSON.stringify(first));
+  const visits = [];
+  for (let i = 0; i < 14; i++) {
+    await p.keyboard.press('Tab');
+    visits.push(await focusAt());
+  }
+  for (let i = 0; i < 4; i++) {
+    await p.keyboard.down('Shift');
+    await p.keyboard.press('Tab');
+    await p.keyboard.up('Shift');
+    visits.push(await focusAt());
+  }
+  const names = [...new Set(visits.map((v) => v.text))];
+  report('Tab and Shift+Tab go round the board\u2019s own buttons only', visits.every((v) => v.inBoard) && names.length >= 3, `${visits.filter((v) => !v.inBoard).length} stops off the board; went round ${names.join(' | ')}`);
+  // Enter on the Fields tab: the board shows fields, and the keyboard stays on it.
+  await p.evaluate(() => [...document.querySelectorAll('.dialog .tabs button')].find((b) => b.textContent === 'Fields')?.focus());
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(300);
+  const tabbed = await p.evaluate(() => ({ on: document.querySelector('.dialog .tabs button.on')?.textContent, inBoard: !!document.activeElement?.closest('.dialog.on'), open: window.sunup.dialogs.open }));
+  report('Enter on a tab changes tab and keeps the keyboard on the board', tabbed.on === 'Fields' && tabbed.inBoard && tabbed.open, JSON.stringify(tabbed));
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(300);
+  const closed = await p.evaluate(() => ({ open: window.sunup.dialogs.open, switcher: !!document.querySelector('.shellover.on'), body: document.activeElement === document.body || !document.activeElement?.closest('.hud, .dialog') }));
+  report('Escape closes the board and gives the keyboard back to the farm', !closed.open && !closed.switcher && closed.body, JSON.stringify(closed));
 }
 
 await run('phone', { width: 412, height: 838 }, true);

@@ -6,8 +6,9 @@ import { farmer } from './actors';
 import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
-import { TOOL_UPGRADES } from './constants';
-import { canDeliver } from './goals';
+import { BUILD_COST, TOOL_UPGRADES } from './constants';
+import { canDeliver, canMeet, plantedFor, requestHave } from './goals';
+import { guarded } from './day';
 import { owned } from './world';
 import type { CropId, ToolId, WorldState } from './types';
 
@@ -37,9 +38,14 @@ function bestSeed(s: WorldState): CropId {
     const ok = allowed.filter((c) => sowing(s.day, c).ok);
     allowed = ok.length ? ok : ['radish'];
   }
-  // Orders and requests first: whatever one still needs and can be grown in time.
+  // Orders and requests first: whatever one still needs and can be grown in time. Of a pair, a person picks one:
+  // the one already begun, else the one that leaves the most over its seed.
   if (homestead(s)) {
-    for (const o of s.orders) {
+    const open = s.orders.filter((o) => canMeet(s, o));
+    const short = open.filter((o) => plantedFor(s, o) > 0 && requestHave(s, o) < o.items[0].n);
+    const net = (o: (typeof open)[number]) => o.reward - o.items[0].n * CROPS[o.items[0].crop].seed;
+    const chosen = short.length ? short : open.filter((o) => plantedFor(s, o) === 0).sort((a, b) => net(b) - net(a)).slice(0, 1);
+    for (const o of chosen) {
       for (const it of o.items) {
         const have = s.stock[it.crop].reduce((a, b) => a + b, 0) + inGround(s, it.crop);
         if (have < it.n && allowed.includes(it.crop) && CROPS[it.crop].seed <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
@@ -86,8 +92,9 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
       for (const tool of tools) {
         const r = resolve(s, tool, x, y);
         if (!r.verb || !r.ok) continue;
-        // A person waters crops, not bare soil.
+        // A person waters crops, not bare soil, and does not pull up their own scarecrows.
         if (r.verb === 'water' && !s.plots[y * s.W + x].crop) continue;
+        if (r.verb === 'clear' && r.build) continue;
         const rank = { scare: 0, harvest: 1, clear: 2, tend: 2, water: 3, plant: 4, till: 5, build: 9, refill: 6 }[r.verb];
         out.push({ x, y, tool, rank });
         break;
@@ -102,7 +109,9 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
 export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   const out: Command[] = [];
   if (s.turnover >= 0) return out;
+  // Like a person through the lessons: requests, then the crows and bugs, and scarecrows after the first crow.
   if (homestead(s)) for (const what of ['requests', 'pests']) if (!s.learn.includes(what)) out.push({ type: 'unlock', what });
+  if (homestead(s) && !s.learn.includes('build') && s.stats.days >= 8) out.push({ type: 'unlock', what: 'build' });
   const f = farmer(s);
 
   // Spend money now and then.
@@ -129,6 +138,37 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
     for (const t of ['can', 'hoe'] as const) {
       const next = TOOL_UPGRADES[t][s.tools[t]];
       if (next && s.rep >= next.rep && s.coins > next.cost + 300) out.push({ type: 'upgrade', tool: t });
+    }
+  }
+
+  // Sunup: a scarecrow in the middle of each field, once scarecrows are known (a person builds them after the first crows).
+  if (homestead(s) && s.learn.includes('build') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.scarecrow + 60) {
+    for (const p of s.parcels) {
+      const covered = [[0, 0], [3, 0], [0, 3], [3, 3]].every(([dx, dy]) => guarded(s, p.x + dx, p.y + dy));
+      if (!p.owned || covered) continue;
+      const spot = [[1, 1], [2, 1], [1, 2], [2, 2]].map(([dx, dy]) => ({ x: p.x + dx, y: p.y + dy })).find((t) => {
+        const q = s.plots[t.y * s.W + t.x];
+        return q.tilled && !q.crop && !s.builds.some((b) => b.x === t.x && b.y === t.y);
+      });
+      if (!spot) continue;
+      if (s.buildKind !== 'scarecrow') out.push({ type: 'buildKind', kind: 'scarecrow' });
+      if (s.tool !== 'build') out.push({ type: 'tool', tool: 'build' });
+      out.push({ type: 'actAt', x: spot.x, y: spot.y });
+      return out;
+    }
+  }
+  // From the third field the watering outgrows a day's stamina: a sprinkler in each field, beside its scarecrow.
+  const fields = s.parcels.filter((p) => p.owned).length;
+  if (homestead(s) && fields >= 3 && s.learn.includes('build') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.sprinkler + 300) {
+    for (const p of s.parcels) {
+      if (!p.owned || s.builds.some((b) => b.kind === 'sprinkler' && b.x >= p.x && b.x < p.x + p.w && b.y >= p.y && b.y < p.y + p.h)) continue;
+      const t = { x: p.x + 2, y: p.y + 2 };
+      const q = s.plots[t.y * s.W + t.x];
+      if (!q.tilled || q.crop || s.builds.some((b) => b.x === t.x && b.y === t.y)) continue;
+      if (s.buildKind !== 'sprinkler') out.push({ type: 'buildKind', kind: 'sprinkler' });
+      if (s.tool !== 'build') out.push({ type: 'tool', tool: 'build' });
+      out.push({ type: 'actAt', x: t.x, y: t.y });
+      return out;
     }
   }
 

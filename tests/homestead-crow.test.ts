@@ -57,7 +57,8 @@ describe('the crow lesson is never ticked off unseen', () => {
     expect(s.learn).not.toContain('lesson:pests');
   });
 
-  it('seen for long enough while the crow was there, it ends when the crow goes, and the scarecrow line follows', () => {
+  // Round 3: the scarecrow line (and the Build tool) come the next morning, one new thing a day.
+  it('seen for long enough while the crow was there, it ends when the crow goes, and the scarecrow line follows the next morning', () => {
     const s = farm();
     const t = new Tutor();
     crow(s);
@@ -65,6 +66,8 @@ describe('the crow lesson is never ticked off unseen', () => {
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);
     expect(s.learn).toContain('lesson:pests');
+    expect(t.update(s, 0.1, true).line).not.toMatch(/Scarecrows/);
+    s.day += 1;
     expect(t.update(s, 0.1, true).line).toMatch(/^Scarecrows keep crows away\./);
   });
 
@@ -110,7 +113,7 @@ describe('a crow takes over from the bug line', () => {
     for (let i = 0; i < 20; i++) t.update(s, 0.1, true);
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);
-    // The scarecrow note, then the bugs again: they were never picked.
+    // The bugs again: they were never picked (the scarecrow note waits for the next morning).
     for (let i = 0; i < 120; i++) t.update(s, 0.1, true);
     expect(s.learn).toContain('lesson:pests');
     expect(s.learn).not.toContain('lesson:bugs');
@@ -128,7 +131,7 @@ describe('a crow takes over from the bug line', () => {
 
   it('the bug line says to take the hands when something else is in hand', () => {
     const s = farm();
-    s.learn.push('lesson:pests', 'lesson:scarecrow');
+    s.learn.push('lesson:pests', 'lesson:scarecrow', 'lesson:forecast');
     s.tool = 'can';
     plant(s, 2, 8, 'lettuce', 1);
     plots(s, 2, 8).crop!.bugs = 1;
@@ -139,7 +142,7 @@ describe('a crow takes over from the bug line', () => {
 
   it('after the bug lesson, the pointer keeps finding bugs without a word', () => {
     const s = farm();
-    s.learn.push('lesson:pests', 'lesson:scarecrow', 'lesson:bugs');
+    s.learn.push('lesson:pests', 'lesson:scarecrow', 'lesson:forecast', 'lesson:bugs');
     plots(s, 5, 6).crop!.bugs = 1;
     const out = new Tutor().update(s, 0.1, true);
     expect(out.line).toBe('');

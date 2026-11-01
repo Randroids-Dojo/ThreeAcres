@@ -44,9 +44,11 @@ export function facingTile(a: Actor): { x: number; y: number } {
  * Walking along a row while holding act then works each plot in turn, and
  * the well or the board answer from any side. `useful` says what counts;
  * the sim asks the tool, the director also counts the notice board. Null
- * when nothing in reach is useful.
+ * when nothing in reach is useful. `held` (a repeat from a held act key)
+ * leaves out what is behind the farmer: walking with Space held never sows
+ * a plot it has passed.
  */
-export function snapAim(a: Actor, useful: (x: number, y: number) => boolean): { x: number; y: number } | null {
+export function snapAim(a: Actor, useful: (x: number, y: number) => boolean, held = false): { x: number; y: number } | null {
   const front = facingTile(a);
   if (inMap(front.x, front.y) && useful(front.x, front.y)) return front;
   const t = tileOf(a);
@@ -62,6 +64,8 @@ export function snapAim(a: Actor, useful: (x: number, y: number) => boolean): { 
       const cy = y + 0.5 - a.y;
       const d = Math.hypot(cx, cy);
       const ahead = d > 1e-6 ? (cx * v.x + cy * v.y) / d : 1;
+      // A held act key works what it walks past at its side, never what it has left behind.
+      if (held && ahead < -0.05) continue;
       const score = d - 0.35 * ahead;
       if (score < bestScore - 1e-9) {
         bestScore = score;
@@ -470,8 +474,8 @@ function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
   if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
 }
 
-/** Taps that can wait their turn while the farmer is busy. */
-export const TAP_QUEUE = 12;
+/** Taps that can wait their turn while the farmer is busy: three fields' worth. One more is refused, and says so. */
+export const TAP_QUEUE = 48;
 
 /** Jobs a tap may change tools for: free of coins and never undoing anything. */
 const TAP_JOBS = new Set<Verb>(['harvest', 'tend', 'scare', 'clear', 'water']);

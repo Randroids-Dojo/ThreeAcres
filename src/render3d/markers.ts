@@ -25,7 +25,7 @@ import {
   Vector3,
 } from 'three';
 import type { FrameView } from '../contract';
-import { area, homestead } from '../sim/actions';
+import { area, homestead, worksOn } from '../sim/actions';
 import type { Verb, WorldState } from '../sim/types';
 import { GeoBuilder, block, cyl } from './builder';
 import type { Materials } from './materials';
@@ -338,10 +338,10 @@ export function buildMarkers(mats: Materials, cap: number): Markers {
         // An upgraded can or hoe works more than the aimed plot: show the rest of its reach.
         const level = h.verb === 'water' ? s.tools?.can ?? 0 : h.verb === 'till' ? s.tools?.hoe ?? 0 : 0;
         if (h.ok && level > 0 && homestead(s) && s.actors[0]) {
-          for (const t of area(s.actors[0], h.x, h.y, level)) {
+          for (const t of area(s, h.x, h.y, level)) {
             if (nReach >= 8 || (t.x === h.x && t.y === h.y)) continue;
-            const i = t.y * s.W + t.x;
-            if (s.tiles[i] !== 'field' || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+            // Only the plots it would really work: a thirsty crop for the can, meadow for the hoe.
+            if (!worksOn(s, h.verb as 'water' | 'till', t.x, t.y)) continue;
             _q.identity();
             _p.set(t.x + 0.5, 0.1, t.y + 0.5);
             _s.set(0.94, 1, 0.94);

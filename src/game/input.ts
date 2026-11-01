@@ -150,12 +150,13 @@ export class Input {
       my /= len;
     }
     out.unshift({ type: 'move', x: mx, y: my });
-    // Holding the act key repeats, so walking down a row works each plot ahead in turn.
+    // Holding the act key repeats, so walking down a row works each plot ahead in turn. A repeat is marked held: it
+    // works what the farmer walks past at the side, never a plot already behind.
     if (this.keys.has('Space') || this.keys.has('KeyE') || this.touchActHeld) {
       this.actHeld += dt;
       if (this.actHeld > 0.22) {
         this.actHeld = 0.1;
-        out.push({ type: 'act' });
+        out.push({ type: 'act', held: true });
       }
     } else this.actHeld = 0;
     return out;

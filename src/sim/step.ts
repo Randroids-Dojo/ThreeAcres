@@ -173,11 +173,12 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         const r = resolve(s, s.tool, x, y);
         return !!(r.verb && r.ok);
       };
-      const t = (homestead(s) ? snapAim(f, useful) : null) ?? facingTile(f);
+      const t = (homestead(s) ? snapAim(f, useful, !!c.held) : null) ?? facingTile(f);
       if (!inMap(t.x, t.y)) return;
       const r = resolve(s, s.tool, t.x, t.y);
       if (r.verb && r.ok) startAction(s, f, r, t.x, t.y, ev);
-      else if (r.reason) ev.push({ type: 'deny', x: t.x, y: t.y, reason: r.reason });
+      // A held key walking past nothing to do says nothing; a press says why not.
+      else if (r.reason && !c.held) ev.push({ type: 'deny', x: t.x, y: t.y, reason: r.reason });
       break;
     }
     case 'actAt': {
@@ -196,7 +197,10 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         const tap = { x: t.x, y: t.y, tool: tapTool(s, s.tool, t.x, t.y) };
         const queue = (s.taps ??= []);
         if (f.task || f.path.length || f.aim || queue.length) {
-          if (queue.length < TAP_QUEUE && !queue.some((q) => q.x === tap.x && q.y === tap.y)) queue.push(tap);
+          if (queue.some((q) => q.x === tap.x && q.y === tap.y)) break;
+          if (queue.length < TAP_QUEUE) queue.push(tap);
+          // A full queue never drops a tap without a word.
+          else ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: 'Busy. Tap it again soon' });
         } else doTap(s, f, tap, ev);
         break;
       }

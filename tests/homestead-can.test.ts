@@ -50,6 +50,8 @@ describe('the upgraded can works its whole reach', () => {
   it('aimed where every plot in reach is wet, it says so', () => {
     const s = teach(world('sunup'), EARLY, EARLY_FEATURES);
     s.tools.can = 2;
+    // (Sunup's can waters crops, so the plots in reach are growing.)
+    for (let x = 2; x < 6; x++) for (let y = 5; y < 9; y++) if (!plots(s, x, y).crop) plant(s, x, y, 'carrot', 1);
     for (let x = 1; x < 7; x++) for (let y = 4; y < 10; y++) {
       plots(s, x, y).wet = true;
       plots(s, x, y).moisture = 3;

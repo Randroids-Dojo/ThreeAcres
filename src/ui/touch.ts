@@ -107,8 +107,9 @@ export class TouchControls {
     const water = this.host.water();
     // With nothing to do, the button wears the tool in hand (a can, not a hand, while the can is held).
     setHtml(this.act.querySelector('.ic')!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : this.host.toolIcon())));
-    // A verb on the button, always: Pick for the bugs, Shoo for a crow. An empty can says so.
-    const word = aim?.label ?? (verb ? actWord(verb) : '');
+    // A verb on the button whenever acting would do something: Pick for the bugs, Shoo for a crow. Where it would do
+    // nothing the button is dim and wordless (bare soil never says Water), and an empty can says so.
+    const word = aim?.label ?? (verb && aim?.ok ? actWord(verb) : '');
     setText(this.act.querySelector('.tb-t')!, water?.empty && !(aim && aim.ok) ? 'Empty' : word);
     toggle(this.act, 'no', !(aim && aim.ok));
     // With the can in hand the button carries its water gauge.

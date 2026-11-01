@@ -6,7 +6,7 @@
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
-import { homestead, resolve, sowing } from '../sim/actions';
+import { doomedAtTurn, homestead, nightsToTurn, resolve, sowing } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, cropWord, QUALITY_NAME } from '../sim/crops';
@@ -19,6 +19,7 @@ import { brief, canLevel, describe, denyText, seedNote, sentence, townName } fro
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
+import { scarecrowWords } from './dialogs';
 
 
 export interface HudHost {
@@ -48,8 +49,9 @@ export function morningNews(s: WorldState): string {
   const bits: string[] = [];
   for (const f of r.filled ?? []) bits.push(`${esc(townName(f.who))} paid ${fmt(f.reward)}`);
   if (sold) bits.push(`sold ${sold} for ${fmt(value)}`);
-  // A request that ran out of time says so, rather than vanishing from the board.
+  // A request that ran out of time says so, rather than vanishing from the board; so does one that can no longer be met.
   for (const l of r.lapsed ?? []) bits.push(`${esc(townName(l.who))} gave up on the ${cropWord(l.crop, l.n)}`);
+  for (const w of r.withdrawn ?? []) bits.push(`${esc(townName(w.who))} found ${cropWord(w.crop, w.n)} elsewhere`);
   for (const k of r.kept ?? []) bits.push(`${k.n} ${cropWord(k.crop, k.n)} kept for a request`);
   if (r.grew) bits.push(`${r.grew} grew`);
   if (r.crewWork) bits.push(`the crew did ${r.crewWork} jobs overnight`);
@@ -58,6 +60,11 @@ export function morningNews(s: WorldState): string {
   if (r.turned) bits.push(`the turn took ${r.turned} green ${r.turned === 1 ? 'crop' : 'crops'}`);
   if (r.eaten) bits.push(`crows ate ${r.eaten}`);
   if (r.gift) bits.push(`a neighbour left ${fmt(r.gift)} coins for seed`);
+  // Two nights before the season turns: what the turn will take, while there is still time to plan for it.
+  if (homestead(s) && nightsToTurn(s.day) === 2) {
+    const doomed = s.plots.filter((p, i) => p.crop && doomedAtTurn(s, i)).length;
+    if (doomed) bits.push(`${doomed} green ${doomed === 1 ? 'crop' : 'crops'} won\u2019t ripen before ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()}`);
+  }
   return sentence(bits);
 }
 
@@ -95,6 +102,8 @@ const POINT_HEIGHT = 0.4;
 const POINT_LIFT = 17;
 
 const WEATHER_ICON: Record<Weather, IconId> = { sun: 'sun', cloud: 'cloud', rain: 'rain', storm: 'storm', heat: 'heat' };
+/** One short word for each day of the forecast. */
+const FORECAST_WORD: Record<Weather, string> = { sun: 'Sun', cloud: 'Cloud', rain: 'Rain', storm: 'Storm', heat: 'Heat' };
 const TOOL_ICON: Record<ToolId, IconId> = { hands: 'hands', hoe: 'hoe', can: 'can', seeds: 'seeds', build: 'build', smart: 'smart' };
 const TOOL_NAME: Record<ToolId, string> = { hands: 'Hands', hoe: 'Hoe', can: 'Can', seeds: 'Seeds', build: 'Build', smart: 'Smart' };
 
@@ -123,6 +132,8 @@ export class Hud {
   // Over a target it is a bobbing chevron; at the screen's edge it sits on a dark disc, so it reads as an arrow and not a figure.
   private pointer = el('div', 'tpoint', '<svg viewBox="-16 -16 32 32"><circle class="disc" r="14.5"/><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
   private pointAt: { x: number; y: number } | null = null;
+  /** Until when the forecast wears its arrival lift (it came with its lesson). */
+  private forecastNew = 0;
   private toolsKey = '';
   private goalsKey = '';
   private meterKey = '';
@@ -195,7 +206,17 @@ export class Hud {
     toggle(this.goals, 'folded', this.foldedGoals);
 
 
-    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.pointer, this.touch.el, this.toasts, this.floaters);
+    // The pointer takes a tap: it walks to what it points at and does the job there (a tap on the ground behind an
+    // edge arrow would walk somewhere else).
+    this.pointer.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const t = this.pointAt;
+      if (!t || !this.pointer.classList.contains('on')) return;
+      host.send({ type: 'actAt', x: Math.floor(t.x), y: Math.floor(t.y) });
+      host.cue('tap');
+    });
+    this.pointer.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.touch.el, this.pointer, this.toasts, this.floaters);
   }
 
   // ------------------------------------------------------------ per frame
@@ -220,7 +241,8 @@ export class Hud {
     setText(this.clockEl, s.rules.clock === 'turns' ? `${s.ap} of ${s.apMax} moves` : clock(s.minute));
     const wild = s.rules.weather === 'wild';
     // The next three days, read as a sentence: "Sunny, then rain, sun, cloud".
-    const fc = wild && this.knows(s, 'forecast') ? `<span class="fc" title="The next three days: ${s.forecast.map((w) => WEATHER_NAMES[w].toLowerCase()).join(', ')}"><span class="then">then</span>${s.forecast.map((w) => `<span class="ic" title="${WEATHER_NAMES[w]}">${icon(WEATHER_ICON[w])}</span>`).join('')}</span>` : '';
+    // Each day of the forecast wears its word under its picture.
+    const fc = wild && this.knows(s, 'forecast') ? `<span class="fc${this.forecastNew > performance.now() ? ' new' : ''}" title="The next three days: ${s.forecast.map((w) => WEATHER_NAMES[w].toLowerCase()).join(', ')}"><span class="then">then</span>${s.forecast.map((w) => `<span class="fd"><span class="ic">${icon(WEATHER_ICON[w])}</span><span class="fl">${FORECAST_WORD[w]}</span></span>`).join('')}</span>` : '';
     setHtml(this.sky, `<span class="ic">${icon(WEATHER_ICON[s.weather])}</span><span>${WEATHER_NAMES[s.weather]}</span>${fc}`);
 
     const key = s.rules.clock;
@@ -395,6 +417,8 @@ export class Hud {
       toggle(b, 'next', note.state === 'next');
       const gone = homestead(s) && note.state === 'off';
       toggle(b, 'gone', gone);
+      // Seed the purse cannot pay for looks it: faded, its price in red, a dashed edge.
+      toggle(b, 'poor', homestead(s) && !gone && note.state !== 'late' && s.coins < CROPS[c].seed);
       setText(b.querySelector('.pr')!, note.price);
       setText(b.querySelector('.wh')!, note.when);
       // Number keys pick a card: each shown card wears its number while a keyboard or mouse is in use.
@@ -470,7 +494,7 @@ export class Hud {
     for (const k of ['scarecrow', 'sprinkler'] as BuildKind[]) {
       const b = el('button', 'seed', `<span class="ic" style="width:24px;height:24px">${icon(k)}</span><span class="nm">${k === 'scarecrow' ? 'Scarecrow' : 'Sprinkler'}</span><span class="pr">${BUILD_COST[k]}</span><span class="key">${k === 'scarecrow' ? 1 : 2}</span>`);
       b.dataset.kind = k;
-      b.title = k === 'scarecrow' ? 'Keeps crows off everything within three plots' : 'Waters the nine plots around it every morning';
+      b.title = k === 'scarecrow' ? `${scarecrowWords(this.host.state())}.` : 'Waters the nine plots around it every morning';
       b.onclick = () => {
         this.host.send({ type: 'buildKind', kind: k });
         this.host.cue('tool');
@@ -631,7 +655,7 @@ export class Hud {
         break;
       case 'request':
         // Requests filled or gone overnight are on the morning card; this is one handed over by day.
-        if (e.done && s.turnover < 0) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins and a good word.`, 'big', 3200);
+        if (e.done && s.turnover < 0) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
         break;
       case 'upgrade': {
         const u = TOOL_UPGRADES[e.tool][e.level - 1];
@@ -644,7 +668,8 @@ export class Hud {
         break;
       }
       case 'season':
-        if (s.rules.goal !== 'almanac') this.toast(`<b>${SEASON_NAMES[e.season]}</b> begins`, 'big');
+        // Sunup says so on the morning card, so the two never stack.
+        if (s.rules.goal !== 'almanac' && !homestead(s)) this.toast(`<b>${SEASON_NAMES[e.season]}</b> begins`, 'big');
         break;
       case 'dawn':
         this.morning(s);
@@ -663,6 +688,7 @@ export class Hud {
         break;
       case 'unlock':
         this.fresh = e.what;
+        if (e.what === 'forecast') this.forecastNew = performance.now() + 2400;
         break;
     }
   }
@@ -688,11 +714,12 @@ export class Hud {
     if (!pp) return;
     const W = this.root.clientWidth;
     const H = this.root.clientHeight;
-    // The clear band: below the day card and coins, above the tool rack.
+    // The clear band: below the day card and coins, above the tool rack (and, on a phone, above the act button,
+    // so the arrow never lies over it).
     const x0 = 22;
     const x1 = W - 22;
     const y0 = 150;
-    const y1 = H - 150;
+    const y1 = H - (this.touch.shown ? 200 : 150);
     const inside = pp.x > x0 && pp.x < x1 && pp.y > y0 && pp.y < y1;
     toggle(this.pointer, 'over', inside);
     if (inside) {
@@ -722,7 +749,10 @@ export class Hud {
 
   private morning(s: WorldState): void {
     if (s.rules.clock === 'flow' && s.speed > 1) return;
-    const news = morningNews(s);
+    let news = morningNews(s);
+    // A new season is news on its own, on the same card (a toast of its own would hide behind it).
+    const turn = homestead(s) && dayOfSeason(s.day) === 1 && s.day > 1 ? `${SEASON_NAMES[season(s.day)]} begins.` : '';
+    if (turn) news = news ? `${turn} ${news}` : turn;
     // Only news earns a morning card.
     if (!news) return;
     const weather = WEATHER_NAMES[s.weather].toLowerCase();

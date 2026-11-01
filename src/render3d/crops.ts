@@ -118,6 +118,14 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
   rings.name = 'ripe-rings';
   rings.receiveShadow = false;
   rings.renderOrder = 2;
+  // Bugs: a rust ring on the soil, so a bugged crop reads from across the field even on a phone, where the plant's
+  // own yellowing is small.
+  const bugRingGeo = new RingGeometry(0.3, 0.46, 28, 1).rotateX(-Math.PI / 2);
+  const bugRingMat = new MeshBasicMaterial({ color: '#c4471f', transparent: true, opacity: 0.78, depthWrite: false });
+  const bugRings = make(bugRingGeo, bugRingMat, cap, false);
+  bugRings.name = 'bug-rings';
+  bugRings.receiveShadow = false;
+  bugRings.renderOrder = 2;
   const pipMat = patch(new MeshLambertMaterial({ vertexColors: true, emissive: '#3a3020' }), { snow: 0 });
   const pipGeos = pipModels();
   const pips = [null, make(pipGeos[1], pipMat, cap, false), make(pipGeos[2], pipMat, cap, false), make(pipGeos[3], pipMat, cap, false)];
@@ -155,6 +163,7 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
       }
       let bugN = 0;
       let ringN = 0;
+      let bugRingN = 0;
       const pipN = [0, 0, 0, 0];
       const W = st.W;
       for (let i = 0; i < st.plots.length; i++) {
@@ -172,6 +181,11 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
         const yaw = (h - 0.5) * (kind === 'sunflower' ? 0.3 : 1.0);
         let sy = 0.94 + hash2(x, y, 8) * 0.12;
         let sxz = sy;
+        // Seeds and sprouts are drawn a size up: on a phone they were dots.
+        if (!crop.dead && crop.stage <= 1) {
+          sy *= crop.stage === 0 ? 1.45 : 1.3;
+          sxz *= crop.stage === 0 ? 1.45 : 1.3;
+        }
         let ox = 0;
         let lean = 0;
         // Grow and plant: squash and stretch.
@@ -223,8 +237,14 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
           rings.setMatrixAt(ringN++, _m);
         }
 
-        // Bugs: crawlers on the plant and gnats circling above it, more as the count rises.
+        // Bugs: crawlers on the plant and gnats circling above it, more as the count rises, and the rust ring.
         if (crop.bugs > 0 && !crop.dead) {
+          const k = 1 + Math.sin(now * 4 + h * 6) * 0.05;
+          _q.identity();
+          _p.set(x + 0.5, SOIL_Y + 0.014, y + 0.5);
+          _s.set(k, 1, k);
+          _m.compose(_p, _q, _s);
+          bugRings.setMatrixAt(bugRingN++, _m);
           const top = Math.max(0.16, models.height[kind][crop.stage]);
           const nb = Math.min(3, crop.bugs);
           for (let b = 0; b < nb * 2; b++) {
@@ -259,6 +279,7 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
       }
       commit(bugs, bugN, false);
       commit(rings, ringN, false);
+      commit(bugRings, bugRingN, false);
       for (let q = 1; q <= 3; q++) commit(pips[q]!, pipN[q], false);
 
       // Flyers: an arc from the plot into the crate, spinning.
@@ -296,6 +317,8 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
       pipMat.dispose();
       ringGeo.dispose();
       ringMat.dispose();
+      bugRingGeo.dispose();
+      bugRingMat.dispose();
     },
   };
   return self;

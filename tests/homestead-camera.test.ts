@@ -98,4 +98,18 @@ describe('the phone camera keeps the farm in view', () => {
       }
     }
   });
+
+  // Round 3: from the first field the well was off screen, and on the path between the fields the first field's
+  // left column left the screen. Now the west side holds still on the first two fields and the well.
+  it('from the first field and the path beside it, the first field’s left column and the well are both on screen', () => {
+    for (const h of [838, 900]) {
+      for (const [fx, fy] of [[3.5, 6.5], [2.5, 5.5], [6.5, 7], [7.5, 9.5], [5.5, 4.5]]) {
+        const rig = framed(h, fx, fy);
+        // The left edge of the first field, on every one of its rows.
+        for (let y = 5; y < 9; y++) expect(rig.project(2, y + 0.99, 0)!.x, `field 1 at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(0);
+        const well = rig.project(11.5, 2.5, 0.6)!;
+        expect(well.x, `well, farmer ${fx},${fy}`).toBeLessThanOrEqual(W - 12);
+      }
+    }
+  });
 });

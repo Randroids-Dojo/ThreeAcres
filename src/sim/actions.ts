@@ -64,10 +64,28 @@ export function sowing(day: number, crop: CropId): Sowing {
   return { ok: true, next: false, late: false, reason: '' };
 }
 
-/** Would watering soak this plot? Owned, hoed, nothing built on it, and not already wet. */
+/**
+ * Sunup: will the season's turn take this plot's crop? It does not grow in
+ * the next season and would still be green on the last night, even watered
+ * every night (ripe crops survive the turn to be picked).
+ */
+export function doomedAtTurn(s: WorldState, i: number): boolean {
+  const c = s.plots[i]?.crop;
+  if (!c || c.dead || c.stage === 4 || !homestead(s)) return false;
+  const next = ((season(s.day) + 1) % 4) as 0 | 1 | 2 | 3;
+  if (inSeason(c.kind, next)) return false;
+  return CROPS[c.kind].days - c.age > nightsToTurn(s.day);
+}
+
+/**
+ * Would watering soak this plot? Owned, hoed, nothing built on it, and not
+ * already wet. Sunup's can waters crops, not bare soil: only a plot with a
+ * crop still growing.
+ */
 function soakable(s: WorldState, x: number, y: number): boolean {
   if (!owned(s, x, y) || buildAt(s, x, y)) return false;
   const p = plots(s, x, y);
+  if (homestead(s) && (!p.crop || p.crop.dead || p.crop.stage === 4)) return false;
   return p.tilled && !(s.rules.growth === 'classic' ? p.wet : p.moisture >= 3);
 }
 
@@ -78,9 +96,14 @@ function tillable(s: WorldState, x: number, y: number): boolean {
   return !p.tilled && !p.crop;
 }
 
+/** Would the farmer's watering or hoeing work this plot (one of an upgraded tool's reach)? For the reach marks. */
+export function worksOn(s: WorldState, verb: 'water' | 'till', x: number, y: number): boolean {
+  return verb === 'water' ? soakable(s, x, y) : tillable(s, x, y);
+}
+
 /** The plots the farmer's tool would work from here: the upgraded can and hoe reach past the aimed one. */
 function toolArea(s: WorldState, x: number, y: number, level: number): { x: number; y: number }[] {
-  return homestead(s) && level > 0 ? area(s.actors[0], x, y, level) : [{ x, y }];
+  return homestead(s) && level > 0 ? area(s, x, y, level) : [{ x, y }];
 }
 
 function plantCheck(s: WorldState, crop: CropId): Resolved {
@@ -139,6 +162,8 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
       if (!toolArea(s, x, y, s.tools.can).some((t) => soakable(s, t.x, t.y))) {
         if (build) return NO('water', 'Nothing to water');
         if (!plot.tilled) return NO('water', 'Hoe this plot first');
+        if (homestead(s) && (!crop || crop.dead)) return NO('water', 'Nothing growing here');
+        if (homestead(s) && crop?.stage === 4) return NO('water', 'Ripe, it needs no water');
         return NO('water', 'Already watered');
       }
       if (homestead(s) && s.water <= 0) return NO('water', 'The can is empty. Fill the can at the well');
@@ -196,7 +221,7 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
   let extra = 0;
   switch (verb) {
     case 'till': {
-      const tiles = isFarmer && homestead(s) ? area(actor, x, y, s.tools.hoe) : [{ x, y }];
+      const tiles = isFarmer && homestead(s) ? area(s, x, y, s.tools.hoe) : [{ x, y }];
       let n = 0;
       for (const t of tiles) {
         if (!owned(s, t.x, t.y)) continue;
@@ -212,7 +237,7 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
     }
     case 'water': {
       const limited = isFarmer && homestead(s);
-      const tiles = limited ? area(actor, x, y, s.tools.can) : [{ x, y }];
+      const tiles = limited ? area(s, x, y, s.tools.can) : [{ x, y }];
       let n = 0;
       for (const t of tiles) {
         if (limited && s.water <= 0) break;
@@ -316,24 +341,42 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
 }
 
 /**
- * Plots an upgraded tool works: level 1 three in a row away from the farmer,
- * level 2 the three by three square around the aimed plot.
+ * Plots an upgraded tool works. Level 1: three in a row along the field's
+ * row (east to west, the way the crops are sown), the aimed plot in the
+ * middle, slid along so all three stay in its field: wherever the farmer
+ * stands, it never reaches past the field onto the path or into the next
+ * field. Level 2: the three by three square around the aimed plot.
  */
-export function area(actor: Actor, x: number, y: number, level: number): { x: number; y: number }[] {
+export function area(s: WorldState, x: number, y: number, level: number): { x: number; y: number }[] {
   if (level <= 0) return [{ x, y }];
   if (level >= 2) {
     const out = [{ x, y }];
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) out.push({ x: x + dx, y: y + dy });
     return out.filter((t) => inMap(t.x, t.y));
   }
-  let dx = Math.sign(x - Math.floor(actor.x));
-  let dy = Math.sign(y - Math.floor(actor.y));
-  if (dx && dy) dy = 0;
-  if (!dx && !dy) {
-    dx = actor.facing === 'e' ? 1 : actor.facing === 'w' ? -1 : 0;
-    dy = actor.facing === 's' ? 1 : actor.facing === 'n' ? -1 : 0;
+  const field = inMap(x, y) ? s.parcelOf[idx(x, y)] : -1;
+  const inField = (tx: number) => field >= 0 && inMap(tx, y) && s.tiles[idx(tx, y)] === 'field' && s.parcelOf[idx(tx, y)] === field;
+  if (!inField(x)) return [{ x, y }];
+  const from = !inField(x - 1) ? x : !inField(x + 1) ? x - 2 : x - 1;
+  return [from, from + 1, from + 2].filter(inField).map((tx) => ({ x: tx, y }));
+}
+
+/**
+ * Sunup: what on the farm still wants doing today: ripe crops, thirsty ones,
+ * bugs and crows. (Bare soil is a choice, not a chore.) The sleep question
+ * asks only when something does.
+ */
+export function workLeft(s: WorldState): { ripe: number; thirsty: number; bugs: number; crows: number } {
+  const out = { ripe: 0, thirsty: 0, bugs: 0, crows: 0 };
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (!c || c.dead || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+    if (c.stage === 4) out.ripe++;
+    else if (c.bugs > 0) out.bugs++;
+    else if (s.rules.growth === 'classic' ? !s.plots[i].wet : s.plots[i].moisture <= CROPS[c.kind].thirst) out.thirsty++;
   }
-  return [0, 1, 2].map((k) => ({ x: x + dx * k, y: y + dy * k })).filter((t) => inMap(t.x, t.y));
+  out.crows = s.crows.filter((c) => c.phase === 'in' || c.phase === 'peck').length;
+  return out;
 }
 
 /** Sunup: the reputation the land agent wants before he sells a field (0 under other rules, or when it is owned). */

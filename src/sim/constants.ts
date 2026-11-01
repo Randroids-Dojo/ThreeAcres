@@ -27,7 +27,7 @@ export const AP_MAX = 12;
 /** Stamina per verb under the day clock. Turns charge one move for each, scaring included. Clearing a withered crop is free. */
 export const STAMINA_COST: Record<Verb, number> = {
   till: 2,
-  water: 1,
+  water: 2,
   plant: 1,
   harvest: 1,
   tend: 1,
@@ -67,27 +67,35 @@ export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; n
   ],
 };
 
-/** Town requests open at once under the homestead: one until the first is filled, then two, never more. */
-export const REQUEST_SLOTS = 2;
+/** Town requests open at once under the homestead: one until the first is filled; after that a pair on offer and what is under way, never more than this. */
+export const REQUEST_SLOTS = 4;
 export function requestSlots(rep: number): number {
   return rep >= 1 ? REQUEST_SLOTS : 1;
 }
-/** A request pays what its crops fetch at market and at most this much more (a fifth), ... */
-export const REQUEST_PREMIUM = 1.2;
-/** ... and never more than this many coins over market. */
-export const REQUEST_EXTRA = 60;
-/** The most a request asks for (so two of them can still outgrow two fields of free soil), or five of the big crops. */
-export const REQUEST_MAX = 20;
-export const REQUEST_MAX_BIG = 5;
-/** Days a request leaves to get the seed in, beyond its crop's growing time. */
-export const REQUEST_SLACK = [2, 3] as const;
-/** The chance a morning pins a second request while one is open. */
-export const REQUEST_CHANCE = 0.6;
+/**
+ * A request pays clearly more than its crops fetch at market, from 1.4 to 1.6
+ * times as much, so turning one down costs something.
+ */
+export const REQUEST_PAY = [1.4, 1.6] as const;
+/** The most a request asks for, or of the big crops. */
+export const REQUEST_MAX = 24;
+export const REQUEST_MAX_BIG = 8;
+/** The least a request asks for. */
+export const REQUEST_MIN = 3;
+/** Days a request leaves to get the seed in: its sow-by day is this many days after the morning it is pinned. */
+export const REQUEST_SOW = [1, 2] as const;
+/** The share of what the farm could grow for it alone that each of a pair asks for. */
+export const REQUEST_SHARE = [0.55, 0.8] as const;
 /** Sunup's fields beyond the first: the reputation the land agent wants before he sells each (by field id). */
 export const FIELD_REP = [0, 0, 2, 4, 6, 8] as const;
 /** Sunup: in the last days of a season the next season's seeds can go in, so the turn takes nothing you could have planned for. */
 export const SEASON_PREVIEW_DAYS = 3;
 export const HAND_SLOWER = 1.4;
+/** Sunup: the chance a growing crop gets bugs on a morning, and that bugs left on a crop spread overnight to a neighbour of the same kind, or of another. */
+export const BUG_CHANCE = 0.035;
+export const BUG_SPREAD = { same: 1, other: 0.5 } as const;
+/** Sunup: a crop left dry on a heat wave's night counts this many dry nights (three wither it). */
+export const HEAT_DRY = 3;
 
 /** Tiles per second. */
 export const WALK_SPEED = 4.2;
@@ -97,6 +105,8 @@ export const HOP_SECONDS = 0.16;
 
 export const BUILD_COST: Record<BuildKind, number> = { scarecrow: 40, sprinkler: 120 };
 export const SCARECROW_RADIUS = 3;
+/** Sunup's scarecrow keeps crows off the five by five square around it: one in the middle of a field covers it, one at its edge does not. */
+export const SUNUP_SCARECROW_RADIUS = 2;
 
 export const HAND_HIRE = 150;
 export const HAND_WAGE = 15;
@@ -110,6 +120,8 @@ export const CROW_PECK_MINUTES = 150;
 /** Sunup: before the crow lesson, the one crow a day comes between these minutes (6:30 to 8:00). */
 export const CROW_FIRST = [30, 120] as const;
 export const CROW_FLY_SECONDS = 1.6;
+/** Sunup, after the crow lesson: the chance on a dry morning that a crow comes for each field with crops no scarecrow watches. */
+export const CROW_PER_FIELD = 0.65;
 export const CROW_SCARE_RANGE = 1.6;
 
 export const START_COINS = 150;

@@ -18,7 +18,7 @@ const PITCH_WIDE = (60 * Math.PI) / 180;
 const PITCH_WIDE_TALL = (66 * Math.PI) / 180;
 const CLOSE_TILES = 9;
 /** Tall screens: steeper, a little wider, and kept inside the farm. */
-export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.5, maxTiles: 12, bandTop: 100, bandBottom: 112 };
+export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.8, maxTiles: 12, bandTop: 100, bandBottom: 112 };
 /** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
 const BOUNDS = { x0: 0.02, x1: 19.98, z1: 15.25 };
 /** The back row of trees, roughly: how high their crowns reach and how far in they stand. */
@@ -52,6 +52,22 @@ export interface Rig {
   pixelScale(): number;
   /** Ground rect the camera can see: [minX, minZ, maxX, maxZ]. */
   ground: Float32Array;
+}
+
+/**
+ * Where a tall screen's close camera looks across the farm. A phone sees
+ * about ten and a half tiles across, just the width of the first two fields
+ * and the well. Anywhere on the west side (the first field, the path between
+ * the fields, the second field) it holds still on the middle of that, so the
+ * first field's left column and the well both stay in view; going east it
+ * slides on to follow the farmer, and it always keeps the farmer well inside
+ * the screen.
+ */
+export function tallX(fx: number, tiles: number): number {
+  const WEST = 6.8;
+  const room = fx <= 9 ? WEST : fx >= 13 ? fx : WEST + (fx - 9) * ((13 - WEST) / 4);
+  const keep = Math.max(0, tiles / 2 - 0.6);
+  return clamp(room, fx - keep, fx + keep);
 }
 
 export function makeRig(): Rig {
@@ -280,7 +296,7 @@ export function makeRig(): Rig {
     const dist = tall ? tilesForTall(W, H) / (2 * t * aspect) : (CLOSE_TILES * Math.sin(PITCH_CLOSE)) / (2 * t);
     goal.pitch = tall ? TALL.pitch : PITCH_CLOSE;
     goal.dist = dist / zoom;
-    goal.tx = intent.focusX;
+    goal.tx = tall ? tallX(intent.focusX, tilesForTall(W, H) / zoom) : intent.focusX;
     goal.tz = intent.focusY;
     // Both shapes keep to the farm: no void past its edges, no sky below the top of the clear band.
     keepInside(goal, W, H);

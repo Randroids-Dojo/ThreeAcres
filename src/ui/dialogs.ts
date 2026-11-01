@@ -8,9 +8,9 @@ import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { MILESTONES, stockCount } from '../sim/goals';
-import { season, SEASON_NAMES } from '../sim/world';
-import type { BuildKind, CropId, WorldState } from '../sim/types';
+import { begun, MILESTONES, plantedFor, requestHave, sowByOf, stockCount } from '../sim/goals';
+import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
+import type { BuildKind, CropId, Order, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
 import { townName } from './describe';
 import { icon } from './icons';
@@ -21,6 +21,8 @@ export interface DialogHost {
   cue(c: UiCue): void;
   onChange(open: boolean): void;
   pickBuild(kind: BuildKind): void;
+  /** Is the keyboard what the player last used? Then an opened card takes the keyboard's focus. */
+  keyboard?(): boolean;
 }
 
 type Tab = 'requests' | 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
@@ -54,6 +56,36 @@ export class Dialogs {
       this.pressedScrim = false;
       if (began && !this.sticky) this.close();
     };
+    // While a card is open, Tab and Shift+Tab go round its own buttons only, never the HUD behind it.
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (!this.open || e.key !== 'Tab') return;
+        e.preventDefault();
+        const all = this.focusables();
+        if (!all.length) return;
+        const at = all.indexOf(document.activeElement as HTMLElement);
+        const next = at < 0 ? (e.shiftKey ? all.length - 1 : 0) : (at + (e.shiftKey ? all.length - 1 : 1)) % all.length;
+        all[next].focus();
+      },
+      true,
+    );
+  }
+
+  /** The buttons on the open card a keyboard can reach, in order. */
+  private focusables(): HTMLElement[] {
+    return [...this.root.querySelectorAll<HTMLElement>('button')].filter((b) => !(b as HTMLButtonElement).disabled && b.offsetParent !== null && getComputedStyle(b).visibility !== 'hidden');
+  }
+
+  /**
+   * Put the keyboard on the card when a keyboard is in use (B opened the
+   * board): on `prefer` if given, else its first button. A tap or a click
+   * leaves focus alone; the first Tab still lands on the card.
+   */
+  private focusIn(prefer?: HTMLElement | null): void {
+    if (!(this.host.keyboard?.() ?? document.getElementById('app')?.dataset.device === 'key')) return;
+    const target = prefer && this.root.contains(prefer) ? prefer : this.focusables()[0];
+    target?.focus({ preventScroll: true });
   }
 
   private show(title: string, kind: string, sticky = false): void {
@@ -74,6 +106,8 @@ export class Dialogs {
   close(force = false): void {
     if (!this.open || (this.sticky && !force)) return;
     this.open = false;
+    // The keyboard goes back to the farm.
+    if (this.root.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     toggle(this.root, 'on', false);
     toggle(this.scrim, 'on', false);
     this.host.onChange(false);
@@ -107,11 +141,19 @@ export class Dialogs {
     row.append(yes, no);
     this.body.append(row);
     this.yes = go;
+    this.focusIn(yes);
   }
 
-  /** Sleeping before noon asks first. */
-  confirmSleep(minute: number, onYes: () => void): void {
-    this.ask('Sleep now?', 'sleep', `It is only ${clock(minute)}. Crops grow and the crate ships overnight, and the rest of today is gone.`, 'Sleep', onYes);
+  /** Sleeping before noon, with work still waiting, asks first and says what waits. */
+  confirmSleep(minute: number, onYes: () => void, left?: { ripe: number; thirsty: number; bugs: number; crows: number }): void {
+    const bits: string[] = [];
+    if (left?.ripe) bits.push(`${left.ripe} ripe ${left.ripe === 1 ? 'crop' : 'crops'}`);
+    if (left?.thirsty) bits.push(`${left.thirsty} thirsty ${left.thirsty === 1 ? 'crop' : 'crops'}`);
+    if (left?.bugs) bits.push(`bugs on ${left.bugs} ${left.bugs === 1 ? 'crop' : 'crops'}`);
+    if (left?.crows) bits.push(left.crows === 1 ? 'a crow' : `${left.crows} crows`);
+    const list = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : (bits[0] ?? '');
+    const what = list ? ` ${list[0].toUpperCase()}${list.slice(1)} still ${bits.length === 1 && /^(a crow|1 )/.test(list) ? 'waits' : 'wait'}.` : '';
+    this.ask('Sleep now?', 'sleep', `It is only ${clock(minute)}.${what} Crops grow and the crate ships overnight.`, 'Sleep', onYes);
   }
 
   /** Re-render the open dialog after the farm changed (a purchase, a delivery). */
@@ -127,10 +169,14 @@ export class Dialogs {
     this.tab = tab ?? (s.rules.goal === 'orders' ? 'market' : homestead(s) && s.learn.includes('requests') ? 'requests' : this.tab);
     this.show('Notice board', 'board');
     this.renderBoard();
+    // The keyboard comes onto the board (B opened it): on the tab it shows.
+    this.focusIn(this.body.querySelector<HTMLElement>('.tabs button.on'));
   }
 
   private renderBoard(): void {
     const s = this.host.state();
+    // A re-render (a tab chosen, a purchase) keeps the keyboard on the board.
+    const hadFocus = this.root.contains(document.activeElement);
     // Sunup shows only what its lessons have brought in.
     const knows = (what: string) => !homestead(s) || s.learn.includes(what);
     const tabs: [Tab, string][] = [];
@@ -157,32 +203,30 @@ export class Dialogs {
       case 'requests': {
         list.append(el('p', 'legend', smithLine(s)));
         if (!s.orders.length) list.append(el('p', 'legend', 'No requests just now. More come with the mornings.'));
+        // A pair still to choose between hangs together, "or" between them: only one of the two can be met.
+        const shown = new Set<number>();
+        let paired = false;
         for (const o of s.orders) {
-          const it = o.items[0];
-          const have = Math.min(stockCount(s, it.crop), it.n);
-          const days = o.due - s.day;
-          const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
-          const ready = have >= it.n;
-          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}.</span><span class="pay">Pays ${fmt(o.reward)} and a good word</span></span>`);
-          if (ready) {
-            const b = el('button', 'btn primary', 'Deliver');
-            b.onclick = () => {
-              this.host.send({ type: 'deliver', id: o.id });
-              this.host.cue('order');
-              setTimeout(() => this.refresh(), 0);
-            };
-            note.append(b);
-          }
-          list.append(note);
+          if (shown.has(o.id)) continue;
+          shown.add(o.id);
+          const mate = o.pair !== undefined && !begun(s, o) ? s.orders.find((q) => q !== o && q.pair === o.pair && !begun(s, q) && !shown.has(q.id)) : undefined;
+          if (mate) {
+            shown.add(mate.id);
+            paired = true;
+            const pair = el('div', 'pair');
+            pair.append(this.requestNote(s, o), el('div', 'or', 'or'), this.requestNote(s, mate));
+            list.append(pair);
+          } else list.append(this.requestNote(s, o));
         }
-        list.append(el('p', 'legend', 'The crate keeps what a request needs.'));
+        list.append(el('p', 'legend', paired ? 'Only one of a pair can be met: plant for one. The crate keeps what a request needs.' : 'The crate keeps what a request needs.'));
         break;
       }
       case 'fields':
         for (const p of s.parcels) {
           // The price is on the stamp only; a field the land agent will not sell yet says the reputation it wants.
           const rep = fieldRep(s, p.id);
-          const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : s.rep < rep ? `Four by four, meadow. Sold to farmers with reputation ${rep}` : 'Four by four, meadow'}</span></span>`);
+          // A field that wants more reputation shows its price in its words (the stamp shows the reputation).
+          const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : s.rep < rep ? `Four by four, meadow, ${fmt(p.price)} coins. Sold at reputation ${rep}` : 'Four by four, meadow'}</span></span>`);
           if (!p.owned) {
             const short = s.coins < p.price || s.rep < rep;
             const b = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
@@ -214,7 +258,7 @@ export class Dialogs {
         }
         break;
       case 'tools': {
-        list.append(el('p', 'legend', `The smith works for coins, but only for farmers the town knows. Fill requests to earn reputation. Yours is ${s.rep}.`));
+        list.append(el('p', 'legend', `The smith works for coins, but only for farmers with a reputation. Fill requests to earn it. Yours is ${s.rep}.`));
         for (const t of ['can', 'hoe'] as const) {
           const level = s.tools[t];
           const now = level === 0 ? (t === 'can' ? 'Watering can' : 'Hoe') : TOOL_UPGRADES[t][level - 1].name;
@@ -247,7 +291,7 @@ export class Dialogs {
       }
       case 'builds':
         for (const k of ['sprinkler', 'scarecrow'] as BuildKind[]) {
-          const it = el('div', 'item', `<span class="ic">${icon(k)}</span><span class="tx"><b>${k === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b><span>${k === 'sprinkler' ? 'Waters the nine plots around it every morning' : 'Keeps crows off everything within three plots'}. ${BUILD_COST[k]} coins, placed on bare soil</span></span>`);
+          const it = el('div', 'item', `<span class="ic">${icon(k)}</span><span class="tx"><b>${k === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b><span>${k === 'sprinkler' ? 'Waters the nine plots around it every morning' : scarecrowWords(s)}. ${BUILD_COST[k]} coins, placed on bare soil</span></span>`);
           const b = el('button', 'btn primary', 'Place');
           b.onclick = () => {
             this.host.pickBuild(k);
@@ -309,6 +353,38 @@ export class Dialogs {
     this.body.append(bar, list);
     pinNotes(list);
     for (const [i, b] of [...bar.children].entries()) (b as HTMLElement).style.setProperty('--tilt', `${((i * 53) % 5) - 2}deg`);
+    if (hadFocus) this.focusIn(bar.querySelector<HTMLElement>('button.on'));
+  }
+
+  /**
+   * One request's note: what it needs and when, what it pays and against
+   * what. An offer reads "Sow 8 by Spring 6, seed 120" and "Pays 660, 440 at
+   * market"; once the seed is in, how far it has got and when it is wanted.
+   */
+  private requestNote(s: WorldState, o: Order): HTMLElement {
+    const it = o.items[0];
+    const d = CROPS[it.crop];
+    const name = it.n === 1 ? d.name.toLowerCase() : d.plural;
+    const inCrate = Math.min(stockCount(s, it.crop), it.n);
+    const toSow = Math.max(0, it.n - requestHave(s, o));
+    const sowBy = sowByOf(o);
+    const more = plantedFor(s, o) > 0 ? ' more' : '';
+    const need =
+      toSow > 0 && s.day <= sowBy
+        ? `Sow ${toSow}${more} ${sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`}, seed ${fmt(toSow * d.seed)}`
+        : `${inCrate} of ${it.n} in the crate, wanted by ${dayName(s, o.due)}`;
+    const note = el('div', 'item req', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}</span><span class="need">${need}</span><span class="pay">Pays ${fmt(o.reward)}, ${fmt(d.price * it.n)} at market</span></span>`);
+    note.dataset.crop = it.crop;
+    if (inCrate >= it.n) {
+      const b = el('button', 'btn primary', 'Deliver');
+      b.onclick = () => {
+        this.host.send({ type: 'deliver', id: o.id });
+        this.host.cue('order');
+        setTimeout(() => this.refresh(), 0);
+      };
+      note.append(b);
+    }
+    return note;
   }
 
   // ------------------------------------------------------------ season
@@ -356,7 +432,7 @@ export class Dialogs {
     // The price is on the stamp; the words say what it is and what you have.
     const rep = fieldRep(s, id);
     const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${s.rep}.` : ` You have ${fmt(s.coins)} coins.`;
-    this.body.append(el('p', '', `Four by four, meadow now. Rich soil that has not been farmed.${known}`));
+    this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${known}`));
     const row = el('div', 'row ask');
     const short = s.coins < p.price || s.rep < rep;
     const buy = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
@@ -372,18 +448,36 @@ export class Dialogs {
     row.append(buy, no);
     this.body.append(row);
     this.yes = short ? null : go;
+    this.focusIn(short ? no : buy);
   }
 }
 
-/** Requests and the smith: how far the town's good word has got, and what the next one brings. */
+/** A day as the day card names it ("Spring 6"), or "tomorrow". */
+function dayName(s: WorldState, day: number): string {
+  if (day === s.day + 1) return 'tomorrow';
+  return `${SEASON_NAMES[season(day)]} ${dayOfSeason(day)}`;
+}
+
+/** What a scarecrow watches over, in the farm's words. */
+export function scarecrowWords(s: WorldState): string {
+  return homestead(s) ? 'Keeps crows off the five by five square around it' : 'Keeps crows off everything within three plots';
+}
+
+/**
+ * Requests and the smith: the reputation requests have earned, and what the
+ * next points of it bring (only for a tool the farm has: no copper hoe
+ * before the hoe).
+ */
 export function smithLine(s: WorldState): string {
+  const has = (t: 'can' | 'hoe') => !homestead(s) || s.learn.includes(t);
   const next = (['hoe', 'can'] as const)
+    .filter(has)
     .map((t) => ({ t, u: TOOL_UPGRADES[t][s.tools[t]] }))
     .filter((x) => x.u && x.u.rep > s.rep)
     .sort((a, b) => a.u!.rep - b.u!.rep)[0];
   const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
   const n = (k: number) => words[k] ?? String(k);
-  const head = `Each request filled is a good word in town. ${s.rep === 0 ? 'None yet' : `${n(s.rep)} so far`}.`;
+  const head = `Each request filled adds one to your reputation. Yours is ${s.rep}.`;
   if (!next) return `${head} The smith will make you anything he has.`;
   const left = next.u!.rep - s.rep;
   return `${head} ${n(left)} more and the smith makes you a ${next.u!.name.toLowerCase()}.`;

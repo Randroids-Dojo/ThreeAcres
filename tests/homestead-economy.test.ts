@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { CROPS } from '../src/sim/crops';
 import { nightfall } from '../src/sim/day';
-import { fillRequests, makeRequest } from '../src/sim/goals';
+import { fillRequests, offerRequests } from '../src/sim/goals';
 import { step } from '../src/sim/step';
 import { plant, plots } from '../src/sim/world';
 import type { WorldState } from '../src/sim/types';
@@ -30,36 +30,34 @@ function town(seed: number, fields = 1, day = 4): WorldState {
   return s;
 }
 
-describe('requests pay a little over market, and no more', () => {
-  it('at most a fifth over what the crops fetch, and never more than 60 coins over', () => {
+// Round 3: requests paid at most a fifth over market (60 coins at most), so turning one down cost nothing. Now they
+// pay 1.4 to 1.6 times market, come as a pair, and only one of the pair can be met.
+describe('requests pay clearly more than market', () => {
+  it('from 1.4 to 1.6 times what the crops fetch', () => {
     let n = 0;
     for (let seed = 1; seed <= 30; seed++) {
       for (const fields of [1, 2, 3]) {
         const s = town(seed * 7, fields, 11 + (seed % 15));
-        for (let k = 0; k < 2; k++) {
-          const o = makeRequest(s);
-          if (!o) continue;
-          s.orders.push(o);
+        s.coins = 300 + seed * 40;
+        for (const o of offerRequests(s)) {
           n++;
           const market = o.items.reduce((a, it) => a + CROPS[it.crop].price * it.n, 0);
-          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeLessThanOrEqual(1.21);
-          expect(o.reward - market).toBeLessThanOrEqual(62);
-          expect(o.reward).toBeGreaterThanOrEqual(market);
+          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.4);
+          expect(o.reward / market).toBeLessThanOrEqual(1.6);
         }
       }
     }
-    expect(n).toBeGreaterThan(150);
+    expect(n).toBeGreaterThan(120);
   });
 });
 
 describe('requests are few, and they compete', () => {
-  it('two open at most, and a filled one is not replaced until a morning', () => {
+  it('a pair at most on offer, and a filled one is not replaced until a morning', () => {
     const s = town(9);
+    s.coins = 500;
     fillRequests(s, true);
     fillRequests(s, true);
     fillRequests(s, true);
-    expect(s.orders.length).toBeLessThanOrEqual(2);
-    while (s.orders.length < 2) fillRequests(s, true);
     expect(s.orders.length).toBe(2);
     const it0 = s.orders[0].items[0];
     s.stock[it0.crop][0] = it0.n;
@@ -68,29 +66,28 @@ describe('requests are few, and they compete', () => {
     expect(s.orders.length).toBe(1);
   });
 
-  it('two open requests want more than the soil free to plant before they are due', () => {
+  it('the two of a pair want more soil or more seed than the farm has before they must be sown', () => {
     let pairs = 0;
     for (let seed = 1; seed <= 40; seed++) {
       for (const fields of [1, 2]) {
         const s = town(seed * 13, fields, 2 + (seed % 6));
-        const a = makeRequest(s);
-        if (!a) continue;
-        s.orders.push(a);
-        const b = makeRequest(s);
-        if (!b || CROPS[b.items[0].crop].price > 150 || CROPS[a.items[0].crop].price > 150) continue;
+        s.coins = 100 + (seed % 5) * 150;
+        const offer = offerRequests(s);
+        if (offer.length !== 2) continue;
+        const [a, b] = offer;
         pairs++;
-        // The soil they could use: free now, as nothing is growing, so every owned plot.
+        // Nothing is growing, so every owned plot is free, and the purse is all the seed money there is.
         const free = s.plots.filter((_, i) => s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned).length;
-        expect(a.items[0].n + b.items[0].n, `seed ${seed}, ${fields} fields`).toBeGreaterThan(free);
+        const cost = (o: typeof a) => o.items[0].n * CROPS[o.items[0].crop].seed;
+        expect(a.items[0].n + b.items[0].n > free || cost(a) + cost(b) > s.coins, `seed ${seed}, ${fields} fields`).toBe(true);
         // Each alone can be met.
-        expect(a.items[0].n).toBeLessThanOrEqual(free);
-        expect(b.items[0].n).toBeLessThanOrEqual(free);
-        // Too soon to grow one after the other on the same plots.
-        const days = (o: typeof a) => CROPS[o.items[0].crop].days;
-        expect(Math.min(a.due, b.due) - s.day).toBeLessThan(days(a) + days(b));
+        for (const o of offer) {
+          expect(o.items[0].n).toBeLessThanOrEqual(free);
+          expect(cost(o)).toBeLessThanOrEqual(s.coins);
+        }
       }
     }
-    expect(pairs).toBeGreaterThan(40);
+    expect(pairs).toBeGreaterThan(60);
   });
 });
 

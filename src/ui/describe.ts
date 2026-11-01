@@ -2,7 +2,7 @@
 // do. Under synergy soil it also explains the crop's quality, which is most
 // of the puzzle.
 
-import { fieldRep, homestead, sowing, type Resolved } from '../sim/actions';
+import { doomedAtTurn, fieldRep, homestead, nightsToTurn, sowing, type Resolved } from '../sim/actions';
 import { BUILD_COST, CAN_WATER, STAMINA_COST } from '../sim/constants';
 import { CROPS, QUALITY_NAME } from '../sim/crops';
 import { qualityAt } from '../sim/soil';
@@ -58,7 +58,7 @@ export function describe(s: WorldState, x: number, y: number, r: Resolved): stri
   const parts: string[] = [];
   const b = buildAt(s, x, y);
   const synergy = s.rules.growth === 'synergy';
-  if (b) parts.push(`<b>${b.kind === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b> <span class="why">${b.kind === 'sprinkler' ? 'waters the nine plots around it each morning' : 'keeps crows off within three plots'}</span>`);
+  if (b) parts.push(`<b>${b.kind === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b> <span class="why">${b.kind === 'sprinkler' ? 'waters the nine plots around it each morning' : homestead(s) ? 'keeps crows off the five by five square around it' : 'keeps crows off within three plots'}</span>`);
   const c = plot.crop;
   if (c) {
     const d = CROPS[c.kind];
@@ -122,6 +122,8 @@ export function brief(s: WorldState, x: number, y: number): string {
   let state: string;
   if (c.dead) state = 'withered';
   else if (c.stage === 4) state = 'ripe';
+  // In the last two days of a season, a crop the turn will take says so.
+  else if (nightsToTurn(s.day) <= 2 && doomedAtTurn(s, y * s.W + x)) state = `won\u2019t ripen before ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()}`;
   else if (c.bugs) state = 'bugs, pick them off';
   else if (!plot.wet) state = 'thirsty';
   else {

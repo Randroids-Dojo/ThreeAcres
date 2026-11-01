@@ -104,7 +104,8 @@ describe('the day and stamina fit the work', () => {
     expect(tiredBefore10).toBe(0);
     expect(busy).toBeGreaterThanOrEqual(4);
     expect(DAY_SECONDS).toBeLessThan(240);
-    expect(STAMINA_COST.water + STAMINA_COST.plant + STAMINA_COST.harvest).toBeLessThanOrEqual(3);
+    // Round 3 made watering two (a dry day on one or two fields is real work); planting and harvesting stay one.
+    expect(STAMINA_COST.water + STAMINA_COST.plant + STAMINA_COST.harvest).toBeLessThanOrEqual(4);
     expect(STAMINA_MAX).toBe(100);
   });
 });

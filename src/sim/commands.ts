@@ -6,8 +6,8 @@ import type { BuildKind, CropId, Rules, ToolId } from './types';
 export type Command =
   /** Walk control: the stick or keys this frame, each axis -1 to 1. */
   | { type: 'move'; x: number; y: number }
-  /** Walk control: use the tool on the tile in front. */
-  | { type: 'act' }
+  /** Walk control: use the tool on the tile in front. `held` is a repeat from a held act key or button: it never works a plot behind the farmer. */
+  | { type: 'act'; held?: boolean }
   /** Walk control: a tap on a tile. Next to the farmer it acts, further away the farmer walks there. */
   | { type: 'actAt'; x: number; y: number }
   /** Point control: queue a job on a tile with the current tool. */

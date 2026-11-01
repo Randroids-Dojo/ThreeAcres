@@ -167,6 +167,12 @@ export interface Order {
   reward: number;
   rep: number;
   due: number;
+  /** Sunup: the last day its seed can go in and still be ripe by the due day. Missing in older saves. */
+  sowBy?: number;
+  /** Sunup: the day it was pinned. Crops of its kind planted since then count as planted for it. */
+  made?: number;
+  /** Sunup: requests offered together share this; only one of them can be met. */
+  pair?: number;
 }
 
 export type GoalKind = 'harvest' | 'variety' | 'quality' | 'earn' | 'growing' | 'nowither';
@@ -232,6 +238,8 @@ export interface DayReport {
   gift?: number;
   /** Sunup: requests that ran out of time overnight, unfilled. */
   lapsed?: { who: string; crop: CropId; n: number }[];
+  /** Sunup: requests withdrawn in the morning because they could no longer be met. */
+  withdrawn?: { who: string; crop: CropId; n: number }[];
 }
 
 export interface WorldState {

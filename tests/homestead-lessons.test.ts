@@ -57,13 +57,15 @@ describe('the crow lesson', () => {
     s.crows.push({ id: 900, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
     for (let i = 0; i < 20; i++) out = t.update(s, 0.1, true);
     expect(out.line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
-    // Shooed: the crow lesson ends, and the scarecrow note follows.
+    // Shooed: the crow lesson ends, and the scarecrow note follows the next morning (one new thing a day).
     t.onEvent(s, { type: 'crowScared', id: 900, x: 3, y: 5 } as never);
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);
     out = t.update(s, 0.1, true);
     expect(s.learn).toContain('lesson:pests');
-    expect(out.line).toBe('Scarecrows keep crows away. Build one.');
+    expect(out.line).toBe('');
+    s.day += 1;
+    expect(t.update(s, 0.1, true).line).toBe('Scarecrows keep crows away. Build one.');
   });
 });
 
@@ -82,8 +84,6 @@ describe('a crow will not wait', () => {
     t.onEvent(s, { type: 'crowScared', id: 901, x: 3, y: 5 } as never);
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);
-    expect(t.update(s, 0.1, true).line).toBe('Scarecrows keep crows away. Build one.');
-    for (let i = 0; i < 100; i++) t.update(s, 0.1, true);
     expect(t.update(s, 0.1, true).line).toBe('Buy a second field.');
   });
 });
@@ -102,6 +102,7 @@ describe('Sunup copy after the playtest', () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
     for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'bugs', 'wide']) s.learn.push(`lesson:${id}`);
+    s.learnCount['done:pests'] = s.day - 1;
     s.coins = 0;
     const t = new Tutor();
     const line = t.update(s, 0.1, true).line;

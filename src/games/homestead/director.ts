@@ -3,7 +3,7 @@
 // under one fixed set of rules (the homestead); the shell hosts it.
 
 import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
-import { resolve } from '../../sim/actions';
+import { resolve, workLeft } from '../../sim/actions';
 import { facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
 import type { Command } from '../../sim/commands';
@@ -87,6 +87,7 @@ export class Director {
     this.dialogs = new Dialogs({
       ...host,
       onChange: () => undefined,
+      keyboard: () => this.input.lastKind === 'key',
       pickBuild: (k: BuildKind) => {
         this.input.push({ type: 'buildKind', kind: k });
         this.input.push({ type: 'tool', tool: 'build' });
@@ -256,15 +257,17 @@ export class Director {
 
   /**
    * Sleep from the button or Enter. Before noon it asks first, so a stray tap
-   * does not throw away a morning, except while the first lesson teaches it
-   * and when there is no stamina left to spend.
+   * does not throw away a morning, but only when something on the farm still
+   * wants doing (ripe or thirsty crops, bugs, a crow), and never while the
+   * first lesson teaches it or when there is no stamina left to spend.
    */
   sleep(): void {
     const s = this.state;
     if (s.turnover >= 0) return;
     const teaching = !s.learn.includes('lesson:sleep');
-    if (s.minute < 360 && !teaching && s.stamina >= 10) {
-      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }));
+    const left = workLeft(s);
+    if (s.minute < 360 && !teaching && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0) {
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), left);
       return;
     }
     this.input.push({ type: 'sleep' });
