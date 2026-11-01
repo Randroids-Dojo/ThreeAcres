@@ -73,8 +73,9 @@ describe('a bot farm over twenty days', () => {
       // Before round 1: 6.7 waterings per harvest and 15 quiet nights in 30 (11.8 and 12 in the playtest's bot farm).
       // Round 1 brought it to about 2 with two-day soil, and the second playtest found too little to do: the can now
       // wets a plot for one night, so dry days mean watering, but not the old grind. Requests are scarce now, so a
-      // few more nights pass without a sale.
-      expect(water / harvest).toBeLessThan(5);
+      // few more nights pass without a sale. Round 4 made sprinklers dearer and wear out after a season, so a farm
+      // waters more by can (the committed round 3 rules already watered 4.4 times a harvest on farm 42).
+      expect(water / harvest).toBeLessThan(6);
       expect(quietNights(r.events as never)).toBeLessThanOrEqual(9);
       expect(turned).toBeLessThan(10);
     });

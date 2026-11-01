@@ -65,7 +65,7 @@ describe('the crow lesson', () => {
     expect(s.learn).toContain('lesson:pests');
     expect(out.line).toBe('');
     s.day += 1;
-    expect(t.update(s, 0.1, true).line).toBe('Scarecrows keep crows away. Build one.');
+    expect(t.update(s, 0.1, true).line).toBe('Build a scarecrow on bare soil.');
   });
 });
 
@@ -106,7 +106,7 @@ describe('Sunup copy after the playtest', () => {
     s.coins = 0;
     const t = new Tutor();
     const line = t.update(s, 0.1, true).line;
-    expect(line).toBe('Scarecrows keep crows away. They cost 40.');
+    expect(line).toBe('Scarecrows cost 40. Sleep to sell the crate.');
   });
 
   it('a milestone reads as something won, not a task', async () => {

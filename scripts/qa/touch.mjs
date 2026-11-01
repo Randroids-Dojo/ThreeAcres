@@ -19,6 +19,13 @@
 // bare soil never lights Water; fourteen quick real taps are all done; the
 // coin stays a coin whatever seed is picked, and a seed the purse cannot pay
 // for looks it.
+// Round 4: the View button shows the whole farm with a real tap (a bugged crop
+// in the first field's left column, off screen from the second field, comes
+// into view) and a second tap comes back; a tap on a "Too late" seed closes the
+// picker and puts the seed away, so the next plot tap plants nothing; a tap
+// with the can on a dry, bugged crop picks the bugs off and waters nothing; a
+// refusal over a plot at the screen's edge ("Already watered") stays whole on
+// screen; every tool on the rack wears its name.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -435,7 +442,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
     st.stamina = 100;
     st.water = 12;
     // (The far field is owned but its meadow is not the point here: the hoe's lesson is done.)
-    for (const what of ['can', 'pests', 'hoe', ...['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'hoe', 'requests', 'deliver', 'choose', 'field', 'pests', 'scarecrow', 'forecast', 'bugs', 'turn', 'smith'].map((l) => `lesson:${l}`)]) if (!st.learn.includes(what)) st.learn.push(what);
+    for (const what of ['can', 'pests', 'hoe', ...['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'hoe', 'requests', 'deliver', 'choose', 'field', 'pests', 'scarecrow', 'forecast', 'sprinkler', 'bugs', 'turn', 'smith', 'wide'].map((l) => `lesson:${l}`)]) if (!st.learn.includes(what)) st.learn.push(what);
     st.parcels[4].owned = true;
     const q = st.plots[6 * st.W + 14];
     q.tilled = true;
@@ -514,6 +521,113 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   }
   const got = (await p.evaluate(() => window.sunup.state.stats.harvested.radish)) - before;
   check('fourteen quick real taps are all done (the old queue dropped the thirteenth)', got === 14, `${got} of 14`);
+}
+
+// ---- round 4
+{
+  const tapAt = async (x, y, id) => { await touch('touchStart', [[x, y, id]]); await p.waitForTimeout(40); await touch('touchEnd', []); };
+  const centre = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }, sel);
+  // Every tool on the rack wears its name (Hoe and Build looked alike, and only the one in hand was labelled).
+  await p.evaluate(() => { const st = window.sunup.state; for (const w of ['can', 'seeds', 'hoe', 'build', 'sleep', 'wide']) if (!st.learn.includes(w)) st.learn.push(w); st.learn.push('lesson:wide'); window.sunup.hud.pickTool('hands'); });
+  await p.waitForTimeout(400);
+  const labels = await p.evaluate(() => [...document.querySelectorAll('.toolbar .tool')].map((b) => { const l = b.querySelector('.lbl'); const r = l.getBoundingClientRect(); return { t: l.textContent, o: Number(getComputedStyle(l).opacity), w: r.width, size: parseFloat(getComputedStyle(l).fontSize), icon: b.querySelector('.ic').innerHTML }; }));
+  const hoe = labels.find((l) => l.t === 'Hoe');
+  const build = labels.find((l) => l.t === 'Build');
+  check('every tool on the rack wears its name, and the Hoe and Build look different', labels.every((l) => l.o >= 0.8 && l.w > 10 && l.size >= 11) && !!hoe && !!build && hoe.icon !== build.icon, JSON.stringify(labels.map((l) => [l.t, l.o, Math.round(l.w)])));
+
+  // The View button: standing in the second field, a bugged crop in the first field's left column is off screen; a real
+  // tap on View shows it, and a second tap comes back close up.
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    st.parcels[1].owned = true;
+    for (let y = 5; y < 9; y++) for (let x = 7; x < 11; x++) st.plots[y * st.W + x].tilled = true;
+    const q = st.plots[6 * st.W + 2];
+    q.tilled = true;
+    q.wet = true;
+    q.crop = { id: st.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 1, quality: 0, picks: 0, parched: false, planted: st.day };
+    st.rules.camera = 'close';
+    Object.assign(st.actors[0], { x: 10.5, y: 6.5, task: null, path: [] });
+    window.sunup.walkAim = null;
+  });
+  await p.waitForTimeout(1500);
+  const seen = () => p.evaluate(() => { const q = window.sunup.r3d.project(2.5, 6.5, 0.3); return { x: Math.round(q.x), y: Math.round(q.y), on: q.x > 0 && q.x < innerWidth && q.y > 0 && q.y < innerHeight, camera: window.sunup.state.rules.camera }; });
+  const closeUp = await seen();
+  const vb = await centre('.topbtns .viewbtn');
+  await tapAt(vb[0], vb[1], 81);
+  await p.waitForTimeout(1500);
+  const whole = await seen();
+  await p.screenshot({ path: '/tmp/acres-touch-farm-view.png' });
+  await tapAt(vb[0], vb[1], 82);
+  await p.waitForTimeout(1200);
+  const back = await seen();
+  check('from the second field a bugged crop in the first field’s left column is off screen; a real tap on View shows it, a second comes back', !closeUp.on && whole.on && whole.camera === 'wide' && back.camera === 'close', JSON.stringify({ closeUp, whole, back }));
+
+  // A tap on a "Too late" seed puts the seed away: the picker closes, the hands come out, and the next plot tap plants nothing.
+  await p.evaluate(() => { const st = window.sunup.state; st.day = 8; st.coins = 300; st.minute = 60; st.stamina = 100; st.plots[6 * st.W + 2].crop = null; for (let x = 2; x < 6; x++) { const q = st.plots[7 * st.W + x]; q.crop = null; q.tilled = true; } window.sunup.hud.pickTool('hands'); Object.assign(st.actors[0], { x: 3.5, y: 4.5, task: null, path: [] }); window.sunup.walkAim = null; });
+  await p.waitForTimeout(900);
+  await p.evaluate(() => document.querySelector('.seedbar.hidden') && window.sunup.hud.pickTool('seeds'));
+  await p.waitForTimeout(300);
+  let card = await centre('.seedbar .seed[data-crop="radish"]');
+  await tapAt(card[0], card[1], 83);
+  await p.waitForTimeout(300);
+  await p.evaluate(() => document.querySelector('.seedbar.hidden') && window.sunup.hud.pickTool('seeds'));
+  await p.waitForTimeout(300);
+  card = await centre('.seedbar .seed[data-crop="carrot"]');
+  await tapAt(card[0], card[1], 84);
+  await p.waitForTimeout(400);
+  const late = await p.evaluate(() => ({ picker: !document.querySelector('.seedbar').classList.contains('hidden'), tool: window.sunup.state.tool, toast: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent).join(' | ') }));
+  const planted0 = await p.evaluate(() => window.sunup.state.plots.filter((q) => q.crop).length);
+  const coins0 = await p.evaluate(() => window.sunup.state.coins);
+  const plotPt = await p.evaluate(() => window.sunup.r3d.project(3.5, 7.5, 0));
+  await tapAt(plotPt.x, plotPt.y, 85);
+  await p.waitForTimeout(2000);
+  const after = await p.evaluate(() => ({ planted: window.sunup.state.plots.filter((q) => q.crop).length, coins: window.sunup.state.coins }));
+  check('a tap on a "Too late" seed closes the picker and puts the seed away: the next plot tap plants nothing', !late.picker && late.tool === 'hands' && /Too late/.test(late.toast) && after.planted === planted0 && after.coins === coins0, JSON.stringify({ late, planted0, after, coins0 }));
+
+  // The can in hand, a dry bugged crop tapped: the bugs come off, nothing is watered.
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    st.water = 12;
+    const q = st.plots[6 * st.W + 4];
+    q.tilled = true;
+    q.wet = false;
+    q.moisture = 0;
+    q.crop = { id: st.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 1, quality: 0, picks: 0, parched: false, planted: st.day };
+    window.sunup.hud.pickTool('can');
+    Object.assign(st.actors[0], { x: 4.5, y: 4.5, task: null, path: [] });
+    window.sunup.walkAim = null;
+    window.__r4 = [];
+    const d = window.sunup;
+    const orig = d.events.push.bind(d.events);
+    d.events.push = (e) => { if (e.type === 'water' || e.type === 'tend') window.__r4.push(e.type); return orig(e); };
+  });
+  await p.waitForTimeout(700);
+  const bug = await p.evaluate(() => window.sunup.r3d.project(4.5, 6.5, 0));
+  await tapAt(bug.x, bug.y, 86);
+  await p.waitForTimeout(1800);
+  const bugAfter = await p.evaluate(() => ({ bugs: window.sunup.state.plots[6 * window.sunup.state.W + 4].crop.bugs, events: window.__r4, tool: window.sunup.state.tool }));
+  check('a tap with the can on a dry, bugged crop picks the bugs off and waters nothing', bugAfter.bugs === 0 && bugAfter.events.includes('tend') && !bugAfter.events.includes('water'), JSON.stringify(bugAfter));
+
+  // "Already watered" over a plot at the screen's edge stays whole on screen.
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    const q = st.plots[6 * st.W + 2];
+    q.tilled = true;
+    q.wet = true;
+    q.moisture = 2;
+    q.crop = { id: st.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+    window.sunup.hud.pickTool('can');
+    Object.assign(st.actors[0], { x: 2.5, y: 5.5, facing: 's', task: null, path: [] });
+    window.sunup.walkAim = null;
+  });
+  await p.waitForTimeout(800);
+  const edge = await p.evaluate(() => window.sunup.r3d.project(2.5, 6.5, 0));
+  await tapAt(edge.x, edge.y, 87);
+  await p.waitForTimeout(250);
+  const fl = await p.evaluate(() => [...document.querySelectorAll('.floaters .floater')].map((f) => { const r = f.getBoundingClientRect(); return { t: f.textContent, l: Math.round(r.left), r: Math.round(r.right) }; }));
+  const aw = fl.find((f) => f.t === 'Already watered');
+  check('"Already watered" over a plot at the screen’s edge stays whole on screen', !!aw && aw.l >= 0 && aw.r <= 412 && edge.x < 60, JSON.stringify({ fl, at: Math.round(edge.x) }));
+  await p.evaluate(() => window.sunup.hud.pickTool('hands'));
 }
 
 // A save from the old crew mode brings a farm hand along; Sunup is worked alone, so the hand has gone home on load.

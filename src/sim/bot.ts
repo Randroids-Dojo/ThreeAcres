@@ -112,6 +112,7 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   // Like a person through the lessons: requests, then the crows and bugs, and scarecrows after the first crow.
   if (homestead(s)) for (const what of ['requests', 'pests']) if (!s.learn.includes(what)) out.push({ type: 'unlock', what });
   if (homestead(s) && !s.learn.includes('build') && s.stats.days >= 8) out.push({ type: 'unlock', what: 'build' });
+  if (homestead(s) && s.learn.includes('build') && !s.learn.includes('sprinkler') && s.parcels.filter((p) => p.owned).length >= 2) out.push({ type: 'unlock', what: 'sprinkler' });
   const f = farmer(s);
 
   // Spend money now and then.
@@ -159,7 +160,7 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   }
   // From the third field the watering outgrows a day's stamina: a sprinkler in each field, beside its scarecrow.
   const fields = s.parcels.filter((p) => p.owned).length;
-  if (homestead(s) && fields >= 3 && s.learn.includes('build') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.sprinkler + 300) {
+  if (homestead(s) && fields >= 3 && s.learn.includes('sprinkler') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.sprinkler + 300) {
     for (const p of s.parcels) {
       if (!p.owned || s.builds.some((b) => b.kind === 'sprinkler' && b.x >= p.x && b.x < p.x + p.w && b.y >= p.y && b.y < p.y + p.h)) continue;
       const t = { x: p.x + 2, y: p.y + 2 };

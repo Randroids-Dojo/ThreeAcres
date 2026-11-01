@@ -9,7 +9,14 @@
 // sow-by day (coins, the crate and what ripens in time), and its pay against
 // market; and for the day: the lowest stamina by fields owned, crows, bugs,
 // heat waves and what each of them cost.
-// npx tsx scripts/balance.ts [days] [farms]
+// Round 4 adds, for each pair as it is pinned: how far apart its two notes are
+// on what they earn over their seed for each plot and day; what requests paid
+// over market on crops already growing; the active seconds of each day (the
+// farmer walking or working) beside the hour of the last job; crops lost by
+// cause; and how steady the stream of requests is (mornings between new ones).
+// It reads requests only through what the round 3 rules had too, so it runs
+// on the committed code as well, for a before and after.
+// npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person]
 import { CROP_IDS, CROPS } from '../src/sim/crops';
 import { PRESET_IDS } from '../src/sim/presets';
 import { play, world } from '../tests/helpers';
@@ -18,6 +25,7 @@ import type { CropId, Order, WorldState } from '../src/sim/types';
 const DAYS = Number(process.argv[2] ?? 30);
 const FARMS = Number(process.argv[3] ?? 6);
 const ONLY_SUNUP = process.argv.includes('--sunup');
+const ONLY_PERSON = process.argv.includes('--person');
 
 if (!ONLY_SUNUP) {
   for (const id of PRESET_IDS) {
@@ -46,6 +54,16 @@ interface Pinned {
   sowBy: number;
   ratio: number;
   reward: number;
+  /** Crops already in the crate or growing that will be ripe by its due day, and how many it has you sow fresh. */
+  base: number;
+  fresh: number;
+  /** What it earns over its seed for each plot and day its fresh sowing takes. */
+  perDay: number;
+  /** What it pays over market on the crops already growing it counts. */
+  basePremium: number;
+  pair: number | undefined;
+  /** Fields owned when it was pinned. */
+  fields: number;
 }
 
 interface Farm {
@@ -65,6 +83,8 @@ interface Farm {
   requests: number;
   lapsed: number;
   withdrawn: number;
+  /** Withdrawn by day because seed went in for the other of its pair. */
+  closed: number;
   pinned: Pinned[];
   rep: number;
   fields: number;
@@ -80,6 +100,13 @@ interface Farm {
   heatDeaths: number;
   scarecrows: number;
   sprinklers: number;
+  /** Crops that withered dry (not bugs, not heat), and that the season's turn took. */
+  dryDeaths: number;
+  turned: number;
+  /** Real seconds each day the farmer was walking or working, with the fields owned that day. */
+  active: { secs: number; fields: number; day: number }[];
+  /** Mornings that brought new requests (after the first was filled). */
+  newMornings: number[];
 }
 
 const JOBS = new Set(['till', 'water', 'plant', 'harvest', 'tend', 'refill', 'clear', 'build']);
@@ -103,6 +130,16 @@ function pinOf(s: WorldState, o: Order): Pinned {
     if (CROPS[c.kind].days - c.age <= sowBy - s.day - 1) ripening += CROPS[c.kind].price;
   }
   const stock = s.stock[it.crop].reduce((a, b) => a + b, 0);
+  // What the crate and the ground will have by its due day (as the rules count it), so the rest is sown fresh.
+  let base = stock;
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (c && !c.dead && c.kind === it.crop && ownedAt(s, i) && CROPS[c.kind].days - c.age <= o.due - s.day) base++;
+  }
+  // Requests for the same crop that come first (due sooner, or pinned first) take theirs from the crate first.
+  for (const q of s.orders) if (q.id !== o.id && q.items[0].crop === it.crop && (q.due < o.due || (q.due === o.due && q.id < o.id))) base -= q.items[0].n;
+  base = Math.max(0, Math.min(base, it.n));
+  const fresh = Math.max(1, it.n - base);
   let crate = 0;
   for (const c of CROP_IDS) crate += s.stock[c].reduce((a, b) => a + b, 0) * CROPS[c].price;
   const need = Math.max(0, it.n - growing - stock);
@@ -118,6 +155,13 @@ function pinOf(s: WorldState, o: Order): Pinned {
     sowBy,
     ratio: o.reward / (d.price * it.n),
     reward: o.reward,
+    base,
+    fresh,
+    perDay: (o.reward - base * d.price - fresh * d.seed) / (fresh * d.days),
+    // Pay is spread evenly over the count under the old rules: the share of it on crops already growing, over market.
+    basePremium: (o as Order & { fresh?: number }).fresh !== undefined ? Math.max(0, o.reward - (it.n - (o as Order & { fresh?: number }).fresh!) * d.price - (o as Order & { fresh?: number }).fresh! * d.price * 1.8) : Math.max(0, base * (o.reward / it.n - d.price)),
+    pair: (o as Order & { pair?: number }).pair,
+    fields: s.parcels.filter((p) => p.owned).length,
   };
 }
 
@@ -143,14 +187,22 @@ function sunupFarm(seed: number, pace?: number): Farm {
   let wasTired = false;
   let heatNight = false;
   let heatDeaths = 0;
+  let activeSecs = 0;
+  let lapsedReported = 0;
+  const active: Farm['active'] = [];
+  const newMornings: number[] = [];
+  let firstFilled = false;
   const r = play(s, DAYS, {
     pace,
     each: (st: WorldState) => {
+      const f = st.actors[0];
+      if (st.turnover < 0 && (f.task || f.path.length || f.aim || f.moving)) activeSecs += 1 / 30;
       if (st.report && st.report !== seenReport) {
         seenReport = st.report;
         turned += st.report.turned ?? 0;
         if (st.report.gift) gifts++;
         withdrawn += ((st.report as unknown as { withdrawn?: unknown[] }).withdrawn ?? []).length;
+        lapsedReported += ((st.report as unknown as { lapsed?: unknown[] }).lapsed ?? []).length;
       }
       if (st.turnover < 0) low = Math.min(low, st.stamina);
       // Note the moment the day ends: what hour, and was it stamina that ended it.
@@ -160,6 +212,8 @@ function sunupFarm(seed: number, pace?: number): Farm {
         staminaLeft.push(st.stamina);
         if (st.stamina < 4) wasTired = true;
         workEnd.push({ hour: lastJob < 0 ? 6 : 6 + lastJob / 60, low, fields: st.parcels.filter((p) => p.owned).length, day: st.day, wet: st.weather === 'rain' || st.weather === 'storm' });
+        active.push({ secs: activeSecs, fields: st.parcels.filter((p) => p.owned).length, day: st.day });
+        activeSecs = 0;
         heatNight = st.weather === 'heat';
         if (heatNight) heatDays++;
         lastJob = -1;
@@ -181,11 +235,15 @@ function sunupFarm(seed: number, pace?: number): Farm {
         if (e.type === 'wither' && heatNight) heatDeaths++;
       }
       for (const p of st.parcels) if (p.owned && p.id > 0 && !bought[p.id]) bought[p.id] = st.day;
+      let fresh = false;
       for (const o of st.orders) {
         if (seenOrders.has(o.id)) continue;
         seenOrders.add(o.id);
         pinned.push(pinOf(st, o));
+        if (firstFilled) fresh = true;
       }
+      if (fresh && newMornings[newMornings.length - 1] !== st.day) newMornings.push(st.day);
+      if (ev.some((e) => e.type === 'request' && e.done)) firstFilled = true;
     },
   });
   let requests = 0;
@@ -199,6 +257,7 @@ function sunupFarm(seed: number, pace?: number): Farm {
   let bugDeaths = 0;
   let scarecrows = 0;
   let sprinklers = 0;
+  let dryDeaths = 0;
   const bugged = new Set<string>();
   for (const e of r.events) {
     if (e.type === 'water') waterings++;
@@ -212,6 +271,7 @@ function sunupFarm(seed: number, pace?: number): Farm {
     else if (e.type === 'wither') {
       withered++;
       if (bugged.has(`${e.x},${e.y}`)) bugDeaths++;
+      else dryDeaths++;
     } else if (e.type === 'crowEat') eaten++;
     else if (e.type === 'crowIn') crows++;
     else if (e.type === 'bugs') {
@@ -244,8 +304,9 @@ function sunupFarm(seed: number, pace?: number): Farm {
     eaten,
     gifts,
     requests,
-    lapsed: Math.max(0, lapsed - withdrawn),
+    lapsed: lapsedReported,
     withdrawn,
+    closed: Math.max(0, lapsed - withdrawn - lapsedReported),
     pinned,
     rep: s.rep,
     fields: s.parcels.filter((p) => p.owned).length,
@@ -260,6 +321,10 @@ function sunupFarm(seed: number, pace?: number): Farm {
     heatDeaths,
     scarecrows,
     sprinklers,
+    dryDeaths: Math.max(0, dryDeaths - heatDeaths),
+    turned,
+    active,
+    newMornings,
   };
 }
 
@@ -275,7 +340,7 @@ const fmtH = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60))
 const num = (n: number) => Math.round(n).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}%` : 'n/a');
 // The quick bot, then the bot at a person's pace (about one action every 1.3 seconds, like the playtest).
-for (const [label, pace] of [['the quick bot', undefined], ['the bot at a person’s pace', 0.9]] as const) {
+for (const [label, pace] of ([['the quick bot', undefined], ['the bot at a person’s pace', 0.9]] as const).filter(([, p]) => !ONLY_PERSON || p)) {
   const farms: Farm[] = [];
   for (let i = 0; i < FARMS; i++) farms.push(sunupFarm(42 + i * 1013, pace));
   const avg = (f: (x: Farm) => number) => farms.reduce((a, x) => a + f(x), 0) / farms.length;
@@ -297,9 +362,9 @@ for (const [label, pace] of [['the quick bot', undefined], ['the bot at a person
   const later = farms.flatMap((f) => f.pinned.slice(1));
   const ratios = all.map((p) => p.ratio);
   const growing = later.filter((p) => p.growing > 0).length;
-  const met = later.filter((p) => p.growing + p.stock >= p.n).length;
+  const met = later.filter((p) => p.base >= p.n).length;
   const short = later.filter((p) => p.cost > 0 && (p.cost > p.budget || p.sowBy < p.day)).length;
-  console.log(`  requests               ${avg((f) => f.requests).toFixed(1)} filled, ${avg((f) => f.withdrawn).toFixed(1)} withdrawn, ${avg((f) => f.lapsed).toFixed(1)} lapsed unfilled; reputation ${avg((f) => f.rep).toFixed(1)}`);
+  console.log(`  requests               ${avg((f) => f.requests).toFixed(1)} filled, ${avg((f) => f.withdrawn).toFixed(1)} withdrawn in the morning, ${avg((f) => f.closed).toFixed(1)} closed by day when the other of the pair was sown, ${avg((f) => f.lapsed).toFixed(1)} lapsed unfilled; reputation ${avg((f) => f.rep).toFixed(1)}`);
   console.log(`  requests after the first: ${later.length}; asked for a crop already growing ${pct(growing, later.length)} (already met when pinned ${pct(met, later.length)}); seed out of reach by its sow-by day ${pct(short, later.length)}`);
   console.log(`  pay against market     median ${med(ratios).toFixed(2)}x, lowest ${Math.min(...ratios).toFixed(2)}x, highest ${Math.max(...ratios).toFixed(2)}x; largest reward ${num(Math.max(...all.map((p) => p.reward)))}`);
   const pairs = farms.flatMap((f) => {
@@ -320,5 +385,39 @@ for (const [label, pace] of [['the quick bot', undefined], ['the bot at a person
   const spring = farms.flatMap((f) => f.workEnd).filter((w) => w.day > 3 && w.day <= 10);
   console.log(`           spring (days 4 to 10) ${show(spring)}`);
   console.log(`  day ends (bot sleeps)  median ${fmtH(med(hours))}, earliest ${fmtH(Math.min(...hours))}, latest ${fmtH(Math.max(...hours))}; stamina ran out first on ${avg((f) => f.tiredDays).toFixed(1)} days; median stamina left ${med(farms.flatMap((f) => f.staminaLeft)).toFixed(0)}`);
+  // Round 4.
+  const groups = farms.flatMap((f) => {
+    const byPair = new Map<string, Pinned[]>();
+    for (const p of f.pinned.slice(1)) if (p.pair !== undefined) byPair.set(`${p.day}:${p.pair}`, [...(byPair.get(`${p.day}:${p.pair}`) ?? []), p]);
+    return [...byPair.values()].filter((g) => g.length === 2);
+  });
+  const gaps = groups.map(([a, b]) => Math.abs(a.perDay - b.perDay) / Math.max(Math.abs(a.perDay), Math.abs(b.perDay), 1e-9));
+  const totals = groups.map(([a, b]) => {
+    const na = a.reward - a.base * CROPS[a.crop].price - a.fresh * CROPS[a.crop].seed;
+    const nb = b.reward - b.base * CROPS[b.crop].price - b.fresh * CROPS[b.crop].seed;
+    return Math.abs(na - nb) / Math.max(na, nb, 1);
+  });
+  console.log(`  pairs                  ${groups.length}; gap on earnings per plot and day: median ${(100 * med(gaps)).toFixed(0)}%, within 10% ${pct(gaps.filter((g) => g <= 0.1).length, gaps.length)}, largest ${(100 * Math.max(0, ...gaps)).toFixed(0)}%; gap on what each clears in all: median ${(100 * med(totals)).toFixed(0)}%`);
+  const freshRatio = later.map((p) => (p.reward - p.base * CROPS[p.crop].price) / (p.fresh * CROPS[p.crop].price));
+  console.log(`  pay on what is sown    median ${med(freshRatio).toFixed(2)}x market, lowest ${Math.min(...freshRatio).toFixed(2)}x, highest ${Math.max(...freshRatio).toFixed(2)}x; premium paid on crops already growing ${num(avg((f) => f.pinned.reduce((a, p) => a + p.basePremium, 0)))} a farm; median reward ${num(med(later.map((p) => p.reward)))}`);
+  const bySize = (lo: number, hi: number) => {
+    const xs = later.filter((p) => p.fields >= lo && p.fields <= hi).map((p) => p.reward - p.base * CROPS[p.crop].price);
+    return xs.length ? `median ${num(med(xs))}, largest ${num(Math.max(...xs))} (${xs.length})` : 'none';
+  };
+  console.log(`  pay for what is sown   1 field ${bySize(1, 1)}; 2 fields ${bySize(2, 2)}; 3 to 6 ${bySize(3, 6)}`);
+  const streams = farms.map((f) => {
+    const m = f.newMornings;
+    let gap = 0;
+    for (let i = 1; i < m.length; i++) gap = Math.max(gap, m[i] - m[i - 1]);
+    return { n: m.length, gap };
+  });
+  console.log(`  request stream         mornings with new requests after the first is filled: ${(streams.reduce((a, x) => a + x.n, 0) / farms.length).toFixed(1)} a farm; longest wait between them median ${med(streams.map((x) => x.gap))} days, worst ${Math.max(...streams.map((x) => x.gap))}`);
+  const act = farms.flatMap((f) => f.active).filter((a) => a.day > 3);
+  const actBy = (lo: number, hi: number) => {
+    const xs = act.filter((a) => a.fields >= lo && a.fields <= hi).map((a) => a.secs);
+    return xs.length ? `median ${med(xs).toFixed(0)} s, three in four under ${quart(xs, 0.75).toFixed(0)} s (${xs.length} days)` : 'no days';
+  };
+  console.log(`  active seconds a day   1 field ${actBy(1, 1)}; 2 fields ${actBy(2, 2)}; 3 to 6 ${actBy(3, 6)}`);
+  console.log(`  crops lost             ${avg((f) => f.dryDeaths).toFixed(1)} dry, ${avg((f) => f.heatDeaths).toFixed(1)} on heat nights, ${avg((f) => f.bugDeaths).toFixed(1)} to bugs, ${avg((f) => f.eaten).toFixed(1)} to crows, ${avg((f) => f.turned).toFixed(1)} to the turn (a farm)`);
   console.log(`  pressure               crows ${avg((f) => f.crows).toFixed(1)} (ate ${avg((f) => f.eaten).toFixed(1)}), bug outbreaks ${avg((f) => f.bugs).toFixed(1)} (crops lost to bugs ${avg((f) => f.bugDeaths).toFixed(1)}), heat waves ${avg((f) => f.heatDays).toFixed(1)} (crops lost on heat nights ${avg((f) => f.heatDeaths).toFixed(1)}); built ${avg((f) => f.scarecrows).toFixed(1)} scarecrows, ${avg((f) => f.sprinklers).toFixed(1)} sprinklers`);
 }

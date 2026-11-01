@@ -3,7 +3,7 @@
 // of the puzzle.
 
 import { doomedAtTurn, fieldRep, homestead, nightsToTurn, sowing, type Resolved } from '../sim/actions';
-import { BUILD_COST, CAN_WATER, STAMINA_COST } from '../sim/constants';
+import { BUILD_COST, CAN_WATER, SPRINKLER_MORNINGS, STAMINA_COST } from '../sim/constants';
 import { CROPS, QUALITY_NAME } from '../sim/crops';
 import { qualityAt } from '../sim/soil';
 import { buildAt, isField, owned, plots, season, SEASON_NAMES } from '../sim/world';
@@ -114,7 +114,8 @@ export function brief(s: WorldState, x: number, y: number): string {
     return `<b>For sale</b> <span class="why">${s.rep < rep ? `to farmers with reputation ${rep}` : `${p.price} coins`}</span>`;
   }
   const b = buildAt(s, x, y);
-  if (b) return `<b>${b.kind === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b>`;
+  // A sprinkler says how long it has left before it wears out.
+  if (b) return b.kind === 'sprinkler' ? `<b>Sprinkler</b> <span class="why">${sprinklerLeft(b.left ?? SPRINKLER_MORNINGS)}</span>` : '<b>Scarecrow</b>';
   const plot = plots(s, x, y);
   const c = plot.crop;
   if (!c) return plot.tilled ? `<b>Bare soil</b>${plot.wet ? ' <span class="why">watered</span>' : ''}` : '<b>Meadow</b> <span class="why">hoe this plot to plant it</span>';
@@ -132,6 +133,11 @@ export function brief(s: WorldState, x: number, y: number): string {
     state = `${left} day${left === 1 ? '' : 's'} to go${plot.moisture >= 3 && s.weather !== 'heat' ? ', wet till tomorrow' : ''}`;
   }
   return `<b>${d.name}</b> <span class="why">${state}</span>`;
+}
+
+/** How long a sprinkler has before it wears out, in a few words. */
+export function sprinklerLeft(left: number): string {
+  return `${left} ${left === 1 ? 'morning' : 'mornings'} left`;
 }
 
 /** The can's water for the meters: how full, and whether it is empty. Null before the can is yours. */

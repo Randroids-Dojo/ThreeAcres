@@ -1,7 +1,7 @@
 // What a tool does to a tile, and doing it. resolve() is pure and is also used
 // by the UI for the highlight; perform() changes the farm and reports events.
 
-import { BUILD_COST, CAN_MOISTURE, CAN_WATER, DAYS_PER_SEASON, FIELD_REP, SEASON_PREVIEW_DAYS, STAMINA_COST } from './constants';
+import { BUILD_COST, CAN_MOISTURE, CAN_WATER, DAY_SECONDS, DAYS_PER_SEASON, FIELD_REP, SEASON_PREVIEW_DAYS, SPRINKLER_MORNINGS, STAMINA_COST, SUNUP_DAY_SECONDS } from './constants';
 import { CROPS, inSeason, QUALITY_MULT, stageOf } from './crops';
 import { propAt } from './map';
 import { feedAround, needsWater, qualityAt, soak } from './soil';
@@ -27,6 +27,16 @@ export function crowAt(s: WorldState, x: number, y: number) {
 /** Sunup's homestead rules: seasonal crops, a can that runs dry, town requests. */
 export function homestead(s: WorldState): boolean {
   return s.rules.goal === 'market' && s.rules.tools === 'kit';
+}
+
+/**
+ * Real seconds from 6:00 to midnight under the day clock. Sunup's day grows
+ * with the farm: a minute on one field, two on five or six.
+ */
+export function daySeconds(s: WorldState): number {
+  if (!homestead(s)) return DAY_SECONDS;
+  const fields = s.parcels.filter((p) => p.owned).length;
+  return SUNUP_DAY_SECONDS[Math.max(0, Math.min(SUNUP_DAY_SECONDS.length - 1, fields - 1))];
 }
 
 /** Sunup's sowing calendar for a crop today. */
@@ -320,7 +330,8 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       if (plot.crop || buildAt(s, x, y) || s.coins < BUILD_COST[kind]) return false;
       s.coins -= BUILD_COST[kind];
       plot.tilled = true;
-      s.builds.push({ id: s.nextId++, kind, x, y });
+      // Sunup's sprinkler waters for a season, then wears out.
+      s.builds.push(kind === 'sprinkler' && homestead(s) ? { id: s.nextId++, kind, x, y, left: SPRINKLER_MORNINGS } : { id: s.nextId++, kind, x, y });
       ev.push({ type: 'build', x, y, kind, by });
       break;
     }

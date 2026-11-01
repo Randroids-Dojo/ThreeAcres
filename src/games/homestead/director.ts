@@ -360,7 +360,7 @@ export class Director {
     const lesson = this.tutor.update(s, dt, this.hud.touch.shown, !this.dialogs.open && !this.hud.picking);
     cmds.push(...lesson.cmds);
     this.hud.setLesson(lesson.line);
-    this.hud.setPoint(lesson.point);
+    this.hud.setPoint(lesson.point, lesson.tap);
     this.lessonPoint = lesson.line ? lesson.point : null;
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };

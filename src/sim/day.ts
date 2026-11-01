@@ -3,7 +3,7 @@
 // and orders.
 
 import { choreNow, hands } from './actors';
-import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SUNUP_SCARECROW_RADIUS } from './constants';
+import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
 import { CROP_IDS, stageOf } from './crops';
 import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
 import { homestead, sowing } from './actions';
@@ -195,10 +195,19 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   if (s.weather === 'rain' || s.weather === 'storm') {
     for (let i = 0; i < s.plots.length; i++) if (s.tiles[i] === 'field') soak(s.plots[i]);
   }
-  for (const b of s.builds) {
+  for (const b of s.builds.slice()) {
     if (b.kind !== 'sprinkler') continue;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (isField(s, b.x + dx, b.y + dy)) soak(s.plots[idx(b.x + dx, b.y + dy)]);
     ev.push({ type: 'sprinkle', x: b.x, y: b.y });
+    // Sunup's sprinkler waters for a season, then wears out (its last watering still counts today).
+    if (homestead(s)) {
+      b.left = (b.left ?? SPRINKLER_MORNINGS) - 1;
+      if (b.left <= 0) {
+        s.builds = s.builds.filter((o) => o !== b);
+        ev.push({ type: 'unbuild', x: b.x, y: b.y, kind: b.kind });
+        if (s.report) s.report.worn = (s.report.worn ?? 0) + 1;
+      }
+    }
   }
 
   // Pests wait until Sunup has introduced them.
@@ -244,9 +253,9 @@ function morning(s: WorldState, ev: SimEvent[]): void {
     if (growing > 0) {
       if (homestead(s) && !s.learn.includes('lesson:pests')) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, CROW_FIRST[0], CROW_FIRST[1]));
       else {
-        // Sunup: a crow for most fields a scarecrow does not watch over (so where it stands matters); a field it
-        // watches over whole draws none.
-        const n = homestead(s) ? s.parcels.filter((p) => p.owned && openField(s, p) && rand(s) < CROW_PER_FIELD).length : 1 + (rand(s) < 0.4 ? 1 : 0) + (growing > 24 ? 1 : 0);
+        // Sunup: a crow for most fields a scarecrow does not watch over (so where it stands matters), and now and then
+        // one for the edge of a field it does watch; a field watched over sure, edges and all, draws none.
+        const n = homestead(s) ? s.parcels.filter((p) => p.owned && rand(s) < crowChance(s, p)).length : 1 + (rand(s) < 0.4 ? 1 : 0) + (growing > 24 ? 1 : 0);
         for (let k = 0; k < n; k++) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, 60, DAY_MINUTES - CROW_PECK_MINUTES - 120));
         s.crowPlan.sort((a, b) => a - b);
       }
@@ -265,6 +274,15 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   }
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);
+  // Sunup's morning card says what is ripe to pick (not how many crops changed their look overnight).
+  if (homestead(s) && s.report) {
+    let ripe = 0;
+    for (let i = 0; i < s.plots.length; i++) {
+      const c = s.plots[i].crop;
+      if (c && !c.dead && c.stage === 4 && s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned) ripe++;
+    }
+    s.report.ripe = ripe;
+  }
   ev.push({ type: 'dawn', day: s.day, weather: s.weather, season: season(s.day) });
 }
 
@@ -294,15 +312,24 @@ export function rescue(s: WorldState): number {
   return gift;
 }
 
-/** Does a field have a growing crop no scarecrow watches over? */
-function openField(s: WorldState, p: { x: number; y: number; w: number; h: number }): boolean {
+/**
+ * The chance a crow comes for a field on a dry morning: most mornings for a
+ * field with a growing crop no scarecrow watches, now and then for one whose
+ * only open crops are at the edge of a scarecrow's watch, never for one
+ * watched over sure.
+ */
+function crowChance(s: WorldState, p: { x: number; y: number; w: number; h: number }): number {
+  let edge = 0;
   for (let y = p.y; y < p.y + p.h; y++) {
     for (let x = p.x; x < p.x + p.w; x++) {
       const c = s.plots[idx(x, y)].crop;
-      if (c && !c.dead && c.stage >= 1 && !guarded(s, x, y)) return true;
+      if (!c || c.dead || c.stage < 1) continue;
+      if (!guarded(s, x, y)) return CROW_PER_FIELD;
+      if (!guardedSure(s, x, y)) edge++;
     }
   }
-  return false;
+  // A second scarecrow that brings most of the edge under its sure watch makes a crow rarer still.
+  return CROW_EDGE * Math.min(1, edge / CROW_EDGE_FULL);
 }
 
 /** How far a scarecrow's watch reaches: two plots each way in Sunup (a five by five square), three elsewhere. */
@@ -310,25 +337,37 @@ export function scarecrowRadius(s: WorldState): number {
   return homestead(s) ? SUNUP_SCARECROW_RADIUS : SCARECROW_RADIUS;
 }
 
-/** Is (x, y) within a scarecrow's watch? */
+/** Is (x, y) within a scarecrow's watch (in Sunup, its edge included)? */
 export function guarded(s: WorldState, x: number, y: number): boolean {
   const r = scarecrowRadius(s);
   return s.builds.some((b) => b.kind === 'scarecrow' && Math.max(Math.abs(b.x - x), Math.abs(b.y - y)) <= r);
 }
 
-/** Pick a crop for a crow: growing, unguarded, not already someone's dinner. */
+/** Is (x, y) watched for sure? In Sunup only the plots right beside a scarecrow; its outer ring is its edge, where crows still try. */
+export function guardedSure(s: WorldState, x: number, y: number): boolean {
+  const r = homestead(s) ? SUNUP_SCARECROW_SURE : SCARECROW_RADIUS;
+  return s.builds.some((b) => b.kind === 'scarecrow' && Math.max(Math.abs(b.x - x), Math.abs(b.y - y)) <= r);
+}
+
+/**
+ * Pick a crop for a crow: growing, not already someone's dinner, and open: no
+ * scarecrow watching it, or (when every growing crop is watched) one at the
+ * edge of a scarecrow's watch, never one right beside a scarecrow.
+ */
 export function crowTarget(s: WorldState): { x: number; y: number } | null {
-  const options: { x: number; y: number }[] = [];
+  const open: { x: number; y: number }[] = [];
+  const edge: { x: number; y: number }[] = [];
   for (let y = 0; y < s.H; y++) {
     for (let x = 0; x < s.W; x++) {
       if (!owned(s, x, y)) continue;
       const c = s.plots[idx(x, y)].crop;
       if (!c || c.dead || c.stage < 1) continue;
-      if (guarded(s, x, y)) continue;
+      if (guardedSure(s, x, y)) continue;
       if (s.crows.some((k) => k.x === x && k.y === y && k.phase !== 'gone')) continue;
-      options.push({ x, y });
+      (guarded(s, x, y) ? edge : open).push({ x, y });
     }
   }
+  const options = open.length ? open : edge;
   if (!options.length) return null;
   return options[Math.floor(rand(s) * options.length)];
 }

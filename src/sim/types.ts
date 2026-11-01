@@ -83,6 +83,8 @@ export interface Build {
   kind: BuildKind;
   x: number;
   y: number;
+  /** Sunup: mornings a sprinkler still waters before it wears out. Missing in older saves (a full season then). */
+  left?: number;
 }
 
 export interface Parcel {
@@ -171,8 +173,10 @@ export interface Order {
   sowBy?: number;
   /** Sunup: the day it was pinned. Crops of its kind planted since then count as planted for it. */
   made?: number;
-  /** Sunup: requests offered together share this; only one of them can be met. */
+  /** Sunup: requests offered together share this; only one of them can be taken. */
   pair?: number;
+  /** Sunup: how many of it are to be sown fresh (the rest are crops already growing, paid at market). Missing in older saves. */
+  fresh?: number;
 }
 
 export type GoalKind = 'harvest' | 'variety' | 'quality' | 'earn' | 'growing' | 'nowither';
@@ -240,6 +244,10 @@ export interface DayReport {
   lapsed?: { who: string; crop: CropId; n: number }[];
   /** Sunup: requests withdrawn in the morning because they could no longer be met. */
   withdrawn?: { who: string; crop: CropId; n: number }[];
+  /** Sunup: crops ripe on the farm this morning, ready to pick. */
+  ripe?: number;
+  /** Sunup: sprinklers that wore out this morning. */
+  worn?: number;
 }
 
 export interface WorldState {
@@ -327,6 +335,11 @@ export interface WorldState {
   learn: string[];
   /** Counts the lessons watch for (UI only; the simulation never reads it). */
   learnCount: Record<string, number>;
+  /**
+   * Sunup: a new save holds the clock at 6:00 until the farmer first does
+   * something, so reading the first line costs no daylight.
+   */
+  held?: boolean;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */
@@ -363,5 +376,5 @@ export type SimEvent =
   | { type: 'hire'; id: number }
   | { type: 'refill'; x: number; y: number; by: number }
   | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number }
-  | { type: 'request'; id: number; who: string; done: boolean; reward: number }
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId }
   | { type: 'unlock'; what: string };

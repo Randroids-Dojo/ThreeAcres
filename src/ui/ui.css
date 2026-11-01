@@ -570,3 +570,29 @@ svg { width: 100%; height: 100%; display: block; }
 .tpoint.on { pointer-events: auto; cursor: pointer; z-index: 5; }
 .tpoint.on:not(.over)::before { content: ''; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; }
 .dialog-open .tpoint, .picking .tpoint { opacity: 0 !important; pointer-events: none !important; }
+
+/* ---------------------------------------------------------------- Sunup, after the fourth playtest */
+/* Every tool on the rack wears its name, not only the one in hand: the Hoe and Build looked alike unlabelled. */
+.tool .lbl { opacity: 0.82; }
+.tool.on .lbl { opacity: 1; }
+/* The board and the view buttons wear their words too; on a phone View shows the whole farm. */
+.hud .topbtns .iconbtn { width: 48px; height: 44px; display: grid; grid-template-rows: 20px auto; place-items: center; align-content: center; gap: 1px; padding: 3px 0 2px; }
+.hud .topbtns .iconbtn .ic { width: 20px; height: 20px; }
+.hud .topbtns .tlbl { font-size: 11px; font-weight: 700; line-height: 1; color: var(--cream); }
+.hud .topbtns .viewbtn.on { background: #f4e8c8; color: var(--ink); }
+.hud .topbtns .viewbtn.on .tlbl { color: var(--ink); }
+.hud .topbtns { display: flex; gap: 12px; justify-content: flex-end; }
+/* The board's close button says Close. */
+.dialog header .closebtn { width: auto; height: 38px; border-radius: 19px; padding: 0 13px 0 9px; display: flex; align-items: center; gap: 4px; font-weight: 700; font-size: 13.5px; }
+.dialog header .closebtn .ic { width: 18px; height: 18px; }
+/* Bigger small type: the forecast's words and the seed cards' lines read at arm's length. */
+.daycard .sky .fc .fl { font-size: 11px; }
+.daycard .sky .fc .fd { min-width: 28px; }
+.seed .nm { font-size: 12.5px; }
+.seed .pr { font-size: 12px; }
+.seed .wh { font-size: 12px; }
+@media (max-width: 640px) { .seedbar { max-width: calc(4 * 90px + 12px); } .seed { min-width: 84px; } }
+/* A request note says when it will be ripe and when it is wanted. */
+.item.req .tx .when { color: var(--ink); }
+/* With words on the board and view buttons, their key caps sit at the top left, clear of the words (the count badge is top right). */
+.hud .topbtns .kcap { bottom: auto; right: auto; top: -5px; left: -5px; }

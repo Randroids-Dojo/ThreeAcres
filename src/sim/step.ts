@@ -1,13 +1,13 @@
 // One tick of the farm. Applies the player's commands, moves the clock by the
 // current clock rule, runs people and crows, and returns what happened.
 
-import { canAfford, fieldRep, homestead, resolve } from './actions';
+import { canAfford, daySeconds, fieldRep, homestead, resolve } from './actions';
 import { doTap, dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tapTool, TAP_QUEUE, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
-import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, TOOL_UPGRADES } from './constants';
+import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, nightfall, turnsMinute } from './day';
-import { checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
+import { checkMilestones, closePairs, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -23,6 +23,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   countPlaytime(s, dt);
 
   let move = { x: 0, y: 0 };
+  // Sunup's new save holds the clock until the farmer first does something (a lesson's unlock is not the farmer).
+  if (s.held && commands.some((c) => (c.type === 'move' ? Math.hypot(c.x, c.y) >= 0.15 : c.type !== 'unlock' && c.type !== 'rules' && c.type !== 'speed'))) s.held = false;
   for (const c of commands) {
     if (c.type === 'move') move = c;
     else command(s, c, ev);
@@ -46,7 +48,7 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   const minutesBefore = s.minute;
   switch (s.rules.clock) {
     case 'day':
-      s.minute += (dt * DAY_MINUTES) / DAY_SECONDS;
+      if (!s.held) s.minute += (dt * DAY_MINUTES) / daySeconds(s);
       break;
     case 'flow':
       s.minute += (dt * s.speed * DAY_MINUTES) / FLOW_SECONDS;
@@ -75,6 +77,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
   // The first request comes as soon as the board brings requests in; the rest come with the mornings.
   if (homestead(s) && s.learn.includes('requests') && !s.requested && !s.orders.length) fillRequests(s);
+  // Seed sown for one of a pair takes it: the other goes at once, with a word.
+  if (homestead(s) && s.orders.length > 1) closePairs(s, ev);
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -98,6 +102,11 @@ function beginNight(s: WorldState, ev: SimEvent[]): void {
 }
 
 // ---------------------------------------------------------------- crows
+
+/** Game minutes a crow pecks before it eats. Sunup's crow is as patient in real seconds whatever the day's length. */
+export function peckMinutes(s: WorldState): number {
+  return homestead(s) && s.rules.clock === 'day' ? (SUNUP_CROW_PECK_SECONDS * DAY_MINUTES) / daySeconds(s) : CROW_PECK_MINUTES;
+}
 
 function tickCrows(s: WorldState, dt: number, gameMinutes: number, ev: SimEvent[]): void {
   while (s.crowPlan.length && s.minute >= s.crowPlan[0]) {
@@ -126,7 +135,7 @@ function tickCrows(s: WorldState, dt: number, gameMinutes: number, ev: SimEvent[
           break;
         }
         if (s.rules.clock !== 'turns') c.t += gameMinutes;
-        if (c.t >= CROW_PECK_MINUTES) {
+        if (c.t >= peckMinutes(s)) {
           p.crop = null;
           s.almanac.withered++;
           ev.push({ type: 'crowEat', id: c.id, x: c.x, y: c.y });

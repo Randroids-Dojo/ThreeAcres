@@ -120,12 +120,15 @@ describe('requests fit the season', () => {
     expect(s.orders.length).toBe(2);
   });
 
+  // Round 4: in eight words or fewer, and the smith only once his lesson has come.
   it('the board says how far reputation is from the smith’s next tool', () => {
     const s = onDay3(1);
     s.learn.push('hoe');
-    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 0. Two more and the smith makes you a copper hoe.');
+    expect(smithLine(s)).toBe('Reputation 0. Each request filled adds one.');
+    s.learn.push('smith');
+    expect(smithLine(s)).toBe('Reputation 0. Two more for a copper hoe.');
     s.rep = 2;
-    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 2. One more and the smith makes you a copper can.');
+    expect(smithLine(s)).toBe('Reputation 2. One more for a copper can.');
   });
 
   // Round 3: requests asked for what was already growing (eight of the tester's ten). A farm that grows every crop

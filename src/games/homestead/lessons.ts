@@ -9,7 +9,7 @@ import type { Command } from '../../sim/commands';
 import { BUILD_COST, TOOL_UPGRADES } from '../../sim/constants';
 import { CROPS, cropWord } from '../../sim/crops';
 import { nightsToTurn } from '../../sim/actions';
-import { guarded } from '../../sim/day';
+import { guardedSure } from '../../sim/day';
 import { begun } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
 import { season, SEASON_NAMES } from '../../sim/world';
@@ -48,6 +48,8 @@ interface Lesson {
   act?: string;
   /** A tile to point at while the line is up (a chevron over it, or at the screen's edge when it is out of view). */
   point?(s: WorldState): Point | null;
+  /** What a tap on the pointer takes in hand before it walks there and acts (the Build tool and a scarecrow, say). */
+  tap?: Command[];
 }
 
 const ownedAt = (s: WorldState, i: number) => s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned;
@@ -105,8 +107,36 @@ const thePair = (s: WorldState) => {
 };
 /** The day a lesson finished (0 for a farm that finished it before days were kept). */
 const doneOn = (s: WorldState, id: string) => s.learnCount[`done:${id}`] ?? 0;
-/** The growing crop nearest the farmer that no scarecrow watches over. */
-const unguarded = (s: WorldState) => nearest(s, (c, i) => live(c) && c.stage >= 1 && !guarded(s, i % s.W, Math.floor(i / s.W)));
+/** Bare, hoed soil with nothing built on it: where a scarecrow or a sprinkler can go. */
+const bareAt = (s: WorldState, i: number) => !s.plots[i].crop && s.plots[i].tilled && s.tiles[i] === 'field' && !s.builds.some((b) => b.y * s.W + b.x === i);
+/** Is a plot one of the middle four of its field (where one scarecrow or sprinkler reaches the most of it)? */
+const midField = (s: WorldState, i: number) => {
+  const p = s.parcels[s.parcelOf[i]];
+  if (!p) return false;
+  const dx = (i % s.W) - p.x;
+  const dy = Math.floor(i / s.W) - p.y;
+  return dx >= 1 && dx <= p.w - 2 && dy >= 1 && dy <= p.h - 2;
+};
+/** Does a plot's field have a growing crop a scarecrow does not watch for sure? */
+const fieldOpen = (s: WorldState, i: number) => {
+  const p = s.parcels[s.parcelOf[i]];
+  if (!p) return false;
+  for (let y = p.y; y < p.y + p.h; y++) for (let x = p.x; x < p.x + p.w; x++) {
+    const c = s.plots[y * s.W + x].crop;
+    if (live(c) && c.stage >= 1 && !guardedSure(s, x, y)) return true;
+  }
+  return false;
+};
+/**
+ * Where to build: bare soil in the middle of a field with crops a crow could
+ * take (for a scarecrow), or of any field (for a sprinkler); else any bare
+ * soil. Never a crop: building goes on bare soil only.
+ */
+const buildSpot = (s: WorldState, guard: boolean) =>
+  nearest(s, (_c, i) => bareAt(s, i) && midField(s, i) && (!guard || fieldOpen(s, i))) ?? nearest(s, (_c, i) => bareAt(s, i) && midField(s, i)) ?? nearest(s, (_c, i) => bareAt(s, i));
+/** Can the smith make something now: a better can or hoe (one the farm has) its reputation is enough for? */
+const smithReady = (s: WorldState) =>
+  (['can', 'hoe'] as const).some((t) => s.learn.includes(t) && TOOL_UPGRADES[t][s.tools[t]] !== undefined && s.rep >= TOOL_UPGRADES[t][s.tools[t]].rep);
 
 /** Features that arrive with no line of their own: crows and bugs start coming from day 5, once a request is understood. */
 const QUIET: { what: string; after: string[]; when(s: WorldState): boolean }[] = [{ what: 'pests', after: ['deliver'], when: (s) => s.day >= 5 }];
@@ -258,19 +288,23 @@ const LESSONS: Lesson[] = [
     done: (s) => !crowHere(s),
   },
   {
-    // The morning after the first crow: the Build tool arrives, with its own line, and points at crops a crow could
-    // take. It ends when a scarecrow goes up, or after a while.
+    // The morning after the first crow: the Build tool arrives, with its own line, and points at bare soil in the
+    // middle of a field a crow could visit (building goes on bare soil only, never on a crop). A tap on the pointer
+    // takes the Build tool with a scarecrow and builds it there. It waits until a scarecrow is up: no timeout.
     id: 'scarecrow',
     after: ['pests'],
     unlocks: ['build'],
     stagger: true,
-    act: 'build',
+    act: 'build:scarecrow',
     ready: (s) => s.day > doneOn(s, 'pests'),
-    // Never "build one" to a farmer who cannot pay for it.
-    text: (s) => (s.coins >= BUILD_COST.scarecrow ? 'Scarecrows keep crows away. Build one.' : `Scarecrows keep crows away. They cost ${BUILD_COST.scarecrow}.`),
-    passive: 12,
-    done: (_s, _n, acted) => acted,
-    point: (s) => unguarded(s),
+    // Never "build" as if it were free to a farmer who cannot pay for it.
+    text: (s) => (s.coins >= BUILD_COST.scarecrow ? 'Build a scarecrow on bare soil.' : `Scarecrows cost ${BUILD_COST.scarecrow}. Sleep to sell the crate.`),
+    done: (s, _n, acted) => acted || s.builds.some((b) => b.kind === 'scarecrow'),
+    point: (s) => buildSpot(s, true),
+    tap: [
+      { type: 'buildKind', kind: 'scarecrow' },
+      { type: 'tool', tool: 'build' },
+    ],
   },
   {
     // The day after the Build tool: the forecast joins the day card.
@@ -281,6 +315,24 @@ const LESSONS: Lesson[] = [
     ready: (s) => s.day > doneOn(s, 'scarecrow'),
     text: () => 'Check the forecast for rain and heat.',
     passive: 8,
+  },
+  {
+    // Two fields want a lot of watering: a day the forecast has come and gone, the sprinkler joins the Build tool,
+    // with its own line, pointing at bare soil in the middle of a field; a tap on the pointer builds one there.
+    id: 'sprinkler',
+    after: ['scarecrow', 'forecast'],
+    unlocks: ['sprinkler'],
+    stagger: true,
+    act: 'build:sprinkler',
+    ready: (s) => fields(s) >= 2 && s.coins >= BUILD_COST.sprinkler && s.day > doneOn(s, 'forecast'),
+    text: () => 'Build a sprinkler to water around it.',
+    passive: 10,
+    done: (_s, _n, acted) => acted,
+    point: (s) => buildSpot(s, false),
+    tap: [
+      { type: 'buildKind', kind: 'sprinkler' },
+      { type: 'tool', tool: 'build' },
+    ],
   },
   {
     // Bugs come with the crows, quietly. Like the crow, the line waits for real
@@ -311,16 +363,16 @@ const LESSONS: Lesson[] = [
     passive: 9,
   },
   {
-    // A keyboard player hears about the wide view once, after the first seeds go in.
+    // The whole farm in one view, once, after the first seeds go in: C on a keyboard, the View button on a phone
+    // (close up, a phone sees about two fields, so a crow or bugs in the first field can hide off screen).
     id: 'wide',
     after: ['plant'],
     unlocks: ['wide'],
-    keys: true,
     act: 'wide',
     ready: (s) => s.day >= 2,
-    text: () => 'Press C to see the whole farm.',
+    text: (_s, touch) => (touch ? 'Tap View to see the whole farm.' : 'Press C to see the whole farm.'),
     passive: 7,
-    // Pressing C does what it says: the line goes.
+    // Pressing C or tapping View does what it says: the line goes.
     done: (_s, _n, acted) => acted,
   },
   {
@@ -328,7 +380,7 @@ const LESSONS: Lesson[] = [
     after: ['deliver'],
     unlocks: ['smith'],
     stagger: true,
-    ready: (s) => s.rep >= Math.min(TOOL_UPGRADES.can[0].rep, TOOL_UPGRADES.hoe[0].rep),
+    ready: (s) => smithReady(s),
     text: () => 'The smith has better tools now.',
     passive: 9,
   },
@@ -390,10 +442,15 @@ export class Tutor {
       case 'water':
       case 'plant':
       case 'till':
-      case 'build':
       case 'refill':
       case 'tend':
         if (e.by === farmerId) bump(e.type);
+        break;
+      case 'build':
+        if (e.by === farmerId) {
+          bump('build');
+          bump(`build:${e.kind}`);
+        }
         break;
       case 'crowScared':
         bump('scare');
@@ -424,7 +481,7 @@ export class Tutor {
    * crow left while the farmer slept, or under the board) is not done: it
    * waits for the next crow.
    */
-  update(s: WorldState, dt: number, touch: boolean, visible = true): { line: string; cmds: Command[]; point: Point | null } {
+  update(s: WorldState, dt: number, touch: boolean, visible = true): { line: string; cmds: Command[]; point: Point | null; tap?: Command[] } {
     const cmds: Command[] = [];
     const n = (k: string) => s.learnCount[k] ?? 0;
     const finished = (id: string) => s.learn.includes(`lesson:${id}`);
@@ -478,9 +535,10 @@ export class Tutor {
         if (next.stagger) s.learnCount[`arrived:${next.id}`] ??= s.day;
         if (next.act && !this.base.has(next.id)) this.base.set(next.id, n(next.act));
         if (next.act) s.learnCount[`${next.act}@${next.id}`] ??= n(next.act);
-        for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
-        // A calm lesson already satisfied before its line ever showed (rain watered the carrots) passes quietly.
+        // A calm lesson already satisfied before its line ever showed (rain watered the carrots) passes quietly,
+        // and what it brings in still comes.
         if (!next.passive && !next.urgent && n(`seen:${next.id}`) === 0 && next.done!(s, n, false)) {
+          for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
           finish(next);
           return { line: '', cmds, point: null };
         }
@@ -493,6 +551,9 @@ export class Tutor {
       if (nudge) return { line: nudge.text, cmds, point: nudge.point?.(s) ?? null };
     }
     const l = this.active;
+    // What a lesson brings onto the screen arrives with its line, the first moment the line can be seen (not while
+    // a reminder speaks over it, nor under the board): nothing shows before its lesson.
+    if (l && visible) for (const what of l.unlocks) if (!s.learn.includes(what) && !cmds.some((c) => c.type === 'unlock' && c.what === what)) cmds.push({ type: 'unlock', what });
     if (l && visible && dt > 0) s.learnCount[`seen:${l.id}`] = n(`seen:${l.id}`) + dt;
     let point = l ? (l.point?.(s) ?? null) : null;
     // After their lessons, crows and bugs still arrive now and then: the pointer keeps finding them, without a word
@@ -500,7 +561,7 @@ export class Tutor {
     const crow = theCrow(s);
     if (!point && finished('pests') && crow) point = { x: crow.x + 0.5, y: crow.y + 0.5 };
     if (!point && finished('bugs')) point = theBugs(s);
-    return { line: l ? l.text(s, touch) : '', cmds, point };
+    return { line: l ? l.text(s, touch) : '', cmds, point, tap: l?.point && point && l.tap ? l.tap : undefined };
   }
 }
 
@@ -510,6 +571,8 @@ export function inferLessons(s: WorldState): void {
   s.learnCount ??= {};
   // A field bought before the hoe always came with one: bring the hoe now.
   if (s.parcels.filter((p) => p.owned).length > 1 && !s.learn.includes('hoe') && s.learn.length) s.learn.push('hoe');
+  // A farm that built a sprinkler before it had a lesson of its own knows it.
+  if (s.builds?.some((b) => b.kind === 'sprinkler')) for (const w of ['sprinkler', 'lesson:sprinkler']) if (!s.learn.includes(w)) s.learn.push(w);
   if (s.learn.length) return;
   const harvested = Object.values(s.stats.harvested).reduce((a, b) => a + b, 0);
   const add = (...xs: string[]) => xs.forEach((x) => s.learn.includes(x) || s.learn.push(x));

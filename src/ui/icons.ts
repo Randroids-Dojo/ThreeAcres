@@ -8,8 +8,9 @@ export const ICONS = {
   hoe: wrap('<path d="M4 20 15.5 8.5"/><path d="M13.5 4.5 19.5 10.5"/><path d="M13.5 4.5c1.6-1.2 3.6-1.3 5 .2 1.5 1.4 1.4 3.4.2 5.1"/>'),
   can: wrap('<path d="M5 9h10v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M15 11l5-4"/><path d="M19 5.5l1.8 1.3"/><path d="M8 9V6.5a2 2 0 0 1 4 0V9"/><path d="M21 9.5v1M22 12v1M20 12.5v1"/>'),
   seeds: wrap('<path d="M6 4h12v16H6z"/><path d="M6 8h12"/><path d="M12 17c-2.2 0-3-1.6-3-3 1.8 0 3 .9 3 3zm0 0c2.2 0 3-1.6 3-3-1.8 0-3 .9-3 3zm0 0v-5"/>'),
-  // A hammer: its head across the handle, the claw curling off the back (the old drawing read as a pencil).
-  build: wrap('<path d="M13.2 10.8 5 19"/><path d="M9.8 7.4l3.5-3.5 6.8 6.8-3.5 3.5z"/><path d="M17.4 4.6c1.6.2 2.6 1.2 2.9 2.9"/>'),
+  // A hammer standing upright: a heavy head across the top of a straight handle, so it never reads as the hoe's
+  // slanting blade beside it on the rack (the first drawing read as a pencil, the second as a second hoe).
+  build: wrap('<path d="M4 4.2h9.6l4.4 2.6-4.4 2.6H4z"/><path d="M8.8 9.4V20.4"/><path d="M7.2 20.4h3.2"/>'),
   smart: wrap('<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5l1.2 2.3 2.3 1.2-2.3 1.2L12 15.5l-1.2-2.3L8.5 12l2.3-1.2z"/>'),
   sun: wrap('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
   cloud: wrap('<path d="M7 18h10a4 4 0 0 0 .5-8 5.5 5.5 0 0 0-10.6 1.5A3.3 3.3 0 0 0 7 18z"/>'),

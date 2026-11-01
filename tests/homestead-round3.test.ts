@@ -163,9 +163,10 @@ describe('lessons and lines', () => {
 
   it('the board never promises a copper hoe before there is a hoe, and says reputation', () => {
     const s = teach(world('sunup'), EARLY, EARLY_FEATURES);
-    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 0. Three more and the smith makes you a copper can.');
+    s.learn.push('smith');
+    expect(smithLine(s)).toBe('Reputation 0. Three more for a copper can.');
     s.learn.push('hoe');
-    expect(smithLine(s)).toBe('Each request filled adds one to your reputation. Yours is 0. Two more and the smith makes you a copper hoe.');
+    expect(smithLine(s)).toBe('Reputation 0. Two more for a copper hoe.');
     expect(smithLine(s)).not.toMatch(/good word/);
   });
 });

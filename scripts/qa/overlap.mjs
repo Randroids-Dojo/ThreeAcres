@@ -19,6 +19,12 @@
 // round the board's own buttons only (they used to cycle eleven HUD pieces
 // behind it), and Escape gives the keyboard back to the farm; the forecast's
 // words stay inside the day card.
+// Round 4: the whole-farm view on a phone and a desktop (View, or C): no
+// overlaps, and every plot of all six fields between the day card and the
+// controls; a busy night's morning card says three clauses at most; the
+// board's notes run ten words at most and its close button says Close; the
+// board and View buttons wear their words; the forecast's words are 11 px or
+// more and the seed cards' lines 12 px or more.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -127,6 +133,17 @@ async function run(label, viewport, touch) {
     // The forecast's three words sit inside the day card.
     ['forecast words', async () => p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.weather = 'storm'; st.forecast = ['cloud', 'storm', 'heat']; })],
     ['sleep question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmSleep(150, () => {}); })],
+    // Round 4: the whole farm in one view (View on a phone, C on a keyboard), with the HUD over it.
+    ['farm view', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.input.push({ type: 'rules', patch: { camera: 'wide' } }); })],
+    // Round 4: a busy night: the morning card still says three clauses at most.
+    ['morning card, a busy night', async () => p.evaluate(() => {
+      const st = window.sunup.state;
+      window.sunup.input.push({ type: 'rules', patch: { camera: 'close' } });
+      st.report = { day: st.day - 1, sold: [{ crop: 'radish', n: 8, value: 240 }], wages: 0, grew: 9, withered: 2, eaten: 1, crewWork: 0, income: 240, filled: [{ who: 'Old Tamsin', reward: 145 }], lapsed: [{ who: 'The lighthouse keeper', crop: 'corn', n: 6 }], withdrawn: [{ who: 'Pell’s pickles', crop: 'carrot', n: 5 }], kept: [{ crop: 'lettuce', n: 3 }], ripe: 6, worn: 1 };
+      window.sunup.hud['morning'](st);
+    })],
+    // Round 4: the smith's tab, once his lesson has come: its note is short.
+    ['board smith', async () => p.evaluate(() => { window.sunup.dialogs.board('tools'); })],
     ['empty can', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.state.water = 0; window.sunup.hud.pickTool('can'); })],
     // The seed picker opens away from the plot being worked: below when the plot is high on the screen, up top when it is low.
     ['seed picker, plot high', async () => p.evaluate(() => { const st = window.sunup.state; st.water = 12; window.sunup.hud.pickTool('hands'); const f = st.actors[0]; Object.assign(f, { x: 3.5, y: 4.5, facing: 's', task: null, path: [] }); window.sunup.hud.pickTool('seeds'); })],
@@ -183,6 +200,47 @@ async function run(label, viewport, touch) {
       if (!q.inside) hits.push('a request note runs off the board');
       if (q.clash) hits.push('the two notes or the "or" overlap');
     }
+    if (name === 'farm view') {
+      const q = await p.evaluate(() => {
+        const st = window.sunup.state;
+        const top = document.querySelector('.daycard').getBoundingClientRect().bottom;
+        const lows = [document.querySelector('.toolbar').getBoundingClientRect().top];
+        for (const sel of ['.tb-act', '.ts-base']) { const e = document.querySelector(sel); if (e && e.getBoundingClientRect().width > 0 && getComputedStyle(e).display !== 'none' && !e.closest('.touch:not(.show)')) lows.push(e.getBoundingClientRect().top); }
+        const bottom = Math.min(...lows);
+        let inside = 0;
+        let n = 0;
+        for (const pc of st.parcels) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
+          n++;
+          const pt = window.sunup.r3d.project(x + 0.5, y + 0.5, 0.3);
+          if (pt && pt.x > 4 && pt.x < innerWidth - 4 && pt.y > top && pt.y < bottom) inside++;
+        }
+        return { camera: st.rules.camera, inside, n };
+      });
+      if (q.camera !== 'wide' || q.inside !== q.n) hits.push(`farm view shows ${q.inside} of ${q.n} plots (${q.camera})`);
+    }
+    if (name === 'morning card, a busy night') {
+      const q = await p.evaluate(() => { const t = [...document.querySelectorAll('.toasts .toast')].pop(); return t ? (t.innerHTML.split('<br>')[1] ?? '').replace(/<[^>]+>/g, '') : ''; });
+      const clauses = q.split(/[.,]\s*/).filter((x) => x.trim()).length;
+      if (!q || clauses > 3) hits.push(`morning card has ${clauses} clauses: ${q}`);
+    }
+    // Round 4: the board's notes are footnotes, not letters, and its close button says what it does.
+    if (name.startsWith('board')) {
+      const q = await p.evaluate(() => ({
+        notes: [...document.querySelectorAll('.dialog.on .list > p.legend')].map((e) => e.textContent.trim()),
+        close: (() => { const b = document.querySelector('.dialog.on header .btn'); const l = b?.querySelector('.tlbl'); return { word: l?.textContent ?? '', shown: !!l && l.getBoundingClientRect().width > 10, aria: b?.getAttribute('aria-label') ?? '' }; })(),
+      }));
+      for (const t of q.notes) if (t.split(/\s+/).length > 10) hits.push(`board note of ${t.split(/\s+/).length} words: "${t}"`);
+      if (q.close.word !== 'Close' || !q.close.shown || q.close.aria !== 'Close') hits.push(`close button ${JSON.stringify(q.close)}`);
+    }
+    // Round 4: small type read at about 9 and 10 px. The forecast's words 11 px or more, the seed cards' lines 12 or more.
+    if (name === 'seed picker' || name === 'seed picker, end of season') {
+      const q = await p.evaluate(() => [...document.querySelectorAll('.seedbar .seed')].filter((e) => getComputedStyle(e).display !== 'none').flatMap((e) => ['.nm', '.pr', '.wh'].map((k) => parseFloat(getComputedStyle(e.querySelector(k)).fontSize))));
+      if (!q.length || Math.min(...q) < 12) hits.push(`seed card type ${Math.min(...q)} px`);
+    }
+    if (name === 'plain') {
+      const q = await p.evaluate(() => [...document.querySelectorAll('.topbtns .iconbtn')].filter((e) => !e.classList.contains('gone') && e.getBoundingClientRect().width > 0).map((e) => { const l = e.querySelector('.tlbl'); return { t: l?.textContent ?? '', w: l ? l.getBoundingClientRect().width : 0, size: l ? parseFloat(getComputedStyle(l).fontSize) : 0 }; }));
+      if (q.map((x) => x.t).join() !== 'Board,View' || q.some((x) => x.w < 10 || x.size < 11)) hits.push(`top buttons ${JSON.stringify(q)}`);
+    }
     if (name === 'forecast words') {
       const q = await p.evaluate(() => {
         const card = document.querySelector('.daycard').getBoundingClientRect();
@@ -190,6 +248,8 @@ async function run(label, viewport, touch) {
         return { n: words.length, inside: words.every((r) => r.left >= card.left - 1 && r.right <= card.right + 1 && r.bottom <= card.bottom + 1) };
       });
       if (q.n !== 3 || !q.inside) hits.push(`forecast words ${JSON.stringify(q)}`);
+      const size = await p.evaluate(() => Math.min(...[...document.querySelectorAll('.daycard .fc .fl')].map((e) => parseFloat(getComputedStyle(e).fontSize))));
+      if (size < 11) hits.push(`forecast words ${size} px`);
     }
     // Stamps you cannot afford are dashed and upright and say what they need.
     if (name === 'board fields, short of coins') {

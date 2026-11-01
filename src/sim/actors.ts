@@ -484,11 +484,19 @@ const TAP_JOBS = new Set<Verb>(['harvest', 'tend', 'scare', 'clear', 'water']);
  * Sunup: the tool for a tapped plot. The tool in hand when it can do the job
  * there; otherwise, when a free job waits there for the hands or the can (a
  * ripe crop, bugs, a crow, a withered crop, a thirsty one), the tool for it.
- * Never seeds or the hoe: a stray tap must not spend coins or turn meadow.
+ * Bugs and a crow come before water: watering a bugged crop leaves the bugs
+ * on it (and a bugged crop does not grow), so a tap with the can on a dry,
+ * bugged crop picks the bugs off. Never seeds or the hoe: a stray tap must
+ * not spend coins or turn meadow.
  */
 export function tapTool(s: WorldState, inHand: ToolId, x: number, y: number): ToolId {
   const r = resolve(s, inHand, x, y);
-  if ((r.verb && r.ok) || !homestead(s)) return inHand;
+  if (!homestead(s)) return inHand;
+  if (r.verb === 'water' && inHand !== 'hands') {
+    const h = resolve(s, 'hands', x, y);
+    if (h.ok && (h.verb === 'tend' || h.verb === 'scare')) return 'hands';
+  }
+  if (r.verb && r.ok) return inHand;
   for (const t of ['hands', 'can'] as ToolId[]) {
     if (t === inHand || (t !== 'hands' && !s.learn.includes(t))) continue;
     const q = resolve(s, t, x, y);

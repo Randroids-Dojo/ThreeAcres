@@ -31,9 +31,9 @@ function town(seed: number, fields = 1, day = 4): WorldState {
 }
 
 // Round 3: requests paid at most a fifth over market (60 coins at most), so turning one down cost nothing. Now they
-// pay 1.4 to 1.6 times market, come as a pair, and only one of the pair can be met.
+// pay 1.3 to 1.8 times market for what they have you sow, come as a pair, and only one of the pair can be taken.
 describe('requests pay clearly more than market', () => {
-  it('from 1.4 to 1.6 times what the crops fetch', () => {
+  it('from 1.3 to 1.8 times what the crops fetch (nothing is growing, so all of it is sown fresh)', () => {
     let n = 0;
     for (let seed = 1; seed <= 30; seed++) {
       for (const fields of [1, 2, 3]) {
@@ -42,8 +42,8 @@ describe('requests pay clearly more than market', () => {
         for (const o of offerRequests(s)) {
           n++;
           const market = o.items.reduce((a, it) => a + CROPS[it.crop].price * it.n, 0);
-          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.4);
-          expect(o.reward / market).toBeLessThanOrEqual(1.6);
+          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.3);
+          expect(o.reward / market).toBeLessThanOrEqual(1.8);
         }
       }
     }
@@ -66,7 +66,7 @@ describe('requests are few, and they compete', () => {
     expect(s.orders.length).toBe(1);
   });
 
-  it('the two of a pair want more soil or more seed than the farm has before they must be sown', () => {
+  it('each of a pair fits the farm alone, and asks for a share of it, not the whole', () => {
     let pairs = 0;
     for (let seed = 1; seed <= 40; seed++) {
       for (const fields of [1, 2]) {
@@ -74,15 +74,12 @@ describe('requests are few, and they compete', () => {
         s.coins = 100 + (seed % 5) * 150;
         const offer = offerRequests(s);
         if (offer.length !== 2) continue;
-        const [a, b] = offer;
         pairs++;
         // Nothing is growing, so every owned plot is free, and the purse is all the seed money there is.
         const free = s.plots.filter((_, i) => s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned).length;
-        const cost = (o: typeof a) => o.items[0].n * CROPS[o.items[0].crop].seed;
-        expect(a.items[0].n + b.items[0].n > free || cost(a) + cost(b) > s.coins, `seed ${seed}, ${fields} fields`).toBe(true);
-        // Each alone can be met.
+        const cost = (o: (typeof offer)[number]) => o.items[0].n * CROPS[o.items[0].crop].seed;
         for (const o of offer) {
-          expect(o.items[0].n).toBeLessThanOrEqual(free);
+          expect(o.items[0].n).toBeLessThanOrEqual(Math.ceil(free * 0.6));
           expect(cost(o)).toBeLessThanOrEqual(s.coins);
         }
       }

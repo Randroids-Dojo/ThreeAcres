@@ -23,7 +23,10 @@ function usable(s: unknown): s is WorldState {
 }
 
 function fresh(): WorldState {
-  return createWorld((Date.now() ^ (Math.random() * 0x7fffffff)) | 0, HOMESTEAD_RULES);
+  const s = createWorld((Date.now() ^ (Math.random() * 0x7fffffff)) | 0, HOMESTEAD_RULES);
+  // A new farm's clock waits at 6:00 until the farmer first does something: reading the first line costs no daylight.
+  s.held = true;
+  return s;
 }
 
 export const game: GameModule = {

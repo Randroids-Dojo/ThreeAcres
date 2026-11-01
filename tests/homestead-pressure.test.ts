@@ -7,10 +7,14 @@
 // scarecrow watches, bugs left on a crop spread to its neighbours, a crop
 // left dry on a heat wave's night withers, and the crow, the Build tool and
 // the forecast come one a day, each with its own line.
+// Round 4: two scarecrows ended the crows for good. Now a scarecrow's sure
+// watch is the plots right beside it; the outer ring of its square is its
+// edge, where crows still try now and then (fewer edge crops, fewer tries),
+// and the scarecrow lesson waits for a scarecrow to go up.
 import { describe, expect, it } from 'vitest';
 import { Tutor } from '../src/games/homestead/lessons';
 import { STAMINA_COST } from '../src/sim/constants';
-import { crowTarget, guarded, nightfall } from '../src/sim/day';
+import { crowTarget, guarded, guardedSure, nightfall } from '../src/sim/day';
 import { plant, plots } from '../src/sim/world';
 import type { WorldState } from '../src/sim/types';
 import { EARLY, EARLY_FEATURES, teach, world } from './helpers';
@@ -31,10 +35,11 @@ const build = (s: WorldState, x: number, y: number) => {
 };
 
 describe('a scarecrow watches a five by five square, so where it stands matters', () => {
-  it('one in the middle of a field covers all of it; one in its corner leaves the far side open', () => {
+  it('one in the middle of a field watches all of it (its far row and column only at the edge); one in its corner leaves the far side open', () => {
     const s = grown();
     build(s, 3, 6);
     for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) expect(guarded(s, x, y), `${x},${y}`).toBe(true);
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) expect(guardedSure(s, x, y), `${x},${y}`).toBe(x <= 4 && y <= 7);
     // Its reach stops two plots out: the next field is open.
     expect(guarded(s, 7, 6)).toBe(false);
     const c = grown();
@@ -43,7 +48,7 @@ describe('a scarecrow watches a five by five square, so where it stands matters'
     for (const [x, y] of [[5, 5], [5, 8], [2, 8], [5, 6]]) expect(guarded(c, x, y), `${x},${y}`).toBe(false);
   });
 
-  it('crows come for the fields no scarecrow watches, and keep away from a farm watched over whole', () => {
+  it('crows come for the fields no scarecrow watches, try a watched field’s edges less often, and keep away from a farm watched over sure', () => {
     const s = grown(7, 2);
     build(s, 3, 6);
     // Field 2 is open: every crow goes for it.
@@ -62,8 +67,21 @@ describe('a scarecrow watches a five by five square, so where it stands matters'
       if (!['rain', 'storm'].includes(s.weather) && s.crowPlan.length) open++;
     }
     expect(open).toBeGreaterThan(10);
-    // A scarecrow in the middle of field 2 as well: no crow comes at all.
+    // A scarecrow in the middle of field 2 as well: now and then a crow tries an edge.
     build(s, 8, 6);
+    let edge = 0;
+    for (let k = 0; k < 30; k++) {
+      s.day = 6;
+      s.weather = 'sun';
+      s.forecast = ['sun', 'sun', 'sun'];
+      nightfall(s, []);
+      for (const p of s.plots) if (p.crop) Object.assign(p.crop, { age: 2, stage: 2, dry: 0, bugs: 0 });
+      if (s.crowPlan.length) edge++;
+    }
+    expect(edge).toBeGreaterThan(0);
+    expect(edge).toBeLessThan(open);
+    // Scarecrows on the middle four plots of each field: every crop watched for sure, and no crow comes.
+    for (const [x, y] of [[4, 6], [3, 7], [4, 7], [9, 6], [8, 7], [9, 7]]) build(s, x, y);
     for (let k = 0; k < 30; k++) {
       s.day = 6;
       s.weather = 'sun';
@@ -163,11 +181,15 @@ describe('the crow, the Build tool and the forecast come one a day', () => {
     // The rest of the crow's day: no Build tool, no forecast, no scarecrow line.
     expect(run(150)).not.toMatch(/Scarecrow|forecast/);
     expect(unlocked[6] ?? []).toEqual([]);
-    // The next morning: the Build tool and its line.
+    // The next morning: the Build tool and its line, which stays until a scarecrow is up (no timeout).
     s.day = 7;
-    expect(run(5)).toMatch(/^Scarecrows keep crows away\./);
+    expect(run(5)).toBe('Build a scarecrow on bare soil.');
     expect(unlocked[7]).toEqual(['build']);
+    expect(run(300)).toBe('Build a scarecrow on bare soil.');
+    s.builds.push({ id: 950, kind: 'scarecrow', x: 3, y: 6 });
+    t.onEvent(s, { type: 'build', x: 3, y: 6, kind: 'scarecrow', by: s.actors[0].id });
     run(150);
+    expect(s.learn).toContain('lesson:scarecrow');
     expect(s.learn).not.toContain('forecast');
     // The morning after: the forecast and its line.
     s.day = 8;
@@ -189,6 +211,11 @@ describe('the crow, the Build tool and the forecast come one a day', () => {
       for (const c of out.cmds) if (c.type === 'unlock' && !s.learn.includes(c.what)) s.learn.push(c.what);
     }
     expect(seen).toEqual(['build']);
+    // A scarecrow goes up the same day: the lesson ends then.
+    s.builds.push({ id: 950, kind: 'scarecrow', x: 3, y: 6 });
+    t.onEvent(s, { type: 'build', x: 3, y: 6, kind: 'scarecrow', by: s.actors[0].id });
+    for (let i = 0; i < 10; i++) t.update(s, 0.1, true);
+    expect(s.learn).toContain('lesson:scarecrow');
     s.day = 10;
     for (let i = 0; i < 300; i++) {
       const out = t.update(s, 0.1, true);

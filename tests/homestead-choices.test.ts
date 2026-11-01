@@ -8,6 +8,11 @@
 // what the farm can raise by its sow-by day, shows that day, pays 1.4 to 1.6
 // times market, and is withdrawn (with a word on the morning card) once it
 // can no longer be met.
+// Round 4: the two of a pair no longer have to overflow the soil or the
+// purse together (that made each ask for most of the farm, and full farms got
+// none): only one of a pair can be taken, by rule, and seed sown for one
+// withdraws the other at once, with a word. Each pays 1.3 to 1.8 times market
+// for what it has you sow, so the two earn the same for each plot and day.
 //
 // These tests read the farm only through what the committed rules had too
 // (fillRequests, the orders on the board, nightfall), so on the old code they
@@ -20,7 +25,6 @@ import { fillRequests } from '../src/sim/goals';
 import { step } from '../src/sim/step';
 import { plant, plots, season } from '../src/sim/world';
 import type { CropId, Order, WorldState } from '../src/sim/types';
-import { morningNews } from '../src/ui/hud';
 import { EARLY, EARLY_FEATURES, teach, world } from './helpers';
 
 /**
@@ -45,7 +49,11 @@ function farm(seed: number, opts: { fields?: number; coins?: number; day?: numbe
   for (const p of s.plots) p.crop = null;
   let k = 0;
   const bare = bareTiles(s);
-  for (const [crop, n] of opts.growing ?? []) for (let j = 0; j < n && k < bare.length; j++, k++) plant(s, bare[k].x, bare[k].y, crop, 0);
+  // Sown the day before (a request pinned this morning did not ask for them).
+  for (const [crop, n] of opts.growing ?? []) for (let j = 0; j < n && k < bare.length; j++, k++) {
+    plant(s, bare[k].x, bare[k].y, crop, 0);
+    plots(s, bare[k].x, bare[k].y).crop!.planted = s.day - 1;
+  }
   return s;
 }
 
@@ -91,8 +99,8 @@ function* farms(): Generator<WorldState> {
   }
 }
 
-describe('a morning offers two requests that cannot both be met', () => {
-  it('two at once, each one alone can be met, the two together cannot', () => {
+describe('a morning offers two requests, and only one can be taken', () => {
+  it('two at once, each of which the farm can meet alone', () => {
     let mornings = 0;
     let pairs = 0;
     for (const s of farms()) {
@@ -100,32 +108,28 @@ describe('a morning offers two requests that cannot both be met', () => {
       fillRequests(s, true);
       if (s.orders.length !== 2) continue;
       pairs++;
-      const [a, b] = s.orders;
       const free = bareTiles(s).length;
-      for (const o of [a, b]) {
+      for (const o of s.orders) {
         expect(fresh(s, o), `${o.items[0].n} ${o.items[0].crop}`).toBeLessThanOrEqual(free);
         expect(fresh(s, o) * seedOf(o)).toBeLessThanOrEqual(s.coins);
       }
-      const soil = fresh(s, a) + fresh(s, b) > free;
-      const seed = fresh(s, a) * seedOf(a) + fresh(s, b) * seedOf(b) > s.coins;
-      expect(soil || seed, `${a.items[0].n} ${a.items[0].crop} and ${b.items[0].n} ${b.items[0].crop}, ${free} plots, ${s.coins} coins`).toBe(true);
     }
-    // A pair on most mornings; a single request only when the soil or the purse is too small for two.
+    // A pair on most mornings; a single request only when only one crop can go in.
     expect(pairs / mornings).toBeGreaterThan(0.75);
   });
 
-  it('sowing for one takes what the other needed: the other is withdrawn the next morning, with a word on the card', () => {
+  it('sowing for one takes it: the other goes at once, with a word', () => {
     let checked = 0;
     for (const s of farms()) {
       fillRequests(s, true);
       if (s.orders.length !== 2) continue;
       const [a, b] = s.orders;
-      sowFor(s, a, fresh(s, a));
-      nightfall(s, []);
+      // One seed is enough to choose.
+      sowFor(s, a, 1);
+      const ev = step(s, 0.016);
       expect(s.orders.map((o) => o.id), `kept ${a.items[0].n} ${a.items[0].crop}`).toContain(a.id);
       expect(s.orders.map((o) => o.id), `withdrew ${b.items[0].n} ${b.items[0].crop}`).not.toContain(b.id);
-      const crop = CROPS[b.items[0].crop];
-      expect(morningNews(s)).toMatch(new RegExp(`found (${crop.plural}|${crop.name.toLowerCase()}) elsewhere`));
+      expect(ev.some((e) => e.type === 'request' && e.id === b.id && !e.done)).toBe(true);
       checked++;
     }
     expect(checked).toBeGreaterThan(40);
@@ -228,14 +232,18 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     expect(n).toBeGreaterThan(100);
   });
 
-  it('pays 1.4 to 1.6 times what its crops fetch at market, so turning one down costs something', () => {
+  it('pays 1.3 to 1.8 times market for what it has you sow (crops already growing at market), so turning one down costs something', () => {
     const ratios: number[] = [];
     for (const s of farms()) {
       fillRequests(s, true);
-      for (const o of s.orders) ratios.push(o.reward / (CROPS[o.items[0].crop].price * o.items[0].n));
+      for (const o of s.orders) {
+        const d = CROPS[o.items[0].crop];
+        const base = o.items[0].n - fresh(s, o);
+        ratios.push((o.reward - base * d.price) / (d.price * fresh(s, o)));
+      }
     }
-    expect(Math.min(...ratios)).toBeGreaterThanOrEqual(1.4);
-    expect(Math.max(...ratios)).toBeLessThanOrEqual(1.6);
+    expect(Math.min(...ratios)).toBeGreaterThanOrEqual(1.3);
+    expect(Math.max(...ratios)).toBeLessThanOrEqual(1.8);
   });
 
   it('the first is still three radishes, and nothing more comes until it is filled', () => {

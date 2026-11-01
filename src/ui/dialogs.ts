@@ -6,7 +6,7 @@ import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
-import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, TOOL_UPGRADES } from '../sim/constants';
+import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
 import { begun, MILESTONES, plantedFor, requestHave, sowByOf, stockCount } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
@@ -43,8 +43,9 @@ export class Dialogs {
 
   constructor(private host: DialogHost) {
     const head = el('header');
-    const close = el('button', 'btn iconbtn', `<span class="ic">${icon('close')}</span>`);
+    const close = el('button', 'btn closebtn', `<span class="ic">${icon('close')}</span><span class="tlbl">Close</span>`);
     close.title = 'Close (Esc)';
+    close.setAttribute('aria-label', 'Close');
     close.onclick = () => this.close();
     head.append(this.title, close);
     this.root.append(head, this.body);
@@ -202,7 +203,7 @@ export class Dialogs {
     switch (this.tab) {
       case 'requests': {
         list.append(el('p', 'legend', smithLine(s)));
-        if (!s.orders.length) list.append(el('p', 'legend', 'No requests just now. More come with the mornings.'));
+        if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
         // A pair still to choose between hangs together, "or" between them: only one of the two can be met.
         const shown = new Set<number>();
         let paired = false;
@@ -218,7 +219,7 @@ export class Dialogs {
             list.append(pair);
           } else list.append(this.requestNote(s, o));
         }
-        list.append(el('p', 'legend', paired ? 'Only one of a pair can be met: plant for one. The crate keeps what a request needs.' : 'The crate keeps what a request needs.'));
+        list.append(el('p', 'legend', paired ? 'Plant for one of a pair.' : 'The crate keeps what requests need.'));
         break;
       }
       case 'fields':
@@ -258,7 +259,7 @@ export class Dialogs {
         }
         break;
       case 'tools': {
-        list.append(el('p', 'legend', `The smith works for coins, but only for farmers with a reputation. Fill requests to earn it. Yours is ${s.rep}.`));
+        list.append(el('p', 'legend', `Tools cost coins and reputation. Yours is ${s.rep}.`));
         for (const t of ['can', 'hoe'] as const) {
           const level = s.tools[t];
           const now = level === 0 ? (t === 'can' ? 'Watering can' : 'Hoe') : TOOL_UPGRADES[t][level - 1].name;
@@ -290,8 +291,9 @@ export class Dialogs {
         break;
       }
       case 'builds':
-        for (const k of ['sprinkler', 'scarecrow'] as BuildKind[]) {
-          const it = el('div', 'item', `<span class="ic">${icon(k)}</span><span class="tx"><b>${k === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b><span>${k === 'sprinkler' ? 'Waters the nine plots around it every morning' : scarecrowWords(s)}. ${BUILD_COST[k]} coins, placed on bare soil</span></span>`);
+        // Only what a lesson has brought in: the sprinkler comes after the scarecrow.
+        for (const k of (['scarecrow', 'sprinkler'] as BuildKind[]).filter((b) => b === 'scarecrow' || knows('sprinkler'))) {
+          const it = el('div', 'item', `<span class="ic">${icon(k)}</span><span class="tx"><b>${k === 'sprinkler' ? 'Sprinkler' : 'Scarecrow'}</b><span>${k === 'sprinkler' ? sprinklerWords(s) : scarecrowWords(s)}. ${BUILD_COST[k]} coins, on bare soil</span></span>`);
           const b = el('button', 'btn primary', 'Place');
           b.onclick = () => {
             this.host.pickBuild(k);
@@ -373,7 +375,9 @@ export class Dialogs {
       toSow > 0 && s.day <= sowBy
         ? `Sow ${toSow}${more} ${sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`}, seed ${fmt(toSow * d.seed)}`
         : `${inCrate} of ${it.n} in the crate, wanted by ${dayName(s, o.due)}`;
-    const note = el('div', 'item req', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}</span><span class="need">${need}</span><span class="pay">Pays ${fmt(o.reward)}, ${fmt(d.price * it.n)} at market</span></span>`);
+    // When it will be ready and when it is wanted, so the two of a pair can be weighed at a glance.
+    const when = toSow > 0 && s.day <= sowBy ? `Ripe in ${d.days} days, due ${dayName(s, o.due)}` : '';
+    const note = el('div', 'item req', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}</span><span class="need">${need}</span>${when ? `<span class="when">${when}</span>` : ''}<span class="pay">Pays ${fmt(o.reward)}, ${fmt(d.price * it.n)} at market</span></span>`);
     note.dataset.crop = it.crop;
     if (inCrate >= it.n) {
       const b = el('button', 'btn primary', 'Deliver');
@@ -460,13 +464,18 @@ function dayName(s: WorldState, day: number): string {
 
 /** What a scarecrow watches over, in the farm's words. */
 export function scarecrowWords(s: WorldState): string {
-  return homestead(s) ? 'Keeps crows off the five by five square around it' : 'Keeps crows off everything within three plots';
+  return homestead(s) ? 'Keeps crows off the plots around it. Crows still try the edges' : 'Keeps crows off everything within three plots';
+}
+
+/** What a sprinkler does, in the farm's words. */
+export function sprinklerWords(s: WorldState): string {
+  return homestead(s) ? `Waters the plots around it for ${SPRINKLER_MORNINGS} mornings` : 'Waters the nine plots around it every morning';
 }
 
 /**
- * Requests and the smith: the reputation requests have earned, and what the
- * next points of it bring (only for a tool the farm has: no copper hoe
- * before the hoe).
+ * Requests and the smith: the reputation requests have earned, and, once the
+ * smith has been met, what the next points of it bring (only for a tool the
+ * farm has: no copper hoe before the hoe). Short: a footnote, not a letter.
  */
 export function smithLine(s: WorldState): string {
   const has = (t: 'can' | 'hoe') => !homestead(s) || s.learn.includes(t);
@@ -477,10 +486,11 @@ export function smithLine(s: WorldState): string {
     .sort((a, b) => a.u!.rep - b.u!.rep)[0];
   const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
   const n = (k: number) => words[k] ?? String(k);
-  const head = `Each request filled adds one to your reputation. Yours is ${s.rep}.`;
-  if (!next) return `${head} The smith will make you anything he has.`;
+  // The smith is not named before his lesson.
+  if (homestead(s) && !s.learn.includes('smith')) return `Reputation ${s.rep}. Each request filled adds one.`;
+  if (!next) return `Reputation ${s.rep}. The smith will make anything.`;
   const left = next.u!.rep - s.rep;
-  return `${head} ${n(left)} more and the smith makes you a ${next.u!.name.toLowerCase()}.`;
+  return `Reputation ${s.rep}. ${n(left)} more for a ${next.u!.name.toLowerCase()}.`;
 }
 
 /** Notes on a corkboard never hang quite straight. */

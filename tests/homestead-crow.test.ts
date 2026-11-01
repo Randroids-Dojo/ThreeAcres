@@ -68,7 +68,7 @@ describe('the crow lesson is never ticked off unseen', () => {
     expect(s.learn).toContain('lesson:pests');
     expect(t.update(s, 0.1, true).line).not.toMatch(/Scarecrows/);
     s.day += 1;
-    expect(t.update(s, 0.1, true).line).toMatch(/^Scarecrows keep crows away\./);
+    expect(t.update(s, 0.1, true).line).toBe('Build a scarecrow on bare soil.');
   });
 
   it('until the lesson is done, a crow still pecking at nightfall takes nothing', () => {
