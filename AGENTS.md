@@ -47,6 +47,10 @@ npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell f
 npx tsx scripts/ranch-balance.ts       # Thistledown: coins a game day for typical ranches, against sweeping; neglect and gate timing
 node scripts/deck-board.mjs            # Seedbound: how the board persists (crops standing at dawn, bare dawns, sowings beside standing crops)
 npx tsx scripts/deck-seasons.ts        # Seedbound: per-season clear rates for years 1 to 3 with the decent, strict and guided bots
+npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates for each stall strategy (is one dominant?)
+npx tsx scripts/ranch-orders.ts        # Thistledown: how varied each morning's orders are and whether they compete
+npx tsx scripts/ranch-catch.ts         # Thistledown: catch success per kind for a careless thumb against a careful one
+node scripts/ranch-catch-real.mjs      # the same with real touch in the browser (RANCH_URL=...)
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
 node scripts/render3d-flash.mjs        # 3D frame readback for black or NaN pixels; also render3d-shots, -perf, -pick, -leak
 node scripts/audio-check.mjs           # audio levels, latency, crossfades, bursts (writes WAVs to /tmp/acres-audio-2)
