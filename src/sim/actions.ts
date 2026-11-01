@@ -131,6 +131,18 @@ function buildCheck(s: WorldState, kind: BuildKind): Resolved {
   return { verb: 'build', ok: true, reason: '', build: kind };
 }
 
+/**
+ * What building one `kind` at (x, y) would do, whatever is in hand (the
+ * lesson pointer's one-off build): owned, hoed or meadow field with nothing on
+ * it, and the coins for it.
+ */
+export function resolveBuild(s: WorldState, kind: BuildKind, x: number, y: number): Resolved {
+  if (!isField(s, x, y)) return NONE('');
+  if (!owned(s, x, y)) return NONE('unowned');
+  if (buildAt(s, x, y) || plots(s, x, y).crop) return NO('build', 'Clear it first');
+  return buildCheck(s, kind);
+}
+
 /** What `tool` would do at (x, y), and whether it can. */
 export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Resolved {
   // The can fills at the well or from the pond: with the can in hand, or in

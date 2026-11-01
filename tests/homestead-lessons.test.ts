@@ -98,7 +98,7 @@ describe('Sunup copy after the playtest', () => {
     for (const l of lines) expect(l, l).not.toMatch(/pinned|^Grow it|Done for today|Hoe it first/);
   });
 
-  it('never says "Build one" to a farmer who cannot pay for it', async () => {
+  it('never says "Build one" to a farmer who cannot pay for it (round 5: the line waits until a scarecrow can be paid for)', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
     for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'bugs', 'wide']) s.learn.push(`lesson:${id}`);
@@ -106,7 +106,9 @@ describe('Sunup copy after the playtest', () => {
     s.coins = 0;
     const t = new Tutor();
     const line = t.update(s, 0.1, true).line;
-    expect(line).toBe('Scarecrows cost 40. Sleep to sell the crate.');
+    expect(line).not.toMatch(/Build|Scarecrow|Sleep/);
+    s.coins = 40;
+    expect(t.update(s, 0.1, true).line).toBe('Build a scarecrow on bare soil.');
   });
 
   it('a milestone reads as something won, not a task', async () => {

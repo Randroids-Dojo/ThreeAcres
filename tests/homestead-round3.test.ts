@@ -149,7 +149,9 @@ describe('lessons and lines', () => {
   });
 
   it('"Press C to see the whole farm." goes as soon as C is pressed', () => {
-    const s = teach(world('sunup'), EARLY, EARLY_FEATURES);
+    // (Round 5: the line comes with the second field, when there is more farm than the close view holds.)
+    const s = teach(world('sunup'), [...EARLY, 'hoe'], [...EARLY_FEATURES, 'hoe']);
+    s.parcels[1].owned = true;
     s.day = 2;
     const t = new Tutor();
     let out = t.update(s, 0.5, false);

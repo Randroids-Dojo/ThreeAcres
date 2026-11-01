@@ -26,6 +26,16 @@
 // with the can on a dry, bugged crop picks the bugs off and waters nothing; a
 // refusal over a plot at the screen's edge ("Already watered") stays whole on
 // screen; every tool on the rack wears its name.
+// Round 5: a real tap on the plot under the scarecrow lesson's chevron (drawn
+// half a tile above its target) does that plot's own job: no Build tool, no
+// scarecrow, no question; a tap inside the target tile asks first, Not now
+// does nothing, yes builds one, once, and the tool in hand stays; five taps
+// after it plant five seeds and build nothing; with no coins a tap on the
+// pointer says what a scarecrow costs and nothing else happens (no tool
+// change, no walk), and the line steps aside until one can be paid for; from
+// the second field and the well's front the first field's left column is on
+// screen and a real tap there works; at no stamina one refusal shows and the
+// act button is dim.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -535,8 +545,8 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   const build = labels.find((l) => l.t === 'Build');
   check('every tool on the rack wears its name, and the Hoe and Build look different', labels.every((l) => l.o >= 0.8 && l.w > 10 && l.size >= 11) && !!hoe && !!build && hoe.icon !== build.icon, JSON.stringify(labels.map((l) => [l.t, l.o, Math.round(l.w)])));
 
-  // The View button: standing in the second field, a bugged crop in the first field's left column is off screen; a real
-  // tap on View shows it, and a second tap comes back close up.
+  // The View button: standing in the far east field, a bugged crop in the first field's left column is off screen; a
+  // real tap on View shows it, and a second tap comes back close up. (Round 5: from the second field it is on screen.)
   await p.evaluate(() => {
     const st = window.sunup.state;
     st.parcels[1].owned = true;
@@ -546,7 +556,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
     q.wet = true;
     q.crop = { id: st.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 1, quality: 0, picks: 0, parched: false, planted: st.day };
     st.rules.camera = 'close';
-    Object.assign(st.actors[0], { x: 10.5, y: 6.5, task: null, path: [] });
+    Object.assign(st.actors[0], { x: 14.5, y: 6.5, task: null, path: [] });
     window.sunup.walkAim = null;
   });
   await p.waitForTimeout(1500);
@@ -560,7 +570,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await tapAt(vb[0], vb[1], 82);
   await p.waitForTimeout(1200);
   const back = await seen();
-  check('from the second field a bugged crop in the first field’s left column is off screen; a real tap on View shows it, a second comes back', !closeUp.on && whole.on && whole.camera === 'wide' && back.camera === 'close', JSON.stringify({ closeUp, whole, back }));
+  check('from the far east field a bugged crop in the first field’s left column is off screen; a real tap on View shows it, a second comes back', !closeUp.on && whole.on && whole.camera === 'wide' && back.camera === 'close', JSON.stringify({ closeUp, whole, back }));
 
   // A tap on a "Too late" seed puts the seed away: the picker closes, the hands come out, and the next plot tap plants nothing.
   await p.evaluate(() => { const st = window.sunup.state; st.day = 8; st.coins = 300; st.minute = 60; st.stamina = 100; st.plots[6 * st.W + 2].crop = null; for (let x = 2; x < 6; x++) { const q = st.plots[7 * st.W + x]; q.crop = null; q.tilled = true; } window.sunup.hud.pickTool('hands'); Object.assign(st.actors[0], { x: 3.5, y: 4.5, task: null, path: [] }); window.sunup.walkAim = null; });
@@ -628,6 +638,175 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   const aw = fl.find((f) => f.t === 'Already watered');
   check('"Already watered" over a plot at the screen’s edge stays whole on screen', !!aw && aw.l >= 0 && aw.r <= 412 && edge.x < 60, JSON.stringify({ fl, at: Math.round(edge.x) }));
   await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+}
+
+// ---- round 5
+{
+  const tapAt = async (x, y, id) => { await touch('touchStart', [[x, y, id]]); await p.waitForTimeout(40); await touch('touchEnd', []); };
+  const centre = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }, sel);
+  const tilePt = (x, y) => p.evaluate(([x, y]) => window.sunup.r3d.project(x + 0.5, y + 0.5, 0), [x, y]);
+  // The scarecrow lesson's morning: field 1 growing carrots, its plot (3,7) bare, a ripe radish just north of it on
+  // (3,6), where the chevron is drawn; field 2 bare for sowing. Seeds in hand, as the tester had.
+  const scarecrowMorning = (coins) => p.evaluate((coins) => {
+    const st = window.sunup.state;
+    const lessons = ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'stamina', 'hoe', 'requests', 'deliver', 'choose', 'field', 'pests', 'bugs', 'turn', 'smith', 'wide'];
+    for (const l of lessons) if (!st.learn.includes(`lesson:${l}`)) st.learn.push(`lesson:${l}`);
+    for (const w of ['can', 'seeds', 'coins', 'stamina', 'sleep', 'board', 'requests', 'pests', 'hoe', 'wide']) if (!st.learn.includes(w)) st.learn.push(w);
+    st.learn = st.learn.filter((w) => w !== 'lesson:scarecrow' && w !== 'lesson:forecast' && w !== 'lesson:sprinkler' && w !== 'build' && w !== 'sprinkler');
+    st.day = 7;
+    st.learnCount['done:pests'] = 6;
+    // (A second run of the lesson on the same page: its counts start again.)
+    for (const k of ['build', 'build:scarecrow', 'seen:scarecrow', 'seenOn:scarecrow']) delete st.learnCount[k];
+    st.coins = coins;
+    st.stamina = 100;
+    st.minute = 60;
+    st.weather = 'sun';
+    st.orders = [];
+    st.crows = [];
+    st.crowPlan = [];
+    st.builds = [];
+    st.parcels[1].owned = true;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 11; x++) {
+      const q = st.plots[y * st.W + x];
+      if (st.tiles[y * st.W + x] !== 'field') continue;
+      q.tilled = true;
+      q.wet = true;
+      q.moisture = 2;
+      q.crop = x <= 5 ? { id: st.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day } : null;
+    }
+    st.plots[7 * st.W + 3].crop = null;
+    st.plots[6 * st.W + 3].crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+    st.seed = 'radish';
+    st.tool = 'seeds';
+    st.rules.camera = 'close';
+    Object.assign(st.actors[0], { x: 3.5, y: 3.5, facing: 's', task: null, path: [] });
+    window.sunup.walkAim = null;
+    window.sunup.dialogs.close(true);
+  }, coins);
+  const where = () => p.evaluate(() => {
+    const st = window.sunup.state;
+    const e = document.querySelector('.tpoint');
+    const r = e.getBoundingClientRect();
+    const t = window.sunup.hud['pointAt'];
+    return { line: document.querySelector('.hint.on')?.textContent ?? '', on: e.classList.contains('on'), over: e.classList.contains('over'), x: r.x + r.width / 2, y: r.y + r.height / 2, target: t ? [Math.floor(t.x), Math.floor(t.y)] : null, tool: st.tool, builds: st.builds.map((b) => `${b.kind}@${b.x},${b.y}`), coins: st.coins, dialog: window.sunup.dialogs.open, farmer: [+st.actors[0].x.toFixed(2), +st.actors[0].y.toFixed(2)], radishes: st.stats.harvested.radish };
+  });
+  await scarecrowMorning(220);
+  await p.waitForTimeout(1200);
+  let w0 = await where();
+  // The plot under the chevron's drawn position: the one north of the target.
+  const under = await p.evaluate(([x, y]) => window.sunup.r3d.pick(x, y), [w0.x, w0.y]);
+  check('the scarecrow lesson points at bare soil (3,7) with its chevron drawn over the plot to the north (3,6)', w0.line === 'Build a scarecrow on bare soil.' && w0.on && w0.over && w0.target?.join() === '3,7' && under?.x === 3 && under?.y === 6, JSON.stringify({ w0, under }));
+  await tapAt(w0.x, w0.y, 90);
+  await p.waitForTimeout(2200);
+  let w1 = await where();
+  check('P0: a real tap on the plot under the chevron does that plot’s own job: its radish is harvested, no Build tool, no scarecrow, no question', w1.radishes === w0.radishes + 1 && w1.builds.length === 0 && w1.tool !== 'build' && !w1.dialog && w1.coins === w0.coins, JSON.stringify({ before: w0, after: w1 }));
+  await p.screenshot({ path: '/tmp/acres-touch-r5-under-chevron.png' });
+  // A real tap inside the target tile asks first; Not now does nothing at all. (With the radish picked, its plot is the
+  // nearest bare soil in the field's middle, so the pointer may have moved there: tap wherever it points now.)
+  await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+  await p.waitForTimeout(400);
+  const aim = (await where()).target;
+  const tgt = await tilePt(aim[0], aim[1]);
+  const toolBefore = (await where()).tool;
+  const posBefore = (await where()).farmer;
+  await tapAt(tgt.x, tgt.y, 91);
+  await p.waitForTimeout(500);
+  let w2 = await where();
+  const ask = await p.evaluate(() => ({ title: document.querySelector('.dialog.on h2')?.textContent ?? '', text: document.querySelector('.dialog.on p')?.textContent ?? '' }));
+  check('a real tap inside the target tile asks before it builds ("Build a scarecrow?", 40 coins, what it does)', w2.dialog && ask.title === 'Build a scarecrow?' && /^40 coins\. .+You have 220\.$/.test(ask.text) && w2.builds.length === 0, JSON.stringify({ ask, w2 }));
+  await p.screenshot({ path: '/tmp/acres-touch-r5-ask.png' });
+  const no = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog.on .ask .btn')].find((e) => e.textContent === 'Not now'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  if (no) await tapAt(no[0], no[1], 92);
+  await p.waitForTimeout(900);
+  let w3 = await where();
+  check('Not now does nothing: no scarecrow, no walk, the same tool in hand', !w3.dialog && w3.builds.length === 0 && w3.tool === toolBefore && Math.hypot(w3.farmer[0] - posBefore[0], w3.farmer[1] - posBefore[1]) < 0.05, JSON.stringify({ w3, posBefore, toolBefore }));
+  // Yes builds one, once, and the tool in hand stays in hand.
+  await tapAt(tgt.x, tgt.y, 93);
+  await p.waitForTimeout(500);
+  const yes = await centre('.dialog.on .ask .btn.primary');
+  if (yes) await tapAt(yes[0], yes[1], 94);
+  for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.length)); i++) await p.waitForTimeout(100);
+  await p.waitForTimeout(500);
+  let w4 = await where();
+  check('yes builds one scarecrow on the target (40 coins), the seeds stay in hand, and the lesson ends', w4.builds.join() === `scarecrow@${aim[0]},${aim[1]}` && w4.coins === w0.coins - 40 && w4.tool === 'seeds' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), JSON.stringify({ w4, aim }));
+  // Never a chain: five more taps on bare soil plant five radishes and build nothing (five taps built five scarecrows).
+  for (const [x, y, id] of [[7, 6, 95], [8, 6, 96], [9, 6, 97], [10, 6, 98], [7, 7, 99]]) {
+    const q = await tilePt(x, y);
+    await tapAt(q.x, q.y, id);
+    await p.waitForTimeout(250);
+  }
+  await p.waitForTimeout(4500);
+  const chain = await p.evaluate(() => { const st = window.sunup.state; return { builds: st.builds.length, sown: [[7, 6], [8, 6], [9, 6], [10, 6], [7, 7]].filter(([x, y]) => st.plots[y * st.W + x].crop?.kind === 'radish').length, coins: st.coins, tool: st.tool }; });
+  check('five taps on bare soil after it sow five radishes (50 coins) and build nothing', chain.builds === 1 && chain.sown === 5 && chain.coins === w4.coins - 50 && chain.tool === 'seeds', JSON.stringify(chain));
+  await p.screenshot({ path: '/tmp/acres-touch-r5-after.png' });
+
+  // With no coins, a tap on the pointer says what a scarecrow costs, and nothing else happens: no tool change, no walk.
+  await scarecrowMorning(220);
+  await p.waitForTimeout(1200);
+  w0 = await where();
+  const tp = await tilePt(3, 7);
+  // (The coins go and the tap lands in the same moment, before the line can step aside.)
+  await p.evaluate(([x, y]) => { window.sunup.state.coins = 0; window.sunup.input.tapScreen(x, y); }, [tp.x, tp.y]);
+  await p.waitForTimeout(800);
+  w1 = await where();
+  const said = await p.evaluate(() => [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent));
+  check('a pointer tap with no coins says "A scarecrow costs 40. You have 0." and does nothing else', said.some((t) => t === 'A scarecrow costs 40. You have 0.') && w1.tool === w0.tool && w1.builds.length === 0 && !w1.dialog && Math.hypot(w1.farmer[0] - w0.farmer[0], w1.farmer[1] - w0.farmer[1]) < 0.05, JSON.stringify({ said, w0, w1 }));
+  check('and with no coins the scarecrow line and its pointer step aside (no "Sleep to sell the crate")', !/[Ss]carecrow|Sleep/.test(w1.line) && !(w1.on && w1.target?.join() === '3,7'), JSON.stringify(w1));
+  // The edge arrow is the pointer itself: with no coins, a tap on it says so too.
+  await p.evaluate(() => { const st = window.sunup.state; st.coins = 220; Object.assign(st.actors[0], { x: 17.5, y: 3.5, task: null, path: [] }); });
+  await p.waitForTimeout(1500);
+  const edge = await where();
+  await p.evaluate(() => { window.sunup.state.coins = 0; document.querySelector('.tpoint').click(); });
+  await p.waitForTimeout(500);
+  const edgeAfter = await where();
+  const said2 = await p.evaluate(() => [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent));
+  check('the edge arrow with no coins says what it costs too, and nothing walks or changes tools', edge.on && !edge.over && said2.filter((t) => t === 'A scarecrow costs 40. You have 0.').length >= 1 && edgeAfter.tool === edge.tool && !edgeAfter.dialog && Math.hypot(edgeAfter.farmer[0] - edge.farmer[0], edgeAfter.farmer[1] - edge.farmer[1]) < 0.05, JSON.stringify({ edge, edgeAfter, said2 }));
+
+  // P3: from the second field and from the well's front, the first field's left column is on screen and a real tap
+  // there works (a ripe radish on it is harvested).
+  for (const [fx, fy, label] of [[10.5, 6.5, 'the second field'], [11.5, 3.5, 'the well’s front']]) {
+    await p.evaluate(([fx, fy]) => {
+      const st = window.sunup.state;
+      st.coins = 200;
+      st.stamina = 100;
+      const q = st.plots[7 * st.W + 2];
+      q.tilled = true;
+      q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+      st.rules.camera = 'close';
+      window.sunup.input.push({ type: 'tool', tool: 'hands' });
+      Object.assign(st.actors[0], { x: fx, y: fy, task: null, path: [] });
+      window.sunup.walkAim = null;
+    }, [fx, fy]);
+    await p.waitForTimeout(1500);
+    const q = await tilePt(2, 7);
+    const r0 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
+    await tapAt(q.x, q.y, 100);
+    await p.waitForTimeout(3500);
+    const r1 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
+    check(`from ${label}, the first field’s left column is on screen and a real tap there harvests`, q.x > 8 && r1 === r0 + 1, JSON.stringify({ at: [Math.round(q.x), Math.round(q.y)], r0, r1 }));
+  }
+
+  // P2: at no stamina, one refusal shows, and the act button is dim and wordless (it stayed lit with Water).
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    for (let x = 2; x < 6; x++) { const q = st.plots[6 * st.W + x]; q.tilled = true; q.wet = false; q.moisture = 0; q.crop = { id: st.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; }
+    st.water = 12;
+    st.stamina = 0;
+    window.sunup.input.push({ type: 'tool', tool: 'can' });
+    Object.assign(st.actors[0], { x: 3.5, y: 5.5, facing: 's', task: null, path: [] });
+    window.sunup.walkAim = null;
+  });
+  await p.waitForTimeout(500);
+  const dim = await actButton();
+  for (const [x, id] of [[2, 101], [3, 102], [4, 103], [5, 104]]) {
+    const q = await tilePt(x, 6);
+    await tapAt(q.x, q.y, id);
+    await p.waitForTimeout(60);
+  }
+  await p.waitForTimeout(300);
+  const refusals = await p.evaluate(() => [...document.querySelectorAll('.floaters .floater.no')].map((f) => f.textContent));
+  check('at no stamina: one refusal on screen, and the act button is dim and wordless over a thirsty crop', refusals.length === 1 && /Too tired/.test(refusals[0]) && !dim.lit && dim.word === '', JSON.stringify({ refusals, dim }));
+  await p.evaluate(() => { window.sunup.state.stamina = 100; window.sunup.input.push({ type: 'tool', tool: 'hands' }); });
 }
 
 // A save from the old crew mode brings a farm hand along; Sunup is worked alone, so the hand has gone home on load.

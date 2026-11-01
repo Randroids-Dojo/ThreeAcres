@@ -109,7 +109,10 @@ describe('a request pays its premium only on what it has you sow', () => {
 });
 
 describe('the two of a pair are a real choice', () => {
-  it('they earn the same over their seed for each plot and day, within 10% (7 corn beat 9 sunflowers on every count)', () => {
+  // Round 5 replaced this rule: pairs priced to earn the same for each plot and day read as identical (the fifth
+  // playtest's corn and sunflowers both cleared 675 over 42 plot-days). `homestead-round5.test.ts` checks the pairs
+  // that differ in kind. What stays from round 4: neither of a pair is a poor deal on what it earns over its seed.
+  it('neither earns less than half of the other over its seed for each plot and day (7 corn beat 9 sunflowers on every count)', () => {
     let pairs = 0;
     const gaps: string[] = [];
     for (const s of farms()) {
@@ -117,7 +120,7 @@ describe('the two of a pair are a real choice', () => {
       if (offer.length !== 2) continue;
       pairs++;
       const [a, b] = offer.map((o) => perPlotDay(s, o));
-      if (Math.abs(a - b) > 0.1 * Math.max(a, b)) gaps.push(`${offer.map((o) => `${o.items[0].n} ${o.items[0].crop} for ${o.reward}`).join(' or ')}: ${a.toFixed(1)} and ${b.toFixed(1)}`);
+      if (Math.min(a, b) < 0.5 * Math.max(a, b)) gaps.push(`${offer.map((o) => `${o.items[0].n} ${o.items[0].crop} for ${o.reward}`).join(' or ')}: ${a.toFixed(1)} and ${b.toFixed(1)}`);
     }
     expect(pairs).toBeGreaterThan(50);
     expect(gaps, gaps.slice(0, 3).join('; ')).toEqual([]);
@@ -125,14 +128,17 @@ describe('the two of a pair are a real choice', () => {
 });
 
 describe('requests are sized to the farm, and capped', () => {
-  it('what a request pays for its own sowing is at most 30 coins a plot of owned field (a 1,020 request on two fields)', () => {
+  it('what a request gains over market is at most 14 coins a plot of owned field (a 1,020 request on two fields)', () => {
+    // (Round 5: the cap is on the gain over market, which the board now headlines; it was 30 a plot on all of the pay
+    // for what a request has you sow, market value included.)
     let n = 0;
     for (const s of farms()) {
       const plotsOwned = fieldTiles(s).length;
       for (const o of offerRequests(s)) {
         n++;
-        const base = baseOf(s, o);
-        expect(o.reward - base * CROPS[o.items[0].crop].price, `${o.items[0].n} ${o.items[0].crop} on ${plotsOwned} plots`).toBeLessThanOrEqual(30 * plotsOwned);
+        const gain = o.reward - o.items[0].n * CROPS[o.items[0].crop].price;
+        expect(gain, `${o.items[0].n} ${o.items[0].crop} on ${plotsOwned} plots`).toBeLessThanOrEqual(14 * plotsOwned);
+        expect(gain).toBeGreaterThan(0);
       }
     }
     expect(n).toBeGreaterThan(100);
@@ -200,6 +206,9 @@ describe('crows go for the edges of a watched field', () => {
       s.day = 6;
       s.weather = 'sun';
       s.forecast = ['sun', 'sun', 'sun'];
+      // (The day played out: the crows that came were shooed, none is still to come. Round 5's flock days let crows
+      // still to come at bedtime take a crop each.)
+      s.crowPlan = [];
       nightfall(s, []);
       for (const p of s.plots) if (p.crop) Object.assign(p.crop, { age: 2, stage: 2, dry: 0, bugs: 0 });
       if (['rain', 'storm'].includes(s.weather)) continue;
@@ -307,8 +316,8 @@ describe('the lessons and the copy', () => {
     for (const c of out.cmds) if (c.type === 'unlock' && !s.learn.includes(c.what)) s.learn.push(c.what);
     expect(out.line).toBe('Build a scarecrow on bare soil.');
     expect(out.point).toEqual({ x: 4.5, y: 7.5 });
-    // A tap on the pointer takes the Build tool and a scarecrow before it acts there.
-    expect(out.tap).toEqual([{ type: 'buildKind', kind: 'scarecrow' }, { type: 'tool', tool: 'build' }]);
+    // A tap on the pointer builds a scarecrow there (round 5: it asks first, once, and leaves the tool in hand alone).
+    expect(out.build).toBe('scarecrow');
     for (let i = 0; i < 300; i++) out = t.update(s, 0.1, true);
     expect(out.line).toBe('Build a scarecrow on bare soil.');
     expect(s.learn).not.toContain('lesson:scarecrow');

@@ -124,8 +124,8 @@ export interface Actor {
   path: { x: number; y: number }[];
   /** Job the actor is working towards. */
   job: number | null;
-  /** Hands only: the chore picked for itself (not a painted job). */
-  aim: { verb: Verb; x: number; y: number } | null;
+  /** Hands only: the chore picked for itself (not a painted job). Sunup's farmer: the job a tap walks to; `build` is a one-off build there. */
+  aim: { verb: Verb; x: number; y: number; build?: BuildKind } | null;
   /** Short hop in turns mode: renderers lift the actor by sin(PI * hop). 0..1, 0 when idle. */
   hop: number;
   /** Hands only: shirt colour index 0..5. */
@@ -177,7 +177,25 @@ export interface Order {
   pair?: number;
   /** Sunup: how many of it are to be sown fresh (the rest are crops already growing, paid at market). Missing in older saves. */
   fresh?: number;
+  /**
+   * Sunup: false while it is only an offer on the board, waiting for the
+   * player to accept it; true once accepted. Missing (older saves, the
+   * first request) means taken.
+   */
+  taken?: boolean;
+  /** Sunup: false until the board has shown it (the board's badge counts these). Missing means seen. */
+  seen?: boolean;
+  /** Sunup: what sort of request it is, so the two of a pair differ in kind (`RequestKind`). Missing in older saves. */
+  kind?: RequestKind;
 }
+
+/**
+ * Sunup's sorts of request. A pair is one bold request against one safe one:
+ * rush (sow today, no day to spare) or easy (two days to sow, two to spare);
+ * long (a slow crop) or quick (a fast one); big (many plots) or small (few).
+ * `single` is a request offered alone, `first` the lesson's three radishes.
+ */
+export type RequestKind = 'rush' | 'easy' | 'long' | 'quick' | 'big' | 'small' | 'single' | 'first';
 
 export type GoalKind = 'harvest' | 'variety' | 'quality' | 'earn' | 'growing' | 'nowither';
 
@@ -248,6 +266,8 @@ export interface DayReport {
   ripe?: number;
   /** Sunup: sprinklers that wore out this morning. */
   worn?: number;
+  /** Sunup: crows are about this morning (a flock day). */
+  flock?: boolean;
 }
 
 export interface WorldState {
@@ -311,7 +331,7 @@ export interface WorldState {
    * Sunup: plots tapped while the farmer was busy, each with the tool it
    * wants, done in order once the job in hand is finished. Missing in older saves.
    */
-  taps?: { x: number; y: number; tool: ToolId }[];
+  taps?: { x: number; y: number; tool: ToolId; build?: BuildKind }[];
   rep: number;
   almanac: Almanac;
   milestones: Record<string, boolean>;
@@ -340,6 +360,12 @@ export interface WorldState {
    * something, so reading the first line costs no daylight.
    */
   held?: boolean;
+  /** Sunup: the sort of pair offered last (a morning offers a different one next). Missing in older saves. */
+  pairKind?: string;
+  /** Sunup: crows are about today: more come, through the afternoon, and a farm left early loses crops to them. */
+  flock?: boolean;
+  /** Sunup: the midday bugs have come today (they land once, at 13:00). */
+  midday?: number;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */

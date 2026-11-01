@@ -1,5 +1,6 @@
-// Things the player builds on a plot: sprinklers (a brass riser with a head
-// that spins when it sprays) and scarecrows (straw, a patched shirt, a hat).
+// Things the player builds on a plot: sprinklers (an upright brass riser on a
+// stone footing, with a blue-capped head that spins when it sprays) and
+// scarecrows (straw, a patched shirt, a hat).
 
 import { DynamicDrawUsage, Group, InstancedMesh, Matrix4, Quaternion, Vector3, type BufferGeometry } from 'three';
 import type { BuildKind, WorldState } from '../sim/types';
@@ -13,6 +14,7 @@ const K = {
   brass: col('#c8913f'),
   brassDark: col('#9a6a2c'),
   pipe: col('#6f7a80'),
+  cap: col('#4f8fc4'),
   wood: col('#8a643f'),
   straw: col('#e6c56a'),
   strawDark: col('#c9a548'),
@@ -25,24 +27,30 @@ const K = {
   band: col('#3d6b4a'),
 };
 
+/**
+ * The sprinkler stands up off its plot: a round stone footing, an upright
+ * brass riser with a collar, and a spinning head with a blue cap above it.
+ * (Round 5: the old one, a low pad with a pipe lying along the soil, read as
+ * a tool dropped in the field.)
+ */
 function sprinklerBase(): BufferGeometry {
   const b = new GeoBuilder();
-  b.add(block(0.24, 0.05, 0.24, 0.02), at(0, 0.025, 0), K.pad);
-  b.add(cyl(0.022, 0.028, 0.3, 7), at(0, 0.04, 0), K.brass, { flat: true });
-  b.add(cyl(0.035, 0.035, 0.03, 8), at(0, 0.12, 0), K.brassDark, { flat: true });
-  // Pipe running to the edge of the tile.
-  b.add(cyl(0.014, 0.014, 0.4, 5), at(0, 0.03, 0, 0, Math.PI / 2, 0), K.pipe);
+  b.add(cyl(0.15, 0.17, 0.06, 10), at(0, 0.03, 0), K.pad, { flat: true });
+  b.add(cyl(0.05, 0.06, 0.04, 8), at(0, 0.07, 0), K.pipe, { flat: true });
+  b.add(cyl(0.026, 0.03, 0.42, 7), at(0, 0.09, 0), K.brass, { flat: true });
+  b.add(cyl(0.042, 0.042, 0.035, 8), at(0, 0.3, 0), K.brassDark, { flat: true });
   return b.build();
 }
 
 function sprinklerHead(): BufferGeometry {
   const b = new GeoBuilder();
-  b.add(cyl(0.035, 0.03, 0.05, 8), at(0, 0, 0), K.brassDark, { flat: true });
+  b.add(cyl(0.045, 0.04, 0.06, 8), at(0, 0, 0), K.brassDark, { flat: true });
   for (const s of [-1, 1]) {
-    b.add(cyl(0.01, 0.01, 0.13, 5), at(0, 0.035, 0, 0, 0, s * (Math.PI / 2 - 0.15)), K.brass);
-    b.add(cone(0.018, 0.04, 6), at(s * 0.13, 0.05, 0, 0, 0, s * -0.6), K.brassDark, { flat: true });
+    // Two arms reaching out and a little up, each with a nozzle turned along the spin.
+    b.add(cyl(0.012, 0.012, 0.2, 5), at(s * 0.1, 0.045, 0, 0, 0, s * (Math.PI / 2 - 0.22)), K.brass);
+    b.add(cone(0.022, 0.05, 6), at(s * 0.2, 0.07, s * 0.02, Math.PI / 2, 0, 0), K.brassDark, { flat: true });
   }
-  b.add(ball(0.02, 6, 4), at(0, 0.06, 0), K.brass);
+  b.add(ball(0.04, 8, 5), at(0, 0.07, 0), K.cap);
   return b.build();
 }
 
@@ -134,7 +142,7 @@ export function buildBuilds(mats: Materials, cap: number): Builds {
           const si = i % spin.length;
           spin[si] += speed * dt;
           _q.setFromAxisAngle(_up, spin[si]);
-          _p.set(b.x + 0.5 + ox, 0.02 + 0.33 * sy, b.y + 0.5);
+          _p.set(b.x + 0.5 + ox, 0.02 + 0.52 * sy, b.y + 0.5);
           _m.compose(_p, _q, _s);
           head.setMatrixAt(k, _m);
         } else {

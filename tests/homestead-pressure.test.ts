@@ -202,6 +202,8 @@ describe('the crow, the Build tool and the forecast come one a day', () => {
     s.day = 9;
     s.orders = [];
     s.rep = 3;
+    // (Round 5: the smith comes only when the farm can pay for what he makes.)
+    s.coins = 500;
     s.learnCount['done:pests'] = 8;
     const t = new Tutor();
     const seen: string[] = [];

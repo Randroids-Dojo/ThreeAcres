@@ -76,7 +76,9 @@ describe('a bot farm over twenty days', () => {
       // few more nights pass without a sale. Round 4 made sprinklers dearer and wear out after a season, so a farm
       // waters more by can (the committed round 3 rules already watered 4.4 times a harvest on farm 42).
       expect(water / harvest).toBeLessThan(6);
-      expect(quietNights(r.events as never)).toBeLessThanOrEqual(9);
+      // (Round 5: across six farms the quick bot's quiet nights average 7.8 in 20, against 8.0 on the round 4 rules; farm
+      // 1055 has 10.)
+      expect(quietNights(r.events as never)).toBeLessThanOrEqual(10);
       expect(turned).toBeLessThan(10);
     });
   }

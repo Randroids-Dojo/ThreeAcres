@@ -2,14 +2,14 @@
 // control and the hands, actions in progress, footsteps, and the hands' own
 // choice of chores.
 
-import { crowAt, homestead, perform, resolve, type Resolved } from './actions';
+import { canAfford, crowAt, homestead, perform, resolve, resolveBuild, type Resolved } from './actions';
 import { ACTION_SECONDS, BUILD_COST, HAND_SLOWER, HAND_SPEED, HOP_SECONDS, WALK_SPEED } from './constants';
 import { CROPS } from './crops';
 import { BUNK, PROPS, propAt } from './map';
 import { pathNextTo, pathTo } from './path';
 import { needsWater } from './soil';
 import { idx, inMap, owned, walkable } from './world';
-import type { Actor, Facing, Job, SimEvent, ToolId, Verb, WorldState } from './types';
+import type { Actor, BuildKind, Facing, Job, SimEvent, ToolId, Verb, WorldState } from './types';
 
 const RADIUS = 0.28;
 const STEP_EVERY = 0.55;
@@ -470,7 +470,8 @@ function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
   a.aim = null;
   const t = tileOf(a);
   if (Math.max(Math.abs(t.x - aim.x), Math.abs(t.y - aim.y)) > 1) return;
-  const r = resolve(s, s.tool, aim.x, aim.y);
+  // A one-off build from the lesson pointer builds that; anything else is the tool in hand's job.
+  const r = aim.build ? resolveBuild(s, aim.build, aim.x, aim.y) : resolve(s, s.tool, aim.x, aim.y);
   if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
 }
 
@@ -516,24 +517,46 @@ export function wellTap(s: WorldState, x: number, y: number): { x: number; y: nu
   return r.verb === 'refill' && r.ok ? { x: w.x, y: w.y } : null;
 }
 
-/** Sunup: do one tap now, with its tool: act on it from beside it, or walk there and then act. */
-export function doTap(s: WorldState, a: Actor, tap: { x: number; y: number; tool: ToolId }, ev: SimEvent[]): void {
-  // The tool chosen when it was tapped, if it still does the job; else whatever does it now.
-  const fits = (t: ToolId) => {
-    const r = resolve(s, t, tap.x, tap.y);
-    return !!(r.verb && r.ok);
-  };
-  const tool = fits(tap.tool) ? tap.tool : tapTool(s, s.tool, tap.x, tap.y);
-  if (tool !== s.tool) {
-    s.tool = tool;
-    s.kitTool = tool;
+/**
+ * Sunup: do one tap now, with its tool: act on it from beside it, or walk
+ * there and then act. A tap carrying `build` is the lesson pointer's one-off
+ * build: it builds that, once, and leaves the tool in hand alone. Too tired
+ * for the job: one refusal, and the taps still waiting are dropped (the
+ * fifth playtest drew two refusals on top of each other).
+ */
+export function doTap(s: WorldState, a: Actor, tap: { x: number; y: number; tool: ToolId; build?: BuildKind }, ev: SimEvent[]): void {
+  let r: Resolved;
+  if (tap.build) r = resolveBuild(s, tap.build, tap.x, tap.y);
+  else {
+    // The tool chosen when it was tapped, if it still does the job; else whatever does it now.
+    const fits = (t: ToolId) => {
+      const q = resolve(s, t, tap.x, tap.y);
+      return !!(q.verb && q.ok);
+    };
+    const tool = fits(tap.tool) ? tap.tool : tapTool(s, s.tool, tap.x, tap.y);
+    if (tool !== s.tool) {
+      s.tool = tool;
+      s.kitTool = tool;
+    }
+    r = resolve(s, s.tool, tap.x, tap.y);
   }
-  const r = resolve(s, s.tool, tap.x, tap.y);
+  if (r.verb && r.ok && homestead(s)) {
+    const tired = canAfford(s, r.verb);
+    if (tired) {
+      ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: tired });
+      ev.push({ type: 'tired' });
+      s.taps = [];
+      return;
+    }
+  }
   const t = tileOf(a);
   if (Math.max(Math.abs(t.x - tap.x), Math.abs(t.y - tap.y)) <= 1) {
     if (r.verb && r.ok) startAction(s, a, r, tap.x, tap.y, ev);
     else if (r.reason) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
-  } else walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok));
+  } else {
+    walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok));
+    if (tap.build && a.aim) a.aim.build = tap.build;
+  }
 }
 
 export function walkTo(s: WorldState, a: Actor, x: number, y: number, thenAct: boolean): void {

@@ -8,6 +8,7 @@ import { PARCELS } from '../../sim/map';
 import type { GameModule } from '../../shell/types';
 import { Director } from './director';
 import { inferLessons } from './lessons';
+import { adoptRequests } from '../../sim/goals';
 
 declare global {
   interface Window {
@@ -56,6 +57,8 @@ export const game: GameModule = {
     s.tools ??= { can: 0, hoe: 0 };
     if (s.tool === 'smart') s.tool = 'hands';
     inferLessons(s);
+    // Requests are taken on the board now: an old save's pair nobody sowed for is still on offer.
+    adoptRequests(s);
     // Phones play close up; the wide view is a desktop choice (C).
     if (matchMedia('(pointer: coarse)').matches) s.rules.camera = 'close';
     const d = new Director(s, ctx);

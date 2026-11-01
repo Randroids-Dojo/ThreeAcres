@@ -7,10 +7,10 @@ import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
 import { BUILD_COST, TOOL_UPGRADES } from './constants';
-import { canDeliver, canMeet, plantedFor, requestHave } from './goals';
+import { canDeliver, canMeet, gainOf, isTaken, offered, sowByOf, stillToSow } from './goals';
 import { guarded } from './day';
 import { owned } from './world';
-import type { CropId, ToolId, WorldState } from './types';
+import type { CropId, Order, RequestKind, ToolId, WorldState } from './types';
 
 const KIT: ToolId[] = ['hands', 'can', 'seeds', 'hoe'];
 
@@ -19,10 +19,29 @@ export interface Bot {
   wait: number;
   /** Seconds between actions under walk control. 0.05 is the quick bot; about a second plays at a person's pace. */
   pace: number;
+  /**
+   * Sunup: how it takes one of a pair on the board: the one with the bigger gain, always the bold one (rush, long,
+   * big), always the safe one (easy, quick, small), or none at all.
+   */
+  choose: 'gain' | 'bold' | 'safe' | 'none';
+  /** A busy player: it goes to bed once the clock passes this many game minutes after 6:00 (undefined: when done). */
+  bedtime?: number;
 }
 
-export function newBot(pace = 0.05): Bot {
-  return { idle: 0, wait: 0, pace };
+export function newBot(pace = 0.05, opts: Partial<Pick<Bot, 'choose' | 'bedtime'>> = {}): Bot {
+  return { idle: 0, wait: 0, pace, choose: opts.choose ?? 'gain', bedtime: opts.bedtime };
+}
+
+const BOLD = new Set<RequestKind>(['rush', 'long', 'big']);
+
+/** Which offer on the board the bot takes, by its way of choosing; null for none. Only one it can still meet. */
+export function botPick(s: WorldState, how: Bot['choose']): Order | null {
+  if (how === 'none') return null;
+  const offers = s.orders.filter((o) => offered(o) && canMeet(s, o));
+  if (!offers.length) return null;
+  if (how === 'gain') return offers.reduce((a, b) => (gainOf(b) > gainOf(a) ? b : a));
+  const want = offers.find((o) => (how === 'bold') === BOLD.has(o.kind ?? 'single'));
+  return want ?? offers[0];
 }
 
 function inGround(s: WorldState, c: CropId): number {
@@ -38,18 +57,13 @@ function bestSeed(s: WorldState): CropId {
     const ok = allowed.filter((c) => sowing(s.day, c).ok);
     allowed = ok.length ? ok : ['radish'];
   }
-  // Orders and requests first: whatever one still needs and can be grown in time. Of a pair, a person picks one:
-  // the one already begun, else the one that leaves the most over its seed.
+  // Requests first: whatever a request it took still needs sown and can be grown in time, the one due to be sown
+  // soonest first.
   if (homestead(s)) {
-    const open = s.orders.filter((o) => canMeet(s, o));
-    const short = open.filter((o) => plantedFor(s, o) > 0 && requestHave(s, o) < o.items[0].n);
-    const net = (o: (typeof open)[number]) => o.reward - o.items[0].n * CROPS[o.items[0].crop].seed;
-    const chosen = short.length ? short : open.filter((o) => plantedFor(s, o) === 0).sort((a, b) => net(b) - net(a)).slice(0, 1);
-    for (const o of chosen) {
-      for (const it of o.items) {
-        const have = s.stock[it.crop].reduce((a, b) => a + b, 0) + inGround(s, it.crop);
-        if (have < it.n && allowed.includes(it.crop) && CROPS[it.crop].seed <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
-      }
+    const open = s.orders.filter((o) => isTaken(o) && canMeet(s, o) && s.day <= sowByOf(o) && stillToSow(s, o) > 0).sort((a, b) => sowByOf(a) - sowByOf(b));
+    for (const o of open) {
+      const it = o.items[0];
+      if (allowed.includes(it.crop) && CROPS[it.crop].seed <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
     }
   }
   if (s.rules.goal === 'orders') {
@@ -111,7 +125,8 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   if (s.turnover >= 0) return out;
   // Like a person through the lessons: requests, then the crows and bugs, and scarecrows after the first crow.
   if (homestead(s)) for (const what of ['requests', 'pests']) if (!s.learn.includes(what)) out.push({ type: 'unlock', what });
-  if (homestead(s) && !s.learn.includes('build') && s.stats.days >= 8) out.push({ type: 'unlock', what: 'build' });
+  // (The crow and scarecrow lessons are done by then, as a person's would be: crows come for each open field.)
+  if (homestead(s) && !s.learn.includes('build') && s.stats.days >= 8) for (const what of ['build', 'lesson:pests', 'lesson:scarecrow']) out.push({ type: 'unlock', what });
   if (homestead(s) && s.learn.includes('build') && !s.learn.includes('sprinkler') && s.parcels.filter((p) => p.owned).length >= 2) out.push({ type: 'unlock', what: 'sprinkler' });
   const f = farmer(s);
 
@@ -120,6 +135,11 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   if (next && s.coins > next.price + 150) out.push({ type: 'buyParcel', id: next.id });
   if (s.rules.crew === 'crew' && s.coins > 600 && s.actors.filter((a) => a.role === 'hand').length < 3) out.push({ type: 'hire' });
   for (const o of s.orders) if (canDeliver(s, o)) out.push({ type: 'deliver', id: o.id });
+  // Sunup: a request is taken on the board, by the bot's way of choosing; planting never takes one.
+  if (homestead(s)) {
+    const pick = botPick(s, bot.choose);
+    if (pick) out.push({ type: 'accept', id: pick.id });
+  }
   if (s.rules.goal === 'orders') for (const c of CROP_IDS) if (s.stock[c].some((n) => n > 0) && !s.orders.some((o) => o.items.some((it) => it.crop === c))) out.push({ type: 'sell', crop: c });
   if (s.almanac.draft) out.push({ type: 'draft', crop: s.almanac.draft[0] });
   if (s.rules.clock === 'flow' && s.speed !== 4) out.push({ type: 'speed', speed: 4 });
@@ -198,7 +218,9 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   }
 
   const busy = s.jobs.length > 0 || f.task || f.path.length || f.aim;
-  if (!busy && (outOfMoves || !todo.length || (s.rules.clock === 'day' && s.minute > 900))) bot.idle += dt;
+  // A busy player goes to bed at its hour, whatever is left.
+  const late = bot.bedtime !== undefined && s.rules.clock === 'day' && s.minute >= bot.bedtime;
+  if (!busy && (outOfMoves || late || !todo.length || (s.rules.clock === 'day' && s.minute > 900))) bot.idle += dt;
   else bot.idle = 0;
   if (s.rules.clock !== 'flow' && bot.idle > 0.5) {
     out.push({ type: 'sleep' });

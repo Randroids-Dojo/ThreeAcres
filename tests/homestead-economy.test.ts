@@ -31,9 +31,10 @@ function town(seed: number, fields = 1, day = 4): WorldState {
 }
 
 // Round 3: requests paid at most a fifth over market (60 coins at most), so turning one down cost nothing. Now they
-// pay 1.3 to 1.8 times market for what they have you sow, come as a pair, and only one of the pair can be taken.
+// pay clearly more than market for what they have you sow, come as a pair, and only one of the pair can be taken.
+// (Round 5: the gain is set by the soil and days and the kind, so the range is 1.15 to 2 times; it was 1.3 to 1.8.)
 describe('requests pay clearly more than market', () => {
-  it('from 1.3 to 1.8 times what the crops fetch (nothing is growing, so all of it is sown fresh)', () => {
+  it('from 1.15 to 2 times what the crops fetch (nothing is growing, so all of it is sown fresh)', () => {
     let n = 0;
     for (let seed = 1; seed <= 30; seed++) {
       for (const fields of [1, 2, 3]) {
@@ -42,8 +43,8 @@ describe('requests pay clearly more than market', () => {
         for (const o of offerRequests(s)) {
           n++;
           const market = o.items.reduce((a, it) => a + CROPS[it.crop].price * it.n, 0);
-          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.3);
-          expect(o.reward / market).toBeLessThanOrEqual(1.8);
+          expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.15);
+          expect(o.reward / market).toBeLessThanOrEqual(2);
         }
       }
     }
@@ -59,11 +60,14 @@ describe('requests are few, and they compete', () => {
     fillRequests(s, true);
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
+    // (Round 5: one is taken on the board, and the other goes.)
+    step(s, 0.016, [{ type: 'accept', id: s.orders[0].id }]);
+    expect(s.orders.length).toBe(1);
     const it0 = s.orders[0].items[0];
     s.stock[it0.crop][0] = it0.n;
     step(s, 0.016, [{ type: 'deliver', id: s.orders[0].id }]);
     for (let i = 0; i < 30; i++) step(s, 0.016);
-    expect(s.orders.length).toBe(1);
+    expect(s.orders.length).toBe(0);
   });
 
   it('each of a pair fits the farm alone, and asks for a share of it, not the whole', () => {
@@ -147,6 +151,7 @@ describe('a bot farm at a person’s pace over thirty days', () => {
       expect(s.parcels.filter((p) => p.owned).length).toBeGreaterThanOrEqual(2);
       expect(filled).toBeGreaterThanOrEqual(3);
       expect(filled).toBeLessThanOrEqual(14);
-    });
+      // (Thirty days of play at a person's pace take a few seconds; under a full parallel run, more than the default.)
+    }, 20000);
   }
 });

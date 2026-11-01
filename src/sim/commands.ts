@@ -27,6 +27,12 @@ export type Command =
   /** Sunup: buy the next level of a tool from the smith. */
   | { type: 'upgrade'; tool: 'can' | 'hoe' }
   | { type: 'deliver'; id: number }
+  /** Sunup: take a request offered on the board (the other of its pair is let go). */
+  | { type: 'accept'; id: number }
+  /** Sunup: the board's requests have been read: none of them is new now. */
+  | { type: 'readBoard' }
+  /** Sunup: build one of a kind on a plot, once: walk there and build it; the tool in hand stays in hand. */
+  | { type: 'buildAt'; x: number; y: number; kind: BuildKind }
   | { type: 'sell'; crop: CropId }
   | { type: 'draft'; crop: CropId }
   | { type: 'rules'; patch: Partial<Rules> }

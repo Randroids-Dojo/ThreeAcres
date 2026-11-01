@@ -25,6 +25,10 @@
 // board's notes run ten words at most and its close button says Close; the
 // board and View buttons wear their words; the forecast's words are 11 px or
 // more and the seed cards' lines 12 px or more.
+// Round 5: the board's offers headline their gain over market and carry an
+// Accept stamp that takes a tap; a taken note says what is growing for it;
+// the build question; "Heat wave" keeps the day card to one line; on a
+// desktop the HUD's type is a size up (it read tiny at 1280 by 800).
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -79,7 +83,7 @@ async function run(label, viewport, touch) {
   }
   // Everything introduced, so every piece can show.
   await p.evaluate(() => {
-    for (const what of ['can', 'sleep', 'coins', 'seeds', 'stamina', 'board', 'requests', 'hoe', 'pests', 'build', 'forecast', 'smith', 'wide']) window.sunup.input.push({ type: 'unlock', what });
+    for (const what of ['can', 'sleep', 'coins', 'seeds', 'stamina', 'board', 'requests', 'hoe', 'pests', 'build', 'forecast', 'smith', 'wide', 'fields', 'seedtab']) window.sunup.input.push({ type: 'unlock', what });
   });
   await p.waitForTimeout(400);
   const boxes = () =>
@@ -130,8 +134,20 @@ async function run(label, viewport, touch) {
       window.sunup.pinRequests();
       window.sunup.dialogs.board('requests');
     })],
+    // Round 5: one of the pair taken: its note says what is growing for it and when it is wanted.
+    ['board requests, one taken', async () => p.evaluate(async () => {
+      const st = window.sunup.state;
+      const offer = st.orders.find((o) => o.taken === false);
+      if (offer) window.sunup.input.push({ type: 'accept', id: offer.id });
+      await new Promise((r) => setTimeout(r, 120));
+      window.sunup.dialogs.board('requests');
+    })],
+    // Round 5: the lesson pointer asks before it builds.
+    ['build question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmBuild('scarecrow', 220, () => {}); })],
     // The forecast's three words sit inside the day card.
     ['forecast words', async () => p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.weather = 'storm'; st.forecast = ['cloud', 'storm', 'heat']; })],
+    // Round 5: "Heat wave" wrapped the day card onto two lines.
+    ['heat wave', async () => p.evaluate(() => { const st = window.sunup.state; st.weather = 'heat'; st.forecast = ['heat', 'storm', 'rain']; })],
     ['sleep question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmSleep(150, () => {}); })],
     // Round 4: the whole farm in one view (View on a phone, C on a keyboard), with the HUD over it.
     ['farm view', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.input.push({ type: 'rules', patch: { camera: 'wide' } }); })],
@@ -199,6 +215,29 @@ async function run(label, viewport, touch) {
       if (q.n !== 2 || !q.or) hits.push(`the pair is not shown (${JSON.stringify(q)})`);
       if (!q.inside) hits.push('a request note runs off the board');
       if (q.clash) hits.push('the two notes or the "or" overlap');
+      // Round 5: each offer headlines its gain over market, and carries an Accept stamp.
+      const g = await p.evaluate(() => [...document.querySelectorAll('.dialog .pair .item.req')].map((e) => ({ head: e.querySelector('.tx > b')?.textContent ?? '', green: getComputedStyle(e.querySelector('.tx > b')).color, size: parseFloat(getComputedStyle(e.querySelector('.tx > b')).fontSize), stamp: e.querySelector('.btn')?.textContent ?? '' })));
+      if (g.length !== 2 || g.some((x) => !/^\+[\d,]+ over market$/.test(x.head) || x.stamp !== 'Accept' || x.size < 15)) hits.push(`offer notes ${JSON.stringify(g)}`);
+    }
+    if (name === 'board requests, one taken') {
+      const q = await p.evaluate(() => ({ pair: document.querySelectorAll('.dialog .pair').length, taken: [...document.querySelectorAll('.dialog .item.req.taken')].map((e) => [...e.querySelectorAll('.tx > *')].map((c) => c.textContent)) }));
+      if (q.pair !== 0 || q.taken.length !== 1 || !/^For .+, \+[\d,]+ over market$/.test(q.taken[0][1]) || !/wanted by|Wanted by/.test(q.taken[0][q.taken[0].length - 1])) hits.push(`taken note ${JSON.stringify(q)}`);
+    }
+    if (name === 'build question') {
+      const q = await p.evaluate(() => ({ title: document.querySelector('.dialog h2')?.textContent ?? '', btns: [...document.querySelectorAll('.dialog .ask .btn')].map((b) => b.textContent) }));
+      if (q.title !== 'Build a scarecrow?' || q.btns.join() !== 'Build for 40,Not now') hits.push(`build question ${JSON.stringify(q)}`);
+    }
+    if (name === 'heat wave') {
+      const q = await p.evaluate(() => { const n = document.querySelector('.daycard .sky > span:not(.ic):not(.fc)'); const r = n.getBoundingClientRect(); return { text: n.textContent, h: Math.round(r.height), line: parseFloat(getComputedStyle(n).lineHeight) || parseFloat(getComputedStyle(n).fontSize) * 1.3 }; });
+      if (q.text !== 'Heat wave' || q.h > q.line * 1.4) hits.push(`"Heat wave" runs to ${q.h} px (one line is ${q.line})`);
+    }
+    if (name === 'plain' && !touch) {
+      // Round 5: the desktop HUD's type was tiny at 1280 by 800.
+      const q = await p.evaluate(() => {
+        const px = (sel) => { const e = document.querySelector(sel); return e ? parseFloat(getComputedStyle(e).fontSize) : 0; };
+        return { date: px('.daycard .date'), sky: px('.daycard .sky'), tool: px('.toolbar .tool .lbl'), top: px('.topbtns .tlbl'), stamina: px('.daycard .stamina .mlbl'), coins: px('.coins') };
+      });
+      if (q.date < 22 || q.sky < 15 || q.tool < 13 || q.top < 13 || q.stamina < 13 || q.coins < 23) hits.push(`desktop type ${JSON.stringify(q)}`);
     }
     if (name === 'farm view') {
       const q = await p.evaluate(() => {

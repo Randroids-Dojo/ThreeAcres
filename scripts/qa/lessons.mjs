@@ -28,6 +28,17 @@
 // sprinkler comes after it with a line of its own; each note of a pair says
 // "Ripe in N days, due X"; seed sown for one of a pair withdraws the other at
 // once; the morning card says three clauses at most.
+// Round 5: the second morning brings coins and seeds, and stamina comes later
+// with a line of its own; the View button waits for the second field; the
+// board's Fields tab waits for its lesson (a field bought by tapping it brings
+// it), and buying the field says what it leaves for seed; the pair's line
+// says Accept; a tap on the plot under the scarecrow lesson's chevron does
+// that plot's own job (the chevron stole it, took the Build tool and built
+// with every tap after), and a tap inside the target tile asks before it
+// builds one, once, with the tool in hand left alone (the sprinkler too); the
+// board headlines each offer's gain over market with an Accept stamp, sowing
+// alone takes neither, a real tap on Accept takes one and lets the other go,
+// and the board's badge counts only new notes.
 // node scripts/qa/lessons.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -193,7 +204,7 @@ await send({ type: 'sleep' });
 await p.waitForTimeout(3500);
 await frames(10);
 s = await screen();
-check('morning: coins, seeds and stamina appear', s.coins && s.tools.includes('seeds') && s.stamina && !s.view, JSON.stringify(s));
+check('morning: coins and seeds appear (stamina waits for a line of its own)', s.coins && s.tools.includes('seeds') && !s.stamina && !s.view, JSON.stringify(s));
 check('one line: plant seeds', /sow|seed/i.test(s.line), s.line);
 check('no board or requests yet', !s.board && s.notes === 0);
 await shot('4-plant');
@@ -207,35 +218,8 @@ s = await screen();
 check('after planting, nothing new until day 3', !s.board, `line "${s.line}"`);
 await shot('5-after-plant');
 
-// 4b. Round 4: close up, a phone sees about two fields, so a crow or bugs in the first field could hide off screen.
-// After the first seeds the View button arrives with its own line; a real tap on it shows the whole farm.
-check('after the first seeds, the View button arrives with its own line', s.view && s.line === 'Tap View to see the whole farm.', JSON.stringify(s));
-await tapEl('.topbtns .viewbtn');
-await p.waitForTimeout(1400);
-{
-  const fv = await p.evaluate(() => {
-    const st = window.sunup.state;
-    const W = innerWidth;
-    const top = document.querySelector('.daycard').getBoundingClientRect().bottom;
-    const bottom = Math.min(document.querySelector('.toolbar').getBoundingClientRect().top, document.querySelector('.tb-act').getBoundingClientRect().top, document.querySelector('.ts-base').getBoundingClientRect().top);
-    let inside = 0;
-    let n = 0;
-    const out = [];
-    for (const pc of st.parcels) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
-      n++;
-      const q = window.sunup.r3d.project(x + 0.5, y + 0.5, 0.3);
-      if (q && q.x > 4 && q.x < W - 4 && q.y > top && q.y < bottom) inside++;
-      else if (out.length < 4) out.push([x, y, Math.round(q?.x ?? -1), Math.round(q?.y ?? -1)]);
-    }
-    return { camera: st.rules.camera, inside, n, top: Math.round(top), bottom: Math.round(bottom), out, line: document.querySelector('.hint.on')?.textContent ?? '' };
-  });
-  check('a real tap on View shows the whole farm: every plot of all six fields between the day card and the controls', fv.camera === 'wide' && fv.inside === fv.n, JSON.stringify(fv));
-  check('and the View line goes once it has been done', fv.line !== 'Tap View to see the whole farm.', fv.line);
-  await shot('5b-farm-view');
-  await tapEl('.topbtns .viewbtn');
-  await p.waitForTimeout(900);
-  check('a second tap on View comes back close up', (await p.evaluate(() => window.sunup.state.rules.camera)) === 'close');
-}
+// 4b. Round 5: with one field the whole farm is on screen already, so the View button waits for the second field.
+check('after the first seeds, no View button yet: the one field is all on screen', !s.view && s.line !== 'Tap View to see the whole farm.', JSON.stringify(s));
 
 // 5. A dry can brings the well lesson.
 await p.evaluate(() => (window.sunup.state.water = 2));
@@ -245,6 +229,15 @@ check('a nearly dry can brings the well', /well/i.test(s.line), s.line);
 await p.evaluate(() => (window.sunup.state.water = 12));
 await p.evaluate(() => (window.sunup.state.learnCount.refill = 1));
 await frames(20);
+
+// 5b. Round 5: day 2 brought coins, stamina and seeds at once. Stamina comes once the work has worn it down, with its
+// own line, on a day nothing else new came.
+await p.evaluate(() => (window.sunup.state.stamina = 60));
+await frames(20);
+s = await screen();
+check('stamina worn down: the stamina bar arrives with its own line', s.stamina && s.line === 'Watch your stamina. Each job uses some.', JSON.stringify(s));
+await p.evaluate(() => { window.sunup.state.learnCount['seen:stamina'] = 8; window.sunup.state.stamina = 100; });
+await frames(10);
 
 // 6. Day 3: the board and its first request.
 await send({ type: 'sleep' });
@@ -303,26 +296,33 @@ s = await screen();
 check('harvesting what it asks ends the deliver line', !/ships/.test(s.line) && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:deliver'))), s.line);
 check('crows and the forecast are still to come', !s.forecast && !s.tools.includes('build'));
 
-// 6b. A field bought early, from the board, before its lesson: the hoe still comes, with a line and a pointer.
-await p.evaluate(() => { window.sunup.state.coins = 320; });
+// 6b. A field bought early, before its lesson, by tapping the field itself: the hoe still comes, with a line and a
+// pointer. Round 5: the board has no Fields tab before the field lesson (nothing on the board before its lesson), and
+// the field says what buying it leaves for seed (the fifth playtest spent 250 of 270 and sat broke for five days).
+await p.evaluate(() => { window.sunup.state.coins = 320; window.sunup.state.stamina = 100; });
 await frames(10);
 check('no hoe before a second field', !(await screen()).tools.includes('hoe'));
-await p.evaluate(() => window.sunup.dialogs.board('fields'));
+await p.evaluate(() => window.sunup.dialogs.board());
 await p.waitForTimeout(500);
-const tabsTop = await p.evaluate(() => [...document.querySelectorAll('.dialog .tabs button')].map((b) => Math.round(b.getBoundingClientRect().top)));
-check('the board\u2019s tabs sit on one row on the phone', Math.max(...tabsTop) - Math.min(...tabsTop) < 12, tabsTop.join(','));
-const fieldStamps = await p.evaluate(() => [...document.querySelectorAll('.dialog .item .btn')].map((b) => b.textContent));
-// Round 3: fields 3 to 6 hid their prices behind "Reputation 4". Each card says its price once: on the stamp, or in
-// its words when the stamp shows the reputation it wants.
-const fieldCards = await p.evaluate(() => [...document.querySelectorAll('.dialog .list .item')].filter((e) => e.querySelector('.btn')).map((e) => e.textContent));
-const prices = [250, 800, 1500, 2400, 3500].map((n) => n.toLocaleString('en-US'));
-check('each field\u2019s price shows once (on its stamp, or in its words when the stamp asks for reputation)', fieldStamps[0] === 'Buy for 250' && fieldStamps.slice(1).every((t) => /^Reputation \d+$/.test(t)) && fieldCards.every((t, i) => t.split(prices[i]).length - 1 === 1), JSON.stringify(fieldCards));
-await tapEl('.dialog .item .btn', 'Buy for 250');
-await p.waitForTimeout(400);
+{
+  const early = await p.evaluate(() => [...document.querySelectorAll('.dialog .tabs button')].map((t) => t.textContent));
+  check('before the field lesson the board has no Fields or Seeds tab', !early.includes('Fields') && !early.includes('Seeds'), early.join(','));
+}
+await p.evaluate(() => window.sunup.dialogs.close(true));
+await frames(10);
+{
+  // A real tap on the field for sale.
+  await p.evaluate(() => { const f = window.sunup.state.actors[0]; Object.assign(f, { x: 6.5, y: 4.5, task: null, path: [] }); window.sunup.walkAim = null; });
+  await p.waitForTimeout(900);
+  const fp = await project(8.5, 6.5, 0);
+  await tap(fp.x, fp.y, 6);
+  await p.waitForTimeout(500);
+}
 const askTitle = await p.evaluate(() => document.querySelector('.dialog h2')?.textContent ?? '');
 check('a 250-coin field asks before it buys', /for sale/.test(askTitle) && (await p.evaluate(() => !window.sunup.state.parcels[1].owned)), askTitle);
 const askText = await p.evaluate(() => document.querySelector('.dialog p')?.textContent ?? '');
 check('and says its price once (on the stamp)', !/250/.test(askText), askText);
+check('and says what buying it leaves for seed', /That leaves 70 for seed\./.test(askText), askText);
 await tapEl('.dialog .ask .btn.primary');
 await p.waitForTimeout(500);
 const fieldToasts = await p.evaluate(() => [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent).filter((t) => /field/i.test(t)));
@@ -338,12 +338,59 @@ const fieldPt = await p.evaluate(() => { const e = document.querySelector('.tpoi
 const fieldAt = await project(9, 7, 0.9);
 const fieldOk = fieldPt.on && (fieldPt.over ? Math.abs(fieldPt.x - fieldAt.x) < 90 && fieldAt.y - fieldPt.y < 140 : Math.sign(fieldAt.x - 206) === Math.sign(fieldPt.x - 206));
 check('the pointer is on the new field', fieldOk, JSON.stringify({ fieldPt, fieldAt }));
+// With a second field the board's Fields tab is there: each card that is still for sale says its price once.
+await p.evaluate(() => window.sunup.dialogs.board('fields'));
+await p.waitForTimeout(500);
+const tabsTop = await p.evaluate(() => [...document.querySelectorAll('.dialog .tabs button')].map((b) => Math.round(b.getBoundingClientRect().top)));
+check('the board\u2019s tabs sit on one row on the phone', Math.max(...tabsTop) - Math.min(...tabsTop) < 12, tabsTop.join(','));
+const fieldStamps = await p.evaluate(() => [...document.querySelectorAll('.dialog .item .btn')].map((b) => b.textContent));
+// Round 3: fields 3 to 6 hid their prices behind "Reputation 4". Each card says its price once: on the stamp, or in
+// its words when the stamp shows the reputation it wants.
+const fieldCards = await p.evaluate(() => [...document.querySelectorAll('.dialog .list .item')].filter((e) => e.querySelector('.btn')).map((e) => e.textContent));
+const prices = [800, 1500, 2400, 3500].map((n) => n.toLocaleString('en-US'));
+check('each field\u2019s price shows once (on its stamp, or in its words when the stamp asks for reputation)', fieldStamps.length === 4 && fieldStamps.every((t) => /^Reputation \d+$/.test(t)) && fieldCards.every((t, i) => t.split(prices[i]).length - 1 === 1), JSON.stringify(fieldCards));
+await p.evaluate(() => window.sunup.dialogs.close(true));
+await frames(10);
 await send({ type: 'tool', tool: 'hoe' });
 for (const x of [7, 8]) await actAt(x, 4, 's');
 await frames(20);
 s = await screen();
 check('hoeing two plots ends the hoe line', s.line !== 'Hoe the new field.' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:hoe'))), s.line);
 await send({ type: 'tool', tool: 'hands' });
+
+// 6c. Round 4, moved in round 5: close up, a phone sees about two fields, so a crow or bugs in the first field could
+// hide off screen. With the second field the View button arrives with its own line; a real tap on it shows the
+// whole farm.
+await frames(20);
+s = await screen();
+check('with the second field, the View button arrives with its own line', s.view && s.line === 'Tap View to see the whole farm.', JSON.stringify(s));
+await tapEl('.topbtns .viewbtn');
+await p.waitForTimeout(1400);
+{
+  const fv = await p.evaluate(() => {
+    const st = window.sunup.state;
+    const W = innerWidth;
+    const top = document.querySelector('.daycard').getBoundingClientRect().bottom;
+    const bottom = Math.min(document.querySelector('.toolbar').getBoundingClientRect().top, document.querySelector('.tb-act').getBoundingClientRect().top, document.querySelector('.ts-base').getBoundingClientRect().top);
+    let inside = 0;
+    let n = 0;
+    const out = [];
+    for (const pc of st.parcels) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
+      n++;
+      const q = window.sunup.r3d.project(x + 0.5, y + 0.5, 0.3);
+      if (q && q.x > 4 && q.x < W - 4 && q.y > top && q.y < bottom) inside++;
+      else if (out.length < 4) out.push([x, y, Math.round(q?.x ?? -1), Math.round(q?.y ?? -1)]);
+    }
+    return { camera: st.rules.camera, inside, n, top: Math.round(top), bottom: Math.round(bottom), out, line: document.querySelector('.hint.on')?.textContent ?? '' };
+  });
+  check('a real tap on View shows the whole farm: every plot of all six fields between the day card and the controls', fv.camera === 'wide' && fv.inside === fv.n, JSON.stringify(fv));
+  check('and the View line goes once it has been done', fv.line !== 'Tap View to see the whole farm.', fv.line);
+  await shot('5b-farm-view');
+  await tapEl('.topbtns .viewbtn');
+  await p.waitForTimeout(900);
+  check('a second tap on View comes back close up', (await p.evaluate(() => window.sunup.state.rules.camera)) === 'close');
+}
+
 
 // 7. Crows come in quietly from day 5; the crow line shows only while a crow is really on the farm.
 await p.evaluate(() => { const st = window.sunup.state; for (const id of ['requests', 'deliver']) if (!st.learn.includes(`lesson:${id}`)) st.learn.push(`lesson:${id}`); st.day = 5; });
@@ -376,7 +423,7 @@ check('and the morning has no scarecrow line out of nowhere', !/Scarecrow/.test(
   await frames(20);
   s = await screen();
   const pairUp = await p.evaluate(() => window.sunup.state.orders.length);
-  check('the first request filled, the next morning brings a pair with its line', pairUp === 2 && s.line === 'Two requests on the board. Plant for one.', `${pairUp} requests, line "${s.line}"`);
+  check('the first request filled, the next morning brings a pair with its line', pairUp === 2 && s.line === 'Two requests on the board. Accept one.', `${pairUp} requests, line "${s.line}"`);
   await p.evaluate(() => window.sunup.state.learn.push('lesson:choose'));
 }
 await p.evaluate(() => { window.sunup.state.crows = []; window.sunup.state.crowPlan = []; window.sunup.hud.pickTool('hands'); });
@@ -563,14 +610,50 @@ await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + 
     await frames(20);
     s = await screen();
     check('it has no timer: after 13 s of its line it is still up', s.line === 'Build a scarecrow on bare soil.' && !(await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), s.line);
+    // Round 5, P0: the chevron is drawn over the plot to the north of its target, and a tap there counted as a tap on
+    // the pointer: it took the Build tool without a word, and every tap after built a scarecrow. Now a tap on the plot
+    // under the chevron's drawn position does that plot's own job (a ripe radish there is harvested), with seeds in
+    // hand, and nothing is built.
+    await p.evaluate((t) => {
+      const st = window.sunup.state;
+      const q = st.plots[(t.y - 1) * st.W + t.x];
+      q.tilled = true;
+      q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+      window.sunup.input.push({ type: 'seed', crop: 'radish' });
+      window.sunup.input.push({ type: 'tool', tool: 'seeds' });
+    }, at);
+    await frames(10);
     const before = await p.evaluate(() => ({ coins: window.sunup.state.coins, harvested: Object.values(window.sunup.state.stats.harvested).reduce((a, b) => a + b, 0) }));
     await p.evaluate(() => { window.__water = 0; const d = window.sunup; const orig = d.events.push.bind(d.events); d.events.push = (e) => { if (e.type === 'water') window.__water++; return orig(e); }; });
-    const pt2 = await p.evaluate(() => { const r = document.querySelector('.tpoint').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
-    await tap(pt2[0], pt2[1], 7);
+    const chev = await p.evaluate(() => { const r = document.querySelector('.tpoint').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, over: document.querySelector('.tpoint').classList.contains('over') }; });
+    const under = await p.evaluate((c) => window.sunup.r3d.pick(c.x, c.y), chev);
+    await tap(chev.x, chev.y, 7);
+    await p.waitForTimeout(1800);
+    const stolen = await p.evaluate((b) => ({ builds: window.sunup.state.builds.length, tool: window.sunup.state.tool, harvested: Object.values(window.sunup.state.stats.harvested).reduce((a, c) => a + c, 0) - b.harvested, dialog: window.sunup.dialogs.open, spent: b.coins - window.sunup.state.coins }), before);
+    check('a tap on the plot under the chevron does that plot\u2019s own job (its radish is harvested): no Build tool, no scarecrow, no question', chev.over && !!under && under.x === at.x && under.y === at.y - 1 && stolen.builds === 0 && stolen.tool !== 'build' && stolen.harvested === 1 && !stolen.dialog && stolen.spent === 0, JSON.stringify({ chev, under, at, stolen }));
+    // (The seeds back in hand, without opening the picker.)
+    await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+    await frames(5);
+    // A real tap inside the target tile asks before it builds.
+    const tp = await project(at.x + 0.5, at.y + 0.5, 0);
+    await tap(tp.x, tp.y, 8);
+    await p.waitForTimeout(500);
+    const asked = await p.evaluate(() => ({ open: window.sunup.dialogs.open, title: document.querySelector('.dialog h2')?.textContent ?? '', text: document.querySelector('.dialog p')?.textContent ?? '', yes: document.querySelector('.dialog .ask .btn.primary')?.textContent ?? '', builds: window.sunup.state.builds.length }));
+    check('a tap inside the target tile asks first: "Build a scarecrow?", its cost and what it does', asked.open && asked.title === 'Build a scarecrow?' && /^40 coins\. /.test(asked.text) && asked.yes === 'Build for 40' && asked.builds === 0, JSON.stringify(asked));
+    await tapEl('.dialog .ask .btn.primary');
     for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.length)); i++) await p.waitForTimeout(100);
     await p.waitForTimeout(400);
-    const built = await p.evaluate((b) => ({ builds: window.sunup.state.builds.map((x) => `${x.kind}@${x.x},${x.y}`), spent: b.coins - window.sunup.state.coins, harvested: Object.values(window.sunup.state.stats.harvested).reduce((a, c) => a + c, 0) - b.harvested, watered: window.__water, done: window.sunup.state.learn.includes('lesson:scarecrow') }), before);
-    check('a real tap on its pointer builds a scarecrow there (40 coins, nothing harvested or watered), and the lesson ends', built.builds.join() === `scarecrow@${at.x},${at.y}` && built.spent === 40 && built.harvested === 0 && built.watered === 0 && built.done, JSON.stringify(built));
+    const built = await p.evaluate((b) => ({ builds: window.sunup.state.builds.map((x) => `${x.kind}@${x.x},${x.y}`), spent: b.coins - window.sunup.state.coins, watered: window.__water, done: window.sunup.state.learn.includes('lesson:scarecrow'), tool: window.sunup.state.tool }), before);
+    check('yes builds one scarecrow there (40 coins, nothing watered), the tool in hand stays in hand, and the lesson ends', built.builds.join() === `scarecrow@${at.x},${at.y}` && built.spent === 40 && built.watered === 0 && built.done && built.tool === 'seeds', JSON.stringify(built));
+    // Never a chain: the next taps on bare soil plant, they build nothing.
+    const other = await p.evaluate(() => { const st = window.sunup.state; const i = st.plots.findIndex((q, k) => !q.crop && q.tilled && st.parcelOf[k] === 0 && !st.builds.some((b) => b.y * st.W + b.x === k)); return i < 0 ? null : { x: i % st.W, y: Math.floor(i / st.W) }; });
+    if (other) {
+      const op = await project(other.x + 0.5, other.y + 0.5, 0);
+      await tap(op.x, op.y, 9);
+      await p.waitForTimeout(1800);
+    }
+    const chain = await p.evaluate((o) => ({ builds: window.sunup.state.builds.length, planted: o ? window.sunup.state.plots[o.y * window.sunup.state.W + o.x].crop?.kind ?? null : 'none' }), other);
+    check('the next tap on bare soil plants with the seeds in hand: one tap, one build at most', chain.builds === 1 && (chain.planted === 'radish' || chain.planted === 'none'), JSON.stringify({ other, chain }));
     await shot('8c2-scarecrow-built');
   }
   await frames(10);
@@ -646,12 +729,20 @@ check('on a day of its own, after the scarecrow and the forecast, the sprinkler 
   check('and only now the build picker offers it', kinds.join() === 'scarecrow,sprinkler', kinds.join());
   await p.evaluate(() => { window.sunup.hud.closePicker(); window.sunup.hud.pickTool('hands'); });
   await frames(5);
-  const pt3 = await p.evaluate(() => { const r = document.querySelector('.tpoint').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
-  await tap(pt3[0], pt3[1], 8);
+  // Round 5: a tap inside its target tile asks first, then builds one, once (a tap on a bean under its chevron built a
+  // 200-coin sprinkler with no question asked).
+  const sat = await p.evaluate(() => { const t = window.sunup.hud['pointAt']; return { x: Math.floor(t.x), y: Math.floor(t.y) }; });
+  const sp3 = await project(sat.x + 0.5, sat.y + 0.5, 0);
+  await tap(sp3.x, sp3.y, 8);
+  await p.waitForTimeout(500);
+  const sAsk = await p.evaluate(() => ({ title: document.querySelector('.dialog h2')?.textContent ?? '', builds: window.sunup.state.builds.filter((b) => b.kind === 'sprinkler').length }));
+  check('a tap inside the sprinkler pointer\u2019s target tile asks first', sAsk.title === 'Build a sprinkler?' && sAsk.builds === 0, JSON.stringify(sAsk));
+  await tapEl('.dialog .ask .btn.primary');
   for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.some((b) => b.kind === 'sprinkler'))); i++) await p.waitForTimeout(100);
   await p.waitForTimeout(300);
-  const sp = await p.evaluate(() => ({ s: window.sunup.state.builds.filter((b) => b.kind === 'sprinkler').length, coins: window.sunup.state.coins, done: window.sunup.state.learn.includes('lesson:sprinkler') }));
-  check('a real tap on its pointer builds a sprinkler (200 coins), and the lesson ends', sp.s === 1 && sp.coins === 200 && sp.done, JSON.stringify(sp));
+  const sp = await p.evaluate(() => ({ s: window.sunup.state.builds.filter((b) => b.kind === 'sprinkler').length, coins: window.sunup.state.coins, done: window.sunup.state.learn.includes('lesson:sprinkler'), tool: window.sunup.state.tool }));
+  check('yes builds one sprinkler (200 coins), the hands stay in hand, and the lesson ends', sp.s === 1 && sp.coins === 200 && sp.done && sp.tool === 'hands', JSON.stringify(sp));
+  await shot('10b-sprinkler');
   await p.evaluate(() => { const st = window.sunup.state; st.builds = st.builds.filter((b) => b.kind !== 'sprinkler'); });
 }
 
@@ -727,13 +818,17 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   });
   await q.waitForTimeout(600);
   const qs = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', orders: window.sunup.state.orders.length, pt: (() => { const e = document.querySelector('.tpoint'); return { on: e.classList.contains('on') }; })() }));
-  check('a pair of requests: the line says to plant for one, and points the way', qs.orders === 2 && qs.line === 'Two requests on the board. Plant for one.' && qs.pt.on, JSON.stringify(qs));
+  check('a pair of requests: the line says to accept one, and points the way', qs.orders === 2 && qs.line === 'Two requests on the board. Accept one.' && qs.pt.on, JSON.stringify(qs));
+  // Round 5: the badge counted every open note, read or not. It counts new ones: two, until the board is read.
+  const badge0 = await q.evaluate(() => document.querySelector('.topbtns .badge')?.textContent ?? '');
   // The board, opened with a real tap on its button.
   const bb = await q.evaluate(() => { const r = document.querySelector('.topbtns .iconbtn').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
   const qc = await ctx.newCDPSession(q);
   await qc.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb[0], y: bb[1], id: 3, radiusX: 6, radiusY: 6, force: 1 }] });
   await qc.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await q.waitForTimeout(700);
+  const badge1 = await q.evaluate(() => document.querySelector('.topbtns .badge')?.textContent ?? '');
+  check('the board\u2019s badge counts new notes: 2 when the pair is pinned, none once the board is open', badge0 === '2' && badge1 === '', JSON.stringify({ badge0, badge1 }));
   const pair = await q.evaluate(() => {
     const notes = [...document.querySelectorAll('.dialog .pair .item.req')];
     const or = document.querySelector('.dialog .pair .or');
@@ -747,35 +842,42 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
       notes: notes.map((e) => ({
         box: box(e),
         lines: [...e.querySelectorAll('.tx > *')].map((c) => ({ text: c.textContent, size: parseFloat(getComputedStyle(c).fontSize), cut: c.scrollWidth > c.clientWidth + 1 })),
+        stamp: e.querySelector('.btn')?.textContent ?? '',
       })),
       W,
       H,
     };
   });
   const lines = pair.notes.map((n) => n.lines.map((l) => l.text));
+  // Round 5: "Pays 1,370" beside "Pays 525" misled (most of it was market value for carrots already growing). Each
+  // offer headlines its gain over market, then what it wants, sowing, and ripe and due with its days to spare.
   const readable = pair.n === 2 && pair.or === 'or' && pair.notes.every((n) => {
-    const [name, who, need, when, pay] = n.lines.map((l) => l.text);
-    return /^\d+ [a-z]+$/.test(name) && /^For /.test(who) && /^Sow \d+ (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Ripe in \d+ days, due (tomorrow|[A-Z][a-z]+ \d+)$/.test(when) && /^Pays [\d,]+, [\d,]+ at market$/.test(pay);
+    const [gain, what, need, when] = n.lines.map((l) => l.text);
+    return /^\+[\d,]+ over market$/.test(gain) && /^\d+ [a-z]+ for /.test(what) && /^Sow \d+ (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Ripe in \d+ days, due (tomorrow|[A-Z][a-z]+ \d+), (no day|a day|\d days) to spare$/.test(when) && n.stamp === 'Accept' && !n.lines.some((l) => /Pays/.test(l.text));
   });
-  check('the board shows the pair at a glance: what each needs, sow by, ripe in and due, pays, and against what, "or" between them', readable, JSON.stringify(lines));
+  check('the board shows the pair at a glance: the gain over market first, what each wants, sow by, ripe and due with days to spare, an Accept stamp, "or" between them', readable, JSON.stringify(pair.notes.map((n) => [...n.lines.map((l) => l.text), n.stamp])));
   const onScreen = pair.notes.every((n) => n.box.l >= 0 && n.box.r <= pair.W && n.box.t >= 0 && n.box.b <= pair.H) && pair.notes.every((n) => n.lines.every((l) => l.size >= 12 && !l.cut));
   const [A, B] = pair.notes.map((n) => n.box);
   const apart = A && B && pair.orBox && (A.b <= pair.orBox.t + 1 || A.r <= pair.orBox.l + 1) && (pair.orBox.b <= B.t + 1 || pair.orBox.r <= B.l + 1);
   check('on the phone both notes are whole on screen, in type of 12 px or more, nothing cut off, "or" clear between them', onScreen && apart, JSON.stringify({ boxes: pair.notes.map((n) => n.box), or: pair.orBox, sizes: pair.notes.map((n) => n.lines.map((l) => l.size)) }));
-  // Round 4: each fits the farm alone, and the two earn the same over their seed for each plot and day (7 corn beat 9
-  // sunflowers on every count); seed sown for one withdraws the other at once.
+  // Round 4: each fits the farm alone. Round 5: the two differ in kind (rush or easy, long or quick, big or small), and
+  // the bold one offers clearly more gain (they matched within 3% on net per plot-day, so the pick was no decision).
   const fits = await q.evaluate(() => {
     const st = window.sunup.state;
     const free = st.plots.filter((pl, i) => st.parcelOf[i] >= 0 && st.parcels[st.parcelOf[i]].owned && !pl.crop).length;
     const [a, b] = st.orders;
     const seed = { radish: 10, lettuce: 15, carrot: 15, beans: 30, strawberry: 45, sunflower: 30, corn: 45, pumpkin: 80 };
+    const price = { radish: 30, lettuce: 45, carrot: 55, beans: 30, strawberry: 40, sunflower: 80, corn: 110, pumpkin: 220 };
     const cost = (o) => o.items[0].n * seed[o.items[0].crop];
-    const days = { radish: 3, lettuce: 4, carrot: 5, beans: 5, strawberry: 6, sunflower: 6, corn: 7, pumpkin: 10 };
-    const per = (o) => (o.reward - cost(o)) / (o.items[0].n * days[o.items[0].crop]);
-    return { alone: [a, b].every((o) => o.items[0].n <= free && cost(o) <= st.coins), even: Math.abs(per(a) - per(b)) <= 0.1 * Math.max(per(a), per(b)), per: [per(a), per(b)].map((x) => +x.toFixed(2)), free, coins: st.coins, a: `${a.items[0].n} ${a.items[0].crop}`, b: `${b.items[0].n} ${b.items[0].crop}` };
+    const gain = (o) => o.reward - o.items[0].n * price[o.items[0].crop];
+    const bold = [a, b].find((o) => ['rush', 'long', 'big'].includes(o.kind));
+    const safe = [a, b].find((o) => o !== bold);
+    const kinds = [a.kind, b.kind].sort().join('/');
+    return { alone: [a, b].every((o) => o.items[0].n <= free && cost(o) <= st.coins), kinds, contrast: ['easy/rush', 'long/quick', 'big/small'].includes(kinds), more: !!bold && !!safe && gain(bold) >= 1.2 * gain(safe), gains: [a, b].map(gain), free, coins: st.coins, a: `${a.items[0].n} ${a.items[0].crop}`, b: `${b.items[0].n} ${b.items[0].crop}` };
   });
-  check('each of the pair fits the farm alone, and the two earn within 10% of each other for each plot and day', fits.alone && fits.even, JSON.stringify(fits));
+  check('each of the pair fits the farm alone; the two differ in kind, the bold one offering clearly more gain', fits.alone && fits.contrast && fits.more, JSON.stringify(fits));
   {
+    // Sowing alone takes neither (the fifth playtest's market planting took a request nobody had read).
     await q.evaluate(() => window.sunup.dialogs.close(true));
     const chosen = await q.evaluate(() => {
       const st = window.sunup.state;
@@ -788,8 +890,21 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
       return { a: a.id, b: b.id, crop: b.items[0].crop };
     });
     await q.waitForTimeout(900);
-    const after = await q.evaluate(() => ({ ids: window.sunup.state.orders.map((o) => o.id), toasts: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent) }));
-    check('one seed sown for one of a pair takes it: the other goes at once, with a word', after.ids.includes(chosen.a) && !after.ids.includes(chosen.b) && after.toasts.some((t) => /will find [a-z]+ elsewhere\.$/.test(t)), JSON.stringify({ chosen, after }));
+    const sown = await q.evaluate(() => ({ ids: window.sunup.state.orders.map((o) => o.id), offers: window.sunup.state.orders.filter((o) => o.taken === false).length }));
+    check('seed sown for one of a pair takes neither: both stay on offer', sown.ids.length === 2 && sown.offers === 2, JSON.stringify(sown));
+    // A real tap on the board's Accept takes one: the other goes at once, with a word, and the note says it is taken.
+    await qc.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb[0], y: bb[1], id: 4, radiusX: 6, radiusY: 6, force: 1 }] });
+    await qc.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await q.waitForTimeout(700);
+    const acc = await q.evaluate((id) => { const b = document.querySelector(`.dialog .item.req[data-id="${id}"] .btn`); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }, chosen.a);
+    if (acc) {
+      await qc.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: acc[0], y: acc[1], id: 5, radiusX: 6, radiusY: 6, force: 1 }] });
+      await qc.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+    await q.waitForTimeout(700);
+    const after = await q.evaluate((id) => ({ ids: window.sunup.state.orders.map((o) => o.id), taken: window.sunup.state.orders.find((o) => o.id === id)?.taken, toasts: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent), note: document.querySelector(`.dialog .item.req[data-id="${id}"]`)?.textContent ?? '' }), chosen.a);
+    check('a real tap on Accept takes one: the other goes at once, with a word, and its note says what is growing for it', !!acc && after.ids.join() === String(chosen.a) && after.taken === true && after.toasts.some((t) => /will find [a-z]+ elsewhere\.$/.test(t)) && /1 growing/.test(after.note), JSON.stringify({ chosen, after }));
+    await q.screenshot({ path: `${out}/13a-board-taken.png` });
   }
   await q.screenshot({ path: `${out}/13-board-pair.png` });
   for (const q2 of await q.evaluate(strikeScanInPage)) check(`no ruled line through "${q2.text}"`, false);

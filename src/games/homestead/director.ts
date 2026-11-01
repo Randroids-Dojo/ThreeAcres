@@ -3,10 +3,11 @@
 // under one fixed set of rules (the homestead); the shell hosts it.
 
 import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
-import { resolve, workLeft } from '../../sim/actions';
+import { canAfford, homestead, resolve, workLeft } from '../../sim/actions';
 import { facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
 import { fillRequests } from '../../sim/goals';
+import { guardedSure } from '../../sim/day';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
@@ -18,6 +19,7 @@ import { el } from '../../ui/dom';
 import { Hud } from '../../ui/hud';
 import { Input } from '../../game/input';
 import { Tutor } from './lessons';
+import { pointerTap, type PointerTap } from './pointer';
 import type { GameContext } from '../../shell/types';
 
 /** How tall the well and the notice board are drawn, in tiles, for taps on them. */
@@ -83,6 +85,7 @@ export class Director {
       project: (x, y, h) => this.r3d?.project(x, y, h) ?? null,
       sleep: () => this.sleep(),
       toggleCamera: () => this.toggleCamera(),
+      pointerTap: () => this.onPointer(pointerTap(this.state, this.lessonTarget.point, this.lessonTarget.build, null)),
       input: this.input,
     });
     this.dialogs = new Dialogs({
@@ -135,6 +138,8 @@ export class Director {
 
   /** Where the lesson pointer is aimed, so a wide screen's close camera can keep it clear of the rack and line. */
   private lessonPoint: { x: number; y: number } | null = null;
+  /** The pointer's target and what it builds, for taps on it. */
+  private lessonTarget: { point: { x: number; y: number } | null; build?: BuildKind } = { point: null };
 
   private camera(): CameraIntent {
     const mode = this.state.rules.camera;
@@ -267,11 +272,38 @@ export class Director {
     if (s.turnover >= 0) return;
     const teaching = !s.learn.includes('lesson:sleep');
     const left = workLeft(s);
-    if (s.minute < 360 && !teaching && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0) {
-      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), left);
+    // A flock day: crows still to come take a crop each from a farm left early, so the question asks at any hour.
+    const flock = this.crowsDue();
+    if (!teaching && (flock || (s.minute < 360 && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0))) {
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), left, flock);
       return;
     }
     this.input.push({ type: 'sleep' });
+  }
+
+  /** Is it a flock day with crows still to come and a growing crop no scarecrow watches over for sure? */
+  private crowsDue(): boolean {
+    const s = this.state;
+    if (!homestead(s) || !s.flock || !s.crowPlan.length) return false;
+    for (let i = 0; i < s.plots.length; i++) {
+      const c = s.plots[i].crop;
+      if (!c || c.dead || c.stage < 1 || c.stage >= 4 || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+      if (!guardedSure(s, i % s.W, Math.floor(i / s.W))) return true;
+    }
+    return false;
+  }
+
+  /** Do what a tap on the lesson pointer means: walk there and act, ask before building, or say why not. */
+  private onPointer(t: PointerTap | null): void {
+    if (!t) return;
+    if (t.do === 'act') this.input.push({ type: 'actAt', x: t.x, y: t.y });
+    else if (t.do === 'refuse') {
+      this.hud.toast(t.text, 'deny');
+      this.ctx.audio.ui('deny');
+    } else {
+      const { build, x, y } = t;
+      this.dialogs.confirmBuild(build, this.state.coins, () => this.input.push({ type: 'buildAt', x, y, kind: build }));
+    }
   }
 
   // ------------------------------------------------------------ frame
@@ -288,9 +320,10 @@ export class Director {
    */
   private aimAt(): { x: number; y: number; useful: boolean } | null {
     const s = this.state;
+    // Too tired for the job, acting there would do nothing: the cursor and the button say so by staying dim.
     const ok = (x: number, y: number) => {
       const r = resolve(s, s.tool, x, y);
-      return !!(r.verb && r.ok);
+      return !!(r.verb && r.ok) && !(homestead(s) && canAfford(s, r.verb));
     };
     if (this.walkAim && this.t - this.walkAim.t < 1.2) return { ...this.walkAim, useful: this.atBoard(this.walkAim.x, this.walkAim.y) || ok(this.walkAim.x, this.walkAim.y) };
     const f = farmer(s);
@@ -347,6 +380,15 @@ export class Director {
     const s = this.state;
 
     let cmds = this.input.collect(dt);
+    // A tap inside the lesson pointer's target tile is a tap on the pointer: for a lesson that builds, it asks first
+    // (or says it cannot be paid for) instead of doing the plot's own job. A tap anywhere else does its own job.
+    cmds = cmds.filter((c) => {
+      if (c.type !== 'actAt' || this.dialogs.open) return true;
+      const t = pointerTap(s, this.lessonTarget.point, this.lessonTarget.build, { x: c.x, y: c.y });
+      if (!t) return true;
+      this.onPointer(t);
+      return false;
+    });
     // The notice board is in the yard: act beside it, from any side, or tap it, to read it.
     const aimed = this.aimAt();
     const atBoard = (x: number, y: number) => propAt(x, y)?.kind === 'board';
@@ -360,8 +402,9 @@ export class Director {
     const lesson = this.tutor.update(s, dt, this.hud.touch.shown, !this.dialogs.open && !this.hud.picking);
     cmds.push(...lesson.cmds);
     this.hud.setLesson(lesson.line);
-    this.hud.setPoint(lesson.point, lesson.tap);
+    this.hud.setPoint(lesson.point);
     this.lessonPoint = lesson.line ? lesson.point : null;
+    this.lessonTarget = { point: lesson.point, build: lesson.build };
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);

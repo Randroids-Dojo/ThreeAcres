@@ -567,7 +567,9 @@ svg { width: 100%; height: 100%; display: block; }
 @media (max-width: 560px) { .list .pair { grid-template-columns: 1fr; gap: 8px; } }
 .item.req .tx .need { color: var(--ink); font-weight: 650; }
 /* The lesson pointer takes a tap (it walks to what it points at); at the screen's edge its disc is a finger wide. */
-.tpoint.on { pointer-events: auto; cursor: pointer; z-index: 5; }
+/* Only the edge arrow takes taps; the chevron over a target in view lets them through to the plot under it. */
+.tpoint.on:not(.over) { pointer-events: auto; cursor: pointer; z-index: 5; }
+.tpoint.over { pointer-events: none; }
 .tpoint.on:not(.over)::before { content: ''; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; }
 .dialog-open .tpoint, .picking .tpoint { opacity: 0 !important; pointer-events: none !important; }
 
@@ -596,3 +598,35 @@ svg { width: 100%; height: 100%; display: block; }
 .item.req .tx .when { color: var(--ink); }
 /* With words on the board and view buttons, their key caps sit at the top left, clear of the words (the count badge is top right). */
 .hud .topbtns .kcap { bottom: auto; right: auto; top: -5px; left: -5px; }
+
+/* ---------------------------------------------------------------- Sunup, after the fifth playtest */
+/* An offer headlines its gain over market, in the board's green (it said "Pays 1,370", most of it market value). */
+.item.req .tx b.gain { color: #2f6a2a; font-size: 17px; }
+/* The weather's name never wraps the day card onto two lines ("Heat wave" did). */
+.daycard .sky > span { white-space: nowrap; }
+/* Desktop: the HUD's type read tiny at 1280 by 800. */
+@media (min-width: 900px) and (min-height: 640px) {
+  .daycard .date { font-size: 23px; }
+  .daycard .clock { font-size: 19px; }
+  .daycard .sky { font-size: 15.5px; }
+  .daycard .sky .ic { width: 22px; height: 22px; }
+  .daycard .sky .fc .fl { font-size: 12.5px; }
+  .daycard .sky .fc .then { font-size: 13.5px; }
+  .daycard .stamina .mlbl { font-size: 13px; }
+  .daycard .stamina .meter { width: 130px; }
+  .coins { font-size: 24px; }
+  .tool { width: 62px; height: 66px; grid-template-rows: 34px auto; }
+  .tool .lbl { font-size: 13px; }
+  .tool .key { font-size: 11px; }
+  .hud .topbtns .iconbtn { width: 56px; height: 50px; }
+  .hud .topbtns .tlbl { font-size: 13px; }
+  .hint { font-size: 18px; bottom: calc(140px + var(--safe-b)); max-width: min(560px, calc(100% - 32px)); }
+  .info { font-size: 15.5px; bottom: calc(106px + var(--safe-b)); }
+  .toast { font-size: 15.5px; }
+  .toast.big b { font-size: 19px; }
+  .floater { font-size: 19px; }
+  .floater.no { font-size: 15px; }
+  .item .tx b { font-size: 16.5px; }
+  .item .tx span { font-size: 14px; }
+  .item.req .tx b.gain { font-size: 19px; }
+}

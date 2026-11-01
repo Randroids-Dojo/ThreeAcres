@@ -6,11 +6,11 @@
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
-import { doomedAtTurn, homestead, nightsToTurn, resolve, sowing } from '../sim/actions';
+import { canAfford, doomedAtTurn, homestead, nightsToTurn, resolve, sowing } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, cropWord, QUALITY_NAME } from '../sim/crops';
-import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
+import { canDeliver, isTaken, MILESTONES, newRequests, stockCount } from '../sim/goals';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import { propAt } from '../sim/map';
@@ -33,6 +33,8 @@ export interface HudHost {
   sleep(): void;
   /** Close up or the whole farm (C). */
   toggleCamera(): void;
+  /** A tap on the lesson pointer's edge arrow (the chevron over its target takes no taps: the plot under it does its own job). */
+  pointerTap(): void;
   input: Input;
 }
 
@@ -71,11 +73,14 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
   else if (gone.length > 1) bits.push([2, 3, `${gone.length} requests went elsewhere`]);
   if (r.gift) bits.push([1, 4, `a neighbour left ${fmt(r.gift)} coins for seed`]);
   if (r.worn) bits.push([2, 5, r.worn === 1 ? 'a sprinkler wore out' : `${r.worn} sprinklers wore out`]);
-  // Two nights before the season turns: what the turn will take, while there is still time to plan for it.
-  if (homestead(s) && nightsToTurn(s.day) === 2) {
+  // The last two mornings of a season: what the turn will take, while there is still time to plan for it. It comes
+  // first of all (the fifth playtest's full cards left it out, and the turn took seven beans unannounced).
+  if (homestead(s) && nightsToTurn(s.day) <= 2) {
     const doomed = s.plots.filter((p, i) => p.crop && doomedAtTurn(s, i)).length;
-    if (doomed) bits.push([2, 6, `${doomed} green ${doomed === 1 ? 'crop' : 'crops'} won\u2019t ripen before ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()}`]);
+    if (doomed) bits.push([0, 6, `${doomed} green ${doomed === 1 ? 'crop' : 'crops'} won\u2019t ripen before ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()}`]);
   }
+  // A flock day says so while there is still the day to watch for them.
+  if (r.flock) bits.push([1, 7, 'crows are about today']);
   // What is ripe to pick this morning (Sunup), or, elsewhere, how many crops grew a stage.
   if (r.ripe) bits.push([5, 7, `${r.ripe} ripe to pick`]);
   else if (!homestead(s) && r.grew) bits.push([5, 7, `${r.grew} grew`]);
@@ -150,8 +155,6 @@ export class Hud {
   // Over a target it is a bobbing chevron; at the screen's edge it sits on a dark disc, so it reads as an arrow and not a figure.
   private pointer = el('div', 'tpoint', '<svg viewBox="-16 -16 32 32"><circle class="disc" r="14.5"/><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
   private pointAt: { x: number; y: number } | null = null;
-  /** What a tap on the pointer takes in hand first (the scarecrow lesson's Build tool and scarecrow). */
-  private pointTap: Command[] = [];
   /** Until when the forecast wears its arrival lift (it came with its lesson). */
   private forecastNew = 0;
   private toolsKey = '';
@@ -227,14 +230,14 @@ export class Hud {
     toggle(this.goals, 'folded', this.foldedGoals);
 
 
-    // The pointer takes a tap: it walks to what it points at and does the job there (a tap on the ground behind an
-    // edge arrow would walk somewhere else).
+    // The edge arrow takes a tap: it walks to what it points at and does the job there (a tap on the ground behind
+    // the arrow would walk somewhere else). The chevron over a target in view takes none: a tap there lands on the
+    // farm, so only a tap inside the target tile is a tap on the pointer (the fifth playtest's chevron, drawn half a
+    // tile up, took taps meant for the plot behind it).
     this.pointer.addEventListener('click', (e) => {
       e.stopPropagation();
-      const t = this.pointAt;
-      if (!t || !this.pointer.classList.contains('on')) return;
-      for (const c of this.pointTap) host.send(c);
-      host.send({ type: 'actAt', x: Math.floor(t.x), y: Math.floor(t.y) });
+      if (!this.pointAt || !this.pointer.classList.contains('on') || this.pointer.classList.contains('over')) return;
+      host.pointerTap();
       host.cue('tap');
     });
     this.pointer.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -316,8 +319,9 @@ export class Hud {
     // (a phone's close view sees about two fields, so a crow in the first can hide off screen).
     toggle(this.viewBtn, 'gone', !this.knows(s, 'wide'));
     toggle(this.viewBtn, 'on', s.rules.camera === 'wide');
-    const open = homestead(s) ? s.orders.length : 0;
-    setText(this.boardBtn.querySelector('.badge')!, open ? String(open) : '');
+    // Only new notes: requests pinned since the board was last read (it counted every open note, read or not).
+    const fresh = homestead(s) ? newRequests(s) : 0;
+    setText(this.boardBtn.querySelector('.badge')!, fresh ? String(fresh) : '');
     setText(this.coinsNum, fmt(s.coins));
     if (this.lastCoins >= 0 && s.coins > this.lastCoins) {
       this.coins.classList.remove('bump');
@@ -629,7 +633,8 @@ export class Hud {
     if (html) setHtml(this.info, html);
     // Acting at the notice board opens it, so the button says so.
     if (prop === 'board' && this.knows(s, 'board')) this.aimVerb = { verb: null, ok: true, label: 'Read', icon: 'board' };
-    else this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) };
+    // Too tired for it, the button is dim and wordless, like anywhere acting would do nothing (it stayed lit with Water).
+    else this.aimVerb = { verb: r.verb, ok: !!(r.verb && r.ok) && !(homestead(s) && r.verb && canAfford(s, r.verb)) };
   }
 
   // ------------------------------------------------------------ events
@@ -646,6 +651,8 @@ export class Hud {
         const now = performance.now();
         if (this.lastDeny.text === e.reason && now - this.lastDeny.t < 1200) return;
         this.lastDeny = { text: e.reason, t: now };
+        // One refusal on screen at a time: a new one takes the place of the last (two drew over each other).
+        for (const f of this.floaters.querySelectorAll('.floater.no')) f.remove();
         this.float(e.x + 0.5, e.y + 0.5, denyText(e.reason), true);
         break;
       }
@@ -656,7 +663,7 @@ export class Hud {
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
         // A crop a request wants says how far along the request is, right where it was picked.
         // Short, so it fits over the plot: the crop names the request.
-        const o = homestead(s) ? s.orders.find((q) => q.items[0].crop === e.crop) : null;
+        const o = homestead(s) ? s.orders.find((q) => isTaken(q) && q.items[0].crop === e.crop) : null;
         if (o && e.by === s.actors[0].id) {
           const it = o.items[0];
           const have = Math.min(stockCount(s, it.crop), it.n);
@@ -732,10 +739,9 @@ export class Hud {
     this.lessonLine = line;
   }
 
-  /** A tile for the lesson to point at, or null, and what a tap on the pointer takes in hand before it acts there. */
-  setPoint(p: { x: number; y: number } | null, tap: Command[] = []): void {
+  /** A tile for the lesson to point at, or null. */
+  setPoint(p: { x: number; y: number } | null): void {
     this.pointAt = p;
-    this.pointTap = tap;
   }
 
   /** Over the tile when it is in view, else on the edge of the clear band, turned towards it. */

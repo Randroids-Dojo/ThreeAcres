@@ -66,11 +66,11 @@ export const CAN_WATER = [12, 24, 40] as const;
 export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; name: string }[]> = {
   can: [
     { cost: 400, rep: 3, name: 'Copper can' },
-    { cost: 1500, rep: 10, name: 'Gold can' },
+    { cost: 1500, rep: 8, name: 'Gold can' },
   ],
   hoe: [
     { cost: 300, rep: 2, name: 'Copper hoe' },
-    { cost: 1200, rep: 8, name: 'Gold hoe' },
+    { cost: 1200, rep: 6, name: 'Gold hoe' },
   ],
 };
 
@@ -80,20 +80,34 @@ export function requestSlots(rep: number): number {
   return rep >= 1 ? REQUEST_SLOTS : 1;
 }
 /**
- * A request pays clearly more than the crops it has you sow fetch at market,
- * about 1.5 times as much, so turning one down costs something. The two of a
- * pair are priced to earn the same over their seed for each plot and day
- * they take, so each lands between 1.3 and 1.8 times market; crops already
- * growing that a request counts are paid at market (no premium for what
- * would have been sold anyway).
+ * What a request pays over market (its gain), round 5. The fourth playtest's
+ * pairs were priced to earn the same for each plot and day, and the fifth
+ * found them identical ("corn 675 over 42 against sunflower 675 over 42"):
+ * no decision. Now the two of a pair differ in kind (`RequestKind`): a bold
+ * one (more gain, and more soil, more days or no day to spare) against a safe
+ * one. The safe one pays `REQUEST_RATE` for each plot and day its sowing
+ * takes; the bold one is priced so the two come out alike for a typical farm
+ * (each plot-day of soil worth `REQUEST_SOIL`, and one request in five that
+ * has no day to spare lost, `REQUEST_RISK`). Which is better then turns on
+ * the farm: its free soil, coins, stamina and the forecast.
  */
-export const REQUEST_PAY = [1.3, 1.8] as const;
-/** The pay a request's premium is figured from before the pair is evened out. */
-export const REQUEST_PAY_MID = 1.5;
-/** The most the two of a pair may differ in what they earn over their seed for each plot and day, as a share. */
-export const REQUEST_EVEN = 0.1;
-/** The most a request pays for what it has you sow: this much for each plot of owned field, so a request is sized to the farm. */
-export const REQUEST_PAY_PER_PLOT = 30;
+export const REQUEST_RATE = 6;
+/**
+ * What a plot-day of soil is worth to a typical farm, by the sort of pair: a plot held days longer (long against
+ * quick) ties up coins and soil that would have been sown again, so it is worth more than one more plot held for the
+ * same days (big against small). Tuned on `scripts/balance.ts --pairs`: with one value for both (3), the quick one
+ * beat the long one in 71% of the play-outs that were not a wash, and the big one beat the small one in 69%.
+ */
+export const REQUEST_SOIL = { risk: 3, time: 5, size: 2, single: 3 } as const;
+export const REQUEST_RISK = 0.8;
+/** The bold one of a pair offers at least this much more gain than the safe one, or the pair is not offered. */
+export const REQUEST_BOLD = 1.2;
+/** The most a request's gain over market can be: this much for each plot of owned field, so requests grow with the farm. */
+export const REQUEST_GAIN_PER_PLOT = 14;
+/** How a bold request is sized against its safe partner, in plot-days: a long crop about twice, a big one about 2.2 times. */
+export const REQUEST_SPAN = { long: 2, big: 2.2 } as const;
+/** No request asks for more than this share of the farm's plots (a pair is a choice, not the whole farm). */
+export const REQUEST_MOST = 0.6;
 /** The most a request asks for, or of the big crops. */
 export const REQUEST_MAX = 24;
 export const REQUEST_MAX_BIG = 8;
@@ -103,16 +117,34 @@ export const REQUEST_MIN = 3;
 export const REQUEST_SOW = [1, 2] as const;
 /** When the soil is full, a request may wait this many days for plots to come free (it says so: "Sow 6 by Summer 8"). */
 export const REQUEST_LOOK = 6;
-/** The share of the farm's plots each of a pair asks to have sown (a pair is a choice, not the whole farm). */
-export const REQUEST_SHARE = [0.25, 0.45] as const;
-/** Sunup's fields beyond the first: the reputation the land agent wants before he sells each (by field id). */
-export const FIELD_REP = [0, 0, 2, 4, 6, 8] as const;
+/** The share of the farm's plots each sort of request asks to have sown (a pair is a choice, not the whole farm). */
+export const REQUEST_SHARE = { rush: 0.32, easy: 0.3, quick: 0.3, small: 0.18, single: 0.3 } as const;
+/** A rush request is sown today and due the day it ripens; an easy one is sown by tomorrow with two days to spare; the rest one or two to sow and one to spare (the turn of a season can squeeze them). */
+export const REQUEST_GRACE = { rush: 0, easy: 2, other: 1 } as const;
+/**
+ * Sunup's fields beyond the first: the reputation the land agent wants before he sells each (by field id). Round 5
+ * eased the later ones (2, 4, 6, 8): the fifth playtest sat on 1,755 coins by Summer 9 with nothing to buy.
+ */
+export const FIELD_REP = [0, 0, 2, 3, 5, 7] as const;
 /** Sunup: in the last days of a season the next season's seeds can go in, so the turn takes nothing you could have planned for. */
 export const SEASON_PREVIEW_DAYS = 3;
 export const HAND_SLOWER = 1.4;
 /** Sunup: the chance a growing crop gets bugs on a morning, and that bugs left on a crop spread overnight to a neighbour of the same kind, or of another. */
 export const BUG_CHANCE = 0.035;
 export const BUG_SPREAD = { same: 1, other: 0.5 } as const;
+/**
+ * Sunup, round 5: some days demand attention. On a dry morning after the
+ * scarecrow lesson, crows are about with this chance (a flock day, told on
+ * the morning card): one more crow for each field with growing crops, through
+ * the afternoon, and crows still to come when the farmer sleeps take a crop
+ * each. And at 13:00 bugs land again, as at dawn, so the afternoon has a look
+ * worth taking (`MIDDAY_MINUTE`).
+ */
+export const FLOCK_CHANCE = 0.22;
+export const FLOCK_HOURS = [300, 840] as const;
+export const MIDDAY_MINUTE = 420;
+/** Sunup: the field lesson waits until buying the field leaves this much for seed (the fifth playtest spent 250 of 270 and could not plant it). */
+export const FIELD_SEED = 150;
 /** Sunup: a crop left dry on a heat wave's night counts this many dry nights (three wither it). */
 export const HEAT_DRY = 3;
 

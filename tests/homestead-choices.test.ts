@@ -14,6 +14,12 @@
 // withdraws the other at once, with a word. Each pays 1.3 to 1.8 times market
 // for what it has you sow, so the two earn the same for each plot and day.
 //
+// Round 5: planting no longer takes a request (the fifth playtest's market
+// planting took one nobody had read): the player accepts one of a pair on
+// the board, and the other goes. The two differ in kind, so an easy request
+// keeps up to two days to spare and a rush none, and the gain over market is
+// set by the soil and days it asks for, not by a share of market.
+//
 // These tests read the farm only through what the committed rules had too
 // (fillRequests, the orders on the board, nightfall), so on the old code they
 // fail on their assertions, not on a missing name.
@@ -118,15 +124,17 @@ describe('a morning offers two requests, and only one can be taken', () => {
     expect(pairs / mornings).toBeGreaterThan(0.75);
   });
 
-  it('sowing for one takes it: the other goes at once, with a word', () => {
+  it('accepting one takes it: the other goes at once, with a word (sowing alone takes neither)', () => {
     let checked = 0;
     for (const s of farms()) {
       fillRequests(s, true);
       if (s.orders.length !== 2) continue;
       const [a, b] = s.orders;
-      // One seed is enough to choose.
+      // Seed sown for one of them, for market or not, chooses nothing.
       sowFor(s, a, 1);
-      const ev = step(s, 0.016);
+      step(s, 0.016);
+      expect(s.orders.map((o) => o.id)).toEqual([a.id, b.id]);
+      const ev = step(s, 0.016, [{ type: 'accept', id: a.id }]);
       expect(s.orders.map((o) => o.id), `kept ${a.items[0].n} ${a.items[0].crop}`).toContain(a.id);
       expect(s.orders.map((o) => o.id), `withdrew ${b.items[0].n} ${b.items[0].crop}`).not.toContain(b.id);
       expect(ev.some((e) => e.type === 'request' && e.id === b.id && !e.done)).toBe(true);
@@ -150,7 +158,20 @@ describe('a morning offers two requests, and only one can be taken', () => {
         // Each stays up to its own sow-by day and goes the morning after.
         for (const o of pinned) expect(s.orders.some((q) => q.id === o.id), `day ${s.day}, sow by ${sowByOf(o)}`).toBe(sowByOf(o)! >= s.day);
       }
-      expect(withdrawn).toBe(2);
+      // Offers nobody took go quietly: the morning card names only requests the player took.
+      expect(withdrawn).toBe(0);
+      // A taken one left unsown goes the morning after its sow-by day, and the card says so.
+      const t = farm(91 + day, { fields: 2, coins: 600, day });
+      fillRequests(t, true);
+      const taken = t.orders[0];
+      step(t, 0.016, [{ type: 'accept', id: taken.id }]);
+      let told = 0;
+      while (t.day <= sowByOf(taken)!) {
+        nightfall(t, []);
+        told += t.report?.withdrawn?.length ?? 0;
+      }
+      expect(t.orders.some((q) => q.id === taken.id)).toBe(false);
+      expect(told).toBe(1);
     }
   });
 });
@@ -212,7 +233,7 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     }
   });
 
-  it('shows a sow-by day, a day or two off, and is due its crop’s growing time later (and a day’s grace), never past its season', () => {
+  it('shows a sow-by day, a day or two off, and is due its crop’s growing time later (and its days to spare), never past its season', () => {
     let n = 0;
     for (const s of farms()) {
       fillRequests(s, true);
@@ -221,9 +242,12 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
         expect(sowBy, 'a sow-by day').toBeTypeOf('number');
         expect(sowBy!).toBeGreaterThanOrEqual(s.day);
         expect(sowBy!).toBeLessThanOrEqual(s.day + 2);
-        // Due when seed sown on the sow-by day ripens, and a day's grace for a missed watering (less at a season's end).
+        // Due when seed sown on the sow-by day ripens, and its days to spare: none for a rush, up to two for an easy
+        // one, one for the rest (less at a season's end).
+        const kind = (o as Order & { kind?: string }).kind;
+        const grace = kind === 'rush' ? 0 : kind === 'easy' ? 2 : 1;
         expect(o.due).toBeGreaterThanOrEqual(sowBy! + CROPS[o.items[0].crop].days);
-        expect(o.due).toBeLessThanOrEqual(sowBy! + CROPS[o.items[0].crop].days + 1);
+        expect(o.due, `${kind}`).toBeLessThanOrEqual(sowBy! + CROPS[o.items[0].crop].days + grace);
         const turn = s.day + (10 - ((s.day - 1) % 10)) - 1;
         if (!inSeason(o.items[0].crop, (season(s.day) + 1) % 4)) expect(o.due).toBeLessThanOrEqual(turn);
         n++;
@@ -232,7 +256,7 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     expect(n).toBeGreaterThan(100);
   });
 
-  it('pays 1.3 to 1.8 times market for what it has you sow (crops already growing at market), so turning one down costs something', () => {
+  it('pays clearly more than market for what it has you sow (crops already growing at market), so turning one down costs something', () => {
     const ratios: number[] = [];
     for (const s of farms()) {
       fillRequests(s, true);
@@ -242,8 +266,10 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
         ratios.push((o.reward - base * d.price) / (d.price * fresh(s, o)));
       }
     }
-    expect(Math.min(...ratios)).toBeGreaterThanOrEqual(1.3);
-    expect(Math.max(...ratios)).toBeLessThanOrEqual(1.8);
+    // Round 5: the gain is set by the soil and days a request asks for and its kind, so a slow dear crop gains less
+    // against its market value than a quick cheap one (it was 1.3 to 1.8 times market).
+    expect(Math.min(...ratios)).toBeGreaterThanOrEqual(1.15);
+    expect(Math.max(...ratios)).toBeLessThanOrEqual(2);
   });
 
   it('the first is still three radishes, and nothing more comes until it is filled', () => {
@@ -268,7 +294,11 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
     const [a] = s.orders;
+    // Sown for, but not chosen: nothing new comes.
     sowFor(s, a, fresh(s, a));
+    fillRequests(s, true);
+    expect(s.orders.length).toBe(2);
+    step(s, 0.016, [{ type: 'accept', id: a.id }]);
     nightfall(s, []);
     // The other went, and a new pair came: the morning's choice again.
     expect(s.orders.some((o) => o.id === a.id)).toBe(true);

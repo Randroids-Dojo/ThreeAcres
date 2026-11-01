@@ -16,7 +16,19 @@
 // cause; and how steady the stream of requests is (mornings between new ones).
 // It reads requests only through what the round 3 rules had too, so it runs
 // on the committed code as well, for a before and after.
-// npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person]
+// Round 5 adds morning coins for every day (the median farm, and the poorest
+// and richest), crops lost to crows on flock days, and, with --pairs, how
+// often the better of a pair depends on the farm: every pair the bot is
+// offered is played out both ways from the same morning (the other let go,
+// as the board's Accept does) by a diligent player and a busy one (to bed at
+// 10:00), to the morning after the later due day, and the farm's worth then
+// compared (coins, the crate at market, growing crops by how far grown). It
+// takes a pick only through what the round 4 rules had too (the other of the
+// pair leaves the board), so it runs on the committed code as well.
+// npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs]
+import * as C from '../src/sim/constants';
+import { sowing } from '../src/sim/actions';
+import { PARCELS } from '../src/sim/map';
 import { CROP_IDS, CROPS } from '../src/sim/crops';
 import { PRESET_IDS } from '../src/sim/presets';
 import { play, world } from '../tests/helpers';
@@ -26,6 +38,7 @@ const DAYS = Number(process.argv[2] ?? 30);
 const FARMS = Number(process.argv[3] ?? 6);
 const ONLY_SUNUP = process.argv.includes('--sunup');
 const ONLY_PERSON = process.argv.includes('--person');
+const PAIRS = process.argv.includes('--pairs');
 
 if (!ONLY_SUNUP) {
   for (const id of PRESET_IDS) {
@@ -107,6 +120,13 @@ interface Farm {
   active: { secs: number; fields: number; day: number }[];
   /** Mornings that brought new requests (after the first was filled). */
   newMornings: number[];
+  /** Flock days (crows about), and crops crows took on them. */
+  flocks: number;
+  flockEaten: number;
+  /** Plot-nights in spring (days 3 to 12) left bare with not the coins for one seed of anything that could go in. */
+  idleSoil: number;
+  /** Pairs as pinned, with the farm that morning (for --pairs). */
+  pairs: { state: WorldState; ids: [number, number] }[];
 }
 
 const JOBS = new Set(['till', 'water', 'plant', 'harvest', 'tend', 'refill', 'clear', 'build']);
@@ -165,7 +185,13 @@ function pinOf(s: WorldState, o: Order): Pinned {
   };
 }
 
-function sunupFarm(seed: number, pace?: number): Farm {
+/**
+ * The coins at which a player who does what the field lesson says buys the second field: when the line comes up.
+ * Read from the rules under test (round 5 waits for `FIELD_SEED` more than the price, for seed).
+ */
+const FIELD_LINE = 250 + ((C as Record<string, unknown>).FIELD_SEED as number | undefined ?? 0);
+
+function sunupFarm(seed: number, pace?: number, followField = false): Farm {
   const s = world('sunup', seed);
   const sleepHour: number[] = [];
   const staminaLeft: number[] = [];
@@ -192,10 +218,17 @@ function sunupFarm(seed: number, pace?: number): Farm {
   const active: Farm['active'] = [];
   const newMornings: number[] = [];
   let firstFilled = false;
+  let flocks = 0;
+  let flockEaten = 0;
+  const flockDays = new Set<number>();
+  let idleSoil = 0;
+  const pairs: Farm['pairs'] = [];
   const r = play(s, DAYS, {
     pace,
     each: (st: WorldState) => {
       const f = st.actors[0];
+      // A player who buys the second field the moment the field lesson says to.
+      if (followField && !st.parcels[1].owned && st.coins >= FIELD_LINE && st.turnover < 0) return [{ type: 'buyParcel', id: 1 }];
       if (st.turnover < 0 && (f.task || f.path.length || f.aim || f.moving)) activeSecs += 1 / 30;
       if (st.report && st.report !== seenReport) {
         seenReport = st.report;
@@ -208,6 +241,11 @@ function sunupFarm(seed: number, pace?: number): Farm {
       // Note the moment the day ends: what hour, and was it stamina that ended it.
       if (st.turnover >= 0 && st.day === lastDay) {
         lastDay = -1;
+        // Spring soil left bare tonight for want of coins.
+        if (st.day >= 3 && st.day <= 12) {
+          const cheapest = Math.min(...CROP_IDS.filter((c) => sowing(st.day, c).ok).map((c) => CROPS[c].seed));
+          if (st.coins < cheapest) for (let i = 0; i < st.plots.length; i++) if (ownedAt(st, i) && st.tiles[i] === 'field' && st.plots[i].tilled && !st.plots[i].crop && !st.builds.some((b) => b.y * st.W + b.x === i)) idleSoil++;
+        }
         sleepHour.push(6 + st.minute / 60);
         staminaLeft.push(st.stamina);
         if (st.stamina < 4) wasTired = true;
@@ -235,6 +273,15 @@ function sunupFarm(seed: number, pace?: number): Farm {
         if (e.type === 'wither' && heatNight) heatDeaths++;
       }
       for (const p of st.parcels) if (p.owned && p.id > 0 && !bought[p.id]) bought[p.id] = st.day;
+      // Round 5: flock days, and what crows took on them (by day, or at bedtime from crows still to come).
+      const flock = !!(st as WorldState & { flock?: boolean }).flock;
+      if (flock && st.turnover < 0) flockDays.add(st.day);
+      // Crows on a flock day: by day, or at bedtime (when the day's flock flag has just gone).
+      for (const e of ev) if (e.type === 'crowEat' && (flockDays.has(st.day) || flockDays.has(st.day - 1))) flockEaten++;
+      flocks = flockDays.size;
+      // A pair just pinned: keep the farm as it was that moment, to play it out both ways (--pairs).
+      const fresh2 = st.orders.filter((o) => !seenOrders.has(o.id) && (o as Order & { pair?: number }).pair !== undefined);
+      if (PAIRS && fresh2.length === 2 && pairs.length < 10) pairs.push({ state: structuredClone(st), ids: [fresh2[0].id, fresh2[1].id] });
       let fresh = false;
       for (const o of st.orders) {
         if (seenOrders.has(o.id)) continue;
@@ -325,7 +372,80 @@ function sunupFarm(seed: number, pace?: number): Farm {
     turned,
     active,
     newMornings,
+    flocks,
+    flockEaten,
+    idleSoil,
+    pairs,
   };
+}
+
+/**
+ * What a farm is worth on a morning: its coins, the crate at market, growing crops by how far grown, and what it
+ * has bought at what it cost (fields, the smith's tools, scarecrows, sprinklers by the mornings they have left), so a
+ * pick that lets the farm buy a field sooner is not counted as poorer for it.
+ */
+function worth(s: WorldState): number {
+  let v = s.coins;
+  for (const p of s.parcels) if (p.owned && p.id > 0) v += PARCELS[p.id].price;
+  for (const t of ['can', 'hoe'] as const) for (let l = 0; l < (s.tools?.[t] ?? 0); l++) v += C.TOOL_UPGRADES[t][l].cost;
+  for (const b of s.builds) v += b.kind === 'sprinkler' ? (C.BUILD_COST.sprinkler * ((b as { left?: number }).left ?? 10)) / 10 : C.BUILD_COST.scarecrow;
+  for (const c of CROP_IDS) v += s.stock[c].reduce((a, b) => a + b, 0) * CROPS[c].price;
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (!c || c.dead || !ownedAt(s, i)) continue;
+    const d = CROPS[c.kind];
+    v += d.seed + (d.price - d.seed) * Math.min(1, c.age / d.days);
+  }
+  return v;
+}
+
+/** The sort of a request (round 5), or '' on rules without them. */
+const kindOf = (o: Order) => (o as Order & { kind?: string }).kind ?? '';
+const BOLD = new Set(['rush', 'long', 'big']);
+
+/**
+ * Play one pair out both ways from the morning it was pinned, with a player
+ * that sleeps at `bedtime` (game minutes after 6:00; undefined: when the work
+ * is done). The other of the pair leaves the board, as Accept lets it go.
+ * Returns the farm's worth the morning after the later due day, each way.
+ */
+function playOut(start: WorldState, ids: [number, number], bedtime?: number): [number, number] {
+  // Each way twice, the second with the weather and pests drawn differently, and the two averaged, so chance moves the
+  // call less.
+  const shaken = structuredClone(start);
+  shaken.rng = (shaken.rng ^ 0x5bd1e995) | 0;
+  const way = (a: number, b: number) => (playPick(start, a, b, bedtime) + playPick(shaken, a, b, bedtime)) / 2;
+  return [way(ids[0], ids[1]), way(ids[1], ids[0])];
+}
+
+/** One way of a pair: `id` taken, `mate` let go, played to the morning after the later of the two due days. */
+function playPick(start: WorldState, id: number, mate: number, bedtime?: number): number {
+  const due = Math.max(...start.orders.filter((o) => o.id === id || o.id === mate).map((o) => o.due));
+  const days = Math.max(1, due - start.day + 1);
+  const s = structuredClone(start);
+  s.orders = s.orders.filter((o) => o.id !== mate);
+  const o = s.orders.find((q) => q.id === id) as Order & { taken?: boolean };
+  if (o && o.taken === false) o.taken = true;
+  // Only this pair's pick counts: requests pinned later in the play-out leave the board at once.
+  const keep = new Set(s.orders.map((q) => q.id));
+  play(s, days, {
+    pace: 0.9,
+    each: (st) => {
+      if (st.orders.some((q) => !keep.has(q.id))) st.orders = st.orders.filter((q) => keep.has(q.id));
+      return bedtime !== undefined && st.turnover < 0 && st.minute >= bedtime && st.rules.clock === 'day' ? [{ type: 'sleep' }] : [];
+    },
+  });
+  return worth(s);
+}
+
+/** The same pick played out with two more draws of the weather and pests, averaged as `playOut` does: what chance alone moves the call by. */
+function noiseFloor(start: WorldState, id: number, mate: number): number {
+  const draw = (k: number) => {
+    const s = structuredClone(start);
+    s.rng = (s.rng ^ k) | 0;
+    return playPick(s, id, mate);
+  };
+  return (draw(0x1234567) + draw(0x7654321)) / 2 - (draw(0x2468ace) + draw(0x13579bd)) / 2;
 }
 
 const med = (xs: number[]) => {
@@ -340,9 +460,10 @@ const fmtH = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60))
 const num = (n: number) => Math.round(n).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}%` : 'n/a');
 // The quick bot, then the bot at a person's pace (about one action every 1.3 seconds, like the playtest).
-for (const [label, pace] of ([['the quick bot', undefined], ['the bot at a person’s pace', 0.9]] as const).filter(([, p]) => !ONLY_PERSON || p)) {
+for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the bot at a person’s pace', 0.9, false], [`the bot at a person’s pace, buying the second field when the field lesson says (${FIELD_LINE} coins)`, 0.9, true]] as const).filter(([, p]) => !ONLY_PERSON || p)) {
+  if (follow && PAIRS) continue;
   const farms: Farm[] = [];
-  for (let i = 0; i < FARMS; i++) farms.push(sunupFarm(42 + i * 1013, pace));
+  for (let i = 0; i < FARMS; i++) farms.push(sunupFarm(42 + i * 1013, pace, follow));
   const avg = (f: (x: Farm) => number) => farms.reduce((a, x) => a + f(x), 0) / farms.length;
   const hours = farms.flatMap((f) => f.sleepHour);
   console.log(`\nSunup over ${FARMS} farms, ${DAYS} days each (${label})`);
@@ -420,4 +541,76 @@ for (const [label, pace] of ([['the quick bot', undefined], ['the bot at a perso
   console.log(`  active seconds a day   1 field ${actBy(1, 1)}; 2 fields ${actBy(2, 2)}; 3 to 6 ${actBy(3, 6)}`);
   console.log(`  crops lost             ${avg((f) => f.dryDeaths).toFixed(1)} dry, ${avg((f) => f.heatDeaths).toFixed(1)} on heat nights, ${avg((f) => f.bugDeaths).toFixed(1)} to bugs, ${avg((f) => f.eaten).toFixed(1)} to crows, ${avg((f) => f.turned).toFixed(1)} to the turn (a farm)`);
   console.log(`  pressure               crows ${avg((f) => f.crows).toFixed(1)} (ate ${avg((f) => f.eaten).toFixed(1)}), bug outbreaks ${avg((f) => f.bugs).toFixed(1)} (crops lost to bugs ${avg((f) => f.bugDeaths).toFixed(1)}), heat waves ${avg((f) => f.heatDays).toFixed(1)} (crops lost on heat nights ${avg((f) => f.heatDeaths).toFixed(1)}); built ${avg((f) => f.scarecrows).toFixed(1)} scarecrows, ${avg((f) => f.sprinklers).toFixed(1)} sprinklers`);
+  // Round 5.
+  console.log(`  flock days             ${avg((f) => f.flocks).toFixed(1)} a farm; crops crows took on them ${avg((f) => f.flockEaten).toFixed(1)}`);
+  const daysRow = Array.from({ length: DAYS }, (_, i) => i + 1);
+  const at = (f: Farm, d: number) => f.morning[d] ?? f.coins;
+  console.log(`  morning coins by day (median farm; poorest and richest)`);
+  for (let i = 0; i < daysRow.length; i += 10) {
+    const chunk = daysRow.slice(i, i + 10);
+    console.log(`    ${chunk.map((d) => `${String(d).padStart(2)}: ${num(med(farms.map((f) => at(f, d)))).padStart(5)} (${num(Math.min(...farms.map((f) => at(f, d))))}-${num(Math.max(...farms.map((f) => at(f, d))))})`).join('  ')}`);
+  }
+  const broke = farms.map((f) => daysRow.filter((d) => d >= 3 && d <= 12 && at(f, d) < 100).length);
+  const flush = farms.map((f) => daysRow.filter((d) => d >= 13 && at(f, d) >= 1000).length);
+  console.log(`  spring mornings (days 3 to 12) under 100 coins: ${(broke.reduce((a, b) => a + b, 0) / farms.length).toFixed(1)} a farm; mornings from day 13 at 1,000 or more: ${(flush.reduce((a, b) => a + b, 0) / farms.length).toFixed(1)} a farm`);
+  console.log(`  spring soil left bare for want of coins (days 3 to 12): ${avg((f) => f.idleSoil).toFixed(1)} plot-nights a farm (per farm: ${farms.map((f) => f.idleSoil).join(' ')})`);
+  const later2 = farms.flatMap((f) => f.pinned.slice(1));
+  const gains = later2.map((p) => p.reward - p.n * CROPS[p.crop].price);
+  console.log(`  gain over market       median ${num(med(gains))}, lowest ${num(Math.min(...gains))}, highest ${num(Math.max(...gains))}`);
+  if (PAIRS) {
+    // Every pair the bot was offered, played out both ways by a diligent player and a busy one.
+    type Out = { kinds: string; bold: number; safe: number; diligent: number; busy: number; scale: number; noise: number; free: number; coins: number };
+    const outs: Out[] = [];
+    for (const f of farms) {
+      for (const { state, ids } of f.pairs) {
+        const [a, b] = ids.map((id) => state.orders.find((o) => o.id === id)!);
+        // Round 5 names the bold one; before, the two are taken in the order pinned.
+        const [bold, safe] = BOLD.has(kindOf(b)) ? [b, a] : [a, b];
+        const d = playOut(state, [bold.id, safe.id]);
+        const busy = playOut(state, [bold.id, safe.id], 240);
+        const gain = (o: Order) => o.reward - o.items[0].n * CROPS[o.items[0].crop].price;
+        // The farm that morning: its soil free to plant, and its coins against what the bigger of the two costs to sow.
+        let free = 0;
+        let all = 0;
+        for (let i = 0; i < state.plots.length; i++) {
+          if (!ownedAt(state, i) || state.tiles[i] !== 'field' || state.builds.some((q) => q.y * state.W + q.x === i)) continue;
+          all++;
+          if (!state.plots[i].crop) free++;
+        }
+        const cost = Math.max(...[bold, safe].map((o) => o.items[0].n * CROPS[o.items[0].crop].seed));
+        outs.push({ kinds: kindOf(bold) ? `${kindOf(bold)}/${kindOf(safe)}` : 'pair', bold: gain(bold), safe: gain(safe), diligent: d[0] - d[1], busy: busy[0] - busy[1], scale: Math.max(gain(bold), gain(safe), 1), noise: noiseFloor(state, bold.id, safe.id), free: all ? free / all : 0, coins: state.coins / Math.max(1, cost) });
+      }
+    }
+    // A pick is better when it leaves the farm worth more by a tenth of the larger gain; closer than that is a wash.
+    const call = (gap: number, scale: number) => (gap > 0.1 * scale ? 'first' : gap < -0.1 * scale ? 'second' : 'wash');
+    const report2 = (label: string, xs: Out[]) => {
+      if (!xs.length) return;
+      const tally = (k: 'diligent' | 'busy') => {
+        const c = { first: 0, second: 0, wash: 0 };
+        for (const x of xs) c[call(x[k], x.scale)]++;
+        return `${pct(c.first, xs.length)} / ${pct(c.second, xs.length)} / ${pct(c.wash, xs.length)}`;
+      };
+      const disagree = xs.filter((x) => call(x.diligent, x.scale) !== call(x.busy, x.scale)).length;
+      const decided = xs.flatMap((x) => [call(x.diligent, x.scale), call(x.busy, x.scale)]).filter((c) => c !== 'wash');
+      const firstShare = decided.filter((c) => c === 'first').length / Math.max(1, decided.length);
+      const gap = med(xs.map((x) => Math.abs(x.diligent) / x.scale));
+      const noise = med(xs.map((x) => Math.abs(x.noise) / x.scale));
+      console.log(`    ${label.padEnd(12)} ${String(xs.length).padStart(3)} pairs; gain ${num(med(xs.map((x) => x.bold)))} against ${num(med(xs.map((x) => x.safe)))}; better pick (first / second / a wash), diligent ${tally('diligent')}, busy ${tally('busy')}; the two players disagree on ${pct(disagree, xs.length)}; of the decided calls the first wins ${Math.round(100 * firstShare)}%; outcome gap median ${Math.round(100 * gap)}% of the larger gain (chance alone: ${Math.round(100 * noise)}%)`);
+    };
+    console.log(`  pairs played out both ways (first: ${outs.some((x) => x.kinds !== 'pair') ? 'the bold one (rush, long, big)' : 'the first pinned'}; busy: to bed at 10:00)`);
+    report2('all', outs);
+    for (const k of [...new Set(outs.map((x) => x.kinds))].sort()) if (k !== 'pair') report2(k, outs.filter((x) => x.kinds === k));
+    // Does the better pick follow the farm? The diligent player's calls, split by how much soil was free that morning
+    // and by whether the coins in hand covered the dearer sowing.
+    const split = (label: string, xs: Out[]) => {
+      const share = (ys: Out[]) => {
+        const c = ys.map((x) => call(x.diligent, x.scale)).filter((v) => v !== 'wash');
+        return c.length ? `${Math.round((100 * c.filter((v) => v === 'first').length) / c.length)}% (${c.length})` : 'n/a';
+      };
+      const soilMid = med(xs.map((x) => x.free));
+      console.log(`    ${label.padEnd(12)} the first wins, of decided calls: soil free above the median ${share(xs.filter((x) => x.free > soilMid))}, at or below ${share(xs.filter((x) => x.free <= soilMid))}; coins covering the dearer sowing ${share(xs.filter((x) => x.coins >= 1))}, not ${share(xs.filter((x) => x.coins < 1))}`);
+    };
+    split('all', outs);
+    for (const k of [...new Set(outs.map((x) => x.kinds))].sort()) if (k !== 'pair') split(k, outs.filter((x) => x.kinds === k));
+  }
 }

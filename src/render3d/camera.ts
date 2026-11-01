@@ -56,18 +56,22 @@ export interface Rig {
 
 /**
  * Where a tall screen's close camera looks across the farm. A phone sees
- * about ten and a half tiles across, just the width of the first two fields
- * and the well. Anywhere on the west side (the first field, the path between
- * the fields, the second field) it holds still on the middle of that, so the
- * first field's left column and the well both stay in view; going east it
- * slides on to follow the farmer, and it always keeps the farmer well inside
- * the screen.
+ * about ten tiles across, just the width of the first two fields and the
+ * well. Anywhere on the west side (the first field, the path between the
+ * fields, the second field, and the well's front) it holds still on the
+ * middle of that, so the first field's left column stays in view and takes a
+ * tap (round 5: from the second field's east side or the well it had slid
+ * off screen); going further east it slides on to follow the farmer, and it
+ * always keeps the farmer inside the screen.
  */
 export function tallX(fx: number, tiles: number): number {
   const WEST = 6.8;
-  const room = fx <= 9 ? WEST : fx >= 13 ? fx : WEST + (fx - 9) * ((13 - WEST) / 4);
-  const keep = Math.max(0, tiles / 2 - 0.6);
-  return clamp(room, fx - keep, fx + keep);
+  // From the second field to the well's front it eases a fifth of a tile east, so the well's side has room too.
+  const WELL = 7.0;
+  const HOLD = 11.6;
+  const room = fx <= 9 ? WEST : fx <= HOLD ? WEST + (fx - 9) * ((WELL - WEST) / (HOLD - 9)) : fx >= 15 ? fx : WELL + (fx - HOLD) * ((15 - WELL) / (15 - HOLD));
+  // The farmer keeps 0.6 tiles from the left edge, and 0.45 from the right (the well's front sits near it).
+  return clamp(room, fx - Math.max(0, tiles / 2 - 0.45), fx + Math.max(0, tiles / 2 - 0.6));
 }
 
 export function makeRig(): Rig {

@@ -8,7 +8,7 @@ import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { begun, MILESTONES, plantedFor, requestHave, sowByOf, stockCount } from '../sim/goals';
+import { gainOf, isTaken, MILESTONES, offered, plantedFor, requestProgress, slackOf, sowByOf, stillToSow, stockCount, whyNot } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, Order, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
@@ -145,8 +145,19 @@ export class Dialogs {
     this.focusIn(yes);
   }
 
-  /** Sleeping before noon, with work still waiting, asks first and says what waits. */
-  confirmSleep(minute: number, onYes: () => void, left?: { ripe: number; thirsty: number; bugs: number; crows: number }): void {
+  /**
+   * The lesson pointer asks before it builds: what it costs, what it does,
+   * and the coins in hand. One build, once, on yes.
+   */
+  confirmBuild(kind: BuildKind, coins: number, onYes: () => void): void {
+    const s = this.host.state();
+    const name = kind === 'sprinkler' ? 'sprinkler' : 'scarecrow';
+    const does = kind === 'sprinkler' ? sprinklerWords(s) : scarecrowWords(s);
+    this.ask(`Build a ${name}?`, 'build', `${BUILD_COST[kind]} coins. ${does}. You have ${fmt(coins)}.`, `Build for ${BUILD_COST[kind]}`, onYes);
+  }
+
+  /** Sleeping before noon, with work still waiting, asks first and says what waits (and, on a flock day, that crows are about). */
+  confirmSleep(minute: number, onYes: () => void, left?: { ripe: number; thirsty: number; bugs: number; crows: number }, flock = false): void {
     const bits: string[] = [];
     if (left?.ripe) bits.push(`${left.ripe} ripe ${left.ripe === 1 ? 'crop' : 'crops'}`);
     if (left?.thirsty) bits.push(`${left.thirsty} thirsty ${left.thirsty === 1 ? 'crop' : 'crops'}`);
@@ -154,7 +165,9 @@ export class Dialogs {
     if (left?.crows) bits.push(left.crows === 1 ? 'a crow' : `${left.crows} crows`);
     const list = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : (bits[0] ?? '');
     const what = list ? ` ${list[0].toUpperCase()}${list.slice(1)} still ${bits.length === 1 && /^(a crow|1 )/.test(list) ? 'waits' : 'wait'}.` : '';
-    this.ask('Sleep now?', 'sleep', `It is only ${clock(minute)}.${what} Crops grow and the crate ships overnight.`, 'Sleep', onYes);
+    const crows = flock ? ' Crows are about: those still to come take a crop each.' : ' Crops grow and the crate ships overnight.';
+    // (A flock day asks after noon too, when "only" would be wrong.)
+    this.ask('Sleep now?', 'sleep', `It is ${minute < 360 ? 'only ' : ''}${clock(minute)}.${what}${crows}`, 'Sleep', onYes);
   }
 
   /** Re-render the open dialog after the farm changed (a purchase, a delivery). */
@@ -182,12 +195,16 @@ export class Dialogs {
     const knows = (what: string) => !homestead(s) || s.learn.includes(what);
     const tabs: [Tab, string][] = [];
     if (homestead(s) && knows('requests')) tabs.push(['requests', 'Requests']);
-    tabs.push(['fields', 'Fields'], ['seeds', 'Seeds']);
+    // Sunup: the Fields tab comes with the field lesson (or a field bought by tapping it), the Seeds tab with the first
+    // turn of a season: nothing on the board before its lesson.
+    if (knows('fields') || (homestead(s) && s.parcels.filter((p) => p.owned).length > 1)) tabs.push(['fields', 'Fields']);
+    if (knows('seedtab')) tabs.push(['seeds', 'Seeds']);
     if (knows('smith')) tabs.push(['tools', 'Smith']);
     if (knows('build')) tabs.push(['builds', 'Builds']);
     if (s.rules.crew === 'crew') tabs.push(['crew', 'Crew']);
     if (s.rules.goal === 'orders') tabs.push(['market', 'Market']);
     if (!homestead(s)) tabs.push(['milestones', s.rules.goal === 'almanac' ? 'Almanac' : 'Milestones']);
+    if (!tabs.length) tabs.push(['fields', 'Fields']);
     if (!tabs.some(([t]) => t === this.tab)) this.tab = tabs[0][0];
     const bar = el('div', 'tabs');
     for (const [t, label] of tabs) {
@@ -202,15 +219,17 @@ export class Dialogs {
     const list = el('div', 'list');
     switch (this.tab) {
       case 'requests': {
+        // What is on the board now has been read: the badge counts only notes pinned after this.
+        if (homestead(s) && s.orders.some((o) => o.seen === false)) this.host.send({ type: 'readBoard' });
         list.append(el('p', 'legend', smithLine(s)));
         if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
-        // A pair still to choose between hangs together, "or" between them: only one of the two can be met.
+        // A pair still to choose between hangs together, "or" between them: only one of the two can be taken.
         const shown = new Set<number>();
         let paired = false;
         for (const o of s.orders) {
           if (shown.has(o.id)) continue;
           shown.add(o.id);
-          const mate = o.pair !== undefined && !begun(s, o) ? s.orders.find((q) => q !== o && q.pair === o.pair && !begun(s, q) && !shown.has(q.id)) : undefined;
+          const mate = o.pair !== undefined && offered(o) ? s.orders.find((q) => q !== o && q.pair === o.pair && offered(q) && !shown.has(q.id)) : undefined;
           if (mate) {
             shown.add(mate.id);
             paired = true;
@@ -219,7 +238,7 @@ export class Dialogs {
             list.append(pair);
           } else list.append(this.requestNote(s, o));
         }
-        list.append(el('p', 'legend', paired ? 'Plant for one of a pair.' : 'The crate keeps what requests need.'));
+        list.append(el('p', 'legend', paired ? 'Accept one of a pair.' : s.orders.some(offered) ? 'Accept a request to take it on.' : 'The crate keeps what requests need.'));
         break;
       }
       case 'fields':
@@ -359,27 +378,33 @@ export class Dialogs {
   }
 
   /**
-   * One request's note: what it needs and when, what it pays and against
-   * what. An offer reads "Sow 8 by Spring 6, seed 120" and "Pays 660, 440 at
-   * market"; once the seed is in, how far it has got and when it is wanted.
+   * One request's note. An offer headlines its gain over market ("+195"),
+   * then what it wants and for whom, what to sow and by when ("Sow 6 today,
+   * seed 270"), and when it is ripe and due, with the days to spare ("Ripe in
+   * 7 days, due Summer 7, no day to spare"), and an Accept stamp (dashed, with
+   * what it needs, when it cannot be met now). A taken note says what is
+   * growing for it and in the crate, and when it is wanted.
    */
   private requestNote(s: WorldState, o: Order): HTMLElement {
     const it = o.items[0];
     const d = CROPS[it.crop];
-    const name = it.n === 1 ? d.name.toLowerCase() : d.plural;
-    const inCrate = Math.min(stockCount(s, it.crop), it.n);
-    const toSow = Math.max(0, it.n - requestHave(s, o));
-    const sowBy = sowByOf(o);
-    const more = plantedFor(s, o) > 0 ? ' more' : '';
-    const need =
-      toSow > 0 && s.day <= sowBy
-        ? `Sow ${toSow}${more} ${sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`}, seed ${fmt(toSow * d.seed)}`
-        : `${inCrate} of ${it.n} in the crate, wanted by ${dayName(s, o.due)}`;
-    // When it will be ready and when it is wanted, so the two of a pair can be weighed at a glance.
-    const when = toSow > 0 && s.day <= sowBy ? `Ripe in ${d.days} days, due ${dayName(s, o.due)}` : '';
-    const note = el('div', 'item req', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(townName(o.who))}</span><span class="need">${need}</span>${when ? `<span class="when">${when}</span>` : ''}<span class="pay">Pays ${fmt(o.reward)}, ${fmt(d.price * it.n)} at market</span></span>`);
+    const toSow = stillToSow(s, o);
+    const t = noteText(s, o);
+    const lines = `<b${offered(o) ? ' class="gain"' : ''}>${esc(t.head)}</b>${t.lines.map((l, i) => `<span${i === 1 && t.need ? ' class="need"' : i === t.lines.length - 1 ? ' class="when"' : ''}>${esc(l)}</span>`).join('')}`;
+    const note = el('div', `item req${offered(o) ? ' offer' : ' taken'}`, `<span class="blob">${cropArt(it.crop)}</span><span class="tx">${lines}</span>`);
     note.dataset.crop = it.crop;
-    if (inCrate >= it.n) {
+    note.dataset.id = String(o.id);
+    if (offered(o)) {
+      const why = whyNot(s, o);
+      const b = el('button', 'btn primary accept', why === 'coins' ? `Need ${fmt(toSow * d.seed)}` : why === 'soil' ? 'No room' : why === 'late' ? 'Too late' : 'Accept');
+      b.disabled = !!why;
+      b.onclick = () => {
+        this.host.send({ type: 'accept', id: o.id });
+        this.host.cue('order');
+        setTimeout(() => this.refresh(), 0);
+      };
+      note.append(b);
+    } else if (isTaken(o) && Math.min(stockCount(s, it.crop), it.n) >= it.n) {
       const b = el('button', 'btn primary', 'Deliver');
       b.onclick = () => {
         this.host.send({ type: 'deliver', id: o.id });
@@ -435,7 +460,10 @@ export class Dialogs {
     this.body.innerHTML = '';
     // The price is on the stamp; the words say what it is and what you have.
     const rep = fieldRep(s, id);
-    const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${s.rep}.` : ` You have ${fmt(s.coins)} coins.`;
+    // Buying it should leave coins to sow it: the card says when it would not.
+    const left = s.coins - p.price;
+    const seed = homestead(s) && left >= 0 && left < 150 ? ` That leaves ${fmt(left)} for seed.` : '';
+    const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${s.rep}.` : ` You have ${fmt(s.coins)} coins.${seed}`;
     this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${known}`));
     const row = el('div', 'row ask');
     const short = s.coins < p.price || s.rep < rep;
@@ -454,6 +482,38 @@ export class Dialogs {
     this.yes = short ? null : go;
     this.focusIn(short ? no : buy);
   }
+}
+
+/**
+ * The words on a request's note. An offer headlines its gain over market
+ * ("+195 over market"), then what it wants and for whom, what to sow and by
+ * when ("Sow 6 today, seed 270"), and when it is ripe and due, with its days
+ * to spare ("Ripe in 7 days, due Summer 7, no day to spare"). A taken one
+ * says what is growing for it and in the crate, and when it is wanted.
+ */
+export function noteText(s: WorldState, o: Order): { head: string; lines: string[]; need: boolean } {
+  const it = o.items[0];
+  const d = CROPS[it.crop];
+  const name = it.n === 1 ? d.name.toLowerCase() : d.plural;
+  const gain = gainOf(o);
+  const toSow = stillToSow(s, o);
+  const sowBy = sowByOf(o);
+  const who = townName(o.who);
+  const spare = slackOf(o);
+  const slack = spare <= 0 ? 'no day to spare' : spare === 1 ? 'a day to spare' : `${spare} days to spare`;
+  const when = sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`;
+  if (offered(o)) {
+    const need = toSow > 0 ? `Sow ${toSow} ${when}, seed ${fmt(toSow * d.seed)}` : `Wanted by ${dayName(s, o.due)}`;
+    return { head: `+${fmt(gain)} over market`, lines: [`${it.n} ${name} for ${who}`, need, `Ripe in ${d.days} days, due ${dayName(s, o.due)}, ${slack}`], need: toSow > 0 };
+  }
+  // Taken: what is growing for it and in the crate (the fifth playtest's note said "0 of 9 in the crate" while nine
+  // were growing for it), or what is still to sow.
+  const p = requestProgress(s, o);
+  const more = plantedFor(s, o) > 0 ? ' more' : '';
+  const need = toSow > 0 && s.day <= sowBy ? `Sow ${toSow}${more} ${when}, seed ${fmt(toSow * d.seed)}` : '';
+  const have = [p.growing ? `${p.growing} growing` : '', p.crate ? `${p.crate} in the crate` : ''].filter(Boolean).join(', ');
+  const wanted = have ? `${have[0].toUpperCase()}${have.slice(1)}, wanted by ${dayName(s, o.due)}` : `Wanted by ${dayName(s, o.due)}`;
+  return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(gain)} over market`, ...(need ? [need] : []), wanted], need: !!need };
 }
 
 /** A day as the day card names it ("Spring 6"), or "tomorrow". */

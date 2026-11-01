@@ -3,7 +3,7 @@
 // and orders.
 
 import { choreNow, hands } from './actors';
-import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
+import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, FLOCK_CHANCE, FLOCK_HOURS, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
 import { CROP_IDS, stageOf } from './crops';
 import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
 import { homestead, sowing } from './actions';
@@ -45,6 +45,20 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
   // lesson has been seen, a crow takes nothing in the hours sleep skips: the
   // first crop a crow takes is one the farmer watched it go for.
   const crowsEat = !homestead(s) || s.learn.includes('lesson:pests');
+  // Sunup, a flock day: the crows still to come when the farmer goes to bed come anyway, and each takes a crop no
+  // scarecrow watches over (the morning card said crows were about; the sleep question says so too).
+  if (homestead(s) && s.flock && crowsEat) {
+    for (const _m of s.crowPlan) {
+      const t = crowTarget(s);
+      if (!t) break;
+      s.plots[idx(t.x, t.y)].crop = null;
+      ev.push({ type: 'crowEat', id: s.nextId++, x: t.x, y: t.y });
+      report.eaten++;
+      s.almanac.withered++;
+    }
+  }
+  s.crowPlan = [];
+  s.flock = false;
   for (const c of s.crows) {
     if (c.phase !== 'peck' && c.phase !== 'in') continue;
     const p = s.plots[idx(c.x, c.y)];
@@ -231,9 +245,10 @@ function morning(s: WorldState, ev: SimEvent[]): void {
             const chance = sunup ? (n.kind === c.kind ? BUG_SPREAD.same : BUG_SPREAD.other) : n.kind === c.kind ? 0.5 : 0;
             if (chance > 0 && rand(s) < chance) spread.push(idx(nx, ny));
           }
-        } else if (c.stage >= 1 && c.stage < 4 && rand(s) < (sunup ? BUG_CHANCE : 0.03)) spread.push(idx(x, y));
+        } else if (!sunup && c.stage >= 1 && c.stage < 4 && rand(s) < 0.03) spread.push(idx(x, y));
       }
     }
+    if (sunup) landBugs(s, ev, spread);
     for (const i of spread) {
       const c = s.plots[i].crop!;
       if (c.bugs === 0) {
@@ -257,6 +272,13 @@ function morning(s: WorldState, ev: SimEvent[]): void {
         // one for the edge of a field it does watch; a field watched over sure, edges and all, draws none.
         const n = homestead(s) ? s.parcels.filter((p) => p.owned && rand(s) < crowChance(s, p)).length : 1 + (rand(s) < 0.4 ? 1 : 0) + (growing > 24 ? 1 : 0);
         for (let k = 0; k < n; k++) s.crowPlan.push(s.rules.clock === 'turns' ? 0 : randInt(s, 60, DAY_MINUTES - CROW_PECK_MINUTES - 120));
+        // Some days demand attention: now and then, once scarecrows are known, crows are about (told on the morning
+        // card): one more for each field with a growing crop, through the late morning and the afternoon.
+        if (homestead(s) && s.rules.clock === 'day' && s.learn.includes('lesson:scarecrow') && rand(s) < FLOCK_CHANCE) {
+          s.flock = true;
+          if (s.report) s.report.flock = true;
+          for (const p of s.parcels) if (p.owned && fieldOpen(s, p)) s.crowPlan.push(randInt(s, FLOCK_HOURS[0], FLOCK_HOURS[1]));
+        }
         s.crowPlan.sort((a, b) => a - b);
       }
     }
@@ -310,6 +332,35 @@ export function rescue(s: WorldState): number {
   const gift = cheapest * 4 - s.coins;
   s.coins += gift;
   return gift;
+}
+
+/** Does a field have a crop up and growing that no scarecrow watches over for sure (a crow's dinner)? */
+function fieldOpen(s: WorldState, p: { x: number; y: number; w: number; h: number }): boolean {
+  for (let y = p.y; y < p.y + p.h; y++) for (let x = p.x; x < p.x + p.w; x++) {
+    const c = s.plots[idx(x, y)].crop;
+    if (c && !c.dead && c.stage >= 1 && c.stage < 4 && !guardedSure(s, x, y)) return true;
+  }
+  return false;
+}
+
+/**
+ * Sunup: bugs land on a few growing crops, each with `BUG_CHANCE` (at dawn,
+ * and again at 13:00). `also` adds plots the night's spreading reached.
+ */
+export function landBugs(s: WorldState, ev: SimEvent[], also: number[] = []): void {
+  const hit = also.slice();
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (!c || c.dead || c.bugs > 0 || c.stage < 1 || c.stage >= 4 || s.tiles[i] !== 'field') continue;
+    if (rand(s) < BUG_CHANCE) hit.push(i);
+  }
+  for (const i of hit) {
+    const c = s.plots[i].crop;
+    if (c && c.bugs === 0) {
+      c.bugs = 1;
+      ev.push({ type: 'bugs', x: i % s.W, y: Math.floor(i / s.W) });
+    }
+  }
 }
 
 /**

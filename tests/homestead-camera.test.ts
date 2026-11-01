@@ -112,4 +112,19 @@ describe('the phone camera keeps the farm in view', () => {
       }
     }
   });
+
+  // Round 5: with the farmer in the second field or at the well, the first field's left column was off screen and
+  // could not be tapped. Now the camera holds still on the west side as far as the well's front.
+  it('from the second field and the well, the middle of the first field’s left column is on screen, with room for a finger', () => {
+    for (const h of [838, 900]) {
+      for (const [fx, fy] of [[10.5, 6.5], [10.5, 8.5], [9.5, 7.5], [11.5, 3.5], [10.5, 2.5]]) {
+        const rig = framed(h, fx, fy);
+        // Its middle 12 px or more in from the edge: with half a tile (about 20 px) to its right, a finger has 32 px.
+        for (let y = 5; y < 9; y++) expect(rig.project(2.5, y + 0.5, 0)!.x, `field 1 at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(12);
+        // And the farmer stays on screen.
+        const f = rig.project(fx, fy, 0)!;
+        expect(f.x).toBeLessThan(W - 16);
+      }
+    }
+  });
 });

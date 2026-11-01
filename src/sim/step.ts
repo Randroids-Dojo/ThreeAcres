@@ -1,13 +1,13 @@
 // One tick of the farm. Applies the player's commands, moves the clock by the
 // current clock rule, runs people and crows, and returns what happened.
 
-import { canAfford, daySeconds, fieldRep, homestead, resolve } from './actions';
+import { canAfford, daySeconds, fieldRep, homestead, resolve, resolveBuild } from './actions';
 import { doTap, dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tapTool, TAP_QUEUE, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
-import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
+import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
-import { crowTarget, nightfall, turnsMinute } from './day';
-import { checkMilestones, closePairs, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
+import { crowTarget, landBugs, nightfall, turnsMinute } from './day';
+import { acceptRequest, checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, readRequests, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -77,8 +77,11 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
   // The first request comes as soon as the board brings requests in; the rest come with the mornings.
   if (homestead(s) && s.learn.includes('requests') && !s.requested && !s.orders.length) fillRequests(s);
-  // Seed sown for one of a pair takes it: the other goes at once, with a word.
-  if (homestead(s) && s.orders.length > 1) closePairs(s, ev);
+  // Sunup: at 13:00 bugs land again, as they do at dawn, so the afternoon has a look worth taking.
+  if (homestead(s) && s.rules.clock === 'day' && minutesBefore < MIDDAY_MINUTE && s.minute >= MIDDAY_MINUTE && s.midday !== s.day && s.learn.includes('pests') && s.rules.weather === 'wild') {
+    s.midday = s.day;
+    landBugs(s, ev);
+  }
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -185,6 +188,8 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       const t = (homestead(s) ? snapAim(f, useful, !!c.held) : null) ?? facingTile(f);
       if (!inMap(t.x, t.y)) return;
       const r = resolve(s, s.tool, t.x, t.y);
+      // Too tired, a held key says it once (the press), not again with every repeat.
+      if (r.verb && r.ok && c.held && canAfford(s, r.verb)) return;
       if (r.verb && r.ok) startAction(s, f, r, t.x, t.y, ev);
       // A held key walking past nothing to do says nothing; a press says why not.
       else if (r.reason && !c.held) ev.push({ type: 'deny', x: t.x, y: t.y, reason: r.reason });
@@ -305,6 +310,29 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
     case 'deliver':
       deliver(s, c.id, ev);
       break;
+    case 'accept':
+      if (homestead(s)) acceptRequest(s, c.id, ev);
+      break;
+    case 'readBoard':
+      if (homestead(s)) readRequests(s);
+      break;
+    case 'buildAt': {
+      // Sunup: one build on one plot, from the lesson's pointer once the player has said yes. The tool in hand stays
+      // in hand, so the taps after it do their own jobs (the fifth playtest's pointer took the Build tool, and five
+      // later taps built five scarecrows).
+      if (!awake || s.rules.control !== 'walk' || !homestead(s) || !inMap(c.x, c.y)) return;
+      const r = resolveBuild(s, c.kind, c.x, c.y);
+      if (!r.ok) {
+        if (r.reason) ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
+        return;
+      }
+      const tap = { x: c.x, y: c.y, tool: s.tool, build: c.kind };
+      const queue = (s.taps ??= []);
+      if (f.task || f.path.length || f.aim || queue.length) {
+        if (!queue.some((q) => q.x === tap.x && q.y === tap.y) && queue.length < TAP_QUEUE) queue.push(tap);
+      } else doTap(s, f, tap, ev);
+      break;
+    }
     case 'sell': {
       const v = sellCrop(s, c.crop, ev);
       if (v) ev.push({ type: 'coins', amount: v });
