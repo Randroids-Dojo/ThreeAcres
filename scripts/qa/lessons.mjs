@@ -39,6 +39,13 @@
 // board headlines each offer's gain over market with an Accept stamp, sowing
 // alone takes neither, a real tap on Accept takes one and lets the other go,
 // and the board's badge counts only new notes.
+// Round 6: after reading the board, a line says to plant for the request
+// (only crops sown for it count), pointing at bare soil; the View line waits
+// until the new field is hoed and stays up past 10 seconds; with every plot
+// sown, the scarecrow lesson's pointer finds a bug but carries no build, and a
+// real tap on the bugged crop picks the bugs off (it asked to build a
+// scarecrow); a plot cleared brings the line and its build there; the turn
+// line waits for bare soil and points at it.
 // node scripts/qa/lessons.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -265,6 +272,12 @@ s = await screen();
 check('after reading it, the line goes (and the reading counts)', s.line !== 'Read the board.' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:requests'))), s.line);
 // The deliver line waits until it matters: nothing the request wants is ripe yet.
 check('nothing it wants is ripe: no deliver line yet', !/crate|ships/i.test(s.line), s.line);
+// Round 6: a request counts only what is sown for it (the radishes already growing do not), so the next line says to
+// sow for it, with the pointer on bare soil.
+{
+  const sow = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const t = window.sunup.hud['pointAt']; const st = window.sunup.state; const i = t ? Math.floor(t.y) * st.W + Math.floor(t.x) : -1; return { line: document.querySelector('.hint.on')?.textContent ?? '', on: e.classList.contains('on'), bare: i >= 0 && !st.plots[i].crop && st.plots[i].tilled }; });
+  check('round 6: the next line says to plant for the request, and points at bare soil', /^Plant 3 radishes for the request\.$/.test(sow.line) && sow.on && sow.bare, JSON.stringify(sow));
+}
 // Ripen what the request wants (as the days would): now the line names it and points at a ripe one.
 const want = await p.evaluate(() => {
   const st = window.sunup.state;
@@ -274,7 +287,8 @@ const want = await p.evaluate(() => {
     const q = st.plots[i];
     if (st.parcelOf[i] !== 0 || q.crop) continue;
     q.tilled = true;
-    q.crop = { id: st.nextId++, kind: it.crop, age: 99, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+    // (Round 6: sown for the request, as only crops sown for it count.)
+    q.crop = { id: st.nextId++, kind: it.crop, age: 99, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day, for: st.orders[0].id };
     q.crop.age = { radish: 3 }[it.crop] ?? 3;
     spots.push({ x: i % st.W, y: Math.floor(i / st.W) });
   }
@@ -360,10 +374,18 @@ await send({ type: 'tool', tool: 'hands' });
 
 // 6c. Round 4, moved in round 5: close up, a phone sees about two fields, so a crow or bugs in the first field could
 // hide off screen. With the second field the View button arrives with its own line; a real tap on it shows the
-// whole farm.
+// whole farm. Round 6: the line came for 7 seconds while the tester was still hoeing, and went unseen. It waits until
+// the new field is hoed, and stays up long enough to read.
 await frames(20);
 s = await screen();
-check('with the second field, the View button arrives with its own line', s.view && s.line === 'Tap View to see the whole farm.', JSON.stringify(s));
+check('round 6: while the new field is still being hoed, no View line yet', !s.view && s.line !== 'Tap View to see the whole farm.', JSON.stringify(s));
+await p.evaluate(() => { const st = window.sunup.state; const pc = st.parcels[1]; for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) st.plots[y * st.W + x].tilled = true; });
+await frames(20);
+s = await screen();
+check('with the second field hoed, the View button arrives with its own line', s.view && s.line === 'Tap View to see the whole farm.', JSON.stringify(s));
+await p.waitForTimeout(10000);
+s = await screen();
+check('round 6: the View line is still up 10 seconds later (it went after 7)', s.line === 'Tap View to see the whole farm.', s.line);
 await tapEl('.topbtns .viewbtn');
 await p.waitForTimeout(1400);
 {
@@ -853,7 +875,7 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   // offer headlines its gain over market, then what it wants, sowing, and ripe and due with its days to spare.
   const readable = pair.n === 2 && pair.or === 'or' && pair.notes.every((n) => {
     const [gain, what, need, when] = n.lines.map((l) => l.text);
-    return /^\+[\d,]+ over market$/.test(gain) && /^\d+ [a-z]+ for /.test(what) && /^Sow \d+ (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Ripe in \d+ days, due (tomorrow|[A-Z][a-z]+ \d+), (no day|a day|\d days) to spare$/.test(when) && n.stamp === 'Accept' && !n.lines.some((l) => /Pays/.test(l.text));
+    return /^\+[\d,]+ over market$/.test(gain) && /^\d+ [a-z]+ for /.test(what) && /^Plant \d+ (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Ripe in \d+ days, due (tomorrow|[A-Z][a-z]+ \d+), (no day|a day|\d days) to spare$/.test(when) && n.stamp === 'Accept' && !n.lines.some((l) => /Pays/.test(l.text));
   });
   check('the board shows the pair at a glance: the gain over market first, what each wants, sow by, ripe and due with days to spare, an Accept stamp, "or" between them', readable, JSON.stringify(pair.notes.map((n) => [...n.lines.map((l) => l.text), n.stamp])));
   const onScreen = pair.notes.every((n) => n.box.l >= 0 && n.box.r <= pair.W && n.box.t >= 0 && n.box.b <= pair.H) && pair.notes.every((n) => n.lines.every((l) => l.size >= 12 && !l.cut));
@@ -919,6 +941,65 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
     const clauses = body.replace(/<[^>]+>/g, '').split(/[.,]\s*/).filter((x) => x.trim()).length;
     check('the morning card says three clauses at most', clauses <= 3, `${clauses}: ${body}`);
   }
+  await q.close();
+}
+// 13. Round 6, on a page of its own: the tester's farm, every plot sown, bugs on a carrot, and the scarecrow lesson due.
+// Its pointer fell back to the bug and still carried the build, so a real tap on the bugged crop asked "Build a
+// scarecrow?" and "Build for 40" built nothing. Then the turn line, which said to plant with its chevron on a bug.
+{
+  const q = await ctx.newPage();
+  q.on('pageerror', (e) => errs.push(e.message));
+  const qc = await ctx.newCDPSession(q);
+  const qtap = async (x, y, id = 21) => {
+    await qc.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id, radiusX: 8, radiusY: 8, force: 1 }] });
+    await q.waitForTimeout(50);
+    await qc.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await q.goto(`${base}/?game=homestead&fresh&touch`);
+  await q.waitForFunction(() => window.sunup && window.sunup.frames > 10, null, { timeout: 30000 });
+  await q.evaluate(() => {
+    const st = window.sunup.state;
+    st.learn = ['lesson:pull', 'can', 'lesson:water', 'sleep', 'lesson:sleep', 'coins', 'seeds', 'lesson:plant', 'lesson:well', 'board', 'requests', 'lesson:requests', 'lesson:sowfor', 'stamina', 'lesson:stamina', 'lesson:deliver', 'pests', 'lesson:bugs', 'lesson:choose', 'fields', 'hoe', 'lesson:field', 'lesson:hoe', 'wide', 'lesson:wide', 'seedtab', 'lesson:pests', 'lesson:turn', 'lesson:broke'];
+    Object.assign(st.learnCount, { 'done:pests': 8 });
+    Object.assign(st, { day: 9, held: false, coins: 180, weather: 'rain', orders: [], crows: [], crowPlan: [] });
+    let id = 90000;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) {
+      const pl = st.plots[y * st.W + x];
+      pl.tilled = true;
+      pl.wet = true;
+      pl.crop = { id: id++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: x === 3 && y === 6 ? 1 : 0, quality: 0, picks: 0, parched: false, planted: 7 };
+    }
+  });
+  await q.waitForTimeout(1500);
+  const before = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', target: window.sunup['lessonTarget'], on: document.querySelector('.tpoint').classList.contains('on') }));
+  check('round 6: every plot sown, no scarecrow line, and the pointer that finds the bugs carries no build', before.line !== 'Build a scarecrow on bare soil.' && !before.target.build && before.on && before.target.point?.x === 3.5 && before.target.point?.y === 6.5, JSON.stringify(before));
+  const bug = await q.evaluate(() => window.sunup.r3d.project(3.5, 6.5, 0));
+  await qtap(bug.x, bug.y);
+  await q.waitForTimeout(1800);
+  const after = await q.evaluate(() => { const st = window.sunup.state; return { dialog: window.sunup.dialogs.open, title: document.querySelector('.dialog h2')?.textContent ?? '', bugs: st.plots[6 * st.W + 3].crop?.bugs, coins: st.coins, builds: st.builds.length }; });
+  check('round 6: a real tap on the bugged crop picks the bugs off: no "Build a scarecrow?", nothing spent or built', !after.dialog && after.bugs === 0 && after.coins === 180 && after.builds === 0, JSON.stringify(after));
+  await q.evaluate(() => { const st = window.sunup.state; st.plots[7 * st.W + 4].crop = null; });
+  await q.waitForTimeout(900);
+  const bare = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', target: window.sunup['lessonTarget'] }));
+  check('round 6: a plot cleared, the scarecrow line comes, pointing at it, with its build', bare.line === 'Build a scarecrow on bare soil.' && bare.target.build === 'scarecrow' && bare.target.point?.x === 4.5 && bare.target.point?.y === 7.5, JSON.stringify(bare));
+  // The turn: three nights left in spring, every plot sown, a bug on a carrot. No line telling the farmer to plant;
+  // then a plot comes free and the line comes, its chevron on that plot.
+  await q.evaluate(() => {
+    const st = window.sunup.state;
+    for (const l of ['scarecrow', 'forecast', 'sprinkler']) st.learn.push(`lesson:${l}`);
+    st.learn = st.learn.filter((w) => w !== 'lesson:turn' && w !== 'seedtab');
+    st.day = 8;
+    st.plots[7 * st.W + 4].crop = { id: 95000, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: 7 };
+    st.plots[5 * st.W + 2].crop.bugs = 1;
+  });
+  await q.waitForTimeout(1200);
+  const full = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', seedtab: window.sunup.state.learn.includes('seedtab') }));
+  check('round 6: the turn line waits while every plot is sown (it said to plant with its chevron on a bug)', !/ends soon/.test(full.line) && !full.seedtab, JSON.stringify(full));
+  await q.evaluate(() => { const st = window.sunup.state; st.plots[8 * st.W + 5].crop = null; });
+  await q.waitForTimeout(900);
+  const turn = await q.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', target: window.sunup['lessonTarget'] }));
+  check('round 6: a plot comes free, and the turn line comes with its chevron on it', turn.line === 'Spring ends soon. Plant summer seeds.' && turn.target.point?.x === 5.5 && turn.target.point?.y === 8.5, JSON.stringify(turn));
+  await q.screenshot({ path: `${out}/14-turn-bare.png` });
   await q.close();
 }
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));

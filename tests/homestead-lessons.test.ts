@@ -19,6 +19,16 @@ describe('Sunup lesson lines', () => {
   it('use the words on the buttons', () => {
     for (const l of lines) expect(l, l).not.toMatch(/\b(sow|sown|till|tilled|pulls?|the hand)\b/i);
   });
+
+  it('the board and the morning card use the button words too (Plant, never sow)', async () => {
+    const fs = await import('node:fs');
+    for (const f of ['src/ui/dialogs.ts', 'src/ui/hud.ts', 'src/ui/describe.ts']) {
+      const text = fs.readFileSync(f, 'utf8');
+      // Only strings the player reads: quoted or template text, not code names like stillToSow.
+      const shown = [...text.matchAll(/(['`])((?:(?!\1)[^\n])*)\1/g)].map((m) => m[2]).filter((t) => /[a-z] [a-z]/i.test(t));
+      for (const t of shown) expect(t, `${f}: ${t}`).not.toMatch(/\b(sow|sown|sowing|till|tilled)\b/i);
+    }
+  });
 });
 
 describe('Sunup acting where it would do something', () => {

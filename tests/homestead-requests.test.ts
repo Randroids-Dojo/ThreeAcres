@@ -39,7 +39,8 @@ describe('a request keeps its crops', () => {
   it('a short order stays in the crate overnight instead of being sold', async () => {
     const { plant } = await import('../src/sim/world');
     const s = onDay3(5);
-    s.orders = [{ id: 1, who: 'Mabel', items: [{ crop: 'strawberry', n: 3 }], reward: 190, rep: 1, due: 9 }];
+    // (Round 6: only crops sown for it count; two were, and were picked.)
+    s.orders = [{ id: 1, who: 'Mabel', items: [{ crop: 'strawberry', n: 3 }], reward: 190, rep: 1, due: 9, got: 2 }];
     s.stock.strawberry[0] = 2;
     // The third is growing and will be ripe in time.
     plant(s, 2, 7, 'strawberry', 4);
@@ -52,6 +53,7 @@ describe('a request keeps its crops', () => {
     expect(s.report!.kept).toEqual([{ crop: 'strawberry', n: 2 }]);
     // The third arrives: the request is filled from the crate that night.
     s.stock.strawberry[0] = 3;
+    s.orders[0].got = 3;
     nightfall(s, []);
     expect(s.orders.some((o) => o.id === 1)).toBe(false);
     expect(s.report!.filled).toEqual([{ who: 'Mabel', reward: 190 }]);

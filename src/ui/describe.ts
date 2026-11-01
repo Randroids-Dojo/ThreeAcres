@@ -130,7 +130,8 @@ export function brief(s: WorldState, x: number, y: number): string {
   else {
     // Sunup's soil holds a full watering for two days: say when it is wet for tomorrow too.
     const left = Math.max(1, Math.ceil(d.days - c.age));
-    state = `${left} day${left === 1 ? '' : 's'} to go${plot.moisture >= 3 && s.weather !== 'heat' ? ', wet till tomorrow' : ''}`;
+    // Phrases kept whole: a narrow caption breaks between them ("4 days to / go" broke inside one).
+    state = `<span class="nw">${left} day${left === 1 ? '' : 's'} to go</span>${plot.moisture >= 3 && s.weather !== 'heat' ? ', <span class="nw">wet until tomorrow</span>' : ''}`;
   }
   return `<b>${d.name}</b> <span class="why">${state}</span>`;
 }

@@ -91,7 +91,7 @@ export function requestSlots(rep: number): number {
  * has no day to spare lost, `REQUEST_RISK`). Which is better then turns on
  * the farm: its free soil, coins, stamina and the forecast.
  */
-export const REQUEST_RATE = 6;
+export const REQUEST_RATE = 5;
 /**
  * What a plot-day of soil is worth to a typical farm, by the sort of pair: a plot held days longer (long against
  * quick) ties up coins and soil that would have been sown again, so it is worth more than one more plot held for the

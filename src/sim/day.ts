@@ -5,7 +5,7 @@
 import { choreNow, hands } from './actors';
 import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, FLOCK_CHANCE, FLOCK_HOURS, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
 import { CROP_IDS, stageOf } from './crops';
-import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
+import { claimCrops, endRound, fillOrders, fillRequests, lostFor, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
 import { homestead, sowing } from './actions';
 import { CROPS, inSeason } from './crops';
 import { HOME } from './map';
@@ -28,7 +28,9 @@ export function turnsMinute(s: WorldState): number {
 }
 
 export function nightfall(s: WorldState, ev: SimEvent[]): void {
-  const report: DayReport = { day: s.day, sold: [], wages: 0, grew: 0, withered: 0, eaten: 0, crewWork: 0, income: 0 };
+  // Crops crows took by day count with the night's (round 6: the card said nothing of them).
+  const report: DayReport = { day: s.day, sold: [], wages: 0, grew: 0, withered: 0, eaten: s.eatenToday ?? 0, crewWork: 0, income: 0 };
+  s.eatenToday = 0;
   const coinsBefore = s.coins;
 
   // Under turns the hands do their day's work now.
@@ -51,6 +53,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
     for (const _m of s.crowPlan) {
       const t = crowTarget(s);
       if (!t) break;
+      lostFor(s, s.plots[idx(t.x, t.y)].crop!, 'crows');
       s.plots[idx(t.x, t.y)].crop = null;
       ev.push({ type: 'crowEat', id: s.nextId++, x: t.x, y: t.y });
       report.eaten++;
@@ -64,6 +67,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
     const p = s.plots[idx(c.x, c.y)];
     if (p.crop && c.phase === 'peck' && crowsEat) {
       ev.push({ type: 'crowEat', id: c.id, x: c.x, y: c.y });
+      lostFor(s, p.crop, 'crows');
       p.crop = null;
       report.eaten++;
       s.almanac.withered++;
@@ -88,6 +92,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
           c.bugs++;
           if (c.bugs >= 4) {
             c.dead = true;
+            lostFor(s, c, 'bugs');
             report.withered++;
             s.almanac.withered++;
             ev.push({ type: 'wither', x, y, crop: c.kind });
@@ -107,6 +112,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
           if (s.rules.growth === 'synergy') c.parched = true;
           if (c.dry >= 3) {
             c.dead = true;
+            lostFor(s, c, heat ? 'heat' : 'dry');
             report.withered++;
             s.almanac.withered++;
             ev.push({ type: 'wither', x, y, crop: c.kind });
@@ -124,6 +130,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
   // an open request still needs stays in the crate for it.
   const hold: Partial<Record<string, number>> = {};
   if (sunup) {
+    claimCrops(s);
     settleRequests(s, ev, report);
     const want = wanted(s);
     for (const crop of CROP_IDS) {
@@ -165,12 +172,13 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
         if (!c) continue;
         // A crop that withered tonight stays a day, like any other, and clears for free.
         if (c.dead || inSeason(c.kind, now) || c.stage === 4) continue;
+        lostFor(s, c, 'turn');
         p.crop = null;
         turned++;
       }
       if (turned) report.turned = turned;
       // A request for a crop out of season now goes quietly (only older saves can have one).
-      s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || stockCount(s, it.crop) >= it.n));
+      s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || Math.min(o.got ?? 0, stockCount(s, it.crop)) >= it.n));
     }
   }
   s.report = report;
@@ -248,6 +256,8 @@ function morning(s: WorldState, ev: SimEvent[]): void {
         } else if (!sunup && c.stage >= 1 && c.stage < 4 && rand(s) < 0.03) spread.push(idx(x, y));
       }
     }
+    // Sunup's morning card says how far bugs left overnight spread (round 6: two to eight more, unexplained).
+    if (sunup && s.report) s.report.spread = new Set(spread).size;
     if (sunup) landBugs(s, ev, spread);
     for (const i of spread) {
       const c = s.plots[i].crop!;
@@ -293,6 +303,7 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   if (homestead(s) && s.learn.includes('requests')) {
     withdrawRequests(s, ev, s.report);
     fillRequests(s, true);
+    claimCrops(s);
   }
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);

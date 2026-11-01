@@ -233,7 +233,7 @@ describe('P1: the board headlines the gain over market', () => {
       for (const o of s.orders) {
         const t = noteText(s, o);
         expect(t.head).toBe(`+${gain(o).toLocaleString('en-US')} over market`);
-        expect(t.lines.join(' | ')).toMatch(/^\d+ [a-z]+ for .+ \| Sow \d+ (today|by [A-Za-z]+( \d+)?), seed [\d,]+ \| Ripe in \d+ days, due [A-Za-z]+ \d+, (no day|a day|\d days) to spare$/);
+        expect(t.lines.join(' | ')).toMatch(/^\d+ [a-z]+ for .+ \| Plant \d+ (today|by [A-Za-z]+( \d+)?), seed [\d,]+ \| Ripe in \d+ days, due [A-Za-z]+ \d+, (no day|a day|\d days) to spare$/);
         expect(t.lines.join(' ')).not.toMatch(/Pays/);
       }
     }

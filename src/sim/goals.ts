@@ -6,7 +6,7 @@ import { CROP_IDS, CROPS, count, inSeason } from './crops';
 import { season } from './world';
 import { nightsToTurn, priceOf, sowing } from './actions';
 import { pick, rand, randInt, shuffle } from './rng';
-import type { CropId, DayReport, Goal, GoalKind, Order, RequestKind, SimEvent, WorldState } from './types';
+import type { Crop, CropId, DayReport, Goal, GoalKind, LossCause, Order, RequestFail, RequestKind, SimEvent, WorldState } from './types';
 
 // ---------------------------------------------------------------- selling
 
@@ -71,7 +71,8 @@ export function fillOrders(s: WorldState): void {
 export function canDeliver(s: WorldState, o: Order): boolean {
   // Sunup: a request for a crop another request will be filled from first leaves that one its share.
   // Sunup: only a request the player took is handed over (an offer is never filled by accident).
-  if (s.rules.goal === 'market' && s.rules.tools === 'kit') return isTaken(o) && o.items.every((it) => stockCount(s, it.crop) - claimedAhead(s, it.crop, o.due, o.id) >= it.n);
+  // Round 6: only what was sown for it and harvested counts (crops already growing, or in the crate, never do).
+  if (s.rules.goal === 'market' && s.rules.tools === 'kit') return isTaken(o) && Math.min(o.got ?? 0, stockCount(s, o.items[0].crop)) >= o.items[0].n;
   return o.items.every((it) => stockCount(s, it.crop) >= it.n);
 }
 
@@ -186,52 +187,110 @@ function byDue(a: Order, b: Order): number {
   return a.due - b.due || a.id - b.id;
 }
 
-/**
- * How many of a crop the taken requests for it that come first (due sooner,
- * or pinned first) want: the crate fills those before this one. Two requests
- * for one crop can be open at once once the first is fully sown. Offers
- * claim nothing.
- */
-function claimedAhead(s: WorldState, crop: CropId, due: number, id: number): number {
-  let n = 0;
-  for (const q of s.orders) if (q.id !== id && isTaken(q) && q.items[0].crop === crop && byDue(q, { due, id } as Order) < 0) n += q.items[0].n;
-  return n;
+/** Is a crop sown for a request still on the board (a crop sown for one that has gone is free again)? */
+function sownForOpen(s: WorldState, c: Crop): boolean {
+  return c.for !== undefined && s.orders.some((q) => q.id === c.for);
+}
+
+/** Will a crop be ripe by a request's due day, watered every night? */
+function ripeBy(s: WorldState, c: Crop, due: number): boolean {
+  return CROPS[c.kind].days - c.age <= due - s.day;
 }
 
 /**
- * What a request has already: its crop in the crate, and growing on the farm
- * that will be ripe and picked by its day, less what requests for the same
- * crop that come first will take.
+ * Does a crop count for a request? Round 6: only crops sown for it. A taken
+ * request counts the crops sown for it (`claimCrops` marks them); an offer
+ * counts crops of its kind sown since it was pinned and not for another
+ * request (a crop's id is larger than the request's: both come from one
+ * counter), which accepting it would take up. Nothing already growing when it
+ * was pinned counts, nor anything in the crate it did not grow.
+ */
+function countsFor(s: WorldState, o: Order, c: Crop): boolean {
+  if (c.dead || c.kind !== o.items[0].crop) return false;
+  return isTaken(o) ? c.for === o.id : c.id > o.id && !sownForOpen(s, c);
+}
+
+/**
+ * What a request has already: the crops sown for it and harvested, in the
+ * crate, and those growing for it that will be ripe and picked by its day.
+ * (Round 5 counted every crop of its kind on the farm and in the crate: the
+ * sixth playtest was paid 240 over market for ten lettuces already growing,
+ * and 380 for corn sitting in the crate.)
  */
 export function requestHave(s: WorldState, o: Order): number {
   const it = o.items[0];
-  let have = stockCount(s, it.crop);
+  let have = isTaken(o) ? Math.min(o.got ?? 0, stockCount(s, it.crop)) : 0;
   for (let i = 0; i < s.plots.length; i++) {
     const c = s.plots[i].crop;
-    if (!c || c.dead || c.kind !== it.crop || !ownedPlot(s, i)) continue;
+    if (!c || !ownedPlot(s, i) || !countsFor(s, o, c)) continue;
     // Ripe on the morning `days - age` days from now, if it is watered every night.
-    if (CROPS[c.kind].days - c.age <= o.due - s.day) have++;
+    if (ripeBy(s, c, o.due)) have++;
   }
-  return Math.max(0, have - claimedAhead(s, it.crop, o.due, o.id));
+  return have;
 }
 
-/** Crops of a request's kind on the farm, living and sown since it was pinned. */
+/** Crops sown for a request and still living (ripe in time or not). */
 export function plantedFor(s: WorldState, o: Order): number {
-  const it = o.items[0];
-  const since = o.made ?? Infinity;
   let n = 0;
   for (let i = 0; i < s.plots.length; i++) {
     const c = s.plots[i].crop;
-    if (c && !c.dead && c.kind === it.crop && c.planted >= since && ownedPlot(s, i)) n++;
+    if (c && ownedPlot(s, i) && countsFor(s, o, c)) n++;
   }
   return n;
 }
 
-/** What a taken request has growing for it now (its crop on the farm, ripe by its day) and in the crate, for the board. */
+/** What a taken request has growing for it now (sown for it, ripe by its day) and in the crate, for the board. */
 export function requestProgress(s: WorldState, o: Order): { growing: number; crate: number } {
   const it = o.items[0];
-  const crate = Math.min(it.n, Math.max(0, stockCount(s, it.crop) - claimedAhead(s, it.crop, o.due, o.id)));
+  const crate = Math.min(it.n, o.got ?? 0, stockCount(s, it.crop));
   return { growing: Math.max(0, Math.min(it.n, requestHave(s, o)) - crate), crate };
+}
+
+/** The nearest ripe crop sown for a taken request (for the lesson's pointer), as a plot index, or -1. */
+export function ripeFor(s: WorldState, o: Order): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (c && c.stage === 4 && ownedPlot(s, i) && countsFor(s, o, c)) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * Take up crops for the requests the player took: crops of a request's kind
+ * sown since it was pinned, not sown for another request still open, and
+ * ripe in time, until it has what it asks; the request due first chooses
+ * first. Run whenever seed goes in, a request is accepted, and each night.
+ */
+export function claimCrops(s: WorldState): void {
+  const taken = s.orders.filter(isTaken).sort(byDue);
+  for (const o of taken) {
+    const it = o.items[0];
+    let have = requestHave(s, o);
+    if (have >= it.n) continue;
+    for (let i = 0; i < s.plots.length && have < it.n; i++) {
+      const c = s.plots[i].crop;
+      if (!c || c.dead || c.kind !== it.crop || c.id <= o.id || !ownedPlot(s, i) || sownForOpen(s, c) || !ripeBy(s, c, o.due)) continue;
+      c.for = o.id;
+      have++;
+    }
+  }
+}
+
+/** A crop sown for a request was lost: the request keeps the cause, so if it fails it can say why. */
+export function lostFor(s: WorldState, c: Crop, cause: LossCause): void {
+  if (c.for === undefined) return;
+  const o = s.orders.find((q) => q.id === c.for);
+  if (!o) return;
+  (o.lost ??= {})[cause] = (o.lost[cause] ?? 0) + 1;
+}
+
+/** Why a request the player took failed: what took most of the crops sown for it, else why it could not be met. */
+export function failOf(o: Order, fallback: RequestFail): { why: RequestFail; lost: number } {
+  const lost = Object.entries(o.lost ?? {}) as [LossCause, number][];
+  const total = lost.reduce((a, [, n]) => a + n, 0);
+  if (total > 0) return { why: lost.sort((a, b) => b[1] - a[1])[0][0], lost: total };
+  return { why: fallback, lost: 0 };
 }
 
 /** Does a request still want seed sown for it (on offer, or taken and short of what it needs before its sow-by day)? */
@@ -289,7 +348,7 @@ export function whyNot(s: WorldState, o: Order): '' | 'late' | 'soil' | 'coins' 
   return '';
 }
 
-/** How many of a request are to be sown fresh; the rest are crops already growing (older saves: all of it). */
+/** How many of a request are to be sown fresh: all of it (round 6; older saves counted some already growing). */
 export function freshOf(o: Order): number {
   return Math.max(1, Math.min(o.items[0].n, o.fresh ?? o.items[0].n));
 }
@@ -348,8 +407,7 @@ interface Offer {
   crop: CropId;
   sowBy: number;
   due: number;
-  /** Already in the crate or growing in time (only for a crop the farm grows already). */
-  base: number;
+  /** Plots free to sow it by its sow-by day, and coins for its seed by then (what the taken requests still need taken out). */
   room: number;
   coins: number;
   /** The most of it that could be sown for this request alone. */
@@ -376,7 +434,7 @@ function offer(s: WorldState, crop: CropId, days: number, held: { plots: number;
         const room = roomBy(s, sowBy) - held.plots;
         const coins = sowBudget(s, sowBy) - held.coins;
         const cap = Math.min(room, Math.floor(coins / d.seed), d.price > 150 ? REQUEST_MAX_BIG : REQUEST_MAX);
-        if (cap >= REQUEST_MIN) return { crop, sowBy, due: Math.min(sowBy + d.days + grace, lastDayFor(s, crop)), base: 0, room, coins, cap };
+        if (cap >= REQUEST_MIN) return { crop, sowBy, due: Math.min(sowBy + d.days + grace, lastDayFor(s, crop)), room, coins, cap };
       }
       if (sowBy >= last) break;
     }
@@ -384,14 +442,33 @@ function offer(s: WorldState, crop: CropId, days: number, held: { plots: number;
   return null;
 }
 
+/**
+ * Do the two of a pair compete: could the farm not sow both, for want of free
+ * soil or coins by their sow-by days (each counted at the larger of the two)?
+ */
+export function competes(a: { crop: CropId; room: number; coins: number }, na: number, b: { crop: CropId; room: number; coins: number }, nb: number): boolean {
+  return na + nb > Math.max(a.room, b.room) || na * CROPS[a.crop].seed + nb * CROPS[b.crop].seed > Math.max(a.coins, b.coins);
+}
+
+/** Pin a pair: the two share a pair id, in a random order on the board. */
+function pinPair(s: WorldState, two: Order[], kind: string): Order[] {
+  const pair = Math.min(two[0].id, two[1].id);
+  for (const o of two) o.pair = pair;
+  s.requested = (s.requested ?? 0) + 2;
+  s.pairKind = kind;
+  return rand(s) < 0.5 ? two : [two[1], two[0]];
+}
+
 /** Fives, as coins are counted on the board. */
 function fives(n: number): number {
   return Math.round(n / 5) * 5;
 }
 
-function order(s: WorldState, o: Offer, fresh: number, gain: number, kind: RequestKind, who: string, pair?: number): Order {
-  const n = o.base + fresh;
-  return { id: s.nextId++, who, items: [{ crop: o.crop, n }], reward: n * CROPS[o.crop].price + gain, rep: 1, due: o.due, sowBy: o.sowBy, made: s.day, pair, fresh, kind, taken: false, seen: false };
+/** A request on offer. `id` 0 is a draft, not pinned yet (it takes its id when it is). */
+function order(s: WorldState, o: Offer, fresh: number, gain: number, kind: RequestKind, who: string, pair?: number, id = s.nextId++): Order {
+  // Round 6: all of it sown fresh, for it.
+  const n = fresh;
+  return { id, who, items: [{ crop: o.crop, n }], reward: n * CROPS[o.crop].price + gain, rep: 1, due: o.due, sowBy: o.sowBy, made: s.day, pair, fresh, kind, taken: false, seen: false };
 }
 
 /** The sorts of pair a morning can offer: a bold request (more gain, more at stake) against a safe one. */
@@ -473,7 +550,7 @@ export function offerRequests(s: WorldState): Order[] {
     const sowBy = Math.min(s.day + 2, lastDayFor(s, 'radish') - d.days);
     if (!o && (sowBy < s.day || !sowing(s.day, 'radish').ok)) return [];
     s.requested = (s.requested ?? 0) + 1;
-    const r = order(s, o ?? { crop: 'radish', sowBy, due: Math.min(sowBy + d.days + 1, lastDayFor(s, 'radish')), base: 0, room: 3, coins: 30, cap: 3 }, 3, fives(REQUEST_RATE * 3 * d.days), 'first', pick(s, TOWN));
+    const r = order(s, o ?? { crop: 'radish', sowBy, due: Math.min(sowBy + d.days + 1, lastDayFor(s, 'radish')), room: 3, coins: 30, cap: 3 }, 3, fives(REQUEST_RATE * 3 * d.days), 'first', pick(s, TOWN));
     // The lesson's own request: taken at once.
     delete r.taken;
     return [r];
@@ -494,24 +571,27 @@ export function offerRequests(s: WorldState): Order[] {
   // two crops a request can ask for, and both are often under way).
   const asked = new Set(s.orders.filter((o) => stillSowing(s, o)).map((o) => o.items[0].crop));
   const crops = shuffle(s, known.slice()).filter((c) => !asked.has(c) && sowing(s.day, c).ok);
-  // Fresh crops (not growing, not in the crate) first; one the farm grows only when fewer than two fresh ones can go in.
+  // Crops the farm is not growing (nor has in the crate) first, for variety; one it grows only when fewer than two such
+  // can go in. Either way the request is all fresh sowing: what grows already, or is in the crate, never counts.
   const isFresh = (c: CropId) => !growing(s, c).n && !stockCount(s, c);
   const fresh = crops.filter((c) => isFresh(c) && offer(s, c, days, held, REQUEST_GRACE.other));
   const pool = fresh.length >= 2 ? fresh : [...fresh, ...crops.filter((c) => !isFresh(c))];
   if (!pool.length) return [];
   const plots = farmPlots(s).all;
   const names = shuffle(s, TOWN.slice());
-  /** An offer of one crop for one sort of request, with what the crate and the ground already hold counted in. */
+  /** An offer of one crop for one sort of request: all of it to be sown fresh (nothing growing or in the crate counts). */
   const make = (crop: CropId, kind: RequestKind): Offer | null => {
     const t = timing(kind, days);
-    const o = offer(s, crop, t.days, held, t.grace, t.look);
-    if (!o) return null;
-    if (!isFresh(crop)) o.base = requestHave(s, { id: Number.MAX_SAFE_INTEGER, who: '', items: [{ crop, n: 0 }], reward: 0, rep: 0, due: o.due });
-    return o;
+    return offer(s, crop, t.days, held, t.grace, t.look);
   };
   const size = (o: Offer, n: number) => Math.max(REQUEST_MIN, Math.min(o.cap, Math.ceil(plots * REQUEST_MOST), Math.round(n)));
-  // Each morning tries the sorts of pair in a fresh order, the one offered last time last.
-  const order3 = shuffle(s, CONTRASTS.slice()).sort((a, b) => Number(a.id === s.pairKind) - Number(b.id === s.pairKind));
+  // Each morning tries the sorts of pair in a fresh order, the one offered last time last. A wet morning tries the rush
+  // first (sow today): rain waters what goes in today, so the day has a sowing to plan.
+  const wet = s.weather === 'rain' || s.weather === 'storm';
+  const order3 = shuffle(s, CONTRASTS.slice()).sort((a, b) => Number(a.id === s.pairKind) - Number(b.id === s.pairKind) || (wet ? Number(b.id === 'risk') - Number(a.id === 'risk') : 0));
+  // A pair that does not compete for today's soil or coins is kept only in case no pair does.
+  let loose: Order[] | null = null;
+  let looseKind = '';
   for (const c of order3) {
     // The crops each sort wants: any two for risk; the fastest against a slower one for time; the cheapest seed
     // against a dearer one for size.
@@ -540,15 +620,36 @@ export function offerRequests(s: WorldState): Order[] {
       const pdS = ns * CROPS[safeCrop].days;
       const span = c.bold === 'long' ? REQUEST_SPAN.long : c.bold === 'big' ? REQUEST_SPAN.big : 1;
       const nb = size(bo, (span * pdS) / CROPS[boldCrop].days);
-      const priced = pricePair(s, { o: so, n: ns }, { o: bo, n: nb }, soilValue(c.safe));
+      // Round 6: the two compete for the same free soil or the same coins, so taking one really costs the other (the
+      // sixth playtest found one pair in seven a real choice). Both grow together until they cannot both be sown.
+      let priced: ReturnType<typeof pricePair> = null;
+      let fits = false;
+      for (const k of [1, 1.25, 1.5, 2, 2.5, 3]) {
+        const p = pricePair(s, { o: so, n: size(so, ns * k) }, { o: bo, n: size(bo, nb * k) }, soilValue(c.safe));
+        if (!p) {
+          if (k === 1) break;
+          continue;
+        }
+        priced ??= p;
+        if (competes(so, p.ns, bo, p.nb)) {
+          priced = p;
+          fits = true;
+          break;
+        }
+      }
       if (!priced) continue;
-      const pair = s.nextId;
-      const out = [order(s, so, priced.ns, priced.safe, c.safe, names[0], pair), order(s, bo, priced.nb, priced.bold, c.bold, names[1], pair)];
-      s.requested = (s.requested ?? 0) + 2;
-      s.pairKind = c.id;
-      return rand(s) < 0.5 ? out : [out[1], out[0]];
+      if (!fits) {
+        if (!loose) {
+          // Kept aside without spending ids: pinned below only if nothing better comes.
+          loose = [order(s, so, priced.ns, priced.safe, c.safe, names[0], undefined, 0), order(s, bo, priced.nb, priced.bold, c.bold, names[1], undefined, 0)];
+          looseKind = c.id;
+        }
+        continue;
+      }
+      return pinPair(s, [order(s, so, priced.ns, priced.safe, c.safe, names[0]), order(s, bo, priced.nb, priced.bold, c.bold, names[1])], c.id);
     }
   }
+  if (loose) return pinPair(s, loose.map((o) => ({ ...o, id: s.nextId++ })), looseKind);
   // No pair fits (one crop can go in, say): one request, a share of the farm, at the safe rate.
   for (const crop of pool) {
     const o = make(crop, 'single');
@@ -574,11 +675,14 @@ export function acceptRequest(s: WorldState, id: number, ev: SimEvent[]): boolea
   if (!o || !offered(o) || !canMeet(s, o)) return false;
   o.taken = true;
   o.seen = true;
+  o.got ??= 0;
   for (const q of s.orders.slice()) {
     if (q === o || q.pair === undefined || q.pair !== o.pair || !offered(q)) continue;
     s.orders = s.orders.filter((x) => x !== q);
     ev.push({ type: 'request', id: q.id, who: q.who, done: false, reward: 0, crop: q.items[0].crop });
   }
+  // Seed sown for it since it was pinned (before Accept) counts for it now.
+  claimCrops(s);
   return true;
 }
 
@@ -602,6 +706,17 @@ export function adoptRequests(s: WorldState): void {
     const it = o.items[0];
     if (plantedFor(s, o) === 0 && stockCount(s, it.crop) < it.n) o.taken = false;
   }
+  // Round 6: a request counts only crops sown for it. A taken request from an older save keeps what its crate holds of
+  // its crop (shared out, due first first) and takes up crops sown since it was pinned.
+  const pool: Partial<Record<CropId, number>> = {};
+  for (const o of [...s.orders].sort(byDue)) {
+    if (!isTaken(o) || o.got !== undefined) continue;
+    const it = o.items[0];
+    const left = pool[it.crop] ?? stockCount(s, it.crop);
+    o.got = Math.min(it.n, left);
+    pool[it.crop] = left - o.got;
+  }
+  claimCrops(s);
 }
 
 /**
@@ -631,33 +746,28 @@ export function withdrawRequests(s: WorldState, ev: SimEvent[], report?: DayRepo
   // An offer whose partner was taken (only older saves can have one) goes.
   for (const o of s.orders.slice()) if (offered(o) && o.pair !== undefined && s.orders.some((q) => q !== o && q.pair === o.pair && isTaken(q))) s.orders = s.orders.filter((x) => x !== o);
   for (const o of s.orders.slice()) {
-    if (canMeet(s, o)) continue;
+    const why = whyNot(s, o);
+    if (!why) continue;
     s.orders = s.orders.filter((x) => x !== o);
-    if (report && isTaken(o)) (report.withdrawn ??= []).push({ who: o.who, crop: o.items[0].crop, n: o.items[0].n });
+    // Each says why: what took the crops sown for it (crows, bugs, a dry night), or why it could not be met.
+    if (report && isTaken(o)) (report.withdrawn ??= []).push({ who: o.who, crop: o.items[0].crop, n: o.items[0].n, ...failOf(o, why) });
     ev.push({ type: 'request', id: o.id, who: o.who, done: false, reward: 0, crop: o.items[0].crop });
   }
 }
 
 /**
- * How many of each crop the taken requests still want from the crate: the
- * crate keeps them overnight instead of selling them. Only for a request that
- * can still be met (the crate and what will be ripe by its day make enough);
- * crops held for one that cannot would only miss a night's sale.
+ * How many of each crop the taken requests keep in the crate overnight
+ * instead of selling: what was sown for each and harvested (round 6: only
+ * that; other crops of the kind sell at market). A request that fails lets
+ * its crops go to market the night after.
  */
 export function wanted(s: WorldState): Partial<Record<CropId, number>> {
   const out: Partial<Record<CropId, number>> = {};
-  for (const o of [...s.orders].sort(byDue)) {
+  for (const o of s.orders) {
     if (!isTaken(o)) continue;
-    for (const it of o.items) {
-      let soon = stockCount(s, it.crop) - claimedAhead(s, it.crop, o.due, o.id);
-      for (let i = 0; i < s.plots.length && soon < it.n; i++) {
-        const c = s.plots[i].crop;
-        if (!c || c.dead || c.kind !== it.crop || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
-        // Ripe tomorrow when grown tonight; else it needs a night for each day of growth left.
-        if (CROPS[c.kind].days - c.age <= o.due - s.day - 1) soon++;
-      }
-      if (soon >= it.n) out[it.crop] = (out[it.crop] ?? 0) + it.n;
-    }
+    const it = o.items[0];
+    const keep = Math.min(it.n, o.got ?? 0);
+    if (keep > 0) out[it.crop] = (out[it.crop] ?? 0) + keep;
   }
   return out;
 }
@@ -682,7 +792,7 @@ export function settleRequests(s: WorldState, ev: SimEvent[], report?: DayReport
       ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: o.reward });
     } else if (o.due <= s.day) {
       s.orders = s.orders.filter((x) => x !== o);
-      if (report) (report.lapsed ??= []).push({ who: o.who, crop: o.items[0].crop, n: o.items[0].n });
+      if (report) (report.lapsed ??= []).push({ who: o.who, crop: o.items[0].crop, n: o.items[0].n, ...failOf(o, 'due') });
       ev.push({ type: 'request', id: o.id, who: o.who, done: false, reward: 0, crop: o.items[0].crop });
     }
   }

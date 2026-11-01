@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { tapTool } from '../src/sim/actors';
 import { CROPS } from '../src/sim/crops';
 import { crowTarget, nightfall } from '../src/sim/day';
-import { fillRequests, offerRequests } from '../src/sim/goals';
+import { fillRequests, offerRequests, requestHave } from '../src/sim/goals';
 import { step } from '../src/sim/step';
 import { plant, plots, season } from '../src/sim/world';
 import type { CropId, Order, WorldState } from '../src/sim/types';
@@ -83,7 +83,9 @@ function* farms(): Generator<WorldState> {
 }
 
 describe('a request pays its premium only on what it has you sow', () => {
-  it('crops already growing that it counts are paid at market (31 corn, 28 growing, paid 5,230)', () => {
+  // Round 6: crops already growing never count at all (the sixth playtest was paid 240 over market for ten lettuces
+  // already growing): every request is all fresh sowing, and its gain is what that sowing earns.
+  it('crops already growing never count: all of it is sown fresh, and the gain is for that sowing (31 corn, 28 growing, paid 5,230)', () => {
     let n = 0;
     for (let seed = 1; seed <= 25; seed++) {
       // Summer: the only crops a request can ask for are sunflowers and corn, and both are growing for market.
@@ -94,14 +96,11 @@ describe('a request pays its premium only on what it has you sow', () => {
       for (const o of offerRequests(s)) {
         const it = o.items[0];
         const d = CROPS[it.crop];
-        const base = baseOf(s, o);
-        if (!base) continue;
         n++;
-        const fresh = it.n - base;
-        expect(fresh, `${it.n} ${it.crop}`).toBeGreaterThanOrEqual(3);
-        // What it pays over the market value of the crops already growing is no more than the most a request pays
-        // for its own sowing (1.8 times market), whatever their number.
-        expect(o.reward - base * d.price, `${it.n} ${it.crop}, ${base} growing, pays ${o.reward}`).toBeLessThanOrEqual(fresh * d.price * 1.8 + 5);
+        expect(requestHave(s, { ...o, taken: true }), `${it.n} ${it.crop}`).toBe(0);
+        expect(it.n).toBeGreaterThanOrEqual(3);
+        // What it pays over market is no more than the most a request pays for its own sowing (1.8 times market).
+        expect(o.reward, `${it.n} ${it.crop}, pays ${o.reward}`).toBeLessThanOrEqual(it.n * d.price * 1.8 + 5);
       }
     }
     expect(n).toBeGreaterThan(15);
@@ -178,7 +177,9 @@ describe('requests keep coming', () => {
       ];
       for (let k = 0; k < 6; k++) plant(s, tiles[k].x, tiles[k].y, 'corn', 1);
       for (let k = 6; k < 12; k++) plant(s, tiles[k].x, tiles[k].y, 'sunflower', 1);
+      // (Round 6: sown for them.)
       for (const c of s.plots) if (c.crop) c.crop.planted = 11;
+      for (const c of s.plots) if (c.crop) c.crop.for = c.crop.kind === 'corn' ? 900 : 901;
       fillRequests(s, true);
       if (s.orders.length > 2) offered++;
     }

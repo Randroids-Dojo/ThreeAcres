@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 import { CROP_IDS, CROPS, inSeason } from '../src/sim/crops';
 import { nightfall } from '../src/sim/day';
 import { sowing } from '../src/sim/actions';
-import { fillRequests } from '../src/sim/goals';
+import { fillRequests, requestHave } from '../src/sim/goals';
 import { step } from '../src/sim/step';
 import { plant, plots, season } from '../src/sim/world';
 import type { CropId, Order, WorldState } from '../src/sim/types';
@@ -75,8 +75,13 @@ function bareTiles(s: WorldState): { x: number; y: number }[] {
 
 const growingOf = (s: WorldState, crop: CropId) => s.plots.filter((p, i) => p.crop && !p.crop.dead && p.crop.kind === crop && s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned).length;
 const stockOf = (s: WorldState, crop: CropId) => s.stock[crop].reduce((a, b) => a + b, 0);
-/** What a request still needs sown: its count less what the crate and the ground already hold. */
-const fresh = (s: WorldState, o: Order) => o.items[0].n - stockOf(s, o.items[0].crop) - growingOf(s, o.items[0].crop);
+/**
+ * What a request still needs sown: its count less what the rules count for it. (Round 6: only crops sown for it, so
+ * crops already growing or in the crate never do; it was its count less the crate and the ground.)
+ */
+const fresh = (s: WorldState, o: Order) => o.items[0].n - requestHave(s, o);
+void stockOf;
+void growingOf;
 const seedOf = (o: Order) => CROPS[o.items[0].crop].seed;
 const sowByOf = (o: Order) => (o as Order & { sowBy?: number }).sowBy;
 

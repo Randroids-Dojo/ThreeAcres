@@ -10,7 +10,7 @@ import { actWord } from '../src/ui/touch';
 import { EARLY, EARLY_FEATURES, stand, teach, world } from './helpers';
 
 function farm() {
-  const s = teach(world('sunup'), [...EARLY, 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'scarecrow', 'forecast', 'wide', 'choose'], [...EARLY_FEATURES, 'board', 'requests', 'pests']);
+  const s = teach(world('sunup'), [...EARLY, 'requests', 'sowfor', 'deliver', 'field', 'turn', 'smith', 'pests', 'scarecrow', 'forecast', 'wide', 'choose'], [...EARLY_FEATURES, 'board', 'requests', 'pests']);
   s.tool = 'hands';
   s.day = 6;
   return s;

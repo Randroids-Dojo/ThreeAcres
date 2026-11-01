@@ -29,6 +29,14 @@
 // Accept stamp that takes a tap; a taken note says what is growing for it;
 // the build question; "Heat wave" keeps the day card to one line; on a
 // desktop the HUD's type is a size up (it read tiny at 1280 by 800).
+// Round 6: every HUD piece on the screen, in every state (on a heat-wave day
+// the coins box and the View button ended at 418 px on a 412 px phone, the
+// coins cut off); the heat wave with four-digit coins; a note's phrases never
+// break across lines ("no / day to spare"); on a desktop the board's notes are
+// 15 px or more in cards 300 px or wider and the key caps 11 px or more; the
+// phone's whole-farm view leaves little blank sky above the farm; and with a
+// mouse, the seed picker open, a click on a thirsty crop closes the picker
+// and the lesson pointer comes back.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -55,6 +63,44 @@ const PIECES = {
   toast: '.toasts .toast',
   dialog: '.dialog.on',
 };
+
+/**
+ * Round 6, with a mouse: the seed picker open from the rack, a click on a thirsty carrot takes the can and waters it.
+ * The picker hid but stayed open, and an open picker hides the lesson pointer, so the "Fill the can at the well"
+ * arrow was gone until Escape. Now the picker closes and the pointer comes back.
+ */
+async function pickerMouseCheck(p, label) {
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.dialogs.close(true);
+    window.sunup.input.push({ type: 'rules', patch: { camera: 'close' } });
+    st.learn = st.learn.filter((w) => !w.startsWith('lesson:'));
+    st.learn.push('lesson:pull');
+    st.learnCount = {};
+    Object.assign(st, { day: 2, minute: 60, coins: 100, stamina: 100, water: 12, weather: 'sun', orders: [], crows: [], crowPlan: [], builds: [], report: null });
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) {
+      const q = st.plots[y * st.W + x];
+      q.tilled = true;
+      q.wet = false;
+      q.crop = y === 6 ? { id: st.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: 1 } : null;
+    }
+    st.tool = 'hands';
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [] });
+  });
+  await p.waitForTimeout(1200);
+  const look = () => p.evaluate(() => ({ line: document.querySelector('.hint.on')?.textContent ?? '', bar: !document.querySelector('.seedbar').classList.contains('hidden'), picking: window.sunup.hud.picking, pointer: document.querySelector('.tpoint').classList.contains('on'), tool: window.sunup.state.tool }));
+  const seeds = await p.evaluate(() => { const r = document.querySelector('.toolbar .tool[data-tool="seeds"]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await p.mouse.click(seeds[0], seeds[1]);
+  await p.waitForTimeout(400);
+  const open = await look();
+  const c = await p.evaluate(() => window.sunup.r3d.project(4.5, 6.5, 0));
+  await p.mouse.click(c.x, c.y);
+  await p.waitForTimeout(1800);
+  const after = await look();
+  const ok = open.bar && !open.pointer && after.tool === 'can' && !after.bar && !after.picking && after.pointer;
+  if (!ok) failed++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} round 6: Seeds open, a click on a thirsty carrot takes the can and closes the picker, and the lesson pointer comes back  (${JSON.stringify({ open, after })})`);
+}
 
 async function run(label, viewport, touch) {
   const ctx = await b.newContext({ viewport, deviceScaleFactor: 2, hasTouch: touch, isMobile: touch });
@@ -148,6 +194,8 @@ async function run(label, viewport, touch) {
     ['forecast words', async () => p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.weather = 'storm'; st.forecast = ['cloud', 'storm', 'heat']; })],
     // Round 5: "Heat wave" wrapped the day card onto two lines.
     ['heat wave', async () => p.evaluate(() => { const st = window.sunup.state; st.weather = 'heat'; st.forecast = ['heat', 'storm', 'rain']; })],
+    // Round 6: the same with four-digit coins, the widest the top right gets (the tester's "190" was cut off at 412 px).
+    ['heat wave, 1,190 coins', async () => p.evaluate(() => { const st = window.sunup.state; st.weather = 'heat'; st.forecast = ['heat', 'storm', 'cloud']; st.coins = 1190; })],
     ['sleep question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmSleep(150, () => {}); })],
     // Round 4: the whole farm in one view (View on a phone, C on a keyboard), with the HUD over it.
     ['farm view', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.input.push({ type: 'rules', patch: { camera: 'wide' } }); })],
@@ -183,6 +231,35 @@ async function run(label, viewport, touch) {
         const h = Math.min(A.b, B.b) - Math.max(A.t, B.t);
         if (w > 2 && h > 2) hits.push(`${A.name}/${B.name} ${Math.round(w)}x${Math.round(h)}`);
       }
+    }
+    // Round 6: every piece is on the screen (a heat wave pushed the coins and the View button past a phone's edge).
+    const vw = await p.evaluate(() => [innerWidth, innerHeight]);
+    for (const q of bx) if (q.name !== 'dialog' && (q.l < -1 || q.r > vw[0] + 1 || q.t < -1 || q.b > vw[1] + 1)) hits.push(`${q.name} off the screen (${Math.round(q.l)} to ${Math.round(q.r)} of ${vw[0]})`);
+    if (name.startsWith('heat wave')) {
+      const q = await p.evaluate(() => { const n = document.querySelector('.coins .num'); const r = n.getBoundingClientRect(); return { text: n.textContent, right: Math.round(r.right), clip: n.scrollWidth > n.clientWidth + 1, view: Math.round(document.querySelector('.topbtns .viewbtn').getBoundingClientRect().right) }; });
+      if (q.right > vw[0] || q.view > vw[0] || q.clip) hits.push(`coins or View cut off ${JSON.stringify(q)}`);
+    }
+    // Round 6: a note's phrases never break across two lines ("no / day to spare", "4 days to / go").
+    if (name.startsWith('board requests')) {
+      const broken = await p.evaluate(() => [...document.querySelectorAll('.dialog .item.req .nw')].filter((e) => { const rs = [...e.getClientRects()]; return rs.length > 1 && Math.abs(rs[0].top - rs[rs.length - 1].top) > 3; }).map((e) => e.textContent));
+      if (broken.length) hits.push(`phrases broken across lines: ${broken.join(' | ')}`);
+      const nw = await p.evaluate(() => document.querySelectorAll('.dialog .item.req .nw').length);
+      if (!nw) hits.push('no phrases kept whole on the notes');
+      if (!touch) {
+        const q = await p.evaluate(() => ({ size: Math.min(...[...document.querySelectorAll('.dialog .item.req .tx > span')].map((e) => parseFloat(getComputedStyle(e).fontSize))), width: Math.min(...[...document.querySelectorAll('.dialog .item.req')].map((e) => e.getBoundingClientRect().width)) }));
+        if (q.size < 15 || q.width < 300) hits.push(`desktop notes ${JSON.stringify(q)}`);
+      }
+    }
+    if (name === 'plain' && !touch) {
+      // Round 6: the key caps read (about 8 px on a desktop).
+      const q = await p.evaluate(() => ['.toolbar .tool .key', '.toolbar .tool.act .key', '.topbtns .kcap'].map((k) => { const e = document.querySelector(k); return e ? parseFloat(getComputedStyle(e).fontSize) : 0; }));
+      if (Math.min(...q) < 11) hits.push(`desktop key caps ${q.join(', ')} px`);
+    }
+    if (name === 'farm view' && touch) {
+      // Round 6: the phone's whole-farm view left the top 40% blank sky: the back trees now sit near the day card.
+      const q = await p.evaluate(() => { const top = document.querySelector('.daycard').getBoundingClientRect().bottom; const trees = window.sunup.r3d.project(10, 0.5, 1.75).y; return { blank: Math.round(trees - top), share: +((trees - top) / innerHeight).toFixed(3) }; });
+      console.log(`     ${label} farm view: blank sky between the day card and the back trees ${q.blank} px (${Math.round(q.share * 100)}% of the screen)`);
+      if (q.share > 0.12) hits.push(`blank sky above the farm ${q.blank} px`);
     }
     // A ruled line across the middle of any words reads as struck through.
     for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in}`);
@@ -314,6 +391,7 @@ async function run(label, viewport, touch) {
     await p.screenshot({ path: `/tmp/acres-overlap-${label}-${name.replace(/[ ,]+/g, '-')}.png` });
   }
   if (!touch) await keyboardChecks(p, label);
+  if (!touch) await pickerMouseCheck(p, label);
   if (touch) {
     // Harvest words over a plot stay narrow, even for a long request.
     const w = await p.evaluate(() => {

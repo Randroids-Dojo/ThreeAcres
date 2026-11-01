@@ -65,6 +65,12 @@ export interface Crop {
   /** Went a night without the moisture it needed (synergy quality penalty). */
   parched: boolean;
   planted: number;
+  /**
+   * Sunup: the request this crop was sown for (round 6). A request counts only
+   * crops sown after it was pinned, each for one request: nothing already
+   * growing, or already in the crate, counts towards it.
+   */
+  for?: number;
 }
 
 export interface Plot {
@@ -187,7 +193,21 @@ export interface Order {
   seen?: boolean;
   /** Sunup: what sort of request it is, so the two of a pair differ in kind (`RequestKind`). Missing in older saves. */
   kind?: RequestKind;
+  /** Sunup: crops sown for it and harvested, waiting in the crate (round 6; missing in older saves until they load). */
+  got?: number;
+  /** Sunup: crops sown for it that were lost, by cause, so a request that fails says why. */
+  lost?: Partial<Record<LossCause, number>>;
 }
+
+/** What took a crop: crows, bugs, a dry night, a heat wave's night, or the season's turn. */
+export type LossCause = 'crows' | 'bugs' | 'dry' | 'heat' | 'turn';
+
+/**
+ * Why a request the player took went unfilled: a loss on the farm (the crops
+ * sown for it were taken), or, with no loss, its sow-by day passed with too
+ * little sown ('late'), the soil or the coins ran short, or its day came.
+ */
+export type RequestFail = LossCause | 'late' | 'soil' | 'coins' | 'due';
 
 /**
  * Sunup's sorts of request. A pair is one bold request against one safe one:
@@ -258,16 +278,18 @@ export interface DayReport {
   filled?: { who: string; reward: number }[];
   /** Sunup: coins a neighbour left so a farm with nothing left can start again. */
   gift?: number;
-  /** Sunup: requests that ran out of time overnight, unfilled. */
-  lapsed?: { who: string; crop: CropId; n: number }[];
-  /** Sunup: requests withdrawn in the morning because they could no longer be met. */
-  withdrawn?: { who: string; crop: CropId; n: number }[];
+  /** Sunup: requests that ran out of time overnight, unfilled, and why (round 6: what took the crops sown for it). */
+  lapsed?: { who: string; crop: CropId; n: number; why?: RequestFail; lost?: number }[];
+  /** Sunup: requests withdrawn in the morning because they could no longer be met, and why. */
+  withdrawn?: { who: string; crop: CropId; n: number; why?: RequestFail; lost?: number }[];
   /** Sunup: crops ripe on the farm this morning, ready to pick. */
   ripe?: number;
   /** Sunup: sprinklers that wore out this morning. */
   worn?: number;
   /** Sunup: crows are about this morning (a flock day). */
   flock?: boolean;
+  /** Sunup: crops the bugs left on others spread to overnight. */
+  spread?: number;
 }
 
 export interface WorldState {
@@ -366,6 +388,8 @@ export interface WorldState {
   flock?: boolean;
   /** Sunup: the midday bugs have come today (they land once, at 13:00). */
   midday?: number;
+  /** Sunup: crops crows took by day today (the morning card counts them with the night's; it counted only the night's). */
+  eatenToday?: number;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */
@@ -374,7 +398,7 @@ export type SimEvent =
   | { type: 'water'; x: number; y: number; by: number }
   | { type: 'plant'; x: number; y: number; crop: CropId; by: number }
   | { type: 'grow'; x: number; y: number; crop: CropId; stage: number }
-  | { type: 'harvest'; x: number; y: number; crop: CropId; quality: number; by: number }
+  | { type: 'harvest'; x: number; y: number; crop: CropId; quality: number; by: number; /** Sunup: the request it was sown for, when it counts for one. */ req?: number }
   | { type: 'tend'; x: number; y: number; by: number }
   | { type: 'clear'; x: number; y: number; by: number }
   | { type: 'build'; x: number; y: number; kind: BuildKind; by: number }
@@ -383,7 +407,7 @@ export type SimEvent =
   | { type: 'bugs'; x: number; y: number }
   | { type: 'sprinkle'; x: number; y: number }
   | { type: 'crowIn'; id: number; x: number; y: number }
-  | { type: 'crowEat'; id: number; x: number; y: number }
+  | { type: 'crowEat'; id: number; x: number; y: number; crop?: CropId }
   | { type: 'crowScared'; id: number; x: number; y: number }
   | { type: 'step'; by: number; x: number; y: number; ground: TileKind }
   | { type: 'deny'; x: number; y: number; reason: string }

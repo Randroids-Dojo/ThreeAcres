@@ -28,7 +28,8 @@ describe('Sunup copy after the second playtest', () => {
 
   it('a request handed over by day is a request, not an order', () => {
     const s = teach(world('sunup'), EARLY, EARLY_FEATURES);
-    s.orders = [{ id: 7, who: 'Mabel’s bakery', items: [{ crop: 'radish', n: 2 }], reward: 70, rep: 1, due: 9 }];
+    // (Round 6: two radishes sown for it and picked.)
+    s.orders = [{ id: 7, who: 'Mabel’s bakery', items: [{ crop: 'radish', n: 2 }], reward: 70, rep: 1, due: 9, got: 2 }];
     s.stock.radish[0] = 2;
     const ev: SimEvent[] = [];
     deliver(s, 7, ev);

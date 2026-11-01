@@ -8,9 +8,9 @@ import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { gainOf, isTaken, MILESTONES, offered, plantedFor, requestProgress, slackOf, sowByOf, stillToSow, stockCount, whyNot } from '../sim/goals';
+import { canDeliver, gainOf, isTaken, MILESTONES, offered, plantedFor, requestProgress, slackOf, sowByOf, stillToSow, stockCount, whyNot } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import type { BuildKind, CropId, Order, WorldState } from '../sim/types';
+import type { BuildKind, CropId, LossCause, Order, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
 import { townName } from './describe';
 import { icon } from './icons';
@@ -156,7 +156,11 @@ export class Dialogs {
     this.ask(`Build a ${name}?`, 'build', `${BUILD_COST[kind]} coins. ${does}. You have ${fmt(coins)}.`, `Build for ${BUILD_COST[kind]}`, onYes);
   }
 
-  /** Sleeping before noon, with work still waiting, asks first and says what waits (and, on a flock day, that crows are about). */
+  /**
+   * Sleeping before noon with work still waiting asks first and says what waits; so does sleeping at any hour with
+   * bugs or a crow still on the farm (bugs left on a crop spread overnight, a crow left pecking takes its crop), or
+   * on a flock day (crows still to come take a crop each).
+   */
   confirmSleep(minute: number, onYes: () => void, left?: { ripe: number; thirsty: number; bugs: number; crows: number }, flock = false): void {
     const bits: string[] = [];
     if (left?.ripe) bits.push(`${left.ripe} ripe ${left.ripe === 1 ? 'crop' : 'crops'}`);
@@ -165,8 +169,10 @@ export class Dialogs {
     if (left?.crows) bits.push(left.crows === 1 ? 'a crow' : `${left.crows} crows`);
     const list = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : (bits[0] ?? '');
     const what = list ? ` ${list[0].toUpperCase()}${list.slice(1)} still ${bits.length === 1 && /^(a crow|1 )/.test(list) ? 'waits' : 'wait'}.` : '';
-    const crows = flock ? ' Crows are about: those still to come take a crop each.' : ' Crops grow and the crate ships overnight.';
-    // (A flock day asks after noon too, when "only" would be wrong.)
+    // What the night does to what is left: bugs spread to the crops beside them, a crow eats, a flock day's crows come.
+    const pests = [left?.bugs ? ' Bugs left on a crop spread tonight.' : '', left?.crows ? ` ${left.crows === 1 ? 'A crow left pecking takes its crop' : 'Crows left pecking take their crops'}.` : ''].join('');
+    const crows = flock ? ' Crows are about: those still to come take a crop each.' : pests || ' Crops grow and the crate ships overnight.';
+    // (Pests and flock days ask after noon too, when "only" would be wrong.)
     this.ask('Sleep now?', 'sleep', `It is ${minute < 360 ? 'only ' : ''}${clock(minute)}.${what}${crows}`, 'Sleep', onYes);
   }
 
@@ -390,7 +396,7 @@ export class Dialogs {
     const d = CROPS[it.crop];
     const toSow = stillToSow(s, o);
     const t = noteText(s, o);
-    const lines = `<b${offered(o) ? ' class="gain"' : ''}>${esc(t.head)}</b>${t.lines.map((l, i) => `<span${i === 1 && t.need ? ' class="need"' : i === t.lines.length - 1 ? ' class="when"' : ''}>${esc(l)}</span>`).join('')}`;
+    const lines = `<b${offered(o) ? ' class="gain"' : ''}>${keepWhole(t.head)}</b>${t.lines.map((l, i) => `<span${i === 1 && t.need ? ' class="need"' : i === t.lines.length - 1 ? ' class="when"' : ''}>${keepWhole(l)}</span>`).join('')}`;
     const note = el('div', `item req${offered(o) ? ' offer' : ' taken'}`, `<span class="blob">${cropArt(it.crop)}</span><span class="tx">${lines}</span>`);
     note.dataset.crop = it.crop;
     note.dataset.id = String(o.id);
@@ -404,7 +410,7 @@ export class Dialogs {
         setTimeout(() => this.refresh(), 0);
       };
       note.append(b);
-    } else if (isTaken(o) && Math.min(stockCount(s, it.crop), it.n) >= it.n) {
+    } else if (isTaken(o) && canDeliver(s, o)) {
       const b = el('button', 'btn primary', 'Deliver');
       b.onclick = () => {
         this.host.send({ type: 'deliver', id: o.id });
@@ -503,17 +509,30 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
   const slack = spare <= 0 ? 'no day to spare' : spare === 1 ? 'a day to spare' : `${spare} days to spare`;
   const when = sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`;
   if (offered(o)) {
-    const need = toSow > 0 ? `Sow ${toSow} ${when}, seed ${fmt(toSow * d.seed)}` : `Wanted by ${dayName(s, o.due)}`;
+    const need = toSow > 0 ? `Plant ${toSow} ${when}, seed ${fmt(toSow * d.seed)}` : `Wanted by ${dayName(s, o.due)}`;
     return { head: `+${fmt(gain)} over market`, lines: [`${it.n} ${name} for ${who}`, need, `Ripe in ${d.days} days, due ${dayName(s, o.due)}, ${slack}`], need: toSow > 0 };
   }
   // Taken: what is growing for it and in the crate (the fifth playtest's note said "0 of 9 in the crate" while nine
   // were growing for it), or what is still to sow.
+  // Round 6: only crops sown for it count, so these are its own, and what took any of them says so.
   const p = requestProgress(s, o);
   const more = plantedFor(s, o) > 0 ? ' more' : '';
-  const need = toSow > 0 && s.day <= sowBy ? `Sow ${toSow}${more} ${when}, seed ${fmt(toSow * d.seed)}` : '';
-  const have = [p.growing ? `${p.growing} growing` : '', p.crate ? `${p.crate} in the crate` : ''].filter(Boolean).join(', ');
+  const need = toSow > 0 && s.day <= sowBy ? `Plant ${toSow}${more} ${when}, seed ${fmt(toSow * d.seed)}` : '';
+  const lost = (Object.entries(o.lost ?? {}) as [LossCause, number][]).filter(([, n]) => n > 0).map(([c, n]) => `${n} lost to ${LOSS_WORD[c]}`);
+  const have = [p.growing ? `${p.growing} growing` : '', p.crate ? `${p.crate} in the crate` : '', ...lost].filter(Boolean).join(', ');
   const wanted = have ? `${have[0].toUpperCase()}${have.slice(1)}, wanted by ${dayName(s, o.due)}` : `Wanted by ${dayName(s, o.due)}`;
   return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(gain)} over market`, ...(need ? [need] : []), wanted], need: !!need };
+}
+
+/** What took a crop, after "lost to". */
+const LOSS_WORD: Record<LossCause, string> = { crows: 'crows', bugs: 'bugs', dry: 'a dry night', heat: 'the heat', turn: 'the turn' };
+
+/**
+ * A note's line as HTML, its phrases kept whole: a narrow note breaks between
+ * them, never inside one ("no / day to spare", "4 days to / go").
+ */
+export function keepWhole(line: string): string {
+  return esc(line).replace(/(\+[\d,]+ over market|Sow \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|seed [\d,]+|Ripe in \d+ days?|[Dd]ue (?:tomorrow|[A-Z][a-z]+ \d+)|(?:no|a|\d+) days? to spare|[Ww]anted by (?:tomorrow|[A-Z][a-z]+ \d+)|\d+ (?:growing|in the crate|lost to (?:crows|bugs|a dry night|the heat|the turn)))/g, '<span class="nw">$1</span>');
 }
 
 /** A day as the day card names it ("Spring 6"), or "tomorrow". */

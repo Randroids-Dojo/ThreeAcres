@@ -630,3 +630,32 @@ svg { width: 100%; height: 100%; display: block; }
   .item .tx span { font-size: 14px; }
   .item.req .tx b.gain { font-size: 19px; }
 }
+
+/* ---------------------------------------------------------------- Sunup, after the sixth playtest */
+/* Words over a plot sit on a paper chip, ink on cream, so they read on dark soil ("3 radishes ready" was cream on brown
+   soil and nearly invisible), and stay up long enough to read. Refusals keep their own dark chip. */
+.floater { background: rgba(251, 243, 223, 0.96); color: var(--ink); text-shadow: none; padding: 2px 9px 3px; border-radius: 7px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); animation: floatup6 2.2s ease-out forwards; }
+.floater.no { background: rgba(72, 26, 14, 0.92); color: #ffeae0; text-shadow: none; }
+@keyframes floatup6 { from { opacity: 0; margin-top: 4px; } 8% { opacity: 1; } 82% { opacity: 1; } to { opacity: 0; margin-top: -30px; } }
+/* A note or caption breaks between its phrases, never inside one ("no / day to spare", "4 days to / go"). */
+.item .tx span.nw { white-space: nowrap; color: inherit; font-size: inherit; line-height: inherit; font-weight: inherit; }
+.info .nw { white-space: nowrap; }
+/* The top right never shrinks off a phone's edge: on a heat-wave day the forecast's "then" goes instead (the coins and
+   the View button ended 6 px past a 412 px screen). */
+.topright { flex: none; }
+.daycard { min-width: 0; }
+@media (max-width: 640px) { .daycard .sky .fc .then { display: none; } .daycard .sky { gap: 5px; } }
+/* Desktop: the board fills more of a wide screen, its notes in bigger type, and the keys on the buttons read (8 px). */
+@media (min-width: 900px) and (min-height: 640px) {
+  .dialog { width: min(860px, calc(100% - 60px)); }
+  .list { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .item .tx span { font-size: 15px; }
+  .item .tx b { font-size: 17.5px; }
+  .item.req .tx b.gain { font-size: 21px; }
+  .item .btn { font-size: 15px; }
+  .cork p, .cork .legend { font-size: 14.5px; }
+  .tabs button { font-size: 14.5px; }
+  .tool .key, .tool.act .key { font-size: 12px; }
+  .seed .key { font-size: 12px; }
+  .hud .topbtns .kcap { font-size: 12px; min-width: 18px; height: 18px; line-height: 18px; }
+}

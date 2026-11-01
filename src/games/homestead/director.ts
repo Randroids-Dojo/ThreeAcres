@@ -10,6 +10,7 @@ import { fillRequests } from '../../sim/goals';
 import { guardedSure } from '../../sim/day';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
+import { STAMINA_COST } from '../../sim/constants';
 import { step } from '../../sim/step';
 import { daylightOf, hourOf, inMap, season, SEASON_NAMES, dayOfSeason } from '../../sim/world';
 import { PROPS, propAt } from '../../sim/map';
@@ -265,7 +266,10 @@ export class Director {
    * Sleep from the button or Enter. Before noon it asks first, so a stray tap
    * does not throw away a morning, but only when something on the farm still
    * wants doing (ripe or thirsty crops, bugs, a crow), and never while the
-   * first lesson teaches it or when there is no stamina left to spend.
+   * first lesson teaches it or when there is no stamina left to spend. At any
+   * hour it asks while bugs (with the stamina to pick them) or a crow are on
+   * the farm: bugs spread overnight and a crow eats (round 6: a farm slept
+   * early lost crops it never saw go), and on a flock day.
    */
   sleep(): void {
     const s = this.state;
@@ -274,7 +278,8 @@ export class Director {
     const left = workLeft(s);
     // A flock day: crows still to come take a crop each from a farm left early, so the question asks at any hour.
     const flock = this.crowsDue();
-    if (!teaching && (flock || (s.minute < 360 && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0))) {
+    const pests = (left.bugs > 0 && s.stamina >= STAMINA_COST.tend) || left.crows > 0;
+    if (!teaching && (flock || pests || (s.minute < 360 && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0))) {
       this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), left, flock);
       return;
     }

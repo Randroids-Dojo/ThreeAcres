@@ -7,7 +7,7 @@ import type { Command } from './commands';
 import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, landBugs, nightfall, turnsMinute } from './day';
-import { acceptRequest, checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, readRequests, sellCrop, updateGoals } from './goals';
+import { acceptRequest, checkMilestones, claimCrops, deliver, draft, fillOrders, fillRequests, joinAlmanac, lostFor, readRequests, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -83,6 +83,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     landBugs(s, ev);
   }
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
+  // Sunup: seed sown for a request the player took is marked as its own (round 6: only that counts towards it).
+  if (homestead(s) && s.orders.length && (ev.some((e) => e.type === 'plant') || commands.some((c) => c.type === 'accept'))) claimCrops(s);
   checkMilestones(s, ev);
 
   if ((s.rules.clock === 'day' || s.rules.clock === 'flow') && s.minute >= DAY_MINUTES) {
@@ -139,9 +141,13 @@ function tickCrows(s: WorldState, dt: number, gameMinutes: number, ev: SimEvent[
         }
         if (s.rules.clock !== 'turns') c.t += gameMinutes;
         if (c.t >= peckMinutes(s)) {
+          lostFor(s, p.crop, 'crows');
+          const kind = p.crop.kind;
           p.crop = null;
           s.almanac.withered++;
-          ev.push({ type: 'crowEat', id: c.id, x: c.x, y: c.y });
+          // Counted for the morning card with the night's (round 6: crops taken by day went unreported).
+          s.eatenToday = (s.eatenToday ?? 0) + 1;
+          ev.push({ type: 'crowEat', id: c.id, x: c.x, y: c.y, crop: kind });
           c.phase = 'flee';
           c.t = 0;
         }

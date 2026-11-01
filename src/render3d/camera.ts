@@ -17,6 +17,8 @@ const PITCH_WIDE = (60 * Math.PI) / 180;
 /** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
 const PITCH_WIDE_TALL = (66 * Math.PI) / 180;
 const CLOSE_TILES = 9;
+/** A phone's whole-farm view puts the back trees' tops this far down the screen, just under the day card (px). */
+const WIDE_TALL_TOP = 104;
 /** Tall screens: steeper, a little wider, and kept inside the farm. */
 export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.8, maxTiles: 12, bandTop: 100, bandBottom: 112 };
 /** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
@@ -167,8 +169,14 @@ export function makeRig(): Rig {
     if (key !== fitKey) {
       fitKey = key;
       // Portrait frames the six fields (columns 1.5 to 16.5), panning reaches the rest; landscape shows the whole slab.
-      if (portrait) fitBox(1.5, 1, 16.5, H - 1, PITCH_WIDE_TALL, 0.012, fit);
-      else fitBox(-0.2, -0.2, W + 0.2, H + 0.2, PITCH_WIDE, 0.05, fit, 2.2);
+      if (portrait) {
+        fitBox(1.5, 1, 16.5, H - 1, PITCH_WIDE_TALL, 0.012, fit);
+        // The farm is narrower than a phone is tall, so there is height to spare. As close up, the back trees sit
+        // at the top of the clear band, just under the day card, and the spare height goes to the bottom, behind
+        // the stick and the act button: centred on the screen, the top of it was blank sky (the sixth playtest:
+        // the top 40%), and the lesson line lay over the front fields.
+        fit.tz = solveZ(fit, 10, TREE_TOP.y, TREE_TOP.z, Math.min(h * 0.3, WIDE_TALL_TOP));
+      } else fitBox(-0.2, -0.2, W + 0.2, H + 0.2, PITCH_WIDE, 0.05, fit, 2.2);
     }
     const zoom = clamp(intent.zoom || 1, 0.6, 2.5);
     goal.pitch = fit.pitch + (zoom - 1) * -0.05;

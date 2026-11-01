@@ -65,6 +65,8 @@ describe('requests are few, and they compete', () => {
     expect(s.orders.length).toBe(1);
     const it0 = s.orders[0].items[0];
     s.stock[it0.crop][0] = it0.n;
+    // (Round 6: sown for it and picked.)
+    s.orders[0].got = it0.n;
     step(s, 0.016, [{ type: 'deliver', id: s.orders[0].id }]);
     for (let i = 0; i < 30; i++) step(s, 0.016);
     expect(s.orders.length).toBe(0);

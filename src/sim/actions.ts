@@ -306,7 +306,10 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       }
       plot.nutrient = Math.max(0, plot.nutrient - def.feed);
       if (c.kind === 'beans') feedAround(s, x, y);
-      ev.push({ type: 'harvest', x, y, crop: c.kind, quality: q, by });
+      // Sunup: a crop sown for a request the player took waits in the crate for that request (round 6: only those count).
+      const forReq = c.for !== undefined ? s.orders.find((r) => r.id === c.for && r.taken !== false) : undefined;
+      if (forReq) forReq.got = (forReq.got ?? 0) + 1;
+      ev.push({ type: 'harvest', x, y, crop: c.kind, quality: q, by, req: forReq?.id });
       // Sunup: a regrowing crop kept past its season for its last ripe pick is done after it.
       if (def.regrow > 0 && !(homestead(s) && !inSeason(c.kind, season(s.day)))) {
         c.picks += 1;

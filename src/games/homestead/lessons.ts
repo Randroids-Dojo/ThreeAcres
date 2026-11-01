@@ -10,7 +10,7 @@ import { BUILD_COST, FIELD_SEED, TOOL_UPGRADES } from '../../sim/constants';
 import { CROP_IDS, CROPS, cropWord } from '../../sim/crops';
 import { nightsToTurn, workLeft } from '../../sim/actions';
 import { guardedSure } from '../../sim/day';
-import { isTaken, offered, stockCount, wanted } from '../../sim/goals';
+import { isTaken, offered, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
 import { season, SEASON_NAMES } from '../../sim/world';
 import type { BuildKind, Crop, SimEvent, WorldState } from '../../sim/types';
@@ -79,13 +79,17 @@ function nearest(s: WorldState, test: (crop: Crop | null, i: number) => boolean)
 
 const live = (c: Crop | null): c is Crop => !!c && !c.dead;
 const anyRipe = (s: WorldState) => !!nearest(s, (c) => live(c) && c.stage === 4);
-/** The first request the player took, its crop in the crate, and the nearest ripe one of that crop on the farm. */
+/**
+ * The first request the player took, what was sown for it and is in the crate, and the nearest ripe crop sown for it
+ * (round 6: only crops sown for a request count, so the pointer never shows one sown before it).
+ */
 const theRequest = (s: WorldState) => {
   for (const o of s.orders) {
     if (!isTaken(o)) continue;
     const it = o.items[0];
-    const have = s.stock[it.crop].reduce((a, b) => a + b, 0);
-    const ripe = nearest(s, (c) => live(c) && c.stage === 4 && c.kind === it.crop);
+    const have = requestProgress(s, o).crate;
+    const spots = ripeFor(s, o);
+    const ripe = spots.length ? nearest(s, (_c, i) => spots.includes(i)) : null;
     if (ripe || have > 0) return { o, it, have, ripe };
   }
   return null;
@@ -105,6 +109,9 @@ const prop = (kind: string): Point => {
   const p = PROPS.find((q) => q.kind === kind)!;
   return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
 };
+
+/** The first request the player took that still wants seed sown for it before its sow-by day. */
+const toSowFor = (s: WorldState) => s.orders.find((o) => isTaken(o) && s.day <= sowByOf(o) && stillToSow(s, o) > 0) ?? null;
 
 /** Two requests offered together, neither accepted yet: the morning's choice. */
 const thePair = (s: WorldState) => {
@@ -150,6 +157,8 @@ const fieldOpen = (s: WorldState, i: number) => {
  */
 const buildSpot = (s: WorldState, guard: boolean) =>
   nearest(s, (_c, i) => bareAt(s, i) && midField(s, i) && (!guard || fieldOpen(s, i))) ?? nearest(s, (_c, i) => bareAt(s, i) && midField(s, i)) ?? nearest(s, (_c, i) => bareAt(s, i));
+/** The nearest bare plot, or null when every plot is sown or built on (a line about bare soil waits for one). */
+const bareSpot = (s: WorldState) => nearest(s, (_c, i) => bareAt(s, i));
 /** Can the smith make something now that the farm can pay for: a better can or hoe (one the farm has), its reputation and its coins enough? */
 const smithReady = (s: WorldState) =>
   (['can', 'hoe'] as const).some((t) => {
@@ -252,6 +261,24 @@ const LESSONS: Lesson[] = [
     point: () => ({ x: prop('board').x, y: prop('board').y + 0.1 }),
   },
   {
+    // Round 6: a request counts only what is sown for it (crops already growing, or in the crate, never do), so the
+    // first one says to sow for it, and points at bare soil. It ends when its seed is all in.
+    id: 'sowfor',
+    after: ['requests'],
+    unlocks: [],
+    act: 'plant',
+    ready: (s) => !!toSowFor(s),
+    text: (s) => {
+      const o = toSowFor(s) ?? s.orders.find(isTaken);
+      const it = o?.items[0];
+      const n = o ? Math.max(1, stillToSow(s, o)) : 3;
+      return it ? `Plant ${n} ${cropWord(it.crop, n)} for the request.` : 'Plant seeds for the request.';
+    },
+    done: (s) => !toSowFor(s),
+    hold: (s) => !bareSpot(s),
+    point: (s) => bareSpot(s),
+  },
+  {
     // Up when it matters: once a crop the request wants is ripe (or already in
     // the crate), not on the day the request is read. Names the request, points
     // at a ripe one, and ends when the crate holds enough or the request has
@@ -331,9 +358,10 @@ const LESSONS: Lesson[] = [
     unlocks: ['build'],
     stagger: true,
     act: 'build:scarecrow',
-    // Held until the farm can pay for one (the fifth playtest was told to sleep at 6 am, with a request waiting).
+    // Held until the farm can pay for one (the fifth playtest was told to sleep at 6 am, with a request waiting), and
+    // until there is bare soil to build on (the sixth was told to build on bare soil with every plot sown).
     ready: (s) => s.day > doneOn(s, 'pests') && s.coins >= BUILD_COST.scarecrow,
-    hold: (s) => s.coins < BUILD_COST.scarecrow,
+    hold: (s) => s.coins < BUILD_COST.scarecrow || !bareSpot(s),
     text: () => 'Build a scarecrow on bare soil.',
     done: (s, _n, acted) => acted || s.builds.some((b) => b.kind === 'scarecrow'),
     point: (s) => buildSpot(s, true),
@@ -361,7 +389,7 @@ const LESSONS: Lesson[] = [
     text: () => 'Build a sprinkler to water around it.',
     passive: 10,
     done: (_s, _n, acted) => acted,
-    hold: (s) => s.coins < BUILD_COST.sprinkler,
+    hold: (s) => s.coins < BUILD_COST.sprinkler || !bareSpot(s),
     point: (s) => buildSpot(s, false),
     build: 'sprinkler',
   },
@@ -393,6 +421,9 @@ const LESSONS: Lesson[] = [
     ready: (s) => nightsToTurn(s.day) <= 3,
     text: (s) => `${SEASON_NAMES[season(s.day)]} ends soon. Plant ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()} seeds.`,
     passive: 9,
+    // It says to plant, so it waits for bare soil and points at it (the sixth playtest's chevron sat on a bug).
+    hold: (s) => !bareSpot(s),
+    point: (s) => bareSpot(s),
   },
   {
     // The whole farm in one view, once there is more farm than the close view holds: with the second field (close up,
@@ -402,9 +433,11 @@ const LESSONS: Lesson[] = [
     after: ['plant', 'hoe'],
     unlocks: ['wide'],
     act: 'wide',
-    ready: (s) => fields(s) >= 2,
+    // Once the new field is hoed (or the day after it came), and up long enough to be read: the sixth playtest's line
+    // came for 7 seconds while the tester was still hoeing, and went unseen.
+    ready: (s) => fields(s) >= 2 && (!meadow(s) || s.day > doneOn(s, 'hoe')),
     text: (_s, touch) => (touch ? 'Tap View to see the whole farm.' : 'Press C to see the whole farm.'),
-    passive: 7,
+    passive: 20,
     // Pressing C or tapping View does what it says: the line goes.
     done: (_s, _n, acted) => acted,
   },
@@ -594,13 +627,17 @@ export class Tutor {
       s.learnCount[`seen:${l.id}`] = n(`seen:${l.id}`) + dt;
       s.learnCount[`seenOn:${l.id}`] ??= s.day;
     }
-    let point = l ? (l.point?.(s) ?? null) : null;
+    // The lesson's own target, if it has one now.
+    const own = l ? (l.point?.(s) ?? null) : null;
+    let point = own;
     // After their lessons, crows and bugs still arrive now and then: the pointer keeps finding them, without a word
     // (a crow first: it will not wait).
     const crow = theCrow(s);
     if (!point && finished('pests') && crow) point = { x: crow.x + 0.5, y: crow.y + 0.5 };
     if (!point && finished('bugs')) point = theBugs(s);
-    return { line: l ? l.text(s, touch) : '', cmds, point, build: l?.point && point && l.build ? l.build : undefined };
+    // What the pointer builds goes only with the lesson's own target: the sixth playtest's scarecrow lesson, with no
+    // bare soil, pointed at a bug and still carried the build, so a tap on the bugged crop asked to build a scarecrow.
+    return { line: l ? l.text(s, touch) : '', cmds, point, build: own && l?.build ? l.build : undefined };
   }
 }
 
