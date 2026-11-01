@@ -1086,7 +1086,7 @@ export class Ranch {
     bb.x1 *= this.w;
     bb.y0 *= this.h;
     bb.y1 *= this.h;
-    hud.placeSlots(this.spots, showSlots && !this.paused, bb);
+    hud.placeSlots(this.spots, showSlots && !this.paused, bb, this.paused || this.menu ? -1 : this.tutor.mark.slot);
     // J brings up the next goal, unless a lesson has the page.
     if (f.journal && !hud.lessonUp) {
       if (hud.pageUp) hud.hidePage();

@@ -99,6 +99,11 @@
 
 /* tap targets over the bellows' slot windows, and its body (flicks to the next slot) */
 .rh-bellows { position: absolute; z-index: 3; left: 0; top: 0; padding: 0; border: 0; background: transparent; pointer-events: auto; display: none; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.rh-slotpoint { position: absolute; z-index: 3; left: 0; top: 0; width: 0; height: 0; pointer-events: none; display: none; }
+.rh-slotpoint.on { display: block; }
+.rh-slotpoint::after { content: ''; position: absolute; left: -7px; top: -34px; width: 11px; height: 11px; border-right: 3.5px solid #fbf0d4; border-bottom: 3.5px solid #fbf0d4; transform: rotate(45deg); filter: drop-shadow(0 1px 1.5px rgba(20, 16, 36, 0.7)); animation: rh-point 0.8s ease-in-out infinite alternate; }
+@keyframes rh-point { from { translate: 0 -5px; } to { translate: 0 1px; } }
+@media (prefers-reduced-motion: reduce) { .rh-slotpoint::after { animation: none; } }
 .rh-slotbtn { position: absolute; z-index: 3; left: 0; top: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; pointer-events: auto; display: none; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 
 /* ---------------------------------------------------------------- touch */

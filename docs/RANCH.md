@@ -200,7 +200,7 @@ Downies keep their name: whenever a line says "downy", an arrow is over one.
 | 3 | draw | the bellows, crosshair and count, Draw | a downy is drawn in | Aim at the downy and hold Pull. | Aim at the downy and hold right click. | Aim at the downy and hold LT. |
 | 4 | puff | Puff | something is puffed out | Tap Blow to send it back out. | Click to blow it back out. | Press RT to blow it back out. |
 | 5 | feed | the pause button; a clover head over the downy, the garden's ring | one of your downies eats its favourite | Feed the downy a clover head. | same | same |
-| 6 | sell | arrow on the down, then the crate; coins after the sale | down sold at the Exchange | Blow the fluff into the sell crate. | same | same |
+| 6 | sell | arrow on the fluff (or the downy about to drop it), a chevron over the fluff's window if another kind is chosen, then the crate; coins after the sale | fluff sold at the sell crate | In steps: Pull up the fluff the downy dropped. / Tap the fluff's window to choose it. / Blow the fluff into the sell crate. (Feed the downy again for more fluff. if there is none anywhere, and the downy gets hungry enough to eat at once.) | Press Q until the fluff is chosen. for the choosing step | Press LB or RB to choose the fluff. for the choosing step |
 | 7 | pen | pad posts (Pen only), arrow and ring on the nearest empty pad | a pen is built | Build a pen on an empty plot. | same | same |
 | 8 | penin | ring on the pen | a downy is in a pen | Blow the downy into the pen. | same | same |
 | 9 | meadow | arrow at the ranch gate, then a wild downy | a wild downy is caught; then the day may run on | Catch a downy out in Clover Meadow. | same | same |

@@ -65,6 +65,8 @@ export class Hud {
   private fade = el('div', 'rh-fade');
   readonly slotBtns: HTMLButtonElement[] = [];
   private bellowsBtn = el('button', 'rh-bellows');
+  /** A cream chevron over the slot window a lesson points at, like the markers in the world. */
+  private slotPoint = el('div', 'rh-slotpoint');
   private crossState: CrossState | '' = '';
   private shownCoins = -1;
   private coinTarget = 0;
@@ -111,7 +113,7 @@ export class Hud {
       e.stopPropagation();
       this.onCycle();
     });
-    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, this.bellowsBtn, ...this.slotBtns, this.pause, this.fade);
+    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
     this.pause.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t) return;
@@ -319,7 +321,11 @@ export class Hud {
   }
 
   /** Tap targets over the bellows: one per slot window, sized to their spacing, and the body behind them. */
-  placeSlots(spots: ({ x: number; y: number } | null)[], show: boolean, body: { x0: number; y0: number; x1: number; y1: number } | null): void {
+  placeSlots(spots: ({ x: number; y: number } | null)[], show: boolean, body: { x0: number; y0: number; x1: number; y1: number } | null, point = -1): void {
+    // The pointed window shows on every device: keys and pads switch slots too.
+    const ps = point >= 0 ? spots[point] : null;
+    this.slotPoint.classList.toggle('on', !!ps);
+    if (ps) this.slotPoint.style.transform = `translate(${ps.x.toFixed(0)}px, ${ps.y.toFixed(0)}px)`;
     const a = spots[0];
     const b2 = spots[1];
     const pitch = a && b2 ? Math.hypot(b2.x - a.x, b2.y - a.y) : 44;

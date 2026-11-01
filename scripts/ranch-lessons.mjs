@@ -331,7 +331,10 @@ function only(ui, allowed) {
   check('phone: sell lesson comes next', await k.lessonOn('sell'));
   u = await k.ui();
   check('phone: coins still hidden before the first sale', !u.coins);
-  check('phone: sell line', u.page === 'Blow the fluff into the sell crate.', u.page);
+  // The fed downy's fluff lies on the ground: the line says to pull it up, the arrow is over it.
+  // (The arrow itself fades when you stand within 3 m, so read what the lesson points at.)
+  const aimed = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on ? m.icon : null; });
+  check('phone: sell starts with the fluff on the ground', u.page === 'Pull up the fluff the downy dropped.' && aimed === 'arrow', `${u.page} ${aimed}`);
   await k.shot('phone-06-sell');
   await page.waitForTimeout(1500);
   let tufts = await k.items('tuft');
@@ -350,12 +353,32 @@ function only(ui, allowed) {
   check('phone: the shell corner is clear mid-lessons, with every early piece up', await cornerClear(page));
   check('phone: slots line', u.page === 'Tap a window to switch what you blow.', u.page);
   await k.shot('phone-07-slots');
+  // The trap from the Pixel: finish the window lesson with the clover heads chosen, so Blow would send those.
   const tuftSlot = await k.slotOf('tuft');
-  if ((await k.st()).sel === tuftSlot) await tapWindow((await k.slotOf('cloverhead')));
-  await tapWindow(tuftSlot);
-  if ((await k.st()).sel !== tuftSlot) await tapWindow(tuftSlot);
+  const cloverSlot = await k.slotOf('cloverhead');
+  if ((await k.st()).sel === cloverSlot) await tapWindow(tuftSlot);
+  await tapWindow(cloverSlot);
   check('phone: tapping a window ends the slots lesson', await k.finished('slots'));
   check('phone: then the sell lesson comes back', await k.lessonOn('sell'));
+  await frames(page, 4);
+  const pointed = () => page.evaluate(() => {
+    const p = document.querySelector('.rh-slotpoint');
+    if (!p || getComputedStyle(p).display === 'none') return null;
+    const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(p.style.transform);
+    return m ? { x: +m[1], y: +m[2] } : null;
+  });
+  const winAt = (i) => page.evaluate((i) => window.ranch.slotScreen(i), i);
+  u = await k.ui();
+  check("phone: with clover heads chosen, the line says to choose the fluff", u.page === "Tap the fluff's window to choose it.", u.page);
+  const pt = await pointed();
+  const fw = await winAt(tuftSlot);
+  check("phone: a chevron points at the fluff's window", !!pt && Math.hypot(pt.x - fw.x, pt.y - fw.y) < 6, `${JSON.stringify(pt)} vs ${JSON.stringify(fw)}`);
+  await k.shot('phone-07b-choose');
+  await tapWindow(tuftSlot);
+  await frames(page, 4);
+  u = await k.ui();
+  check('phone: fluff chosen, the line says to blow it in, the chevron goes', u.page === 'Blow the fluff into the sell crate.' && !(await pointed()), u.page);
+  check('phone: the arrow moves to the crate', u.marker === 'arrow');
   await k.place(-6.5, 32.8, -6.5, 5.7, 36.5);
   await frames(page, 3);
   check('phone: no coins on screen just before the sale', !(await k.ui()).coins);

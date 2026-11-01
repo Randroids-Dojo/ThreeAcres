@@ -34,6 +34,8 @@ export interface Mark {
   rx: number;
   rz: number;
   r: number;
+  /** A slot window on the bellows to point at, or -1. */
+  slot: number;
 }
 
 type Floor = (x: number, z: number) => number;
@@ -50,7 +52,12 @@ interface Lesson {
   /** Takes over from the lesson on screen when it becomes ready. */
   urgent?: boolean;
   ready(s: RanchState, n: N): boolean;
-  text(say: Say): string;
+  /** The line now. A lesson with steps words each one from the ranch as it stands. */
+  text(say: Say, s?: RanchState): string;
+  /** Every other line it can show, for checks of length and wording. */
+  also?(say: Say): string[];
+  /** Runs every frame while it is on screen. */
+  each?(s: RanchState): void;
   done(s: RanchState, n: N): boolean;
   /** The moment passed without it being done (night fell before you slept): it leaves quietly. */
   lapse?(s: RanchState): boolean;
@@ -98,6 +105,30 @@ function nearestPad(s: RanchState, ok: (i: number) => boolean): number {
 }
 
 const porch = (s: RanchState) => nearestDowny(s, (d) => d.keep) ?? nearestDowny(s, () => true, 12);
+
+/** Your loose clover downies work up an appetite, so they eat as soon as food lands near them. */
+function appetite(s: RanchState): void {
+  for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0 && d.kind === 'clover') d.hunger = Math.max(d.hunger, 0.62);
+}
+
+/**
+ * Where selling stands: blow (fluff is the chosen kind), choose (fluff is
+ * aboard but another kind is chosen, so Blow would send that), pull (fluff
+ * lies on the ground, or a fed downy is about to drop it) or feed (no fluff
+ * anywhere: feed a downy for more).
+ */
+function sellStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' {
+  const chosen = s.slots[s.sel];
+  if (chosen?.t && chosen.n > 0 && isTuft(chosen.t)) return 'blow';
+  if (carrying(s, isTuft)) return 'choose';
+  return s.items.some((it) => !it.gone && isTuft(it.type)) || s.downies.some((d) => !d.gone && d.shedQ > 0) ? 'pull' : 'feed';
+}
+const SELL = {
+  blow: 'Blow the fluff into the sell crate.',
+  choose: (q: Say) => (q.dev === 'touch' ? "Tap the fluff's window to choose it." : q.dev === 'pad' ? 'Press LB or RB to choose the fluff.' : 'Press Q until the fluff is chosen.'),
+  pull: 'Pull up the fluff the downy dropped.',
+  feed: 'Feed the downy again for more fluff.',
+};
 /** A downy of yours, loose (not penned, not in the canister). */
 const loose = (s: RanchState) => nearestDowny(s, (d) => (d.tame || d.keep) && d.pen < 0);
 
@@ -189,10 +220,7 @@ const LESSONS: Lesson[] = [
     ready: () => true,
     text: () => 'Feed the downy a clover head.',
     done: (_s, n) => n('feed') >= 1,
-    // It has worked up an appetite, so it eats as soon as food lands near it.
-    start: (s) => {
-      for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0 && d.kind === 'clover') d.hunger = Math.max(d.hunger, 0.62);
-    },
+    start: appetite,
     mark: (s, m) => {
       const d = loose(s);
       if (!d) return false;
@@ -213,16 +241,40 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     then: ['coins'],
     ready: () => true,
-    text: () => 'Blow the fluff into the sell crate.',
+    // Feeding drops fluff on the ground; the line follows each step from there.
+    text: (q, s) => {
+      const step = s ? sellStep(s) : 'blow';
+      return step === 'choose' ? SELL.choose(q) : SELL[step];
+    },
+    also: (q) => [SELL.choose(q), SELL.pull, SELL.feed],
     done: (_s, n) => n('sell') >= 1,
+    each: (s) => {
+      if (sellStep(s) === 'feed') appetite(s);
+    },
     mark: (s, m, floor) => {
-      if (carrying(s, isTuft)) {
+      const step = sellStep(s);
+      if (step === 'blow') {
         arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
         ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
         return true;
       }
+      if (step === 'choose') {
+        m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
+        return false;
+      }
+      if (step === 'feed') {
+        const d = loose(s);
+        if (!d) return false;
+        m.icon = 'cloverhead';
+        m.x = d.x;
+        m.y = d.y + 1.05;
+        m.z = d.z;
+        if (carrying(s, (t) => t === 'cloverhead')) m.r = 0;
+        else ring(m, PADS[0].x, PADS[0].z, 3.1);
+        return true;
+      }
       let best = -1;
-      let bd = 40;
+      let bd = 1e9;
       s.items.forEach((it, i) => {
         if (it.gone || !isTuft(it.type)) return;
         const d = dist(s, it.x, it.z);
@@ -231,10 +283,12 @@ const LESSONS: Lesson[] = [
           best = i;
         }
       });
-      if (best < 0) return false;
-      const it = s.items[best];
-      arrow(m, it.x, it.y + 0.9, it.z);
-      return true;
+      if (best >= 0) {
+        const it = s.items[best];
+        return arrow(m, it.x, it.y + 0.9, it.z);
+      }
+      // Not dropped yet: point at the downy it is coming from.
+      return onDowny(m, nearestDowny(s, (d) => d.shedQ > 0));
     },
     note: 'The sell crate buys fluff. Prices change each day.',
   },
@@ -422,7 +476,7 @@ export function allLines(): { id: string; line: string }[] {
     { dev: 'mouse', locked: false, lockAvailable: false },
   ];
   const out: { id: string; line: string }[] = [];
-  for (const l of LESSONS) for (const q of says) if (!out.some((o) => o.id === l.id && o.line === l.text(q))) out.push({ id: l.id, line: l.text(q) });
+  for (const l of LESSONS) for (const q of says) for (const line of [l.text(q), ...(l.also?.(q) ?? [])]) if (!out.some((o) => o.id === l.id && o.line === line)) out.push({ id: l.id, line });
   return out;
 }
 /** Every feature any lesson brings in. */
@@ -444,7 +498,9 @@ export class Tutor {
   private struck: Lesson | null = null;
   private gap = 0;
   private shownFor = 0;
-  readonly mark: Mark = { on: false, icon: 'arrow', x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0 };
+  readonly mark: Mark = { on: false, icon: 'arrow', x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0, slot: -1 };
+  /** The line a finished lesson showed last, kept while it ticks (a stepped line has moved on by then). */
+  private struckLine = '';
   /** Features brought in this frame (cleared each update). */
   readonly fresh: string[] = [];
   private view: TutorView = { line: '', done: false, id: '' };
@@ -533,13 +589,14 @@ export class Tutor {
   update(s: RanchState, dt: number, say: Say, floor: Floor): TutorView {
     this.fresh.length = 0;
     this.mark.on = false;
+    this.mark.slot = -1;
     const n: N = (k) => s.learnCount[k] ?? 0;
     const v = this.view;
     // A finished line stays up, ticked, for a moment.
     if (this.struck) {
       this.gap -= dt;
       if (this.gap > 0) {
-        v.line = this.struck.text(say);
+        v.line = this.struckLine;
         v.done = true;
         v.id = this.struck.id;
         return v;
@@ -563,7 +620,8 @@ export class Tutor {
           if (done && this.shownFor > 0) {
             this.struck = l;
             this.gap = 1.3;
-            v.line = l.text(say);
+            this.struckLine = v.id === l.id && v.line ? v.line : l.text(say, s);
+            v.line = this.struckLine;
             v.done = true;
             v.id = l.id;
             return v;
@@ -596,7 +654,8 @@ export class Tutor {
       return v;
     }
     this.shownFor += dt;
-    v.line = l.text(say);
+    l.each?.(s);
+    v.line = l.text(say, s);
     v.done = false;
     v.id = l.id;
     if (l.mark) this.mark.on = l.mark(s, this.mark, floor);
@@ -616,6 +675,7 @@ export class Tutor {
     this.gap = 0;
     this.shownFor = 0;
     this.mark.on = false;
+    this.mark.slot = -1;
   }
 }
 

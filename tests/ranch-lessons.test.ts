@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GOALS } from '../src/games/ranch/defs';
 import { FEATURES, LESSON_IDS, Tutor, allLines, creditLessons, teachAll, type Say } from '../src/games/ranch/lessons';
 import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
-import { deserialize, serialize } from '../src/games/ranch/state';
+import { deserialize, newItem, serialize } from '../src/games/ranch/state';
 import { PADS } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
 
@@ -219,6 +219,71 @@ describe('the lessons in order', () => {
     expect(Math.hypot(tutor.mark.rx - PADS[0].x, tutor.mark.rz - PADS[0].z)).toBeLessThan(0.01);
     // It has an appetite now, so food puffed near it is eaten.
     expect(d.hunger).toBeGreaterThan(0.5);
+  });
+});
+
+describe('selling, step by step', () => {
+  it('says where the fluff is: feed for it, pull it up, choose it, then blow it in', () => {
+    const { sim, tutor, run, view } = ranch();
+    const s = sim.s;
+    const home = s.downies.find((q) => q.keep)!;
+    s.player.x = home.x + 1;
+    s.player.z = home.z + 1;
+    for (const k of ['look', 'walk', 'catch', 'puff', 'feed']) {
+      tutor.add(s, k);
+      run(1.6);
+    }
+    expect(tutor.current).toBe('sell');
+    // No fluff anywhere: feed again, the downy hungry enough to eat at once, a clover head over it.
+    for (const it of s.items) if (it.type.startsWith('tuft-')) it.gone = true;
+    for (const q of s.slots) {
+      q.t = null;
+      q.n = 0;
+    }
+    run(0.2);
+    expect(view().line).toBe('Feed the downy again for more fluff.');
+    expect(tutor.mark.on && tutor.mark.icon).toBe('cloverhead');
+    const d = s.downies.find((q) => !q.gone && q.keep)!;
+    expect(d.hunger).toBeGreaterThanOrEqual(0.62);
+    // Fed and about to drop it (a downy only drops fluff once it lands): pull, the arrow on that downy, never feed.
+    d.shedQ = 2;
+    d.shedT = 5;
+    run(0.1);
+    expect(view().line).toBe('Pull up the fluff the downy dropped.');
+    expect(Math.abs(tutor.mark.x - d.x)).toBeLessThan(0.01);
+    d.shedQ = 0;
+    // Fluff on the ground: pull it up, the arrow over it however far away.
+    const fluff = newItem(s, 'tuft-clover', s.player.x + 60, 0, s.player.z, -1);
+    fluff.y = sim.phys.floor(fluff.x, fluff.z) + 0.1;
+    s.items.push(fluff);
+    run(0.1);
+    expect(view().line).toBe('Pull up the fluff the downy dropped.');
+    expect(tutor.mark.on && tutor.mark.icon).toBe('arrow');
+    expect(Math.abs(tutor.mark.x - fluff.x)).toBeLessThan(0.01);
+    // Aboard, but clover heads are chosen (Blow would send those): choose the fluff, a chevron over its window.
+    fluff.gone = true;
+    s.slots[0].t = 'cloverhead';
+    s.slots[0].n = 3;
+    s.slots[1].t = 'tuft-clover';
+    s.slots[1].n = 2;
+    s.sel = 0;
+    tutor.add(s, 'slot');
+    run(0.1);
+    expect(view().line).toBe("Tap the fluff's window to choose it.");
+    expect(tutor.mark.slot).toBe(1);
+    // Chosen: blow it into the crate, the arrow on the crate, no window pointer.
+    s.sel = 1;
+    run(0.1);
+    expect(view().line).toBe('Blow the fluff into the sell crate.');
+    expect(tutor.mark.on).toBe(true);
+    expect(tutor.mark.slot).toBe(-1);
+    // Sold: the ticked line is the one that was showing, though the fluff is gone.
+    s.slots[1].t = null;
+    s.slots[1].n = 0;
+    tutor.add(s, 'sell');
+    run(0.1);
+    expect(view().done).toBe(true);
+    expect(view().line).toBe('Blow the fluff into the sell crate.');
   });
 });
 
