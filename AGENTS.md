@@ -41,6 +41,7 @@ node scripts/ranch-lessons.mjs         # Thistledown's lessons on phone, desktop
 node scripts/deck-lessons.mjs [url]    # Seedbound's guided first season: one piece of the table at a time
 node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state; no ruled line through words, no price tag over a card's name, every visible button takes a tap
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
+node scripts/qa/shell-keys.mjs [url]   # the switcher on a keyboard: Escape and ` open and close it in every game, Tab stays on it, Enter plays a card
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth

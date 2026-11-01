@@ -101,6 +101,20 @@ export class Shell {
         e.preventDefault();
         if (this.open && this.current) this.hide();
         else this.show();
+      } else if (e.code === 'Tab' && this.open) {
+        // Tab goes round the switcher's own controls and never leaves for the page behind it.
+        const all = [...this.overlay.querySelectorAll<HTMLElement>('button, input, select, a[href]')].filter((n) => n.offsetParent !== null && !(n as HTMLButtonElement).disabled);
+        if (!all.length) return;
+        const at = all.indexOf(document.activeElement as HTMLElement);
+        const next = at < 0 ? 0 : (at + (e.shiftKey ? all.length - 1 : 1)) % all.length;
+        e.preventDefault();
+        e.stopPropagation();
+        all[next].focus({ preventScroll: true });
+      } else if (e.code === 'Escape' && this.open && this.current) {
+        // Escape opens the switcher in Sunup, so it must close it too, before the game hears it.
+        e.preventDefault();
+        e.stopPropagation();
+        this.hide();
       }
     }, { capture: true });
     window.addEventListener('gamepadconnected', () => this.saw('pad'));
@@ -207,6 +221,10 @@ export class Shell {
     this.render();
     toggle(this.overlay, 'on', true);
     toggle(this.cornerBtn, 'hidden', true);
+    // Tab stays on the switcher: the paused game underneath takes no focus or clicks.
+    for (const g of this.games.values()) g.root.inert = true;
+    const first = this.overlay.querySelector<HTMLButtonElement>('button.game.here') ?? this.overlay.querySelector<HTMLButtonElement>('button.game');
+    first?.focus({ preventScroll: true });
     this.audio.ui('open');
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(this.titleMood);
@@ -218,6 +236,8 @@ export class Shell {
     cancelAnimationFrame(this.raf);
     toggle(this.overlay, 'on', false);
     toggle(this.cornerBtn, 'hidden', false);
+    for (const g of this.games.values()) g.root.inert = false;
+    if (this.overlay.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     const cur = this.games.get(this.current);
     if (cur) {
       toggle(cur.root, 'off', false);
