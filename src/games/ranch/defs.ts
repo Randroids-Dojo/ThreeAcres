@@ -71,6 +71,12 @@ export function eats(k: DownyKind, f: Food): boolean {
   return e === 'any' || FOOD_GROUP[f] === e;
 }
 
+/** The food a hungry downy shows it wants: its favourite, or clover for one that eats anything. */
+export function wantedFood(k: DownyKind): Food {
+  const fav = KIND[k].favourite;
+  return fav === 'any' ? 'cloverhead' : (fav as Food);
+}
+
 export function favourite(k: DownyKind, f: Food): boolean {
   const fav = KIND[k].favourite;
   return fav === 'any' || fav === f;

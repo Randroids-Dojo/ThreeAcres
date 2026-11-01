@@ -47,6 +47,7 @@ Downies are round puff bodies about 0.5 m across, with a seed-head fluff shell, 
 
 **Behaviour:**
 - **Hunger:** rises from 0 to 1 over about 3 game hours. Above 0.5 a downy looks for food within 10 m and hops to it.
+- **Hungry downies show it:** a hungry downy of yours has its favourite food bobbing just over its head (clover for a thistle, which eats anything), so hunger and the right food are shown in the world. A lesson's marker over the same downy stands in for its sign.
 - **Shedding:** eating its favourite sheds 2 down tufts; other food it eats sheds 1. It won't eat a food type it doesn't eat.
 - **Moods:**
   - **Content:** recently fed.
@@ -207,6 +208,7 @@ Downies keep their name: whenever a line says "downy", an arrow is over one.
 | 7 | pen | pad posts (Pen only), arrow and ring on the nearest empty pad | a pen is built | Build a pen on an empty plot. | same | same |
 | 8 | penin | ring on the pen | a downy is in a pen | Blow the downy into the pen. | same | same |
 | 9 | meadow | arrow at the ranch gate, then a wild downy | a wild downy is caught; then the day may run on | Catch a downy out in Clover Meadow. | same | same |
+| 9b | farm | the loop, right after the meadow so the journal is never blank while coins build up: fluff first (blow it in, choose it, or pull it up), then the hungry downy (its favourite over it, or the garden marked if you have no food), then catch another downy | four sales from when it first came up (dusk taking over and handing back keeps the count) | Feed the hungry downy its favourite food. / Pull up food for the hungry downy. / Pull up the fluff your downies dropped. / Blow the fluff into the sell crate. / Catch another downy out in Clover Meadow. | same | same |
 | 10 | dusk | the hour arc, the front door | morning (sleep, or the night passes) | Sleep at the front door till morning. | same | same |
 | 11 | night | nettlebacks, the hedge tag | a nettleback is sent rolling (or dawn) | Blow anything at the pest to shoo it. | same | same |
 | 12 | garden | the Garden tag | a garden is built | Build a garden on an empty plot. | same | same |

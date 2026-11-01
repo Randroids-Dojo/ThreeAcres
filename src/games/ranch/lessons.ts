@@ -9,7 +9,7 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { isDowny, isTuft, type Food } from './defs';
+import { eats, isDowny, isFood, isTuft, wantedFood, type Food } from './defs';
 import { padSpots, type Ev } from './sim';
 import type { Downy, RanchState } from './state';
 import { DOOR, EXCHANGE, GATES, PADS, PEN_R, RANCH_GATE, WORKBENCH, zoneAt } from './world';
@@ -123,6 +123,31 @@ function sellStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' {
   if (carrying(s, isTuft)) return 'choose';
   return s.items.some((it) => !it.gone && isTuft(it.type)) || s.downies.some((d) => !d.gone && d.shedQ > 0) ? 'pull' : 'feed';
 }
+/** Your downies (tame or the porch one), not gone. */
+const mine = (d: Downy) => !d.gone && (d.tame || d.keep);
+/** The nearest of your downies that is hungry enough to eat. */
+const hungryOne = (s: RanchState) => nearestDowny(s, (d) => mine(d) && d.hunger > 0.5 && d.drawn === 0);
+
+/**
+ * The ranch's loop, where it stands: fluff first (blow, choose or pull it),
+ * then a hungry downy (feed it, or fetch food for it), and with everyone fed,
+ * catch another downy.
+ */
+function farmStep(s: RanchState): 'blow' | 'choose' | 'pull' | 'feed' | 'food' | 'catch' {
+  const sell = sellStep(s);
+  if (sell === 'blow' || sell === 'choose') return sell;
+  if (s.items.some((it) => !it.gone && isTuft(it.type) && zoneAt(it.x, it.z) === 'ranch')) return 'pull';
+  const d = hungryOne(s);
+  if (d) return carrying(s, (t) => isFood(t) && eats(d.kind, t)) ? 'feed' : 'food';
+  return 'catch';
+}
+const FARM = {
+  pull: 'Pull up the fluff your downies dropped.',
+  feed: 'Feed the hungry downy its favourite food.',
+  food: 'Pull up food for the hungry downy.',
+  catch: 'Catch another downy out in Clover Meadow.',
+};
+
 const SELL = {
   blow: 'Blow the fluff into the sell crate.',
   choose: (q: Say) => (q.dev === 'touch' ? "Tap the fluff's window to choose it." : q.dev === 'pad' ? 'Press LB or RB to choose the fluff.' : 'Press Q until the fluff is chosen.'),
@@ -341,6 +366,71 @@ const LESSONS: Lesson[] = [
       if (zoneAt(s.player.x, s.player.z) === 'ranch') return arrow(m, RANCH_GATE.x, 6.2, RANCH_GATE.z);
       return onDowny(m, nearestDowny(s, (d) => !d.tame && !d.keep, 26));
     },
+  },
+  {
+    // The loop the ranch runs on, taught once the pens and the meadow are known:
+    // hungry downies show the food they want, fed ones drop fluff, fluff sells.
+    id: 'farm',
+    after: ['meadow'],
+    unlocks: [],
+    ready: () => true,
+    // Count sales from when it first came up; dusk taking over and handing back must not start the count again.
+    start: (s) => {
+      s.learnCount['farm:from'] ??= s.learnCount['sell'] ?? 0;
+    },
+    text: (q, s) => {
+      const step = s ? farmStep(s) : 'feed';
+      return step === 'blow' ? SELL.blow : step === 'choose' ? SELL.choose(q) : FARM[step];
+    },
+    also: () => [SELL.blow, FARM.pull, FARM.food, FARM.catch],
+    done: (_s, n) => n('sell') - n('farm:from') >= 4,
+    mark: (s, m, floor) => {
+      const step = farmStep(s);
+      if (step === 'blow') {
+        arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
+        ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+        return true;
+      }
+      if (step === 'choose') {
+        m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
+        return false;
+      }
+      if (step === 'pull') {
+        let best = -1;
+        let bd = 1e9;
+        s.items.forEach((it, i) => {
+          if (it.gone || !isTuft(it.type) || zoneAt(it.x, it.z) !== 'ranch') return;
+          const d = dist(s, it.x, it.z);
+          if (d < bd) {
+            bd = d;
+            best = i;
+          }
+        });
+        if (best < 0) return false;
+        const it = s.items[best];
+        return arrow(m, it.x, it.y + 0.9, it.z);
+      }
+      if (step === 'feed') {
+        const d = hungryOne(s)!;
+        m.icon = wantedFood(d.kind);
+        m.x = d.x;
+        m.y = d.y + 1.05;
+        m.z = d.z;
+        m.r = 0;
+        return true;
+      }
+      if (step === 'food') {
+        // The nearest garden with something growing, or the first garden.
+        const g = nearestPad(s, (i) => s.pads[i].kind === 'garden' && !!s.pads[i].crop);
+        const i = g >= 0 ? g : 0;
+        arrow(m, PADS[i].x, floor(PADS[i].x, PADS[i].z) + 2.2, PADS[i].z);
+        ring(m, PADS[i].x, PADS[i].z, 3.1);
+        return true;
+      }
+      if (zoneAt(s.player.x, s.player.z) === 'ranch') return arrow(m, RANCH_GATE.x, 6.2, RANCH_GATE.z);
+      return onDowny(m, nearestDowny(s, (d) => !d.tame && !d.keep, 26));
+    },
+    note: 'Hungry downies show the food they want. Fed ones drop fluff.',
   },
   {
     id: 'jump',
@@ -730,6 +820,7 @@ export function creditLessons(s: RanchState): void {
   if (s.pads.some((p) => p.ups.length > 0 || p.kind === 'silo') || s.goals.includes('feeder')) ids.push('ups');
   if (Object.values(s.up).some((v) => v > 0)) ids.push('bench');
   if (s.gates.ridge || s.gates.hollow) ids.push('gates');
+  if (s.stats.sold >= 10 && ids.includes('meadow')) ids.push('farm');
   credit(s, ids);
   // A ranch that has sold, built or slept has seen every control on screen before.
   if (s.stats.sold > 0 || pens > 0 || s.day > 1) credit(s, ['slots', 'jump']);

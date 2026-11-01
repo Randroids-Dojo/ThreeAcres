@@ -13,6 +13,7 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
+  MeshLambertMaterial,
   Object3D,
   PlaneGeometry,
   Quaternion,
@@ -22,7 +23,7 @@ import {
   Euler,
   BoxGeometry,
 } from 'three';
-import { KIND, KINDS, TUFT_KIND, isTuft, type DownyKind, type ItemType } from '../defs';
+import { KIND, KINDS, TUFT_KIND, isTuft, wantedFood, type DownyKind, type Food, type ItemType } from '../defs';
 import { clamp, hash2 } from '../noise';
 import type { Physics } from '../physics';
 import type { RanchState } from '../state';
@@ -284,6 +285,8 @@ export class CreatureView {
   private eyes: InstancedMesh;
   private scowls: InstancedMesh;
   private items: Record<'cloverhead' | 'sweetroot' | 'dewberry' | 'tuft', InstancedMesh>;
+  /** Over each hungry downy of yours, the food it wants, bobbing: hunger and the right food shown in the world. */
+  readonly wants: Record<Food, InstancedMesh>;
   private nBody: InstancedMesh;
   private nSpikes: InstancedMesh;
   private shadows: InstancedMesh;
@@ -331,6 +334,15 @@ export class CreatureView {
       this.items[k] = m;
       this.root.add(m);
     }
+    this.wants = {} as Record<Food, InstancedMesh>;
+    for (const k of ['cloverhead', 'sweetroot', 'dewberry'] as Food[]) {
+      const m = new InstancedMesh(item[k], new MeshLambertMaterial({ vertexColors: true, emissive: 0x3a2a2a }), CAP);
+      m.count = 0;
+      m.frustumCulled = false;
+      m.name = `want-${k}`;
+      this.wants[k] = m;
+      this.root.add(m);
+    }
     this.nBody = new InstancedMesh(nettleBody(), matte(), 8);
     this.nSpikes = new InstancedMesh(nettleSpikes(), matte({ flat: true }), 8);
     for (const m of [this.nBody, this.nSpikes]) {
@@ -366,8 +378,9 @@ export class CreatureView {
     this.shadowN++;
   }
 
-  update(s: RanchState, phys: Physics, t: number, muzzle: Muzzle): void {
+  update(s: RanchState, phys: Physics, t: number, muzzle: Muzzle, skip: { x: number; z: number } | null = null, reduced = false): void {
     this.shadowN = 0;
+    const wn: Record<Food, number> = { cloverhead: 0, sweetroot: 0, dewberry: 0 };
     const n: Record<DownyKind, number> = { clover: 0, ember: 0, brook: 0, thistle: 0 };
     let ne = 0;
     let ns = 0;
@@ -411,6 +424,23 @@ export class CreatureView {
         const fl = phys.rest(d.x, d.z, true);
         this.shadow(d.x, fl, d.z, d.r, d.y - fl);
       }
+      // Hungry and yours: the food it wants bobs over its head (unless a lesson's marker already shows it there).
+      if (d.drawn === 0 && (d.tame || d.keep) && d.hunger > 0.5 && !(skip && Math.abs(skip.x - d.x) < 0.25 && Math.abs(skip.z - d.z) < 0.25)) {
+        const f = wantedFood(k);
+        if (wn[f] < CAP) {
+          const bob = reduced ? 0 : Math.sin(t * 2.6 + d.id) * 0.06;
+          _e.set(0.35, reduced ? d.id : t * 1.1 + d.id, 0, 'YXZ');
+          _q.setFromEuler(_e);
+          _m.compose(_v.set(d.x, d.y + 0.8 + bob, d.z), _q, _s.setScalar(0.95));
+          this.wants[f].setMatrixAt(wn[f]++, _m);
+        }
+      }
+    }
+    for (const f of ['cloverhead', 'sweetroot', 'dewberry'] as Food[]) {
+      const m = this.wants[f];
+      m.count = wn[f];
+      m.visible = wn[f] > 0;
+      m.instanceMatrix.needsUpdate = true;
     }
     for (const k of KINDS) {
       const m = this.bodies[k];

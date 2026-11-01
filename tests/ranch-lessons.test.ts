@@ -139,7 +139,9 @@ describe('the lessons in order', () => {
     n('catch:wild');
     run(1.5);
     expect(sim.knows('time')).toBe(true);
-    expect(lines.length).toBe(9);
+    // The loop comes straight after: no blank journal while coins build up for the next lesson.
+    expect(lines.length).toBe(10);
+    expect(lines[9]).toBe('farm');
   });
 
   it('end only when the action is done, and tick the line before the next', () => {
@@ -284,6 +286,75 @@ describe('selling, step by step', () => {
     run(0.1);
     expect(view().done).toBe(true);
     expect(view().line).toBe('Blow the fluff into the sell crate.');
+  });
+});
+
+describe('the loop, after the meadow', () => {
+  it('says what to do with food and fluff, a step at a time, until four sales', () => {
+    const { sim, tutor, run, view } = ranch();
+    const s = sim.s;
+    for (const id of ['look', 'walk', 'draw', 'puff', 'feed', 'sell', 'pen', 'penin', 'meadow', 'slots', 'jump']) s.learn.push(`lesson:${id}`);
+    for (const f of ['bellows', 'draw', 'puff', 'pause', 'coins', 'pads', 'time', 'slots', 'jump']) s.learn.push(f);
+    s.hour = 9;
+    for (const it of s.items) if (it.type.startsWith('tuft-')) it.gone = true;
+    for (const q of s.slots) {
+      q.t = null;
+      q.n = 0;
+    }
+    const d = s.downies.find((q) => !q.gone && q.keep)!;
+    for (const q of s.downies) q.hunger = 0;
+    d.hunger = 0.8;
+    run(0.2);
+    expect(tutor.current).toBe('farm');
+    // Hungry, and nothing to feed it: fetch food, the garden marked.
+    expect(view().line).toBe('Pull up food for the hungry downy.');
+    expect(tutor.mark.on && tutor.mark.r > 0).toBe(true);
+    // Clover heads aboard: feed it, its favourite bobbing over it.
+    s.slots[0].t = 'cloverhead';
+    s.slots[0].n = 10;
+    s.sel = 0;
+    d.hunger = 0.8;
+    run(0.1);
+    expect(view().line).toBe('Feed the hungry downy its favourite food.');
+    expect(tutor.mark.icon).toBe('cloverhead');
+    expect(Math.abs(tutor.mark.x - d.x)).toBeLessThan(0.01);
+    // It ate and dropped fluff: pull it up, then blow it in.
+    d.hunger = 0;
+    const fluff = newItem(s, 'tuft-clover', d.x + 1, sim.phys.floor(d.x + 1, d.z) + 0.1, d.z);
+    s.items.push(fluff);
+    run(0.1);
+    expect(view().line).toBe('Pull up the fluff your downies dropped.');
+    fluff.gone = true;
+    s.slots[1].t = 'tuft-clover';
+    s.slots[1].n = 2;
+    s.sel = 1;
+    run(0.1);
+    expect(view().line).toBe('Blow the fluff into the sell crate.');
+    // Everyone fed, nothing aboard: catch another downy.
+    s.slots[1].t = null;
+    s.slots[1].n = 0;
+    s.slots[0].t = null;
+    s.slots[0].n = 0;
+    run(0.1);
+    expect(view().line).toBe('Catch another downy out in Clover Meadow.');
+    // Two sales, then dusk takes over; morning hands back, and the count carries on.
+    tutor.add(s, 'sell');
+    tutor.add(s, 'sell');
+    run(0.1);
+    s.hour = 18.4;
+    run(0.2);
+    expect(tutor.current).toBe('dusk');
+    s.hour = 6;
+    run(2);
+    expect(tutor.current).toBe('farm');
+    expect(s.learn).not.toContain('lesson:farm');
+    // Two more make four: it ticks and ends.
+    tutor.add(s, 'sell');
+    tutor.add(s, 'sell');
+    run(0.1);
+    expect(view().done).toBe(true);
+    run(2);
+    expect(s.learn).toContain('lesson:farm');
   });
 });
 

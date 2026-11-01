@@ -378,7 +378,8 @@ function only(ui, allowed) {
   await frames(page, 4);
   u = await k.ui();
   check('phone: fluff chosen, the line says to blow it in, the chevron goes', u.page === 'Blow the fluff into the sell crate.' && !(await pointed()), u.page);
-  check('phone: the arrow moves to the crate', u.marker === 'arrow');
+  const onCrate = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on && m.icon === 'arrow' && Math.abs(m.x - -6.5) < 0.5 && Math.abs(m.z - 36.5) < 0.5; });
+  check('phone: the arrow moves to the crate', onCrate);
   await k.place(-6.5, 32.8, -6.5, 5.7, 36.5);
   await frames(page, 3);
   check('phone: no coins on screen just before the sale', !(await k.ui()).coins);
@@ -446,6 +447,30 @@ function only(ui, allowed) {
   s = await k.st();
   check('phone: the day may run on now, but the clock is not shown until dusk', s.learn.includes('time') && !(await k.ui()).clock);
 
+  // ---- 9b. the loop: right after the meadow, so the journal is never blank while coins build up
+  check('phone: the loop lesson comes straight after the meadow', await k.lessonOn('farm', 4000));
+  // A downy of yours gets hungry: it shows the food it wants, and the line says what to do about it.
+  // (Fluff comes first in the loop, so clear any picked up in the meadow to look at the feeding step.)
+  await page.evaluate(() => {
+    const s = window.ranch.sim.s;
+    for (const q of s.slots) if (q.t && q.t.startsWith('tuft-')) { q.t = null; q.n = 0; }
+    for (const it of s.items) if (it.type.startsWith('tuft-')) it.gone = true;
+    for (const d of s.downies) if (!d.gone && (d.tame || d.keep)) d.hunger = 0.8;
+  });
+  await frames(page, 6);
+  u = await k.ui();
+  check('phone: a hungry downy brings a feeding line', /^(Feed the hungry downy its favourite food\.|Pull up food for the hungry downy\.)$/.test(u.page), u.page);
+  // Every hungry downy of yours in the open shows its food: its own sign, or the lesson's marker standing in for it.
+  const want = await page.evaluate(() => {
+    const r = window.ranch;
+    const hungry = r.sim.s.downies.filter((d) => !d.gone && (d.tame || d.keep) && d.drawn === 0 && d.hunger > 0.5).length;
+    const signs = Object.values(r.creatures.wants).reduce((a, m) => a + m.count, 0);
+    const marker = r.tutor.mark.on && r.tutor.mark.icon !== 'arrow' ? 1 : 0;
+    return { hungry, signs, marker };
+  });
+  check('phone: hungry downies show the food they want', want.hungry >= 1 && want.signs + want.marker === want.hungry, JSON.stringify(want));
+  await k.shot('phone-12b-farm');
+
   // ---- 10. dusk: the clock and the door
   await page.evaluate(() => (window.ranch.sim.s.hour = 18.2));
   check('phone: dusk brings its lesson', await k.lessonOn('dusk', 8000));
@@ -483,7 +508,12 @@ function only(ui, allowed) {
   check('phone: puffing at a nettleback ends the night lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:night'), null, 4000));
 
   // ---- 12. garden, plant, upgrades, bench, gates: each when the coins allow
-  await page.evaluate(() => { const s = window.ranch.sim.s; s.hour = 10; s.coins = 260; });
+  // (The loop lesson ends after four sales; sell four here so the next lessons can come.)
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.hour = 10; for (const d of s.downies) d.hunger = 0; });
+  check('phone: morning hands the journal back to the loop lesson', await k.lessonOn('farm', 4000));
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.sell = (s.learnCount.sell ?? 0) + 4; });
+  check('phone: four sales finish the loop lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:farm'), null, 3000), JSON.stringify(await page.evaluate(() => { const s = window.ranch.sim.s; return { from: s.learnCount['farm:from'], sell: s.learnCount.sell, now: window.ranch.tutor.current }; })));
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 260; });
   check('phone: 200 coins bring the garden lesson', await k.lessonOn('garden', 4000));
   check('phone: garden line', (await k.ui()).page === 'Build a garden on an empty plot.');
   await k.place(25.8 + 1.2, 31.8 + 2.2, 25.8 + 0.4, 5.6, 31.8);

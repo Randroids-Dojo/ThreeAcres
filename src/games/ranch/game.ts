@@ -542,7 +542,9 @@ export class Ranch {
     const a = this.aim;
     U.uDraw.value.set(a.mx, a.my, a.mz, this.sim.drawPower);
     U.uDrawDir.value.set(a.dx, a.dy, a.dz);
-    this.creatures.update(s, this.sim.phys, this.t, { x: a.mx, y: a.my, z: a.mz });
+    // A lesson's marker showing food over a downy stands in for that downy's own sign.
+    const mk = this.tutor.mark;
+    this.creatures.update(s, this.sim.phys, this.t, { x: a.mx, y: a.my, z: a.mz }, mk.on && mk.icon !== 'arrow' ? mk : null, this.ctx.settings().reducedMotion);
     this.pads.update(dt, s.pads);
     this.props.update(this.t, night);
     this.tags.update(dt, gust);
