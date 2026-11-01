@@ -51,6 +51,7 @@ npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates
 npx tsx scripts/ranch-orders.ts        # Thistledown: how varied each morning's orders are and whether they compete
 npx tsx scripts/ranch-catch.ts         # Thistledown: catch success per kind for a careless thumb against a careful one
 node scripts/ranch-catch-real.mjs      # the same with real touch in the browser (RANCH_URL=...)
+node scripts/ranch-pest-night.mjs      # Thistledown: pests readable at night (eye glow measured from the frame)
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
 node scripts/render3d-flash.mjs        # 3D frame readback for black or NaN pixels; also render3d-shots, -perf, -pick, -leak
 node scripts/audio-check.mjs           # audio levels, latency, crossfades, bursts (writes WAVs to /tmp/acres-audio-2)
@@ -59,6 +60,8 @@ node scripts/audio-check.mjs           # audio levels, latency, crossfades, burs
 Screenshots stall frames at DPR 2, so take frame times from runs without them.
 
 Ruled paper: draw rules on the lines of writing (a border under a title, or a gradient on the text element sized from its own line height), never at fixed pixel offsets on the page. `scripts/qa/strike.mjs` finds any rule crossing the middle of a line of words; the checks above run it.
+
+Checks drive the games only through their `window.ranch`, `window.sunup` and `window.deck` hooks, never by importing `/src/...` inside the page, so every check also runs against https://three-acres.vercel.app. In CDP, `Input.dispatchTouchEvent` with `touchEnd` lifts the touch points it lists.
 
 Tap reach: an invisible touch zone (a walk stick's capture area) can lie over a control the player can see, which a box overlap check never notices. `scripts/qa/reach.mjs` asks the browser what a tap at five points across each visible button would hit; the overlap and thumb checks run it.
 
