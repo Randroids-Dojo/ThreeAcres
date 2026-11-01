@@ -53,6 +53,10 @@ A switch never loses progress, moves the farmer into a wall, or strands a job.
 
 The mixer shows how long has been spent in each option, and a notes box stamped with the current mix. This is the lab: the game exists to find the best mix.
 
+## Crows in the lessons
+
+Crows are let onto the farm quietly from day 5, once delivering requests is known; they come on a dry day when something is growing. The crow lesson waits for a real crow: it takes the line from whatever calm lesson is up (a crow will not wait), says "A crow is on your carrots. Shoo it." (naming the crop it is on), and points at it, with a cream chevron bobbing over the crow or sitting on the screen's edge, turned towards it, while it is out of view. It ends when the crow is shooed or flies off, then "Scarecrows keep crows away. Build one." shows for a few seconds and the calm lesson comes back. `scripts/qa/lessons.mjs` checks all of it with a crow on a real crop.
+
 ## Crop art
 
 Each crop has its own small drawing (`src/ui/crops-art.ts`): brown ink outlines, flat fills, one highlight and a darker line for the detail, on a 32 grid so it reads at 16 px and stays crisp at 44. It stands in everywhere a crop is named in the interface: the seed picker, the chosen seed on the Seeds tool, request notes, the board's Seeds tab, the stock list and draft cards. No crop is a coloured dot any more.

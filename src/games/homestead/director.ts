@@ -254,6 +254,7 @@ export class Director {
     const lesson = this.tutor.update(s, dt, this.hud.touch.shown);
     cmds.push(...lesson.cmds);
     this.hud.setLesson(lesson.line);
+    this.hud.setPoint(lesson.point);
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);

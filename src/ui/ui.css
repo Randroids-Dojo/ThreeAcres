@@ -458,3 +458,12 @@ svg { width: 100%; height: 100%; display: block; }
 .shellbtn.fresh::after { content: ''; position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: #e0674b; box-shadow: 0 0 0 2px #2a2116; }
 .shellover .newver { display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--paper3); font-size: 14px; }
 .shellover .newver .btn { min-height: 34px; }
+
+/* The lesson's pointer: cream, like the hint's ink-free cousin; bobs over its target, sits on the edge when the target is out of view. */
+.tpoint { position: absolute; left: 0; top: 0; width: 30px; height: 30px; margin: -15px 0 0 -15px; color: #fbf3dc; filter: drop-shadow(0 1px 2px rgba(20, 14, 6, 0.7)); pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 3; }
+.tpoint.on { opacity: 1; }
+.tpoint svg { width: 100%; height: 100%; display: block; }
+.tpoint.over svg { animation: tpoint-bob 0.9s ease-in-out infinite alternate; }
+@keyframes tpoint-bob { from { transform: translateX(-4px); } to { transform: translateX(3px); } }
+@media (prefers-reduced-motion: reduce) { .tpoint.over svg { animation: none; } }
+

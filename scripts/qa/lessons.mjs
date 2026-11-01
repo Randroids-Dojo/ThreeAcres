@@ -135,6 +135,51 @@ await frames(20);
 s = await screen();
 check('after reading it, the next line explains delivery', /crate|ships/i.test(s.line), s.line);
 check('crows and the forecast are still to come', !s.forecast && !s.tools.includes('build'));
+
+// 7. Crows come in quietly from day 5; the crow line shows only while a crow is really on the farm.
+await p.evaluate(() => { const st = window.sunup.state; for (const id of ['requests', 'deliver']) if (!st.learn.includes(`lesson:${id}`)) st.learn.push(`lesson:${id}`); st.day = 5; });
+await frames(20);
+s = await screen();
+check('day 5 with no crow about: no crow line', !/crow/i.test(s.line), `line "${s.line}"`);
+check('crows are let onto the farm quietly', await p.evaluate(() => window.sunup.state.learn.includes('pests')));
+// A crow comes for the carrots.
+// (It goes for a real growing crop, as crows do.)
+const target = await p.evaluate(() => {
+  const st = window.sunup.state;
+  const i = st.plots.findIndex((q, k) => q.crop && !q.crop.dead && q.crop.stage >= 1 && st.parcelOf[k] >= 0);
+  const x = i % st.W;
+  const y = Math.floor(i / st.W);
+  const f = st.actors[0];
+  Object.assign(f, { x: 12.5, y: 3.5, task: null, path: [] });
+  st.crows.push({ id: st.nextId++, x, y, fromX: -3, fromY: 4, phase: 'in', t: 0 });
+  return { x, y };
+});
+await frames(40);
+s = await screen();
+check('a crow lands: the line names it and the crop it is on', /^A crow is on your [a-z]+\. Shoo it\.$/.test(s.line), s.line);
+// It is pecking out of view: a chevron on the screen's edge points the way.
+const pointer = () => p.evaluate(() => {
+  const e = document.querySelector('.tpoint');
+  const r = e.getBoundingClientRect();
+  return { on: e.classList.contains('on'), over: e.classList.contains('over'), x: r.x + r.width / 2, y: r.y + r.height / 2 };
+});
+const crowAt = () => p.evaluate(() => { const c = window.sunup.state.crows.find((q) => q.phase === 'in' || q.phase === 'peck'); return c ? window.sunup.r3d.project(c.x + 0.5, c.y + 0.5, 0.9) : null; });
+let pt = await pointer();
+let ca = await crowAt();
+const towards = ca && Math.sign(ca.x - 206) === Math.sign(pt.x - 206);
+check('the crow out of view: a chevron at the edge points towards it', pt.on && !pt.over && towards, JSON.stringify({ pt, ca }));
+await shot('8-crow');
+// Walk closer, not yet at it: the chevron moves over the crow.
+await p.evaluate((t) => { const f = window.sunup.state.actors[0]; Object.assign(f, { x: t.x + 3.5, y: t.y - 0.5, task: null, path: [] }); }, target);
+await frames(20);
+pt = await pointer();
+ca = await crowAt();
+check('the crow in view: the chevron bobs just over it', pt.on && pt.over && ca && Math.abs(pt.x - ca.x) < 12 && ca.y - pt.y > 10 && ca.y - pt.y < 50, JSON.stringify({ pt, ca }));
+await shot('8b-crow-near');
+// Walk at it.
+await p.evaluate((t) => { const f = window.sunup.state.actors[0]; Object.assign(f, { x: t.x + 0.5, y: t.y - 0.5, task: null, path: [] }); }, target);
+await frames(20);
+check('walking at the crow shoos it and ends the crow lesson', await p.evaluate(() => window.sunup.state.learn.includes('lesson:pests')));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 console.log(failed ? `LESSONS FAILED (${failed})` : 'LESSONS OK', `shots in ${out}`);

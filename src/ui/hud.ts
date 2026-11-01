@@ -55,6 +55,9 @@ export class Hud {
   private hintEl = el('div', 'hint');
   readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
+  /** The lesson's pointer: a cream chevron over what the line is about, or at the screen's edge when it is out of view. */
+  private pointer = el('div', 'tpoint', '<svg viewBox="-16 -16 32 32"><path d="M-7 -11 L7 0 L-7 11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  private pointAt: { x: number; y: number } | null = null;
   private toolsKey = '';
   private goalsKey = '';
   private meterKey = '';
@@ -117,7 +120,7 @@ export class Hud {
     toggle(this.goals, 'folded', this.foldedGoals);
 
 
-    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.touch.el, this.toasts, this.floaters);
+    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.pointer, this.touch.el, this.toasts, this.floaters);
   }
 
   // ------------------------------------------------------------ per frame
@@ -129,6 +132,7 @@ export class Hud {
     this.updateGoals(s);
     this.updateTools(s);
     this.updateInfo(s, aim);
+    this.updatePointer();
     this.touch.update();
     setText(this.hintEl, this.lessonLine);
     toggle(this.hintEl, 'on', !!this.lessonLine);
@@ -490,6 +494,38 @@ export class Hud {
 
   setLesson(line: string): void {
     this.lessonLine = line;
+  }
+
+  /** A tile for the lesson to point at, or null. */
+  setPoint(p: { x: number; y: number } | null): void {
+    this.pointAt = p;
+  }
+
+  /** Over the tile when it is in view, else on the edge of the clear band, turned towards it. */
+  private updatePointer(): void {
+    const t = this.pointAt;
+    const pp = t && !this.seedOpen && !this.buildOpen ? this.host.project(t.x, t.y, 0.9) : null;
+    toggle(this.pointer, 'on', !!pp);
+    if (!pp) return;
+    const W = this.root.clientWidth;
+    const H = this.root.clientHeight;
+    // The clear band: below the day card and coins, above the tool rack.
+    const x0 = 22;
+    const x1 = W - 22;
+    const y0 = 150;
+    const y1 = H - 150;
+    const inside = pp.x > x0 && pp.x < x1 && pp.y > y0 && pp.y < y1;
+    toggle(this.pointer, 'over', inside);
+    if (inside) {
+      this.pointer.style.transform = `translate(${pp.x.toFixed(0)}px, ${(pp.y - 30).toFixed(0)}px) rotate(90deg)`;
+      return;
+    }
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const dx = pp.x - cx;
+    const dy = pp.y - cy;
+    const k = Math.min((x1 - cx) / Math.max(Math.abs(dx), 1e-3), (y1 - cy) / Math.max(Math.abs(dy), 1e-3));
+    this.pointer.style.transform = `translate(${(cx + dx * k).toFixed(0)}px, ${(cy + dy * k).toFixed(0)}px) rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
   }
 
   /** Tools on the rack: only the ones a lesson has brought in (Sunup), or the full kit. */

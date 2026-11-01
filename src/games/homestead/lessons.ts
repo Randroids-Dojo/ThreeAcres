@@ -4,6 +4,7 @@
 // one appears. Everything a lesson has not introduced stays off the screen.
 
 import type { Command } from '../../sim/commands';
+import { CROPS } from '../../sim/crops';
 import { dayOfSeason } from '../../sim/world';
 import type { SimEvent, WorldState } from '../../sim/types';
 
@@ -19,9 +20,20 @@ interface Lesson {
   /** Finished? `n` reads the counts the tutor keeps. Passive lessons finish on their own after `passive` seconds. */
   done?(s: WorldState, n: (k: string) => number): boolean;
   passive?: number;
+  /** Takes over from a calm lesson when it becomes ready (a crow will not wait), which comes back after. */
+  urgent?: boolean;
+  /** A tile to point at while the line is up (a chevron over it, or at the screen's edge when it is out of view). */
+  point?(s: WorldState): { x: number; y: number } | null;
 }
 
 const anyRipe = (s: WorldState) => s.plots.some((p, i) => s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned && p.crop && !p.crop.dead && p.crop.stage === 4);
+/** A crow on the farm right now, flying in or pecking. */
+const crowHere = (s: WorldState) => s.crows.some((c) => c.phase === 'in' || c.phase === 'peck');
+const theCrow = (s: WorldState) => s.crows.find((c) => c.phase === 'in' || c.phase === 'peck') ?? null;
+
+/** Features that arrive with no line of their own: crows start coming from day 5, on a dry day with something growing. */
+const QUIET: { what: string; after: string[]; when(s: WorldState): boolean }[] = [{ what: 'pests', after: ['deliver'], when: (s) => s.day >= 5 }];
+
 const anyThirsty = (s: WorldState) => s.plots.some((p) => p.crop && !p.crop.dead && p.crop.stage < 4 && !p.wet);
 
 const LESSONS: Lesson[] = [
@@ -99,12 +111,34 @@ const LESSONS: Lesson[] = [
     done: (s, n) => s.parcels.filter((p) => p.owned).length >= 2 && n('till') >= 2,
   },
   {
+    // Crows are let onto the farm quietly (see QUIET); the line waits for a
+    // real one to land, so it never talks about crows that are not there.
     id: 'pests',
+    urgent: true,
     after: ['deliver'],
-    unlocks: ['pests', 'build', 'forecast'],
-    ready: (s) => s.day >= 5,
-    text: () => 'Crows. Walk at them, or build a scarecrow.',
-    done: (s, n) => n('scare') + n('build') >= 1 || s.day >= n('since:pests') + 2,
+    unlocks: ['build', 'forecast'],
+    ready: (s) => crowHere(s),
+    // Names what it is after, so you know where to look.
+    text: (s) => {
+      const c = theCrow(s);
+      const crop = c ? s.plots[c.y * s.W + c.x]?.crop : null;
+      return `A crow is on your ${crop ? CROPS[crop.kind].plural.toLowerCase() : 'crops'}. Shoo it.`;
+    },
+    point: (s) => {
+      const c = theCrow(s);
+      return c ? { x: c.x + 0.5, y: c.y + 0.5 } : null;
+    },
+    // Shooed, or it flew off with its dinner: either way the crow has gone.
+    done: (s, n) => n('scare') + n('build') >= 1 || !crowHere(s),
+  },
+  {
+    id: 'scarecrow',
+    urgent: true,
+    after: ['pests'],
+    unlocks: [],
+    ready: () => true,
+    text: () => 'Scarecrows keep crows away. Build one.',
+    passive: 9,
   },
   {
     id: 'turn',
@@ -131,6 +165,8 @@ export function allLines(s: WorldState): string[] {
 
 export class Tutor {
   private active: Lesson | null = null;
+  /** Quiet unlocks already sent (the sim adds them to the farm's learning on its next step). */
+  private sent = new Set<string>();
 
   /** Count the things lessons wait for. */
   onEvent(s: WorldState, e: SimEvent): void {
@@ -157,10 +193,16 @@ export class Tutor {
   }
 
   /** Once a frame: the line to show, and any unlocks for the farm. */
-  update(s: WorldState, dt: number, touch: boolean): { line: string; cmds: Command[] } {
+  update(s: WorldState, dt: number, touch: boolean): { line: string; cmds: Command[]; point: { x: number; y: number } | null } {
     const cmds: Command[] = [];
     const n = (k: string) => s.learnCount[k] ?? 0;
     const finished = (id: string) => s.learn.includes(`lesson:${id}`);
+    for (const q of QUIET) if (!s.learn.includes(q.what) && !this.sent.has(q.what) && q.after.every(finished) && q.when(s)) {
+      this.sent.add(q.what);
+      cmds.push({ type: 'unlock', what: q.what });
+    }
+    // A lesson finished elsewhere (credited to an old save) leaves quietly.
+    if (this.active && finished(this.active.id)) this.active = null;
     // Finish the lesson on screen when its condition is met.
     if (this.active) {
       const l = this.active;
@@ -172,16 +214,21 @@ export class Tutor {
         this.active = null;
       }
     }
+    const eligible = (l: Lesson) => !finished(l.id) && l.after.every(finished) && l.ready(s);
+    const urgentNow = () => LESSONS.find((l) => l.urgent && eligible(l));
+    // An urgent lesson takes the line from a calm one; the calm one is picked up again after.
+    if (this.active && !this.active.urgent && s.turnover < 0 && urgentNow()) this.active = null;
     if (!this.active && s.turnover < 0) {
-      this.active = LESSONS.find((l) => !finished(l.id) && l.after.every(finished) && l.ready(s)) ?? null;
+      this.active = urgentNow() ?? LESSONS.find(eligible) ?? null;
       if (this.active) {
         s.learnCount[`since:${this.active.id}`] = s.day;
         for (const what of this.active.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
         // A lesson already satisfied (rain watered the carrots) passes quietly.
-        if (!this.active.passive && this.active.done!(s, n)) return { line: '', cmds };
+        if (!this.active.passive && this.active.done!(s, n)) return { line: '', cmds, point: null };
       }
     }
-    return { line: this.active && s.turnover < 0 ? this.active.text(s, touch) : '', cmds };
+    const up = !!this.active && s.turnover < 0;
+    return { line: up ? this.active!.text(s, touch) : '', cmds, point: up ? (this.active!.point?.(s) ?? null) : null };
   }
 }
 

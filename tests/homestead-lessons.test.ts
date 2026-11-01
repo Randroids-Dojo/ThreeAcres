@@ -38,3 +38,52 @@ describe('Sunup acting where it would do something', () => {
     expect(resolve(s, 'seeds', 11, 2).ok).toBe(false);
   });
 });
+
+describe('the crow lesson', () => {
+  it('lets crows in quietly, and speaks only while a crow is actually on the farm', async () => {
+    const { Tutor } = await import('../src/games/homestead/lessons');
+    const s = world('sunup');
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith']) s.learn.push(`lesson:${id}`);
+    s.day = 5;
+    const t = new Tutor();
+    // Day 5, no crow: no line, but crows are let in.
+    let out = t.update(s, 0.1, true);
+    expect(out.line).toBe('');
+    expect(out.cmds.some((c) => c.type === 'unlock' && c.what === 'pests')).toBe(true);
+    s.learn.push('pests');
+    out = t.update(s, 0.1, true);
+    expect(out.line).toBe('');
+    // A crow lands: now the line.
+    s.crows.push({ id: 900, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
+    out = t.update(s, 0.1, true);
+    expect(out.line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
+    // Shooed: the crow lesson ends, and the scarecrow note follows.
+    t.onEvent(s, { type: 'crowScared', id: 900, x: 3, y: 5 } as never);
+    s.crows[0].phase = 'flee';
+    t.update(s, 0.1, true);
+    out = t.update(s, 0.1, true);
+    expect(s.learn).toContain('lesson:pests');
+    expect(out.line).toBe('Scarecrows keep crows away. Build one.');
+  });
+});
+
+describe('a crow will not wait', () => {
+  it('takes the line from a calm lesson, then hands it back', async () => {
+    const { Tutor } = await import('../src/games/homestead/lessons');
+    const s = world('sunup');
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'turn', 'smith']) s.learn.push(`lesson:${id}`);
+    s.learn.push('pests');
+    s.day = 5;
+    s.coins = 500;
+    const t = new Tutor();
+    expect(t.update(s, 0.1, true).line).toBe('Buy a second field. Hoe it first.');
+    s.crows.push({ id: 901, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
+    expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
+    t.onEvent(s, { type: 'crowScared', id: 901, x: 3, y: 5 } as never);
+    s.crows[0].phase = 'flee';
+    t.update(s, 0.1, true);
+    expect(t.update(s, 0.1, true).line).toBe('Scarecrows keep crows away. Build one.');
+    for (let i = 0; i < 100; i++) t.update(s, 0.1, true);
+    expect(t.update(s, 0.1, true).line).toBe('Buy a second field. Hoe it first.');
+  });
+});
