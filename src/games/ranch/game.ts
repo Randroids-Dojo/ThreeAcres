@@ -33,7 +33,7 @@ import { GroundTex, buildFluff, buildGrass } from './scene/grass';
 import { Marker } from './scene/marker';
 import { U, armNaNWatch } from './scene/mat';
 import { PadView } from './scene/pads';
-import { canvas, paintBoard, tex, type BoardRow } from './scene/paint';
+import { canvas, layoutTag, paintBoard, tex, type BoardRow, type TagLayout } from './scene/paint';
 import { buildProps, type Props } from './scene/props';
 import { Sky } from './scene/sky';
 import { TagMenu, type Rail } from './scene/tags';
@@ -1225,6 +1225,13 @@ export class Ranch {
   menuOptions(): string[] {
     return this.menu ? this.tags.opts.map((o) => o.id) : [];
   }
+
+  /** For checks: how a tag's words would be set on its 320 by 160 face. */
+  tagLayout(title: string, price: number | null, note: string): TagLayout {
+    const g = (this.tagProbe ??= document.createElement('canvas').getContext('2d')!);
+    return layoutTag(g, 320, title, price, note);
+  }
+  private tagProbe: CanvasRenderingContext2D | undefined;
 
   /** Where a tag is on screen (CSS px), for tapping it in checks. */
   tagScreen(i: number): { x: number; y: number } | null {

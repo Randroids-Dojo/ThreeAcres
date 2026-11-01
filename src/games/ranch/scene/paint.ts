@@ -281,6 +281,68 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
 
 // ---------------------------------------------------------------- hanging tags
 
+/** How a tag's words are set: sizes, the note's lines, and whether everything fits inside the tag. */
+export interface TagLayout {
+  titleSize: number;
+  /** Prices of four figures and more are set a little smaller, so the title keeps its room. */
+  priceSize: number;
+  noteSize: number;
+  noteLines: string[];
+  fits: boolean;
+}
+
+const PAD = 22;
+
+/**
+ * Fit a tag's words to the tag: the title shrinks to clear the price, the note
+ * shrinks and then wraps onto a second line. Nothing is drawn past the edges.
+ */
+export function layoutTag(g: CanvasRenderingContext2D, w: number, title: string, price: number | null, note: string): TagLayout {
+  let priceW = 0;
+  const pt = price !== null ? price.toLocaleString('en-US') : '';
+  const priceSize = pt.length > 3 ? 34 : 42;
+  if (pt) {
+    g.font = `700 ${priceSize}px ${SERIF}`;
+    priceW = g.measureText(pt).width + 14;
+  }
+  const room = w - PAD * 2;
+  let titleSize = 40;
+  for (; titleSize > 22; titleSize -= 2) {
+    g.font = `650 ${titleSize}px ${SERIF}`;
+    if (g.measureText(title).width <= room - priceW) break;
+  }
+  g.font = `650 ${titleSize}px ${SERIF}`;
+  let fits = g.measureText(title).width <= room - priceW;
+  let noteSize = 24;
+  let noteLines = note ? [note] : [];
+  if (note) {
+    const width = (t: string, size: number) => {
+      g.font = `italic 400 ${size}px ${SERIF}`;
+      return g.measureText(t).width;
+    };
+    for (; noteSize > 19 && width(note, noteSize) > room; noteSize -= 1);
+    if (width(note, noteSize) > room) {
+      // Two lines, split at the space that best balances them.
+      const words = note.split(' ');
+      let best: string[] = [note];
+      let bestW = Infinity;
+      for (let i = 1; i < words.length; i++) {
+        const a = words.slice(0, i).join(' ');
+        const b = words.slice(i).join(' ');
+        const m = Math.max(width(a, 21), width(b, 21));
+        if (m < bestW) {
+          bestW = m;
+          best = [a, b];
+        }
+      }
+      noteLines = best;
+      for (noteSize = 21; noteSize > 16 && Math.max(...noteLines.map((t) => width(t, noteSize))) > room; noteSize -= 1);
+    }
+    fits = fits && Math.max(...noteLines.map((t) => width(t, noteSize))) <= room;
+  }
+  return { titleSize, priceSize, noteSize, noteLines, fits };
+}
+
 export function paintTag(g: CanvasRenderingContext2D, w: number, h: number, title: string, price: number | null, note: string, ok: boolean, hot: boolean, seed: number): void {
   g.clearRect(0, 0, w, h);
   // Tag shape: a plank with clipped top corners and a twine hole.
@@ -300,21 +362,23 @@ export function paintTag(g: CanvasRenderingContext2D, w: number, h: number, titl
   g.beginPath();
   g.arc(w / 2, 18, 8, 0, Math.PI * 2);
   g.fill();
+  const lay = layoutTag(g, w, title, price, note);
   g.textAlign = 'left';
   g.textBaseline = 'alphabetic';
   g.fillStyle = ok ? '#2f2012' : 'rgba(47,32,18,0.55)';
-  g.font = `650 ${title.length > 16 ? 34 : 40}px ${SERIF}`;
-  g.fillText(title, 22, 78);
-  if (note) {
-    g.font = `italic 400 24px ${SERIF}`;
+  g.font = `650 ${lay.titleSize}px ${SERIF}`;
+  g.fillText(title, PAD, 78);
+  if (lay.noteLines.length) {
+    g.font = `italic 400 ${lay.noteSize}px ${SERIF}`;
     g.fillStyle = ok ? 'rgba(47,32,18,0.8)' : 'rgba(47,32,18,0.5)';
-    g.fillText(note, 22, h - 22);
+    const step = lay.noteSize + 4;
+    lay.noteLines.forEach((t, i) => g.fillText(t, PAD, h - 22 - (lay.noteLines.length - 1 - i) * step));
   }
   if (price !== null) {
     g.textAlign = 'right';
-    g.font = `700 42px ${SERIF}`;
+    g.font = `700 ${lay.priceSize}px ${SERIF}`;
     g.fillStyle = ok ? '#2f2012' : '#8e3a26';
-    g.fillText(price.toLocaleString('en-US'), w - 22, 78);
+    g.fillText(price.toLocaleString('en-US'), w - PAD, 78);
   }
   if (hot) {
     g.strokeStyle = '#2f2012';

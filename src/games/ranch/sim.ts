@@ -1674,7 +1674,7 @@ export class Sim {
       out.push({ id: 'sleep', title: 'Sleep till morning', price: null, ok: true, note: `Day ${s.day}, saves the ranch` });
     } else if (it.kind === 'gate') {
       const g = GATES[it.id as GateId];
-      out.push({ id: `gate:${it.id}`, title: `Open the way to ${g.name}`, price: g.cost, ok: can(g.cost), note: '' });
+      out.push({ id: `gate:${it.id}`, title: g.name, price: g.cost, ok: can(g.cost), note: 'Opens the gate' });
     } else if (it.kind === 'chute') {
       this.emptyChute(it.id as number);
     }

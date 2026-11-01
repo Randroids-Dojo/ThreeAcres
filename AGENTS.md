@@ -36,6 +36,7 @@ node scripts/qa/touch.mjs [url]        # touch controls with real touch events (
 node scripts/qa/overlap.mjs [url]      # Sunup: no two HUD pieces overlap in any state, phone and desktop; no ruled line through words; every visible button takes a tap
 node scripts/qa/lessons.mjs [url]      # Sunup's lessons: one feature at a time, nothing on screen before its lesson
 node scripts/ranch-thumbs.mjs [url]    # Thistledown thumb room at the Pixel's viewport: look, buttons, stick, bellows, journal; every slot window takes a tap
+node scripts/ranch-tags.mjs [url]      # Thistledown: every hanging tag's title and note fit on the tag, in the game's font (with a control that must fail)
 node scripts/ranch-lessons.mjs         # Thistledown's lessons on phone, desktop and pad (RANCH_URL=...); nothing early, frame by frame; no ruled line through journal words
 node scripts/deck-lessons.mjs [url]    # Seedbound's guided first season: one piece of the table at a time
 node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state; no ruled line through words, no price tag over a card's name, every visible button takes a tap
