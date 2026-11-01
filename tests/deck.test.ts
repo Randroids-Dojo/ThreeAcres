@@ -1,6 +1,6 @@
 // Seedbound's rules: the day, the board, the scoring cascade, hazards, the
 // shop, meta unlocks and determinism.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { cloneRun, Dice, playRun, botDay, botShop } from '../src/games/deck/bot';
 import { newLearn, Tutor, weatherHelps } from '../src/games/deck/lessons';
 import {
@@ -8,7 +8,12 @@ import {
   buyCard,
   buyPage,
   buyScoop,
+  buySlot,
+  bySeason,
+  canBuySlot,
   CARDS,
+  maxPages,
+  slotPrice,
   endDay,
   energyMax,
   forecast,
@@ -340,7 +345,10 @@ describe('hazards', () => {
 
   it('a crow is announced at dawn and comes only then; it takes one ripe, unguarded crop', () => {
     const was = TUNING.crowChance;
-    TUNING.crowChance = [1];
+    TUNING.crowChance = [0, 0, 1];
+    onTestFinished(() => {
+      TUNING.crowChance = was;
+    });
     const s = table(['strawberry', 'radish'], { season: 2 });
     play(s, 'strawberry', 0);
     play(s, 'radish', 15);
@@ -406,7 +414,7 @@ describe('seasons and the shop', () => {
     s.earned = s.quota;
     toSeasonEnd(s);
     expect(s.phase).toBe('shop');
-    expect(s.shop!.cards.length).toBe(3);
+    expect(s.shop!.cards.length).toBe(4);
     expect(s.shop!.pages.length).toBe(2);
     s.coins = 1000;
     const before = allCards(s).length;
@@ -475,7 +483,7 @@ describe('seasons and the shop', () => {
     }
   });
 
-  it('a full almanac swaps a page for a kept one; coins buy a scoop for good from year 2', () => {
+  it('a full almanac swaps a page for a kept one; coins buy up to four scoops for good from year 2', () => {
     const { s } = newRun(3, null);
     s.year = 2;
     s.earned = 99999;
@@ -490,10 +498,16 @@ describe('seasons and the shop', () => {
     expect(s.pages).not.toContain(first);
     expect(s.pages).toContain(offered[0]);
     const e0 = energyMax(s);
-    expect(buyScoop(s)).not.toBeNull();
-    expect(buyScoop(s)).not.toBeNull();
+    // Four scoops for good, each twice the last: a sink for late coins that the bench now lays out at any count.
+    const prices: number[] = [];
+    for (let k = 0; k < 4; k++) {
+      prices.push(s.coins);
+      expect(buyScoop(s)).not.toBeNull();
+      prices[k] -= s.coins;
+    }
     expect(buyScoop(s)).toBeNull();
-    expect(energyMax(s)).toBe(e0 + 2);
+    expect(energyMax(s)).toBe(e0 + 4);
+    expect(prices[3]).toBe(prices[0] * 8);
   });
 
   it('only shops from the unlocked pool', () => {
@@ -597,7 +611,21 @@ describe('the guided first season', () => {
     playCard(s, 0, 1);
     const h = harvests(endDay(s));
     expect(h.find((x) => x.kind === 'carrot')!.score).toBe(15);
-    expect(s.hand.length).toBe(5);
+    // Days 4 to 6 bring one new card each, so each is met on its own: the beans, the can, the sunflower.
+    const met = new Set<string>(['radish', 'carrot', 'lettuce']);
+    for (const fresh of ['beans', 'can', 'sunflower']) {
+      const ids = s.hand.map((c) => c.id);
+      expect(ids.filter((id) => !met.has(id))).toEqual([fresh]);
+      for (const id of ids) met.add(id);
+      expect(s.hand.length).toBeLessThanOrEqual(5);
+      // Play what fits, as a player would.
+      for (let k = 0; k < 3; k++) {
+        const i = s.hand.findIndex((c) => CARDS[c.id].type === 'seed');
+        const plot = s.plots.findIndex((p) => !p.crop && !p.obj);
+        if (i < 0 || plot < 0 || !playCard(s, i, plot)) break;
+      }
+      endDay(s);
+    }
     expect(allCards(s).length).toBe(START_DECK.length);
     expect(s.script.length).toBe(0);
   });
@@ -641,13 +669,15 @@ describe('previews', () => {
     expect(harvests(endDay(s)).find((x) => x.kind === 'carrot')!.score).toBe(10);
   });
 
-  it('a seed that cannot ripen before the season ends previews as late, its bonuses greyed', () => {
+  it('a seed that ripens after the season ends previews as paying next season, its bonuses counted', () => {
+    // The plot carries over: a lettuce sown on day 6 beside a sunflower is pulled on next season's first night, the sunflower still standing.
     const s = table(['sunflower', 'lettuce']);
     s.day = 6;
     play(s, 'sunflower', 5);
     const p = previewPlay(s, 0, 6)!;
-    expect(p.harvest?.late).toBe(true);
-    expect(p.marks.find((m) => m.plot === 6)?.lost?.why).toBe('late');
+    expect(p.harvest).toEqual({ yield: 8, bloom: 2, score: 16, late: true });
+    expect(p.marks.every((m) => !m.lost)).toBe(true);
+    expect(p.marks).toContainEqual({ plot: 6, yield: 4, bloom: 1, times: 1, nights: 0 });
   });
 
   it('the can and rain show extra nights, the sun shows yield on crops pulled tonight', () => {
@@ -667,11 +697,16 @@ describe('previews', () => {
     play(s, 'radish', 2);
     s.plots[0].crop!.pest = 2;
     const f = forecast(s);
-    expect(f[2]).toEqual({ ripeIn: 0, pull: 0, leave: 0 });
+    expect(f[2]).toEqual({ ripeIn: 0, pull: 0, leave: 0, late: false });
     // Two nights held back, then two to grow.
-    expect(f[0]).toEqual({ ripeIn: 3, pull: 3, leave: 3 });
+    expect(f[0]).toEqual({ ripeIn: 3, pull: 3, leave: 3, late: false });
     // Ripe on night 2, then four picks: nights 2 to 5, the season's last.
-    expect(f[1]).toEqual({ ripeIn: 2, pull: 2, leave: 5 });
+    expect(f[1]).toEqual({ ripeIn: 2, pull: 2, leave: 5, late: false });
+    // On day 4 the same strawberry picks twice this season and twice next: the plot carries over.
+    s.day = 4;
+    expect(forecast(s)[1]).toEqual({ ripeIn: 2, pull: 2, leave: 5, late: false });
+    s.day = 6;
+    expect(forecast(s)[1]).toEqual({ ripeIn: 2, pull: 2, leave: 5, late: true });
   });
 });
 
@@ -756,5 +791,227 @@ describe('lessons that fit the moment', () => {
     expect(tutor().update(c, 'touch', null, 0.1, false).line!.text).not.toMatch(/scarecrow/i);
     c.draw.push({ uid: 990, id: 'scarecrow', up: false });
     expect(tutor().update(c, 'touch', null, 0.1, false).line!.text).toMatch(/scarecrow/i);
+  });
+});
+
+describe('the plot carries over from season to season', () => {
+  function toStall(s: RunState): Ev[] {
+    const ev: Ev[] = [];
+    s.earned = Math.max(s.earned, s.quota);
+    while (s.phase === 'day') {
+      s.earned = Math.max(s.earned, s.quota);
+      ev.push(...endDay(s));
+    }
+    return ev;
+  }
+
+  it('crops still growing, perennials with picks left and objects stand into the next season; only the cards come home', () => {
+    const s = table(['strawberry', 'pumpkin', 'scarecrow', 'beehive', 'radish']);
+    s.day = 3;
+    play(s, 'strawberry', 0);
+    endDay(s);
+    endDay(s);
+    expect(s.day).toBe(5);
+    s.energy = 20;
+    play(s, 'pumpkin', 10);
+    play(s, 'scarecrow', 5);
+    play(s, 'beehive', 15);
+    const owned = allCards(s).length;
+    toStall(s);
+    expect(s.phase).toBe('shop');
+    leaveShop(s);
+    expect(s.season).toBe(1);
+    // The strawberry ripened on night 5 and picked on nights 5 and 6: two picks left. The pumpkin (five nights) is still growing.
+    expect(s.plots[0].crop?.kind).toBe('strawberry');
+    expect(s.plots[0].crop?.picks).toBe(2);
+    expect(s.plots[10].crop?.kind).toBe('pumpkin');
+    expect(s.plots[10].crop!.age).toBe(2);
+    expect(s.plots[5].obj).toBe('scarecrow');
+    expect(s.plots[15].obj).toBe('beehive');
+    // The objects' cards stay out on their plots; every other card is back in the tin or the new hand.
+    expect(s.placed.map((c) => c.id).sort()).toEqual(['beehive', 'scarecrow']);
+    expect(allCards(s).length).toBe(owned);
+    expect(s.discard.length).toBe(0);
+    // And the strawberry picks on the new season's first night, for the new season's quota.
+    const h = harvests(endDay(s));
+    expect(h.map((x) => x.kind)).toEqual(['strawberry']);
+    expect(s.earned).toBe(h[0].score);
+  });
+
+  it('a crop pulled next season pays what its preview said, and the plot stands through the year turn too', () => {
+    const was = [TUNING.pestChance, TUNING.crowChance];
+    TUNING.pestChance = [0];
+    TUNING.crowChance = [0];
+    onTestFinished(() => {
+      [TUNING.pestChance, TUNING.crowChance] = was;
+    });
+    const s = table(['sunflower', 'lettuce'], { season: 3 });
+    s.day = 6;
+    play(s, 'sunflower', 5);
+    const p = previewPlay(s, 0, 6)!;
+    play(s, 'lettuce', 6);
+    toStall(s);
+    leaveShop(s);
+    expect(s.year).toBe(2);
+    expect(s.season).toBe(0);
+    const h = harvests(endDay(s));
+    [TUNING.pestChance, TUNING.crowChance] = was;
+    expect(p.harvest!.late).toBe(true);
+    expect(h.find((x) => x.kind === 'lettuce')?.score).toBe(p.harvest!.score);
+  });
+
+  it('the Long Furrow adds column E without moving anything that stands', () => {
+    const s = table(['carrot', 'beans']);
+    s.day = 6;
+    play(s, 'carrot', 7);
+    play(s, 'beans', 12);
+    s.pages.push('furrow');
+    toStall(s);
+    leaveShop(s);
+    expect(s.cols).toBe(5);
+    // Row 1 column D (7 of 16) is row 1 column D (8 of 20); row 3 column A (12) is 15.
+    expect(s.plots[8].crop?.kind).toBe('carrot');
+    expect(s.plots[15].crop?.kind).toBe('beans');
+    expect(s.plots.filter((q) => q.crop).length).toBe(2);
+  });
+
+  it('with the bot, a season no longer starts on a bare plot', () => {
+    let dawns = 0;
+    let crops = 0;
+    let firstNight = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const { s } = newRun(seed * 31, null);
+      const dice = new Dice(seed);
+      while (s.phase !== 'over' && (s.year - 1) * 4 + s.season < 4) {
+        if (s.phase === 'shop') {
+          botShop(s, { noise: 0.15, seed }, dice);
+          continue;
+        }
+        if (s.day === 1 && (s.season > 0 || s.year > 1)) {
+          dawns++;
+          crops += s.plots.filter((q) => q.crop).length;
+          const before = s.earned;
+          botDay(s, { noise: 0.15, seed }, dice);
+          firstNight += s.earned - before;
+          continue;
+        }
+        botDay(s, { noise: 0.15, seed }, dice);
+      }
+    }
+    expect(dawns).toBeGreaterThan(10);
+    // The old rules cleared the plot at every season's end: 0 crops at every first dawn.
+    expect(crops / dawns).toBeGreaterThanOrEqual(2);
+    expect(firstNight / dawns).toBeGreaterThan(15);
+  });
+});
+
+describe('quotas after the playtest', () => {
+  it('year 1 summer to winter ask more than they did (the tester ran at 1.4 to 1.55 times them), and no year turn is a cliff', () => {
+    // The shipped quotas before: summer 165, autumn 185, winter 220. The plot carrying over lifts takes, so they rise at least 15%.
+    expect(quotaFor(1, 1, [])).toBeGreaterThanOrEqual(Math.round(165 * 1.15));
+    expect(quotaFor(1, 2, [])).toBeGreaterThanOrEqual(Math.round(185 * 1.15));
+    expect(quotaFor(1, 3, [])).toBeGreaterThanOrEqual(Math.round(220 * 1.15));
+    // Spring of year 1 stays where the first round left it: the real puzzle.
+    expect(quotaFor(1, 0, [])).toBe(160);
+    for (let year = 1; year <= 4; year++) {
+      const winter = quotaFor(year, 3, []);
+      const spring = quotaFor(year + 1, 0, []);
+      expect(spring / winter).toBeLessThan(1.25);
+      for (let season = 1; season < 4; season++) expect(quotaFor(year, season as 1 | 2 | 3, [])).toBeGreaterThan(quotaFor(year, (season - 1) as 0 | 1 | 2, []));
+    }
+  });
+});
+
+describe('hazards ramp by season, and the first crow can be met', () => {
+  it('pest and crow odds rise a step a season, with no jump at the year turn', () => {
+    const at = (list: number[], k: number) => bySeason(list, { year: Math.floor(k / 4) + 1, season: (k % 4) as 0 | 1 | 2 | 3 });
+    for (const list of [TUNING.pestChance, TUNING.crowChance]) {
+      const steps: number[] = [];
+      for (let k = 1; k < 12; k++) steps.push(at(list, k) - at(list, k - 1));
+      expect(steps.every((d) => d >= 0 && d <= 0.15)).toBe(true);
+      // Year 1 winter to year 2 spring is a step like any other (the old odds doubled there).
+      expect(at(list, 4) / Math.max(0.01, at(list, 3))).toBeLessThan(1.5);
+    }
+    expect(at(TUNING.pestChance, 0)).toBe(0);
+    expect(at(TUNING.crowChance, 1)).toBe(0);
+    expect(at(TUNING.crowChance, 2)).toBeGreaterThan(0);
+  });
+
+  it('crows come at dawn about as often in year 2 spring as in year 1 winter', () => {
+    const rate = (year: number, season: 0 | 1 | 2 | 3) => {
+      const s = table(['radish'], { year, season, seed: 11 });
+      let crows = 0;
+      for (let n = 0; n < 1500; n++) {
+        s.day = 1;
+        s.phase = 'day';
+        s.earned = 1e9;
+        endDay(s);
+        if (s.crow) crows++;
+      }
+      return crows / 1500;
+    };
+    const winter = rate(1, 3);
+    const spring = rate(2, 0);
+    expect(spring / winter).toBeLessThan(1.5);
+  });
+
+  it('the stall before the first crow season stocks a scarecrow, and the one before the first pests an answer to them', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      // The end of year 1 summer: no crow has come yet, but autumn may bring one.
+      const s = table(['radish'], { season: 1, seed });
+      s.draw = s.draw.filter((c) => c.id !== 'scarecrow');
+      while (s.phase === 'day') {
+        s.earned = 1e6;
+        endDay(s);
+      }
+      expect(s.stats.crows).toBe(0);
+      expect(s.shop!.cards.map((c) => c.card)).toContain('scarecrow');
+      // The end of year 1 spring: pests come from summer.
+      const t = table(['radish'], { season: 0, seed });
+      while (t.phase === 'day') {
+        t.earned = 1e6;
+        endDay(t);
+      }
+      const ids = t.shop!.cards.map((c) => c.card);
+      expect(ids.includes('ladybirds') || ids.includes('garlic')).toBe(true);
+    }
+  });
+});
+
+describe('the stall, round 2', () => {
+  it('lays out four goods, always with a seed and one uncommon or rarer', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const { s } = newRun(seed, null);
+      s.earned = s.quota;
+      while (s.phase === 'day') endDay(s);
+      const cards = s.shop!.cards.map((c) => c.card);
+      expect(cards.length).toBe(4);
+      expect(new Set(cards).size).toBe(4);
+      expect(cards.some((c) => CARDS[c].type === 'seed')).toBe(true);
+      expect(cards.some((c) => CARDS[c].rarity !== 'common')).toBe(true);
+    }
+  });
+
+  it('with the almanac full, coins buy room for one more page, dearer each time', () => {
+    const { s } = newRun(3, null);
+    s.year = 2;
+    s.earned = 99999;
+    while (s.phase === 'day') endDay(s);
+    const offered = s.shop!.pages.map((o) => o.page);
+    s.pages = (['barrel', 'cellar', 'bees', 'thumb', 'basket', 'rotation', 'market', 'clover', 'furrow', 'coldframe'] as const).filter((p) => !offered.includes(p)).slice(0, 5);
+    s.coins = 100000;
+    expect(maxPages(s)).toBe(5);
+    expect(canBuySlot(s)).toBe(true);
+    const first = slotPrice(s);
+    expect(buySlot(s)).not.toBeNull();
+    expect(maxPages(s)).toBe(6);
+    // Room now: the next page is pinned without tearing one out.
+    expect(buyPage(s, 0)).not.toBeNull();
+    expect(s.pages.length).toBe(6);
+    expect(slotPrice(s)).toBe(first * 2);
+    // Not while there is still room.
+    s.slots = 1;
+    s.pages = s.pages.slice(0, 5);
+    expect(canBuySlot(s)).toBe(false);
   });
 });

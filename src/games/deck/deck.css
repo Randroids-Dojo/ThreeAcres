@@ -53,9 +53,12 @@
 .sb[data-narrow] .sb-led-day { font-size: 11.5px; }
 .sb[data-narrow] .sb-led-tally { font-size: 11.5px; }
 .sb[data-narrow] .sb-led-tally b { font-size: 18px; }
-.sb[data-layout='wide'] .sb-ledger { padding: 9px 12px 0 24px; }
-.sb[data-layout='wide'] .sb-led-season { font-size: 21px; line-height: 22px; }
-.sb[data-layout='wide'] .sb-led-day { font-size: 14px; line-height: 18px; }
+/* The desktop ledger reads from arm's length: larger type than the phone's, the take on a row of its own. */
+.sb[data-layout='wide'] .sb-ledger { padding: 8px 12px 0 22px; grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+.sb[data-layout='wide'] .sb-led-season { font-size: 23px; line-height: 26px; }
+.sb[data-layout='wide'] .sb-led-day { font-size: 16px; line-height: 22px; }
+.sb[data-layout='wide'] .sb-led-tally { grid-column: 1; grid-row: 3; align-self: start; justify-self: start; font-size: 16px; line-height: 32px; }
+.sb[data-layout='wide'] .sb-led-tally b { font-size: 27px; }
 .sb[data-layout='wide'][data-short] .sb-led-season { font-size: 16px; line-height: 18px; }
 .sb[data-layout='wide'][data-short] .sb-led-day { font-size: 12px; }
 .sb[data-layout='wide'][data-short] .sb-led-tally b { font-size: 19px; }
@@ -102,18 +105,22 @@
 
 /* ---------------------------------------------------------------- bench */
 .sb-bench { display: flex; align-items: flex-end; justify-content: space-between; gap: 4px; }
-.sb-scoops { display: flex; gap: 3px; align-items: flex-end; margin-bottom: 12px; }
-.sb-scoops img { width: 48px; height: 36px; transition: transform 0.28s cubic-bezier(0.3, 1.4, 0.5, 1), filter 0.25s ease, opacity 0.25s ease; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45)); }
+/* The scoops take whatever room the bench leaves (sized in layoutScoops); the tin, the heap and the lantern never shrink. */
+.sb-scoops { display: grid; gap: 2px 3px; align-content: end; justify-content: start; margin-bottom: 12px; flex: 0 0 auto; }
+.sb-tin, .sb-heap, .sb-lantern { flex: 0 0 auto; }
+.sb-scoops img { width: var(--sw, 48px); height: var(--sh, 36px); transition: transform 0.28s cubic-bezier(0.3, 1.4, 0.5, 1), filter 0.25s ease, opacity 0.25s ease; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45)); }
 /* Spent scoops tip over, empty and pale: three full, one empty reads at a glance. */
 .sb-scoops img.empty { transform: rotate(-24deg) translateY(4px) scale(0.92); opacity: 0.55; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3)) saturate(0.4); }
 /* The scoops a held card would use lift and glow; the ones it lacks ring red. */
 .sb-scoops img.use { transform: translateY(-11px) scale(1.12); filter: drop-shadow(0 0 4px #ffe08a) drop-shadow(0 0 9px rgba(255, 210, 100, 0.95)) drop-shadow(0 5px 3px rgba(0, 0, 0, 0.45)); }
+/* Two rows: a smaller lift, so the top row stays clear of the lesson line above the bench. */
+.sb-scoops.two img.use { transform: translateY(-6px) scale(1.06); }
 .sb-scoops img.short { opacity: 0.9; filter: drop-shadow(0 0 0 #c8352a) drop-shadow(0 0 4px rgba(200, 53, 42, 0.95)); }
 .sb-scoops img.flash { animation: sb-flash 0.5s ease 2; }
 @keyframes sb-flash { 0%, 100% { opacity: 0.9; } 50% { opacity: 1; filter: drop-shadow(0 0 6px #e0402a) drop-shadow(0 0 2px #e0402a); } }
 .sb-scoops img.refill { animation: sb-refill 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
 @keyframes sb-refill { from { transform: rotate(-24deg) translateY(4px) scale(0.92); opacity: 0.55; } 55% { transform: translateY(-8px) scale(1.12); filter: drop-shadow(0 0 6px rgba(255, 226, 140, 0.95)); } to { transform: none; opacity: 1; } }
-.sb-tonight { flex: 1; display: flex; justify-content: center; align-items: flex-end; height: 60px; padding-bottom: 6px; }
+.sb-tonight { flex: 1 1 0; min-width: 0; display: flex; justify-content: center; align-items: flex-end; height: 60px; padding-bottom: 6px; }
 .sb-tonight img { width: 36px; height: 50px; margin: 0 -6px; transform: rotate(-6deg); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5)); }
 .sb-tonight img:nth-child(2n) { transform: rotate(5deg); }
 .sb-tin, .sb-heap, .sb-lantern { border: 0; background: none; padding: 0; position: relative; }
@@ -165,7 +172,6 @@
 .sb[data-layout='wide'] .sb-tin { grid-column: 1; grid-row: 2; margin-bottom: 18px; }
 .sb[data-layout='wide'] .sb-heap { grid-column: 2; grid-row: 2; margin-bottom: 12px; }
 .sb[data-layout='wide'] .sb-lantern { grid-column: 3; grid-row: 2; }
-.sb[data-layout='wide'] .sb-scoops img { width: 66px; height: 50px; }
 .sb[data-layout='wide'] .sb-lantern { width: 84px; height: 108px; }
 .sb[data-layout='wide'] .sb-lantern img { width: 70px; height: 100px; left: 7px; top: -12px; }
 .sb[data-layout='wide'] .sb-flame { left: 38px; top: 27px; width: 9px; height: 17px; }
@@ -355,15 +361,23 @@
 .sb-tincard.spent img, .sb-tincard.out img { filter: saturate(0.5) brightness(0.8) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.5)); }
 .sb[data-layout='wide'] .sb-tincard { width: 110px; height: 154px; }
 
-/* The seed merchant. */
+/* The seed merchant: a head, a body that scrolls only if it must, and a foot with the slip's own place
+   and the signpost, right under the goods (pinned at the bottom once the body fills the screen).
+   Nothing in the body moves when a slip comes or goes. */
 .sb-stall {
-  width: min(760px, 100%); max-height: 100%; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; box-sizing: border-box;
-  display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 4px 0 12px;
+  width: min(760px, 100%); height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
 }
-/* Centred when it fits, top first when it does not: nothing is ever cut off above the scroll. */
-.sb-stall > :first-child { margin-top: auto; }
-.sb-stall > :last-child { margin-bottom: auto; }
-.sb-stall-head { position: relative; display: grid; justify-items: center; gap: 4px; width: 100%; box-sizing: border-box; padding: 0 62px; }
+.sb-stall-head { position: relative; display: grid; justify-items: center; gap: 2px; width: 100%; box-sizing: border-box; padding: 0 56px; flex: 0 0 auto; }
+.sb-stall-body {
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain;
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 2px 0 4px;
+}
+.sb-stall-foot { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 2px; }
+/* Always there and always the same height, empty or not. */
+.sb-slipspot { width: 100%; max-width: 520px; height: 86px; display: flex; align-items: center; justify-content: center; }
+.sb[data-layout='wide'] .sb-stall-foot { flex-direction: row; justify-content: center; gap: 18px; }
+.sb[data-layout='wide'] .sb-slipspot { height: 76px; }
 .sb-stall-book {
   position: absolute; right: 4px; top: 0; width: 44px; height: 50px; border: 0; padding: 0; border-radius: 2px 6px 6px 2px; opacity: 0.9;
   background: #2f4a3a; box-shadow: inset 6px 0 0 #253c2f, inset 0 0 0 2px #2f4a3a, inset 0 0 0 3px #c9a24a, 0 3px 5px rgba(0, 0, 0, 0.5);
@@ -372,12 +386,12 @@
 .sb-stall-book span { color: #e8c86a; font-size: 9.5px; font-style: italic; font-weight: 650; transform: rotate(-90deg); letter-spacing: 0.06em; }
 /* A thing lifted at the stall says what it is, in a sentence, before the second tap buys it. */
 .sb-read {
-  margin: 10px auto 12px; max-width: 460px; box-sizing: border-box; padding: 8px 12px 9px; font-size: 14.5px; line-height: 1.35; color: var(--ink);
+  margin: 0; width: 100%; max-height: 100%; overflow: hidden; box-sizing: border-box; padding: 6px 12px 7px; font-size: 14px; line-height: 1.32; color: var(--ink);
   background: #f6ecd2; border-left: 3px solid #b8352a; transform: rotate(-0.4deg); box-shadow: 0 2px 0 rgba(42, 30, 18, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 }
-.sb-read em { display: block; margin-top: 3px; font-weight: 650; }
-.sb-done { display: flex; align-items: center; gap: 10px; max-width: 460px; padding: 6px 12px; background: #e9f0d8; border-left: 3px solid #4a7a2e; box-shadow: 0 2px 0 rgba(42, 30, 18, 0.3); }
-.sb-done img { width: 48px; height: 67px; }
+.sb-read em { display: block; margin-top: 2px; font-weight: 650; }
+.sb-done { display: flex; align-items: center; gap: 10px; max-width: 100%; max-height: 100%; box-sizing: border-box; padding: 5px 12px; background: #e9f0d8; border-left: 3px solid #4a7a2e; box-shadow: 0 2px 0 rgba(42, 30, 18, 0.3); }
+.sb-done img { width: 50px; height: 70px; }
 .sb-done p { margin: 0; font-size: 14.5px; font-style: italic; }
 .sb-keptpage { border: 1px dashed rgba(42, 22, 8, 0.45); background: rgba(243, 233, 207, 0.6); padding: 2px 7px; font-size: 12.5px; font-weight: 650; font-style: normal; }
 .sb-keptpage:disabled { border-color: transparent; background: none; cursor: default; color: #2a1608; }
@@ -388,18 +402,28 @@
   background-color: #8a5a32; background-image: repeating-linear-gradient(0deg, rgba(60, 30, 10, 0.18) 0 2px, transparent 2px 7px);
   border: 2px solid #3a2410; padding: 6px 18px 8px; transform: rotate(-1.5deg); box-shadow: 0 4px 0 #3a2410;
 }
-.sb-sign span { color: #f6e8c4; font-size: 24px; font-style: italic; font-weight: 720; letter-spacing: 0.02em; }
-.sb-closed { margin: 6px 0 0; max-width: 520px; color: #f6e8c4; font-size: 16px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.sb-sign { padding: 4px 16px 6px; }
+.sb-sign span { color: #f6e8c4; font-size: 21px; font-style: italic; font-weight: 720; letter-spacing: 0.02em; }
+.sb-closed { margin: 4px 0 0; max-width: 520px; color: #f6e8c4; font-size: 15px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-purse-line { margin: 0; color: #e8d8b0; font-size: 14px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-purse-line b { font-size: 18px; color: #fff3cc; }
 .sb-cork {
-  width: 100%; box-sizing: border-box; padding: 10px 12px 14px;
+  width: 100%; box-sizing: border-box; padding: 8px 10px 10px; flex: 0 0 auto;
   background-color: #b08a5a; background-image: radial-gradient(rgba(70, 40, 10, 0.35) 1px, transparent 1.4px), radial-gradient(rgba(255, 230, 190, 0.25) 1px, transparent 1.4px);
   background-size: 6px 6px, 9px 9px; background-position: 0 0, 3px 4px;
   border: 6px solid #6a4426; box-shadow: inset 0 0 12px rgba(40, 20, 0, 0.5);
 }
-.sb-cork h3 { margin: 0 0 8px; font-size: 13px; font-style: italic; font-weight: 600; color: #2a1608; }
+.sb-cork h3 { margin: 0 0 6px; font-size: 13px; font-style: italic; font-weight: 600; color: #2a1608; }
 .sb-pins { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.sb-pins .sb-pagesheet { padding: 12px 10px 8px; gap: 2px; font-size: 12.5px; }
+.sb-pins .sb-pagesheet b { font-size: 14px; margin: 0 -10px; padding: 0 10px 2px; }
+.sb-pins .sb-pencil { font-size: 13px; }
+.sb-slot {
+  display: flex; align-items: baseline; gap: 10px; margin: 8px auto 0; padding: 4px 12px 5px; border: 1.5px dashed rgba(42, 22, 8, 0.55);
+  background: rgba(243, 233, 207, 0.7); color: #2a1608; font-size: 13px; font-style: italic; font-weight: 650;
+}
+.sb-slot em { font-style: normal; font-weight: 600; color: #4a4a52; }
+.sb-slot.lifted { background: #f3e9cf; border: 1.5px solid #b8352a; transform: translateY(-2px); }
 .sb-pagebtn { border: 0; background: none; padding: 0; width: min(46%, 230px); position: relative; text-align: left; }
 .sb-pagesheet {
   position: relative; display: grid; gap: 4px; padding: 16px 12px 12px; background: #f3e9cf; transform: rotate(var(--tilt, 0deg));
@@ -414,25 +438,22 @@
 .sb-ask {
   display: block; margin-top: 8px; text-align: center; font-size: 14px; font-style: italic; font-weight: 650; color: #fff3cc; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
-.sb-kept { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; font-style: italic; color: #2a1608; }
+.sb-kept { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; font-style: italic; color: #2a1608; }
 .sb-kept i { font-style: normal; font-weight: 600; }
 .sb-tray {
-  width: 100%; box-sizing: border-box; padding: 18px 10px 0;
+  width: 100%; box-sizing: border-box; padding: 30px 8px 0; flex: 0 0 auto;
   background-color: #7a5030; background-image: repeating-linear-gradient(90deg, rgba(50, 26, 8, 0.2) 0 2px, transparent 2px 11px);
   border: 10px solid #5a3820; border-bottom-width: 0; box-shadow: inset 0 10px 14px rgba(20, 8, 0, 0.55);
 }
-.sb-goods { display: flex; justify-content: center; align-items: flex-end; gap: 6px; min-height: 200px; padding-bottom: 14px; }
+.sb-goods { display: flex; justify-content: center; align-items: flex-end; gap: 14px; padding-bottom: 12px; }
 .sb-good { border: 0; background: none; padding: 0; position: relative; transform: rotate(var(--tilt, 0deg)); transition: transform 0.18s ease; }
 .sb-good img { display: block; width: 100%; height: 100%; filter: drop-shadow(0 5px 4px rgba(0, 0, 0, 0.55)); }
-.sb-good.s { width: 96px; height: 134px; }
-.sb-good.m { width: 116px; height: 162px; }
-.sb-good.l { width: 138px; height: 193px; }
-.sb-good.lifted { transform: rotate(0deg) translateY(-12px) scale(1.04); z-index: 2; }
-.sb-good.sold { width: 96px; height: 134px; }
-.sb[data-layout='wide'] .sb-good.s { width: 124px; height: 174px; }
-.sb[data-layout='wide'] .sb-good.m { width: 146px; height: 204px; }
-.sb[data-layout='wide'] .sb-good.l { width: 172px; height: 241px; }
-.sb[data-layout='wide'] .sb-goods { min-height: 270px; gap: 18px; }
+/* Four goods on the tray, rarer a little larger. A sold good keeps its size, so nothing beside it moves. */
+.sb-good.s { width: 92px; height: 129px; }
+.sb-good.m { width: 102px; height: 143px; }
+.sb-good.l { width: 112px; height: 157px; }
+.sb-good.lifted { transform: rotate(0deg) translateY(-10px) scale(1.04); z-index: 2; }
+.sb[data-layout='wide'] .sb-goods { gap: 22px; }
 .sb-chalk { position: absolute; inset: 30% 0 auto; font-size: 22px; font-style: italic; color: rgba(245, 240, 225, 0.75); transform: rotate(-12deg); }
 /* The price hangs from the card's top corner, above the face, so it never covers the name. */
 .sb-pricetag {
@@ -442,38 +463,48 @@
 }
 .sb-good .sb-ask { position: absolute; left: -20px; right: -20px; bottom: -26px; }
 .sb-lip {
-  display: flex; justify-content: space-around; gap: 6px; margin: 0 -20px; padding: 10px 6px 12px;
+  display: flex; justify-content: space-around; gap: 6px; margin: 0 -18px; padding: 6px 6px 8px;
   background-color: #a8784a; background-image: repeating-linear-gradient(0deg, rgba(60, 30, 8, 0.18) 0 2px, transparent 2px 8px);
   border-top: 3px solid #3a2410; box-shadow: 0 6px 10px rgba(0, 0, 0, 0.45);
 }
 .sb-thing { border: 0; background: none; padding: 0; display: grid; justify-items: center; gap: 1px; color: #24160a; }
-.sb-thing img { width: 50px; height: 50px; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
+.sb-thing img { width: 40px; height: 40px; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); }
 .sb-thing span { font-size: 14px; font-style: italic; font-weight: 700; }
 .sb-thing em { font-size: 12.5px; color: #3a2410; font-style: normal; font-weight: 600; }
 .sb-thing:disabled { opacity: 0.45; cursor: default; }
 .sb-signpost {
-  border: 0; padding: 10px 40px 12px 20px; font-size: 19px; font-style: italic; font-weight: 700; color: #f6e8c4;
+  flex: 0 0 auto; border: 0; padding: 9px 40px 11px 20px; font-size: 19px; font-style: italic; font-weight: 700; color: #f6e8c4;
   background-color: #8a5a32; background-image: repeating-linear-gradient(0deg, rgba(60, 30, 10, 0.2) 0 2px, transparent 2px 7px);
   clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 0 100%); transform: rotate(-1deg);
   filter: drop-shadow(0 3px 0 #3a2410);
 }
 .sb-stall-lesson {
-  justify-self: center; padding: 7px 14px 6px; font-size: 15px; font-style: italic; font-weight: 560; color: var(--ink);
+  justify-self: center; margin: 0; padding: 7px 14px 6px; font-size: 15px; font-style: italic; font-weight: 560; color: var(--ink);
   background: #fbf4dc; transform: rotate(-0.8deg); box-shadow: 0 1px 0 rgba(42, 30, 18, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 }
 .sb-stall-lesson:empty { display: none; }
-.sb[data-layout='phone'] .sb-good.s { width: 84px; height: 118px; }
-.sb[data-layout='phone'] .sb-good.m { width: 96px; height: 134px; }
-.sb[data-layout='phone'] .sb-good.l { width: 110px; height: 154px; }
-.sb[data-layout='phone'] .sb-good.sold { width: 84px; height: 118px; }
-.sb[data-layout='phone'] .sb-goods { gap: 14px 16px; flex-wrap: wrap; }
+/* A phone holds all four goods in one row. */
+.sb[data-layout='phone'] .sb-good.s { width: 74px; height: 104px; }
+.sb[data-layout='phone'] .sb-good.m { width: 78px; height: 109px; }
+.sb[data-layout='phone'] .sb-good.l { width: 84px; height: 118px; }
+.sb[data-layout='phone'] .sb-goods { gap: 8px; }
+.sb[data-layout='phone'] .sb-pricetag { font-size: 14px; padding: 2px 6px 2px 10px; }
+.sb[data-layout='phone'] .sb-tray { padding-top: 26px; border-width: 6px 6px 0; }
+.sb[data-layout='phone'] .sb-lip { margin: 0 -14px; }
+.sb[data-layout='phone'] .sb-pagebtn { width: min(47%, 230px); }
 
-/* The almanac's entry for the run. */
+/* The almanac's entry for the run: the account scrolls in a long run, the way on stays in sight under it. */
 .sb-entry {
-  width: min(460px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box; padding: 26px 26px 18px;
-  background-color: #f3e9cf; background-image: repeating-linear-gradient(180deg, transparent 0 25px, rgba(70, 110, 160, 0.22) 25px 26px);
+  width: min(460px, 100%); max-height: 100%; display: flex; flex-direction: column; box-sizing: border-box; padding: 26px 26px 12px;
+  background-color: #f3e9cf;
   border-top: 8px double #3a2410; box-shadow: 0 16px 30px rgba(0, 0, 0, 0.55);
 }
+/* The ruling belongs to the account and scrolls with it, so a rule stays under its line of writing. */
+.sb-entry-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain;
+  background-image: repeating-linear-gradient(180deg, transparent 0 25px, rgba(70, 110, 160, 0.22) 25px 26px); background-attachment: local;
+}
+.sb-entry > .sb-plain { flex: 0 0 auto; align-self: flex-start; }
 .sb-entry h2 { margin: 0; font-size: 28px; font-style: italic; }
 .sb-entry p { font-size: 15px; line-height: 26px; margin: 0; }
 .sb-entries { margin: 10px 0; padding-left: 0; list-style: none; }

@@ -242,6 +242,49 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
   }
 }
 
+/** A crow, side on and facing left, s across, centred on (x, y). With `kept`, a red ring and bar over it: crows kept off. */
+export function crow(g: Ctx, x: number, y: number, s: number, kept = false): void {
+  g.save();
+  g.translate(x, y);
+  g.fillStyle = '#1c1a22';
+  // Tail, body, head.
+  g.beginPath();
+  g.moveTo(s * 0.12, -s * 0.02);
+  g.lineTo(s * 0.5, s * 0.16);
+  g.lineTo(s * 0.44, s * 0.24);
+  g.lineTo(s * 0.06, s * 0.12);
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.ellipse(-s * 0.06, s * 0.04, s * 0.26, s * 0.16, -0.2, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.arc(-s * 0.28, -s * 0.12, s * 0.11, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.moveTo(-s * 0.36, -s * 0.16);
+  g.lineTo(-s * 0.52, -s * 0.1);
+  g.lineTo(-s * 0.36, -s * 0.07);
+  g.closePath();
+  g.fillStyle = '#5a5046';
+  g.fill();
+  // Legs.
+  g.beginPath();
+  g.moveTo(-s * 0.08, s * 0.18);
+  g.lineTo(-s * 0.1, s * 0.32);
+  g.moveTo(s * 0.02, s * 0.18);
+  g.lineTo(s * 0.02, s * 0.32);
+  ink(g, '#1c1a22', Math.max(0.6, s * 0.04), 1);
+  if (kept) {
+    g.beginPath();
+    g.arc(0, s * 0.04, s * 0.46, 0, Math.PI * 2);
+    g.moveTo(-s * 0.33, s * 0.37);
+    g.lineTo(s * 0.33, -s * 0.29);
+    ink(g, BLOOM, Math.max(0.8, s * 0.09), 1);
+  }
+  g.restore();
+}
+
 /** A bold number or sign, left-aligned at x, baseline centred on y. Returns its width. */
 export function num(g: Ctx, text: string, x: number, y: number, size: number, col: string): number {
   g.save();
@@ -276,6 +319,7 @@ export type Bit =
   | { t: 'basket' }
   | { t: 'bloom' }
   | { t: 'map'; k: Diagram }
+  | { t: 'nocrow' }
   | { t: 'text'; s: string; c: 'y' | 'b' | 'i' };
 
 const Y = (s: string): Bit => ({ t: 'text', s, c: 'y' });
@@ -327,7 +371,8 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
     case 'ladybirds':
       return up ? [map('guard'), I('+1')] : [map('guard')];
     case 'scarecrow':
-      return [map('scare')];
+      // A crow kept off, and the 3 by 3 it is kept off.
+      return [{ t: 'nocrow' }, map('area')];
     case 'beehive':
       return [map('area'), B(bees ? '+2' : '+1'), BLOOMB];
     case 'rain':
@@ -347,6 +392,7 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
       case 'text':
         return numWidth(g, b.s, h * 0.78);
       case 'map':
+      case 'nocrow':
         return h;
       case 'basket':
       case 'bloom':
@@ -389,6 +435,9 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
         break;
       case 'map':
         diagram(g, b.k, mx, cy, h);
+        break;
+      case 'nocrow':
+        crow(g, mx, cy, h, true);
         break;
       case 'text':
         num(g, b.s, x, cy, h * 0.78, b.c === 'b' ? BLOOM : light ? '#f6ecd0' : INK);

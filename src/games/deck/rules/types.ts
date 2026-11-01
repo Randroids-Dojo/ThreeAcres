@@ -148,6 +148,8 @@ export interface RunState {
   energy: number;
   /** Seed scoops bought for good at the stall, on top of the usual three. */
   scoops: number;
+  /** Almanac page slots bought at the stall, on top of the usual five. */
+  slots: number;
   /** A crow is about tonight: rolled at dawn and shown on the plate, so a scarecrow is a choice. */
   crow: boolean;
   /** Today's toss is used. */
@@ -158,7 +160,7 @@ export interface RunState {
   draw: Card[];
   hand: Card[];
   discard: Card[];
-  /** Object cards out on the board; they come back at the season's end. */
+  /** Object cards out on the board. The plot carries over, so they stay out until the run ends. */
   placed: Card[];
   pages: PageId[];
   /** Weather set for tonight, in the order played. */
@@ -229,4 +231,5 @@ export type Ev =
   | { t: 'remove'; card: Card }
   | { t: 'upgrade'; card: Card }
   | { t: 'scoop' }
+  | { t: 'slot' }
   | { t: 'reroll' };

@@ -10,7 +10,11 @@ import {
   buyCard,
   buyPage,
   buyScoop,
+  buySlot,
   canBuyScoop,
+  canBuySlot,
+  maxPages,
+  slotPrice,
   scoopPrice,
   canRemove,
   canUpgrade,
@@ -18,7 +22,6 @@ import {
   cloneRun,
   endDay,
   leaveShop,
-  MAX_PAGES,
   moveTargets,
   newRun,
   night,
@@ -67,7 +70,7 @@ export class Dice {
 
 const NONE: Ev[] = [];
 
-/** Tonight for real (sampled dice), then calm nights to the season's end, discounted. */
+/** Tonight for real (sampled dice), then calm nights to the season's end and a few past it (the plot carries over), discounted. */
 function evaluate(s: RunState, sample: number): number {
   const c = cloneRun(s);
   c.rng = sample;
@@ -75,14 +78,16 @@ function evaluate(s: RunState, sample: number): number {
   NONE.length = 0;
   night(c, NONE);
   let v = c.earned - start;
-  const daysLeft = TUNING.days - s.day;
-  if (daysLeft <= 0) return v;
+  const nights = TUNING.days - s.day + CARRY;
   // Roll forward as if nothing goes wrong.
   c.year = 1;
   c.season = 0;
   const barrel = c.pages.includes('barrel');
   let k = DISCOUNT;
-  for (let d = 0; d < daysLeft; d++) {
+  const inSeason = TUNING.days - s.day;
+  for (let d = 0; d < nights; d++) {
+    // Coins next season count for next season's quota, not this one's: worth less tonight.
+    if (d === inSeason) k *= CARRY_WEIGHT;
     c.dayHarvests = 0;
     if (barrel) for (let r = 0; r < c.rows; r++) c.plots[r * c.cols].boost += 1;
     const before = c.earned;
@@ -96,6 +101,9 @@ function evaluate(s: RunState, sample: number): number {
 
 /** How much a coin tomorrow is worth against one tonight, to the bot. */
 const DISCOUNT = 0.8;
+/** Nights past the season's end the bot still counts: what stands at the last dusk is there at the next dawn. */
+const CARRY = 3;
+const CARRY_WEIGHT = 0.5;
 
 export interface Play {
   h: number;
@@ -217,8 +225,10 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
   const fuzz = (v: number) => v * (1 + (dice.next() * 2 - 1) * (o.shopNoise ?? o.noise));
   for (let guard = 0; guard < 12; guard++) {
     let did = false;
+    // Room for one more page, once the almanac is full and coins are piling up.
+    if (canBuySlot(s) && s.coins >= 1.25 * slotPrice(s) && buySlot(s)) continue;
     // With the almanac full, a page is only worth it if it beats the weakest kept one by a margin.
-    const full = s.pages.length >= MAX_PAGES;
+    const full = s.pages.length >= maxPages(s);
     const weakest = full ? [...s.pages].sort((a, b) => pageValue(s, a) - pageValue(s, b))[0] : undefined;
     const bar = full ? pageValue(s, weakest!) + 3 : 6;
     const pg = sh.pages

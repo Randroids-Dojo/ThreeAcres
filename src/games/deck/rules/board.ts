@@ -7,11 +7,13 @@ import type { Crop, PageId, Plot, RunState, Season } from './types';
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
 export const TUNING = {
   /** Year 1's quotas, spring to winter. */
-  quotas: [160, 165, 185, 220] as number[],
+  quotas: [160, 210, 240, 290] as number[],
   /** Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. */
-  quotas2: [230, 265, 340, 370] as number[],
-  /** Each year after the second multiplies year 2's quotas by this. */
-  yearMult: 1.45,
+  quotas2: [320, 420, 510, 650] as number[],
+  /** Year 3's. With the plot carrying over, takes climb steeply into year 3 and then flatten, so it has its own row too. */
+  quotas3: [780, 920, 1000, 1080] as number[],
+  /** Each year after the third multiplies year 3's quotas by this. */
+  yearMult: 1.3,
   /** The guided first season's quota: its first three days are set hands, so it takes less. */
   guidedQuota: 70,
   /** A guided first run's other year 1 quotas are this much of the usual: its first stall had fewer coins to spend. */
@@ -19,32 +21,54 @@ export const TUNING = {
   days: 6,
   handSize: 5,
   energy: 3,
-  /** Chance of new pests on a night, by year (the last value repeats). */
-  pestChance: [0.2, 0.4, 0.55] as number[],
+  /**
+   * Chance of new pests on a night, by season from the run's first (the last
+   * value repeats). Hazards ramp a step each season rather than jumping at the
+   * year's turn: the old by-year odds doubled overnight from year 1 winter to
+   * year 2 spring, and takes fell from 231 to 161 for the tester.
+   */
+  pestChance: [0, 0.15, 0.2, 0.25, 0.3, 0.34, 0.38, 0.42, 0.46, 0.5, 0.55] as number[],
   /** Nights pests stay on a crop before they move on. */
   pestNights: 2,
   /** Chance each pested crop spreads to a neighbour on a night. */
   pestSpread: 0.4,
-  /** Chance a crow comes on a night, by year. */
-  crowChance: [0.15, 0.3, 0.45] as number[],
+  /** Chance a crow comes at dawn, by season from the run's first, like the pests. */
+  crowChance: [0, 0, 0.12, 0.16, 0.2, 0.23, 0.26, 0.29, 0.32, 0.36, 0.4, 0.45] as number[],
   removePrice: 35,
   upgradePrice: 40,
   /** Removing or upgrading again in the same visit costs this much more each time. */
   serviceStep: 15,
   rerollBase: 8,
   rerollStep: 3,
-  /** Cards on the merchant's tray. */
-  goods: 3,
+  /** Cards on the merchant's tray: at least one seed and one uncommon or rarer. */
+  goods: 4,
   /** Shop prices rise by this much each year after the first. */
   priceYear: 0.5,
   minDeck: 6,
-  /** A seed scoop for good, from year 2: this much, doubling for the second. */
+  /** A seed scoop for good, from year 2: this much, doubling for each one after. The bench holds any number. */
   scoopPrice: 200,
-  maxScoops: 2,
+  maxScoops: 4,
+  /** Room for one more almanac page, sold once the almanac is full: this much, doubling each time. A late use for coins. */
+  slotPrice: 250,
 };
 
 export function byYear(list: number[], year: number): number {
   return list[Math.min(list.length - 1, year - 1)];
+}
+
+/** Seasons since the run began: 0 is year 1 spring. */
+export function seasonIndex(s: Pick<RunState, 'year' | 'season'>): number {
+  return (s.year - 1) * 4 + s.season;
+}
+
+/** A value from a by-season list (the last value repeats). */
+export function bySeason(list: number[], s: Pick<RunState, 'year' | 'season'>): number {
+  return list[Math.min(list.length - 1, seasonIndex(s))];
+}
+
+/** The season after this one. */
+export function nextSeason(s: Pick<RunState, 'year' | 'season'>): { year: number; season: Season } {
+  return s.season === 3 ? { year: s.year + 1, season: 0 } : { year: s.year, season: (s.season + 1) as Season };
 }
 
 function nice(q: number): number {
@@ -52,7 +76,7 @@ function nice(q: number): number {
 }
 
 export function quotaFor(year: number, season: Season, pages: readonly PageId[], guided = false): number {
-  let q = year === 1 ? TUNING.quotas[season] : TUNING.quotas2[season] * Math.pow(TUNING.yearMult, year - 2);
+  let q = year === 1 ? TUNING.quotas[season] : year === 2 ? TUNING.quotas2[season] : TUNING.quotas3[season] * Math.pow(TUNING.yearMult, year - 3);
   if (year === 1 && guided) q = season === 0 ? TUNING.guidedQuota : q * TUNING.firstYear;
   if (season === 3 && pages.includes('coldframe')) q *= 0.8;
   return nice(q);
@@ -66,13 +90,13 @@ export function handSize(s: RunState): number {
   return TUNING.handSize + (s.pages.includes('basket') ? 1 : 0);
 }
 
-/** Pests from summer of year 1; crows from autumn. */
-export function pestsOn(s: RunState): boolean {
-  return s.year > 1 || s.season >= 1;
+/** Pests from summer of year 1; crows from autumn. A season with no chance of either has none. */
+export function pestsOn(s: Pick<RunState, 'year' | 'season'>): boolean {
+  return bySeason(TUNING.pestChance, s) > 0;
 }
 
-export function crowsOn(s: RunState): boolean {
-  return s.year > 1 || s.season >= 2;
+export function crowsOn(s: Pick<RunState, 'year' | 'season'>): boolean {
+  return bySeason(TUNING.crowChance, s) > 0;
 }
 
 export function emptyPlot(): Plot {
@@ -155,12 +179,14 @@ export function extraGrowth(s: RunState): number {
 
 /** The night a crop is next pulled and the night it leaves its plot, counted from tonight (0). */
 export interface Fate {
-  /** Nights until its next pick, however long the season: 0 is tonight. */
+  /** Nights until its next pick: 0 is tonight. */
   ripeIn: number;
-  /** The night of its next pick, or Infinity if that is after the season ends. */
+  /** The night of its next pick (the same as ripeIn): the plot carries over, so a pick after the season ends still comes, next season. */
   pull: number;
-  /** The night it leaves the plot (an annual's pick, a perennial's last), or Infinity if it stands to the season's end. */
+  /** The night it leaves the plot (an annual's pick, a perennial's last), whichever season that falls in. */
   leave: number;
+  /** Its next pick falls after this season's last night: it pays next season, against next season's quota. */
+  late: boolean;
 }
 
 /**
@@ -168,8 +194,9 @@ export interface Fate {
  * nothing more is played and no hazard comes: each crop grows a night each
  * night (plus tonight's can, rain and storm, and the Rain Barrel each night),
  * pests hold a crop back for the nights they stay, and ripe crops are picked.
- * The previews use it so a bonus only counts when the crop giving it will
- * still be there on the night the other is pulled.
+ * The plot carries over from season to season, so the nights run on past the
+ * season's end. The previews use it so a bonus only counts when the crop
+ * giving it will still be there on the night the other is pulled.
  */
 export function forecast(s: RunState): (Fate | null)[] {
   const last = TUNING.days - s.day;
@@ -191,14 +218,13 @@ export function forecast(s: RunState): (Fate | null)[] {
         if (ripeIn === Infinity) ripeIn = n;
         picks++;
         if (picks >= max) {
-          leave = n <= last ? n : Infinity;
+          leave = n;
           break;
         }
       }
       if (pest) pest--;
-      if (ripeIn !== Infinity && n >= last) break;
     }
-    return { ripeIn, pull: ripeIn <= last ? ripeIn : Infinity, leave };
+    return { ripeIn, pull: ripeIn, leave, late: ripeIn > last };
   });
 }
 

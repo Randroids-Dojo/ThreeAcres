@@ -115,6 +115,7 @@ function migrateRun(r: RunState): void {
   r.script ??= [];
   r.crow ??= false;
   r.scoops ??= 0;
+  r.slots ??= 0;
   r.guided ??= false;
   r.stats.pests ??= 0;
   r.stats.crows ??= 0;
@@ -561,13 +562,13 @@ export class Table {
       this.cardW = Math.round(Math.min(150, Math.max(76, H * 0.17)));
       this.cardH = Math.round(this.cardW * 1.4);
       const handH = Math.round(Math.max(this.cardH + 30, Math.min(250, H * 0.28)));
-      place(this.ledger, sx, 16, P - 64, 64);
-      place(this.purse, sx + P - 56, 18, 56, 56);
-      place(this.book, sx + P - 58, 86, 58, 44);
-      place(this.peg, sx, 90, P - 66, 32);
+      place(this.ledger, sx, 12, P - 66, 94);
+      place(this.purse, sx + P - 56, 16, 56, 56);
+      place(this.book, sx + P - 58, 80, 58, 44);
+      place(this.peg, sx, 116, P - 66, 32);
       const benchY = H - 214;
       this.hintBox = { x: sx, y: benchY - 66, w: P, h: 52 };
-      place(this.pages, sx, 140, P, Math.max(60, benchY - 76 - 140));
+      place(this.pages, sx, 160, P, Math.max(60, benchY - 76 - 160));
       place(this.bench, sx, benchY, P, 200);
       boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
       this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
@@ -646,6 +647,7 @@ export class Table {
       this.scoops.append(i);
     }
     while (this.scoops.children.length > max) this.scoops.lastElementChild!.remove();
+    this.layoutScoops(max);
     const energy = this.busy ? this.shownEnergy : s.energy;
     const card = this.held ? this.cardOf(this.held.uid) : undefined;
     const cost = card ? costOf(card.id, card.up) : 0;
@@ -670,6 +672,51 @@ export class Table {
       this.applyPieces();
     }
     this.lantern.disabled = s.phase !== 'day';
+  }
+
+  /**
+   * Size the scoops to the room the bench leaves them, so any number fits: one
+   * row while they keep a good size, two rows past that. The tin, the spent
+   * heap and the lantern never shrink (five scoops once squeezed the lantern to
+   * 8 px and ran "Spent" into "End day").
+   */
+  private layoutScoops(n: number): void {
+    const key = `${n}|${this.layout}|${this.bench.style.width}|${this.run.tonight.length}`;
+    if (this.scoops.dataset.k === key) return;
+    this.scoops.dataset.k = key;
+    const benchW = parseFloat(this.bench.style.width) || 0;
+    const wide = this.layout === 'wide';
+    const gap = 3;
+    const max = wide ? 66 : 48;
+    let room: number;
+    let tall: number;
+    if (wide) {
+      // Two of the bench's three columns, the top row of its two.
+      room = ((benchW - 8) * 2) / 3 - 6;
+      // The lantern (108 px) holds the bottom row; the scoops get what is left above it.
+      tall = parseFloat(this.bench.style.height) - 6 - 108 - 14;
+    } else {
+      // Beside the tin (66), the spent heap (54) and the lantern (64), with the bench's gaps and room for tonight's weather.
+      const weather = Math.max(1, this.run.tonight.length);
+      room = benchW - 66 - 54 - 64 - 4 * 5 - (36 + 24 * (weather - 1));
+      tall = 58;
+    }
+    let best = { rows: 1, w: 0 };
+    for (const rows of [1, 2]) {
+      const per = Math.ceil(n / rows);
+      const byWidth = Math.floor((room - (per - 1) * gap) / per);
+      const byHeight = Math.floor(((tall - (rows - 1) * 2) / rows) / 0.75);
+      const w = Math.max(14, Math.min(max, byWidth, byHeight));
+      // A second row only when it buys a clearly bigger scoop.
+      if (w > best.w + (rows > 1 ? 3 : 0)) best = { rows, w };
+    }
+    const per = Math.ceil(n / best.rows);
+    const st = this.scoops.style;
+    st.setProperty('--sw', `${best.w}px`);
+    st.setProperty('--sh', `${Math.round(best.w * 0.75)}px`);
+    st.gridTemplateColumns = `repeat(${per}, ${best.w}px)`;
+    st.width = `${per * best.w + (per - 1) * gap}px`;
+    this.scoops.classList.toggle('two', best.rows > 1);
   }
 
   /** Dawn: the scoops refill one after another. */
@@ -874,7 +921,10 @@ export class Table {
         this.updateHighlight();
       }
     });
-    c.addEventListener('pointerleave', () => {
+    // Only a mouse leaving clears the hover. A finger leaves the canvas right after every tap (pointerleave
+    // follows pointerup on touch), which used to wipe the plot a tool had just been aimed at.
+    c.addEventListener('pointerleave', (e) => {
+      if (e.pointerType !== 'mouse' || this.aimed !== null) return;
       this.hover = null;
       this.updateHighlight();
     });
@@ -923,6 +973,11 @@ export class Table {
     return this.held ? this.run.hand.findIndex((c) => c.uid === this.held!.uid) : -1;
   }
 
+  /** The plot the held card is aimed at: on touch the plot a tool was tapped on, else the pointer's or the keyboard cursor's. */
+  private aimAt(): number | null {
+    return this.aimed ?? this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
+  }
+
   updateHighlight(): void {
     const h = this.board.hl;
     h.valid = [];
@@ -936,7 +991,7 @@ export class Table {
     if (idx >= 0 && !this.busy) {
       const card = this.run.hand[idx];
       const def = CARDS[card.id];
-      const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
+      const aim = this.aimAt();
       h.water = card.id === 'can' || card.id === 'rain' || card.id === 'storm';
       if (def.target === 'board') {
         h.all = true;
@@ -969,7 +1024,7 @@ export class Table {
     const s = this.run;
     const card = s.hand[idx];
     const def = CARDS[card.id];
-    const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
+    const aim = this.aimAt();
     const marks: PreviewMark[] = [];
     let total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null = null;
     if (def.target === 'board') {
@@ -995,7 +1050,7 @@ export class Table {
     if (aim !== null) {
       const l = marks.find((m) => m.lost);
       if (l?.lost) reason = { plot: aim, text: this.lostWhy(l.plot, l.lost.why, l.lost.from) };
-      else if (total?.late) reason = { plot: aim, text: 'Too late to ripen this season.' };
+      else if (total?.late) reason = { plot: aim, text: 'Ripens next season.' };
     }
     let none: { plot: number | null; text: string } | null = null;
     if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: 'No effect now.' };
@@ -1003,8 +1058,7 @@ export class Table {
   }
 
   /** "The radish is pulled before the carrot ripens." The held seed stands in for whichever of the two is not on the plot yet. */
-  private lostWhy(plot: number, why: 'gone' | 'late', from: number | null): string {
-    if (why === 'late') return 'Too late to ripen this season.';
+  private lostWhy(plot: number, _why: 'gone', from: number | null): string {
     const s = this.run;
     const held = this.held ? this.cardOf(this.held.uid) : undefined;
     const seed = held && CARDS[held.id].type === 'seed' ? held.id : null;
@@ -1500,6 +1554,9 @@ export class Table {
 
   endDay(): void {
     if (this.busy || this.run.phase !== 'day') return;
+    // A card still in flight lands first: its landing shows the board as the play left it, and must not
+    // run during the night, where it would show the morning's board and tomorrow's hand.
+    this.settle();
     this.putDown(true);
     this.sheets.closeDetail();
     const before = clonePlots(this.run.plots);
@@ -1966,8 +2023,22 @@ export class Table {
   skip(): void {
     if (!this.seq) return;
     this.seq.finish();
-    for (const s of this.small) s.finish();
+    this.settle();
+  }
+
+  /** Finish every small animation now (a card in flight, a bounce, a shears harvest), including any they start. */
+  private settle(): void {
+    for (let guard = 0; guard < 8 && this.small.length; guard++) {
+      const list = this.small;
+      this.small = [];
+      for (const s of list) s.finish();
+    }
     this.small = [];
+  }
+
+  /** Small animations still running, for checks. */
+  get inFlight(): number {
+    return this.small.filter((s) => !s.done).length;
   }
 
   // ---------------------------------------------------------------- keyboard

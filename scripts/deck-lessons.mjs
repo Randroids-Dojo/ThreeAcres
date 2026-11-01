@@ -17,6 +17,12 @@
 //     the timing
 //   - the stall's first tap buys, or does not say what the card does; the
 //     purse disagrees with the rules after a purchase
+//   - days 4 to 6 of the guided season bring more than one new card a day
+//   - on touch, the first tap with a tool on a plot does not show what a mouse
+//     hovering that plot shows (the wash, the moon +1, the +6 yield), measured
+//     on the phone and the desktop and compared
+//   - ending the day within a moment of a play shows the morning's board or
+//     tomorrow's hand during the night (sampled 0.35 s and 0.5 s in)
 // Screens go to /tmp/deck-lessons/; the step-by-step table to steps-*.json.
 // node scripts/deck-lessons.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -416,10 +422,18 @@ async function session(label, viewport, touch) {
   check(`${label}: the carrot paid 5 × 3`, scores.includes(15), scores.join(','));
 
   // ---------------------------------------------------------------- days 4 to 6: the rest as each first matters
+  // One new card a day: the beans, then the can, then the sunflower, never all at once.
+  const met = new Set(['radish', 'carrot', 'lettuce']);
+  const newByDay = {};
   for (let guard = 0; guard < 40; guard++) {
     const st = await p.evaluate(() => ({ phase: window.deck.state().phase, day: window.deck.state().day }));
     if (st.phase !== 'day') break;
     t = await step(`day ${st.day}`);
+    if (!(st.day in newByDay)) {
+      newByDay[st.day] = [...new Set(t.hand.filter((id) => !met.has(id)))];
+      for (const id of t.hand) met.add(id);
+      check(`${label}: day ${st.day} brings one new card at most`, newByDay[st.day].length <= 1, `new: ${newByDay[st.day].join(', ') || 'none'}; hand ${t.hand.join(', ')}`);
+    }
     const l = t.lesson;
     if (l === 'tin') {
       await shot(`14-tin-day${st.day}`);
@@ -622,6 +636,98 @@ async function session(label, viewport, touch) {
   await ctx.close();
 }
 
+/**
+ * Round 2's P1 checks on a returning player's table, by real touch on the phone and the mouse on the desktop:
+ * a tool aims on the first tap with the same preview a hover shows, and a play followed at once by End day
+ * lands before the night, so the night never shows the morning's board or tomorrow's hand.
+ */
+const aimSeen = {};
+async function p1(label, viewport, touch) {
+  const ctx = await b.newContext({ viewport, deviceScaleFactor: 2, hasTouch: touch, isMobile: touch });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  const cdp = await ctx.newCDPSession(p);
+  const wait = (ms) => p.waitForTimeout(ms);
+  const tap = async (x, y) => {
+    if (touch) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 7, radiusX: 6, radiusY: 6, force: 1 }] });
+      await wait(45);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else await p.mouse.click(x, y);
+    await wait(120);
+  };
+  await p.goto(`${base}/?game=deck&fresh`);
+  await p.waitForFunction(() => window.deck && window.deck.frames() > 5, null, { timeout: 20000 });
+  await wait(300);
+  if (touch) await tap(200, 40);
+  const setup = (hand) =>
+    p.evaluate((hand) => {
+      const d = window.deck;
+      d.seed(4242);
+      d.learnAll();
+      const s = d.state();
+      for (const q of s.plots) q.crop = null;
+      s.plots[5].crop = { uid: 8001, kind: 'carrot', age: 0, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+      s.plots[6].crop = { uid: 8002, kind: 'beans', age: 0, days: 3, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+      s.energy = 3;
+      d.hand(hand);
+    }, hand);
+  const cardAt = (id) =>
+    p.evaluate((id) => {
+      const t = window.deck.table;
+      const c = t.run.hand.find((x) => x.id === id);
+      const r = t.handEls.get(c.uid).el.getBoundingClientRect();
+      return [r.left + r.width * 0.3, r.top + r.height * 0.35];
+    }, id);
+  const plotAt = (i) => p.evaluate((i) => { const r = window.deck.rects().plots[i]; return [r.left + r.width / 2, r.top + r.height * 0.55]; }, i);
+  const look = () => p.evaluate(() => { const t = window.deck.table; const pv = window.deck.preview(); return { marks: pv?.marks ?? null, total: pv?.total ?? null, area: [...t.board.hl.area].sort((a, b) => a - b), water: t.board.hl.water, hover: t.board.hl.hover, hand: t.run.hand.map((c) => c.id) }; });
+  for (const [tool, plot] of [['can', 5], ['compost', 6]]) {
+    await setup([tool, 'radish']);
+    await wait(300);
+    await tap(...(await cardAt(tool)));
+    if (touch) await tap(...(await plotAt(plot)));
+    else {
+      await p.mouse.move(...(await plotAt(plot)));
+      await wait(150);
+    }
+    const seen = await look();
+    await p.screenshot({ path: `${out}/p1-${label}-${tool}-aimed.png` });
+    aimSeen[`${tool}:${label}`] = JSON.stringify({ marks: seen.marks, total: seen.total, area: seen.area, water: seen.water });
+    const want = tool === 'can' ? seen.marks?.some((m) => m.plot === 5 && m.nights >= 1) && seen.area.join() === '4,5,6,7' && seen.water : seen.marks?.some((m) => m.plot === 6 && m.yield === 6);
+    check(`${label}: a ${tool} ${touch ? 'tapped once on' : 'hovered over'} a plot shows its preview there${touch ? ' and is not played yet' : ''}`, !!want && seen.hover === plot && seen.hand.includes(tool), JSON.stringify(seen));
+    if (touch) {
+      await tap(...(await plotAt(plot)));
+      const after = await look();
+      check(`${label}: the second tap plays the ${tool}`, !after.hand.includes(tool), after.hand.join());
+    }
+  }
+  // Play, then end the day at once: the night must show the board and hand as they were at dusk.
+  await setup(['radish', 'radish', 'carrot']);
+  await wait(300);
+  await tap(...(await cardAt('radish')));
+  await tap(...(await plotAt(10)));
+  const dusk = await p.evaluate(() => {
+    const t = window.deck.table;
+    const plots = t.run.plots.map((q) => q.crop?.uid ?? 0);
+    const hand = t.run.hand.map((c) => c.uid);
+    const flying = t.inFlight;
+    t.endDay();
+    return { plots, hand, flying };
+  });
+  const samples = [];
+  for (const ms of [350, 150]) {
+    await wait(ms);
+    samples.push(await p.evaluate(() => { const t = window.deck.table; return { busy: t.busy, plots: t.shown.map((q) => q.crop?.uid ?? 0), hand: t.handShown.map((c) => c.uid), cards: document.querySelectorAll('.sb-hand .sb-card:not(.flying)').length }; }));
+  }
+  await p.screenshot({ path: `${out}/p1-${label}-quick-night.png` });
+  const bad = samples.filter((q) => !q.busy || q.plots.join() !== dusk.plots.join() || q.hand.join() !== dusk.hand.join() || q.cards !== dusk.hand.length);
+  check(`${label}: End day ${dusk.flying ? 'with the card still in flight' : 'right after a play'}: the night shows the dusk board and hand`, dusk.plots[10] > 0 && bad.length === 0, JSON.stringify({ dusk, samples }));
+  await p.evaluate(() => window.deck.skip());
+  check(`${label}: P1 checks without page errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+  await ctx.close();
+}
+
 /** A returning player (a finished run, from a save made before the lessons) gets the whole table and no guided deals. */
 async function returning() {
   const ctx = await b.newContext({ viewport: { width: 412, height: 838 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
@@ -667,9 +773,14 @@ async function returning() {
   await ctx.close();
 }
 
-await session('phone', { width: 412, height: 838 }, true);
-await session('desk', { width: 1280, height: 800 }, false);
-await returning();
+if (!process.env.P1_ONLY) {
+  await session('phone', { width: 412, height: 838 }, true);
+  await session('desk', { width: 1280, height: 800 }, false);
+}
+await p1('phone', { width: 412, height: 838 }, true);
+await p1('desk', { width: 1280, height: 800 }, false);
+for (const tool of ['can', 'compost']) check(`a first tap with the ${tool} on touch shows the same preview as a hover on the desktop`, !!aimSeen[`${tool}:phone`] && aimSeen[`${tool}:phone`] === aimSeen[`${tool}:desk`], `${aimSeen[`${tool}:phone`]} vs ${aimSeen[`${tool}:desk`]}`);
+if (!process.env.P1_ONLY) await returning();
 await b.close();
 console.log(failed ? `LESSONS FAILED (${failed})` : 'LESSONS OK', `shots in ${out}`);
 process.exit(failed ? 1 : 0);

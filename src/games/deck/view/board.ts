@@ -19,7 +19,7 @@ export type PreviewMark = Mark;
 
 export interface Preview {
   marks: PreviewMark[];
-  /** A seed on the plot under the finger: what it would score there (late: it won't ripen before the season ends). */
+  /** A seed on the plot under the finger: what it would score there (late: it is pulled next season, the plot carrying over). */
   total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null;
   /** Bloom has been introduced: show bloom with the total. */
   bloom: boolean;
@@ -678,13 +678,14 @@ export class Board {
     let under = -1;
     if (t) {
       const c = this.centre(t.plot);
-      // The arithmetic only when bloom changes the total; otherwise just what it pays.
-      const showBloom = t.bloom !== 1 && !t.late;
+      // The arithmetic only when bloom changes the total; otherwise just what it pays. A crop pulled
+      // next season shows what it will pay then, on a grey slip: it counts toward next season's quota.
+      const showBloom = t.bloom !== 1;
       const big = Math.max(12, Math.round(T * 0.17));
-      const parts = t.late ? ['0'] : showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
+      const parts = showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
       const widths = parts.map((s) => numWidth(ctx, s, big));
       const icon = big * 1.1;
-      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12 + (t.late ? icon : 0);
+      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12;
       const h = big + 8;
       // Straddling the plot's bottom edge, clear of a thumb on the plot.
       const x0 = c.x - w / 2;
@@ -701,7 +702,6 @@ export class Board {
         num(ctx, s, x, y0 + h / 2, big, col);
         x += widths[k] + 3;
       });
-      if (t.late) this.heldMoon(x + icon * 0.4, y0 + h / 2, big * 0.36);
       under = y0 + h + 3;
     }
     // Why: one plain line under the aimed plot.

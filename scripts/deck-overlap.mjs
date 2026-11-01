@@ -16,6 +16,14 @@
 // asking the browser what is on top at points across them); that the stall's
 // first tap says what a card does and buys nothing, and the second buys; and
 // that fresh stock takes two taps like everything else.
+//
+// Round 2 adds: the bench with 3 to 8 scoops (and two weather clippings) on
+// both screens, where every piece must stay whole, inside the bench and the
+// screen, with the lantern and the heap at full width and their labels apart;
+// in every stall state, every control inside the screen without scrolling,
+// the signpost included; and between the first and second tap on every good,
+// page, service and the page slot, nothing on the stall moving by more than a
+// pixel and the second tap landing on the same thing.
 // node scripts/deck-overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -57,10 +65,13 @@ const PIECES = {
   thing: '.sb-thing',
   signpost: '.sb-signpost',
   stallnote: '.sb-stall-note',
+  slipspot: '.sb-slipspot > *',
+  slot: '.sb-slot',
+  kept: '.sb-keptpage',
   // The run's end.
   entry: '.sb-entry > *',
 };
-const SAME = new Set(['card', 'scoop', 'tonight', 'entry']);
+const SAME = new Set(['card', 'scoop', 'tonight', 'entry', 'kept']);
 // Text needs air around it, not just no overlap: labels get this much clearance (CSS px).
 const PAD = { label: 3, count: 1, line: 2 };
 // A piece inside another piece is part of it (a count on its tin, an ask on its good).
@@ -133,22 +144,28 @@ async function run(label, viewport, touch) {
   /** The purse on the table, the purse line at the stall, and the rules' coins: all three must agree. */
   const purse = () => p.evaluate(() => ({ table: Number(window.deck.purse()), line: Number(document.querySelector('.sb-purse-line b')?.textContent ?? NaN), rules: window.deck.state().coins }));
   const purseOk = (q) => q.table === q.rules && (Number.isNaN(q.line) || q.line === q.rules);
-  const toStall = async (seed, coins) => {
+  const toStall = async (seed, coins, tweak) => {
     await p.evaluate(() => window.deck.skip());
     await fresh(seed);
-    await p.evaluate(async (coins) => {
+    await p.evaluate(async ([coins, tweak]) => {
       const d = window.deck;
       const w = (ms) => new Promise((r) => setTimeout(r, ms));
-      d.state().earned = 999;
+      if (tweak) new Function('s', tweak)(d.state());
+      d.state().earned = 99999;
       d.state().coins = coins;
       while (d.state().phase === 'day') {
+        d.state().earned = 99999;
         d.endDay();
         d.skip();
         await w(30);
       }
-    }, coins);
+      d.state().coins = coins;
+      d.table.syncPurse();
+      d.table.sheets.stall();
+    }, [coins, tweak ? `(${tweak.toString()})(s)` : null]);
     await settle(600);
   };
+  const perStall = { moves: [] };
   const extra = [];
   const fresh = async (seed) => {
     await p.evaluate((seed) => {
@@ -168,6 +185,39 @@ async function run(label, viewport, touch) {
       });
       await settle(300);
     }],
+    ...[3, 4, 5, 6, 7, 8].map((n) => [`the bench with ${n} scoops`, async () => {
+      const q = await p.evaluate((n) => {
+        const t = window.deck.table;
+        t.run.scoops = n - 3;
+        t.run.energy = n;
+        t.run.tonight = ['rain', 'sun'];
+        t.syncAll();
+        const box = (sel) => [...document.querySelectorAll(sel)].map((e) => e.getBoundingClientRect());
+        const bench = document.querySelector('.sb-bench').getBoundingClientRect();
+        return { bench: { l: bench.left, r: bench.right }, scoops: box('.sb-scoops img').map((r) => ({ w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom })), parts: ['.sb-tin', '.sb-heap', '.sb-lantern', '.sb-tonight img', '.sb-label', '.sb-scoops img'].flatMap((sel) => box(sel).map((r) => ({ sel, l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width }))), labels: box('.sb-label').map((r) => ({ l: r.left, r: r.right })), W: innerWidth, H: innerHeight };
+      }, n);
+      await settle(150);
+      if (q.scoops.length !== n) extra.push(`${q.scoops.length} scoops on the bench, not ${n}`);
+      const minW = Math.min(...q.scoops.map((x) => x.w));
+      if (minW < 24) extra.push(`a scoop is only ${minW.toFixed(0)} px wide`);
+      const lantern = q.parts.find((x) => x.sel === '.sb-lantern');
+      const heap = q.parts.find((x) => x.sel === '.sb-heap');
+      if (lantern.w < (label === 'phone' ? 60 : 80)) extra.push(`the lantern is squeezed to ${lantern.w.toFixed(0)} px`);
+      if (heap.w < 50) extra.push(`the spent heap is squeezed to ${heap.w.toFixed(0)} px`);
+      for (const x of q.parts) if (x.l < q.bench.l - 1 || x.r > q.bench.r + 1 || x.l < 0 || x.r > q.W || x.t < 0 || x.b > q.H) extra.push(`${x.sel} runs off the bench or the screen (${Math.round(x.l)} to ${Math.round(x.r)})`);
+      const [a, c] = q.labels.sort((x, y) => x.l - y.l);
+      if (a && c && c.l - a.r < 6) extra.push(`"Spent" and "End day" run together (${(c.l - a.r).toFixed(0)} px apart)`);
+      console.log(`       ${label} ${n} scoops: ${minW.toFixed(0)} px each, ${new Set(q.scoops.map((x) => Math.round(x.t))).size} row(s), lantern ${lantern.w.toFixed(0)} px, heap ${heap.w.toFixed(0)} px`);
+      if (n === 8) {
+        await p.evaluate(() => {
+          const t = window.deck.table;
+          t.run.scoops = 0;
+          t.run.energy = 3;
+          t.run.tonight = [];
+          t.syncAll();
+        });
+      }
+    }]),
     ['card held', async () => {
       await p.evaluate(() => {
         const t = window.deck.table;
@@ -222,6 +272,51 @@ async function run(label, viewport, touch) {
       if (!purseOk(bought)) extra.push(`purse wrong after a purchase: table ${bought.table}, stall ${bought.line}, rules ${bought.rules}`);
       await tapAt('.sb-good', want.i === 0 ? 1 : 0);
     }],
+    ['stall, nothing moves between the two taps', async () => {
+      await p.evaluate(() => {
+        window.deck.table.tutor.unlock('services');
+        window.deck.table.tutor.unlock('pages');
+        window.deck.state().coins = 5000;
+        window.deck.table.sheets.stall();
+      });
+      await p.keyboard.press('Escape');
+      await settle(200);
+      // Measured flat: a lifted thing rises by a transform, which a tap still lands on; only layout moves count.
+      const layout = () =>
+        p.evaluate(() => {
+          const flat = document.createElement('style');
+          flat.textContent = '* { transform: none !important; transition: none !important; animation: none !important; }';
+          document.head.append(flat);
+          const out = [...document.querySelectorAll('.sb-sheets.on button')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), e.textContent.trim().slice(0, 16) || e.querySelector('img')?.alt || e.className]; });
+          flat.remove();
+          return out;
+        });
+      for (const sel of ['.sb-good', '.sb-pagebtn', '.sb-thing']) {
+        const n = await p.evaluate((sel) => document.querySelectorAll(sel).length, sel);
+        for (let i = 0; i < n; i++) {
+          const pt = await p.evaluate(([sel, i]) => { const e = document.querySelectorAll(sel)[i]; if (e.disabled) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.6]; }, [sel, i]);
+          if (!pt) continue;
+          const before = await layout();
+          if (touch) {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pt[0], y: pt[1], id: 5 }] });
+            await p.waitForTimeout(40);
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          } else await p.mouse.click(pt[0], pt[1]);
+          await settle(200);
+          const after = await layout();
+          const moved = after.length !== before.length ? [`${before.length} buttons, then ${after.length}`] : after.map((q, k) => ({ q, d: Math.max(Math.abs(q[0] - before[k][0]), Math.abs(q[1] - before[k][1])) })).filter((x) => x.d > 1).map((x) => `${x.q[2]} by ${x.d} px`);
+          const same = await p.evaluate(([sel, i, x, y]) => document.elementFromPoint(x, y)?.closest('button') === document.querySelectorAll(sel)[i], [sel, i, ...pt]);
+          const slip = await p.evaluate(() => document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '');
+          if (moved.length) extra.push(`first tap on ${sel} ${i}: ${moved.slice(0, 3).join(', ')}`);
+          if (!same) extra.push(`second tap on ${sel} ${i} would miss it`);
+          if (!slip) extra.push(`first tap on ${sel} ${i} put up no slip`);
+          perStall.moves.push(moved.length ? Math.max(...after.map((q, k) => Math.max(Math.abs(q[0] - (before[k]?.[0] ?? 0)), Math.abs(q[1] - (before[k]?.[1] ?? 0))))) : 0);
+          await p.keyboard.press('Escape');
+          await settle(120);
+        }
+      }
+      console.log(`       ${label} stall: ${perStall.moves.length} first taps, the most anything moved: ${Math.max(0, ...perStall.moves)} px`);
+    }],
     ['stall, fresh stock takes two taps', async () => {
       await p.evaluate(() => {
         window.deck.table.tutor.unlock('services');
@@ -268,6 +363,30 @@ async function run(label, viewport, touch) {
     ['stall, the throw-out sheet', async () => {
       await tapAt('.sb-thing', 0);
       await tapAt('.sb-thing', 0);
+    }],
+    ['stall in year 2, the almanac full', async () => {
+      await p.evaluate(() => window.deck.table.sheets.back());
+      await toStall(95, 4000, (s) => {
+        s.year = 2;
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb', 'basket'];
+      });
+      const q = await p.evaluate(() => ({ slot: !!document.querySelector('.sb-slot'), scoop: [...document.querySelectorAll('.sb-thing')].some((b) => /scoop/.test(b.textContent)), goods: document.querySelectorAll('.sb-good').length }));
+      if (!q.slot || !q.scoop || q.goods !== 4) extra.push(`year 2 stall: slot ${q.slot}, scoop ${q.scoop}, ${q.goods} goods`);
+    }],
+    ...[['a good lifted', '.sb-good', 0], ['a page lifted', '.sb-pagebtn', 1], ['the scoop lifted', '.sb-thing', 3], ['the page slot lifted', '.sb-slot', 0]].map(([what, sel, i]) => [`stall in year 2, ${what}`, async () => {
+      await p.keyboard.press('Escape');
+      await settle(100);
+      await tapAt(sel, i);
+      const slip = await p.evaluate(() => document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '');
+      if (!slip) extra.push(`no slip for ${what}`);
+    }]),
+    ['stall in year 2, the page slot bought', async () => {
+      const before = await p.evaluate(() => window.deck.state().slots);
+      await tapAt('.sb-slot', 0);
+      const q = await p.evaluate(() => ({ slots: window.deck.state().slots, done: document.querySelector('.sb-slipspot .sb-done')?.textContent ?? '' }));
+      if (q.slots !== before + 1 || !/6 pages/.test(q.done)) extra.push(`the page slot: slots ${before} to ${q.slots}, note "${q.done}"`);
+      const pq = await purse();
+      if (!purseOk(pq)) extra.push(`purse wrong after the page slot: table ${pq.table}, stall ${pq.line}, rules ${pq.rules}`);
     }],
     ['stall, the almanac from the stall', async () => {
       await p.evaluate(() => window.deck.table.sheets.back());
@@ -340,6 +459,23 @@ async function run(label, viewport, touch) {
       });
       await settle(600);
     }],
+    ['run end after a long run', async () => {
+      // Twelve seasons and five new cards: the account scrolls, the way on stays on the screen.
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        s.stats.log = Array.from({ length: 12 }, (_, k) => ({ year: Math.floor(k / 4) + 1, season: k % 4, earned: 300 + k * 90, quota: 280 + k * 80, cleared: k < 11 }));
+        s.end.unlocked = ['pumpkin', 'shears', 'mint', 'trowel', 'storm'];
+        t.sheets.entry();
+        const b = [...document.querySelectorAll('.sb-entry button')].find((x) => /fresh page/.test(x.textContent));
+        const r = b.getBoundingClientRect();
+        const line = [...document.querySelectorAll('.sb-entry p')].map((x) => x.textContent).find((x) => /catalogue/.test(x)) ?? '';
+        return { top: r.top, bottom: r.bottom, H: innerHeight, line };
+      });
+      await settle(200);
+      if (q.bottom > q.H || q.top < 0) extra.push(`"Turn to a fresh page" is off the screen (${Math.round(q.top)} to ${Math.round(q.bottom)} of ${q.H})`);
+      if (!/pumpkin, shears, mint, trowel and storm/.test(q.line)) extra.push(`the new cards are not a plain list: "${q.line}"`);
+    }],
   ];
   for (const [name, setup] of states) {
     extra.length = 0;
@@ -349,6 +485,20 @@ async function run(label, viewport, touch) {
     const hits = [...extra];
     // The shell's corner stays clear, on the table and on every sheet.
     for (const q of await p.evaluate(cornerScan)) hits.push(`in the shell's corner: ${q}`);
+    // At the stall, every control is on the screen without scrolling, the way out included.
+    for (const q of await p.evaluate(() => {
+      if (!document.querySelector('.sb-sheets.on[data-kind="stall"]')) return [];
+      const body = document.querySelector('.sb-stall-body')?.getBoundingClientRect();
+      const out = [];
+      if (!document.querySelector('.sb-signpost')) out.push('no signpost');
+      for (const e of document.querySelectorAll('.sb-sheets.on button')) {
+        const r = e.getBoundingClientRect();
+        const name = e.textContent.trim().slice(0, 18) || e.querySelector('img')?.alt || e.className;
+        if (r.top < 0 || r.left < 0 || r.bottom > innerHeight + 0.5 || r.right > innerWidth + 0.5) out.push(`${name} is off the screen (${Math.round(r.top)} to ${Math.round(r.bottom)} of ${innerHeight})`);
+        else if (body && e.closest('.sb-stall-body') && (r.top < body.top - 0.5 || r.bottom > body.bottom + 0.5)) out.push(`${name} needs a scroll (${Math.round(r.bottom)} under ${Math.round(body.bottom)})`);
+      }
+      return out;
+    })) hits.push(`stall: ${q}`);
     for (let i = 0; i < bx.length; i++) {
       for (let j = i + 1; j < bx.length; j++) {
         const A = bx[i];
@@ -383,7 +533,7 @@ async function run(label, viewport, touch) {
     const reachable = await p.evaluate(() => {
       document.querySelectorAll('[data-clipped]').forEach((e) => delete e.dataset.clipped);
       for (const b of document.querySelectorAll('.sb-sheets.on button')) {
-        const sc = b.closest('.sb-stall, .sb-tinview, .sb-book-page, .sb-entry');
+        const sc = b.closest('.sb-stall-body, .sb-tinview, .sb-book-page, .sb-entry-body');
         if (!sc) continue;
         const r = b.getBoundingClientRect();
         const v = sc.getBoundingClientRect();

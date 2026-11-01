@@ -10,6 +10,7 @@ import {
   buyCard,
   buyPage,
   buyScoop,
+  buySlot,
   canBuyScoop,
   canRemove,
   canUpgrade,
@@ -17,7 +18,7 @@ import {
   cardText,
   costOf,
   leaveShop,
-  MAX_PAGES,
+  maxPages,
   PAGES,
   removeCard,
   removePrice,
@@ -25,6 +26,8 @@ import {
   scoopPrice,
   SEASON_NAMES,
   SEEDS,
+  slotOnSale,
+  slotPrice,
   TUNING,
   upgradeCard,
   upgradeNote,
@@ -55,6 +58,8 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const scoops = (n: number) => (n === 0 ? 'free' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`);
 const lower = (id: CardId) => CARDS[id].name.toLowerCase();
 const lowerFirst = (s: string) => s[0].toLowerCase() + s.slice(1);
+/** "pumpkin, shears and mint": a list said the way a person would. */
+export const listOf = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 function btn(cls: string, html: string, on: () => void): HTMLButtonElement {
   const b = el('button', cls, html);
@@ -234,6 +239,7 @@ export class Sheets {
       'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
+      'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
       'From summer, pests settle on crops: a pested crop does not grow or get picked for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
     ];
@@ -272,7 +278,7 @@ export class Sheets {
       notes.append(el('p', '', `Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}. ${esc(cardText(card.id, card.up))}`));
     } else notes.append(el('p', '', esc(cardText(card.id, card.up))));
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
-    if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot until the season ends, then comes back to the tin.'));
+    if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot from season to season, for the rest of the run.'));
     // What improving would do, only once the player has improved a card at the stall.
     if (!card.up && this.t.tutor.n('improve') > 0) notes.append(el('p', 'sb-quiet', `Improved: ${lowerFirst(upgradeNote(card.id))}`));
     if (!hover) notes.append(el('p', 'sb-quiet', `${this.touch ? 'Tap' : 'Click'} to put it back.`));
@@ -410,6 +416,14 @@ export class Sheets {
     buy();
   }
 
+  /**
+   * The seed merchant's stall. The goods, the pages and the services sit in a
+   * body that scrolls only if it must; under it, in a place of its own that is
+   * always there, one slip says what the lifted thing is (or what was just
+   * bought, or the stall's lesson), and the signpost on to the next season is
+   * pinned below it. Nothing on the tray moves when a slip comes or goes, so a
+   * second tap lands where the first did.
+   */
   stall(end?: Extract<Ev, { t: 'seasonEnd' }>): void {
     const s = this.t.run;
     const sh = s.shop;
@@ -419,28 +433,23 @@ export class Sheets {
     const wrap = el('div', 'sb-stall');
     const tap = this.touch ? 'Tap' : 'Click';
     const ask = (price: number, verb = 'buy') => (s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${tap} again to ${verb}, ${price} coins.</em>`);
+    let read: string | null = null;
     // The head: the sign, the season just closed, the purse, and the almanac.
     const last = s.stats.log[s.stats.log.length - 1];
     const head = el('div', 'sb-stall-head');
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])} is in. You took ${last.earned} against a quota of ${last.quota}.`));
+    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])} is in. You took ${last.earned} of ${last.quota}.`));
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
-    if (this.t.stallLine) wrap.append(this.lessonEl);
-    if (this.done) {
-      const d = el('div', 'sb-done');
-      if (this.doneCard) d.append(Object.assign(el('img'), { src: faceUrl(this.doneCard.id, true), alt: '' }));
-      d.append(el('p', '', esc(this.done)));
-      wrap.append(d);
-    }
+    const body = el('div', 'sb-stall-body');
 
     // Pages pinned on the back board, once the almanac pages have been brought in.
     const cork = el('div', 'sb-cork');
-    const full = s.pages.length >= MAX_PAGES;
-    cork.append(el('h3', '', full ? `Almanac pages. Yours is full: a new page takes a kept one's place.` : `Almanac pages. You keep up to ${MAX_PAGES}.`));
+    const room = maxPages(s);
+    const full = s.pages.length >= room;
+    cork.append(el('h3', '', full ? `Almanac pages. Yours is full: a new page takes a kept one's place.` : `Almanac pages. You keep up to ${room}.`));
     const pins = el('div', 'sb-pins');
-    let pageRead: HTMLElement | null = null;
     const pickedPage = this.picked?.startsWith('page') ? Number(this.picked.slice(4)) : -1;
     sh.pages.forEach((o, i) => {
       const key = `page${i}`;
@@ -449,7 +458,7 @@ export class Sheets {
       b.disabled = o.sold;
       b.setAttribute('aria-label', `${PAGES[o.page].name}, ${o.price} coins. ${PAGES[o.page].text}`);
       if (!o.sold && this.picked === key) {
-        pageRead = this.readSlip(full ? `<b>${esc(PAGES[o.page].name)}</b>. Your almanac is full. <em>${tap} a kept page to swap it out.</em>` : `<b>${esc(PAGES[o.page].name)}</b>. ${esc(PAGES[o.page].text)} ${ask(o.price, 'pin it')}`);
+        read = full ? `<b>${esc(PAGES[o.page].name)}</b>. ${esc(PAGES[o.page].text)} <em>Your almanac is full: ${tap.toLowerCase()} a kept page to swap it out.</em>` : `<b>${esc(PAGES[o.page].name)}</b>. ${esc(PAGES[o.page].text)} ${ask(o.price, 'pin it')}`;
       }
       b.onclick = () =>
         this.lift(key, () => {
@@ -462,7 +471,6 @@ export class Sheets {
     });
     if (!sh.pages.length) pins.append(el('p', 'sb-sub', 'No pages left to sell.'));
     cork.append(pins);
-    if (pageRead) cork.append(pageRead);
     if (s.pages.length) {
       const kept = el('div', 'sb-kept');
       kept.append(el('span', '', 'Kept:'));
@@ -492,15 +500,27 @@ export class Sheets {
       if (this.picked?.startsWith('kept:') && this.swapFor !== null) {
         const o = sh.pages[this.swapFor];
         const out = this.picked.slice(5) as PageId;
-        cork.append(this.readSlip(`Tear out <b>${esc(PAGES[out].name)}</b> for <b>${esc(PAGES[o.page].name)}</b>? ${ask(o.price, 'swap')}`));
+        read = `Tear out <b>${esc(PAGES[out].name)}</b> for <b>${esc(PAGES[o.page].name)}</b>? ${ask(o.price, 'swap')}`;
       }
     }
-    if (this.t.seen('pages')) wrap.append(cork);
+    // Room for one more page: a late use for coins, sold once the almanac is full.
+    if (slotOnSale(s)) {
+      const price = slotPrice(s);
+      const b = btn(`sb-slot${this.picked === 'slot' ? ' lifted' : ''}`, `<span>Room for one more page</span><em>${price} coins</em>`, () =>
+        this.lift('slot', () => {
+          if (buySlot(s)) this.bought('service', `Your almanac keeps ${maxPages(s)} pages now.`);
+          else this.ctx.audio.cue('deck.deny');
+          this.stall();
+        }),
+      );
+      if (this.picked === 'slot') read = `Room for one more almanac page, for good. ${ask(price)}`;
+      cork.append(b);
+    }
+    if (this.t.seen('pages')) body.append(cork);
 
-    // The tray of seed and tools, rarer stock laid out larger.
+    // The tray of seed and tools, rarer stock laid out a little larger.
     const tray = el('div', 'sb-tray');
     const goods = el('div', 'sb-goods');
-    let goodRead: HTMLElement | null = null;
     sh.cards.forEach((o, i) => {
       const key = `card${i}`;
       const def = CARDS[o.card];
@@ -512,7 +532,7 @@ export class Sheets {
         b.disabled = true;
       } else {
         b.innerHTML = `<img src="${faceUrl(o.card, false)}" alt="${esc(def.name)}"><span class="sb-pricetag">${o.price}</span>`;
-        if (this.picked === key) goodRead = this.readSlip(`<b>${esc(def.name)}</b>, ${esc(cardWords(o.card, false))} ${ask(o.price)}`);
+        if (this.picked === key) read = `<b>${esc(def.name)}</b>, ${esc(cardWords(o.card, false))} ${ask(o.price)}`;
         b.setAttribute('aria-label', `${def.name}, ${o.price} coins. ${def.text}`);
       }
       b.onclick = () =>
@@ -528,10 +548,8 @@ export class Sheets {
       goods.append(b);
     });
     tray.append(goods);
-    if (goodRead) tray.append(goodRead);
     // Services on the tray's lip: throw a card out, improve one, fresh stock, and a scoop from year 2.
     const lip = el('div', 'sb-lip');
-    let lipRead: HTMLElement | null = null;
     const thing = (key: string, url: string, label: string, price: number, ok: boolean, words: string, verb: string, why: string, go: () => void) => {
       const b = btn(`sb-thing${this.picked === key ? ' lifted' : ''}`, `<img src="${url}" alt=""><span>${label}</span><em>${price} coins</em>`, () =>
         this.lift(key, () => {
@@ -539,10 +557,11 @@ export class Sheets {
             this.ctx.audio.cue('deck.deny');
             return;
           }
+          this.picked = null;
           go();
         }),
       );
-      if (this.picked === key) lipRead = this.readSlip(`${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`);
+      if (this.picked === key) read = `${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`;
       lip.append(b);
     };
     const bucket = thingUrl('compost', 44, (g, px) => paintBucket(g, px));
@@ -567,13 +586,23 @@ export class Sheets {
         this.stall();
       });
     }
-    if (this.t.seen('services')) {
-      tray.append(lip);
-      if (lipRead) tray.append(lipRead);
-    }
-    wrap.append(tray);
+    if (this.t.seen('services')) tray.append(lip);
+    body.append(tray);
+    wrap.append(body);
+
+    // The slip's own place: what the lifted thing is, else what was just done, else the stall's lesson.
+    const foot = el('div', 'sb-stall-foot');
+    const spot = el('div', 'sb-slipspot');
+    if (read) spot.append(this.readSlip(read));
+    else if (this.done) {
+      const d = el('div', 'sb-done');
+      if (this.doneCard) d.append(Object.assign(el('img'), { src: faceUrl(this.doneCard.id, true), alt: '' }));
+      d.append(el('p', '', esc(this.done)));
+      spot.append(d);
+    } else if (this.t.stallLine) spot.append(this.lessonEl);
+    foot.append(spot);
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : `On to ${SEASON_NAMES[s.season + 1]}`;
-    wrap.append(
+    foot.append(
       btn('sb-signpost', `<span>${next}</span>`, () => {
         const ev = leaveShop(s);
         if (!ev) return;
@@ -584,14 +613,13 @@ export class Sheets {
         this.ctx.audio.cue('deck.shuffle');
       }),
     );
-    const scroll = this.el.querySelector('.sb-stall')?.scrollTop ?? 0;
+    wrap.append(foot);
+    const scroll = this.el.querySelector('.sb-stall-body')?.scrollTop ?? 0;
     // Keep the keyboard where it was: on the lifted thing, or on what was focused before.
     const was = document.activeElement?.closest('.sb-stall') ? [...this.el.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement) : -1;
     this.show('stall', wrap, this.picked ? '.lifted' : undefined);
     if (!this.picked && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
-    wrap.scrollTop = scroll;
-    // Keep the slip that answers a tap in view.
-    (wrap.querySelector('.sb-read') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
+    body.scrollTop = scroll;
   }
   private swapFor: number | null = null;
 
@@ -606,15 +634,15 @@ export class Sheets {
     this.t.syncPurse();
   }
 
-  /** Pin the stall's lesson line at its head (or take it down). */
+  /** The stall's lesson line goes in the slip's place, when no slip is there (or comes down). */
   lesson(line: Line | null): void {
     this.lessonEl.textContent = line?.text ?? '';
     this.lessonEl.dataset.lesson = line?.id ?? '';
     if (this.kind !== 'stall') return;
-    const wrap = this.el.querySelector('.sb-stall');
-    if (!wrap) return;
-    if (line && !wrap.contains(this.lessonEl)) wrap.insertBefore(this.lessonEl, wrap.children[1] ?? null);
-    else if (!line) this.lessonEl.remove();
+    const spot = this.el.querySelector('.sb-slipspot');
+    if (!spot) return;
+    if (!line) this.lessonEl.remove();
+    else if (!spot.querySelector('.sb-read, .sb-done') && !spot.contains(this.lessonEl)) spot.append(this.lessonEl);
   }
 
   // ---------------------------------------------------------------- the almanac entry at the end
@@ -622,7 +650,10 @@ export class Sheets {
   entry(): void {
     const s = this.t.run;
     const m = this.t.meta;
-    const page = el('div', 'sb-entry');
+    // The account scrolls if a long run fills it; the way on stays in sight below it.
+    const sheet = el('div', 'sb-entry');
+    const page = el('div', 'sb-entry-body');
+    sheet.append(page);
     page.append(el('h2', '', `The almanac, year ${s.year}`));
     page.append(el('p', 'sb-sub', 'An account of the kitchen plot.'));
     const list = el('ol', 'sb-entries');
@@ -639,7 +670,7 @@ export class Sheets {
     for (const b of bits) page.append(el('p', '', b));
     const fresh: CardId[] = s.end?.unlocked ?? [];
     if (fresh.length) {
-      page.append(el('p', '', `New in the merchant's catalogue: ${fresh.map((c) => CARDS[c].name).join(' and ')}.`));
+      page.append(el('p', '', `New in the merchant's catalogue: ${listOf(fresh.map((c) => lower(c)))}.`));
       const row = el('div', 'sb-new');
       for (const c of fresh) {
         const img = el('img');
@@ -649,8 +680,8 @@ export class Sheets {
       }
       page.append(row);
     } else page.append(el('p', 'sb-quiet', 'The catalogue holds nothing new. Meet more seasons in a run to add to it.'));
-    page.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
-    this.show('entry', page);
+    sheet.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    this.show('entry', sheet);
     this.ctx.audio.cue('deck.fail');
   }
 

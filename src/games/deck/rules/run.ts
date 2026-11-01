@@ -3,7 +3,7 @@
 // mutates the run and returns what happened as events.
 
 import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, MAX_PAGES, UNLOCK_AT } from './cards';
-import { byYear, crowsOn, emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, quotaFor, TUNING } from './board';
+import { bySeason, emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, nextSeason, quotaFor, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, Shop } from './types';
@@ -13,16 +13,21 @@ export function newMeta(): Meta {
 }
 
 /**
- * The guided first season deals these hands on its first days, from the same
- * tin (the spent pile too, if the tin runs short), so each day brings one idea:
- * day 1 two radishes; day 2 a carrot to plant them beside; day 3 more than three
- * scoops' worth, with radishes to ring the ripening carrot. From day 4 the
- * hand draws up to five as usual.
+ * The guided first season deals these hands, from the same tin (the spent pile
+ * too, if the tin runs short), so each day brings one idea: day 1 two radishes;
+ * day 2 a carrot to plant them beside; day 3 more than three scoops' worth, with
+ * radishes to ring the ripening carrot; days 4 to 6 one new card each. Cards
+ * not played stay in hand. From summer the hand draws up to five as usual.
  */
 export const GUIDED_DEALS: CardId[][] = [
   ['radish', 'radish'],
   ['carrot', 'radish', 'radish'],
   ['radish', 'radish', 'carrot', 'lettuce'],
+  // Then one new card a day, so each comes on its own: the beans (with the tin),
+  // the watering can (with the spent heap), then the sunflower, the lettuce's tall crop.
+  ['beans', 'carrot', 'radish'],
+  ['can', 'radish', 'carrot'],
+  ['sunflower', 'lettuce', 'radish'],
 ];
 
 export function newRun(seed: number, meta: Meta | null, guided = false): { s: RunState; ev: Ev[] } {
@@ -39,6 +44,7 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     quota: 0,
     energy: 0,
     scoops: 0,
+    slots: 0,
     crow: false,
     tossed: false,
     cols: 4,
@@ -93,14 +99,18 @@ export function allCards(s: RunState): Card[] {
   return [...s.draw, ...s.hand, ...s.discard, ...s.placed];
 }
 
+/**
+ * A new season. The plot carries over: whatever stands at the last dusk (crops
+ * still growing, perennials with picks left, scarecrows and beehives) is there
+ * at the first dawn. Only the cards come home: the hand and the spent heap go
+ * back in the tin and it is shuffled. An object's card stays out on its plot.
+ */
 export function startSeason(s: RunState, ev: Ev[]): void {
-  s.cols = s.pages.includes('furrow') ? 5 : 4;
-  s.rows = 4;
-  s.plots = Array.from({ length: s.cols * s.rows }, emptyPlot);
-  s.draw = allCards(s);
+  if (!s.plots.length) s.plots = Array.from({ length: s.cols * s.rows }, emptyPlot);
+  widen(s, s.pages.includes('furrow') ? 5 : 4);
+  s.draw = [...s.draw, ...s.hand, ...s.discard];
   s.hand = [];
   s.discard = [];
-  s.placed = [];
   shuffle(s, s.draw);
   s.tonight = [];
   s.shop = null;
@@ -112,6 +122,19 @@ export function startSeason(s: RunState, ev: Ev[]): void {
   startDay(s, ev);
 }
 
+/** Give the plot this many columns, keeping every plot where it stands (the Long Furrow adds column E on the right). */
+function widen(s: RunState, cols: number): void {
+  if (cols === s.cols && s.plots.length === s.cols * s.rows) return;
+  const old = s.plots;
+  const was = s.cols;
+  s.plots = Array.from({ length: cols * s.rows }, (_, i) => {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    return c < was && old[r * was + c] ? old[r * was + c] : emptyPlot();
+  });
+  s.cols = cols;
+}
+
 export function startDay(s: RunState, ev: Ev[]): void {
   s.energy = energyMax(s);
   s.tossed = false;
@@ -119,7 +142,8 @@ export function startDay(s: RunState, ev: Ev[]): void {
   if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].boost += 1;
   ev.push({ t: 'dawn', day: s.day });
   // A crow comes to the plate's edge at dawn, so the day has time to answer it.
-  s.crow = crowsOn(s) && rand(s) < byYear(TUNING.crowChance, s.year);
+  const crow = bySeason(TUNING.crowChance, s);
+  s.crow = crow > 0 && rand(s) < crow;
   if (s.crow) {
     s.stats.crows++;
     ev.push({ t: 'crowAbout' });
@@ -129,9 +153,10 @@ export function startDay(s: RunState, ev: Ev[]): void {
   else drawUp(s, ev);
 }
 
-/** The guided season's hand for today: these cards from the tin, or the spent pile if the tin has none left. */
+/** The guided season's hand for today: these cards from the tin, or the spent pile if the tin has none left, up to a full hand. */
 function dealScripted(s: RunState, ids: readonly CardId[], ev: Ev[]): void {
   for (const id of ids) {
+    if (s.hand.length >= handSize(s)) break;
     let i = s.draw.findIndex((c) => c.id === id);
     let from = s.draw;
     if (i < 0) {
@@ -340,16 +365,11 @@ function seasonEnd(s: RunState, ev: Ev[]): void {
   const cleared = s.earned >= s.quota;
   s.stats.log.push({ year: s.year, season: s.season, earned: s.earned, quota: s.quota, cleared });
   ev.push({ t: 'seasonEnd', cleared, earned: s.earned, quota: s.quota, year: s.year, season: s.season });
-  // Clear the plot; every card goes back in the tin.
-  s.draw = allCards(s);
+  // The cards come home; the plot stands as it is into the next season.
+  s.draw = [...s.draw, ...s.hand, ...s.discard];
   s.hand = [];
   s.discard = [];
-  s.placed = [];
   s.tonight = [];
-  for (const p of s.plots) {
-    p.crop = null;
-    p.obj = null;
-  }
   if (cleared) {
     s.stats.seasonsCleared++;
     s.phase = 'shop';
@@ -387,19 +407,25 @@ function rollRarity(s: RunState): Rarity {
   return 'common';
 }
 
-/** Cards that answer a hazard the run has met, if the player owns none of them: a scarecrow for crows; ladybirds or garlic for pests. */
+/**
+ * Cards that answer a hazard, if the player owns none of them: a scarecrow for
+ * crows; ladybirds or garlic for pests. Stocked once the hazard has shown, and
+ * before the first season that can bring it, so the first crow can be met.
+ */
 export function hazardAnswers(s: RunState): CardId[][] {
   const own = new Set(allCards(s).map((c) => c.id));
+  // The stall opens between seasons: the season it leads to is the one to get ready for.
+  const ahead = s.phase === 'shop' ? nextSeason(s) : s;
   const out: CardId[][] = [];
-  if (s.stats.crows > 0 && !own.has('scarecrow')) out.push(['scarecrow']);
-  if (s.stats.pests > 0 && !own.has('ladybirds') && !own.has('garlic')) out.push(['ladybirds', 'garlic']);
+  if ((s.stats.crows > 0 || bySeason(TUNING.crowChance, ahead) > 0) && !own.has('scarecrow')) out.push(['scarecrow']);
+  if ((s.stats.pests > 0 || bySeason(TUNING.pestChance, ahead) > 0) && !own.has('ladybirds') && !own.has('garlic')) out.push(['ladybirds', 'garlic']);
   return out.map((o) => o.filter((c) => s.pool.includes(c))).filter((o) => o.length > 0);
 }
 
 /**
- * The goods on the tray: always at least one seed, and an answer to any
- * hazard the run has met that the player cannot yet meet; the rest at random
- * by rarity.
+ * The goods on the tray: always at least one seed, one uncommon or rarer, and
+ * an answer to any hazard the player cannot yet meet; the rest at random by
+ * rarity.
  */
 function rollCards(s: RunState): CardId[] {
   const out: CardId[] = [];
@@ -413,6 +439,8 @@ function rollCards(s: RunState): CardId[] {
     const seeds = s.pool.filter(isSeed);
     add(seeds.some((c) => CARDS[c].rarity === rarity) ? seeds.filter((c) => CARDS[c].rarity === rarity) : seeds);
   }
+  // Never a tray of starter commons only.
+  if (!out.some((c) => CARDS[c].rarity !== 'common')) add(s.pool.filter((c) => CARDS[c].rarity === 'uncommon'));
   while (out.length < TUNING.goods) {
     const rarity = rollRarity(s);
     let opts = s.pool.filter((c) => CARDS[c].rarity === rarity && !out.includes(c));
@@ -449,11 +477,16 @@ export function buyCard(s: RunState, i: number): Ev[] | null {
   return [{ t: 'buy', card: o.card }];
 }
 
+/** How many almanac pages the player may keep: five, and one more for each slot bought. */
+export function maxPages(s: Pick<RunState, 'slots'>): number {
+  return MAX_PAGES + (s.slots ?? 0);
+}
+
 /** Buy a page. With the almanac full, name a kept page to tear out for it. */
 export function buyPage(s: RunState, i: number, replace?: PageId): Ev[] | null {
   const o = s.shop?.pages[i];
   if (s.phase !== 'shop' || !o || o.sold || s.coins < o.price || s.pages.includes(o.page)) return null;
-  const full = s.pages.length >= MAX_PAGES;
+  const full = s.pages.length >= maxPages(s);
   if (full && (!replace || !s.pages.includes(replace))) return null;
   s.coins -= o.price;
   o.sold = true;
@@ -462,7 +495,7 @@ export function buyPage(s: RunState, i: number, replace?: PageId): Ev[] | null {
   return [{ t: 'page', page: o.page }];
 }
 
-/** A seed scoop for good, from year 2, twice at most. */
+/** A seed scoop for good, from year 2, four at most, each dearer than the last. The bench lays out any number. */
 export function scoopPrice(s: RunState): number {
   return Math.round(TUNING.scoopPrice * Math.pow(2, s.scoops) * priceScale(s));
 }
@@ -476,6 +509,27 @@ export function buyScoop(s: RunState): Ev[] | null {
   s.coins -= scoopPrice(s);
   s.scoops++;
   return [{ t: 'scoop' }];
+}
+
+/** Room for one more almanac page: sold once the almanac is full and there are pages left to keep. Doubles each time. */
+export function slotPrice(s: RunState): number {
+  return Math.round(TUNING.slotPrice * Math.pow(2, s.slots ?? 0) * priceScale(s));
+}
+
+export function canBuySlot(s: RunState): boolean {
+  return s.phase === 'shop' && s.pages.length >= maxPages(s) && maxPages(s) < Object.keys(PAGES).length && s.coins >= slotPrice(s);
+}
+
+/** Whether the stall offers a page slot at all (afford it or not). */
+export function slotOnSale(s: RunState): boolean {
+  return s.phase === 'shop' && s.pages.length >= maxPages(s) && maxPages(s) < Object.keys(PAGES).length;
+}
+
+export function buySlot(s: RunState): Ev[] | null {
+  if (!canBuySlot(s)) return null;
+  s.coins -= slotPrice(s);
+  s.slots = (s.slots ?? 0) + 1;
+  return [{ t: 'slot' }];
 }
 
 export function removePrice(s: RunState): number {

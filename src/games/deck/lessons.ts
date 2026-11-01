@@ -220,7 +220,7 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     where: 'table',
     ready: (v) => v.s.phase === 'day' && v.s.hand.some((c) => !v.learn.cards.includes(c.id)),
-    text: (v) => (v.dev === 'touch' ? 'Hold the new card to read it.' : v.dev === 'mouse' ? 'Rest the pointer on the new card.' : 'Take it up, then press I.'),
+    text: (v) => (v.dev === 'touch' ? 'Press and hold the new card to read it.' : v.dev === 'mouse' ? 'Rest the pointer on the new card.' : 'Take it up, then press I.'),
     point: () => 'hand',
     done: (v) => v.n('detail') > v.n('at:newcard:detail') || nightPassed(v, 'newcard'),
   },

@@ -4,7 +4,7 @@
 // another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, SEEDS } from './cards';
-import { around, byYear, guarded, immune, isEmpty, isRipe, isTall, neighbours, pestsOn, TUNING } from './board';
+import { around, bySeason, guarded, immune, isEmpty, isRipe, isTall, neighbours, TUNING } from './board';
 import { pick, rand } from './rng';
 import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, Step } from './types';
 
@@ -181,8 +181,8 @@ export function night(s: RunState, ev: Ev[]): void {
     applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev);
   }
 
-  // 5. Pests count down, may spread, and new ones may land on a growing crop.
-  if (pestsOn(s)) {
+  // 5. Pests count down, may spread, and new ones may land on a growing crop (from summer of year 1, more each season).
+  {
     const gone: number[] = [];
     const still = pestedAtDusk.filter((i) => s.plots[i].crop?.pest);
     for (const i of still) {
@@ -200,7 +200,8 @@ export function night(s: RunState, ev: Ev[]): void {
       s.stats.pests++;
       ev.push({ t: 'pest', plot: j, from: i });
     }
-    if (rand(s) < byYear(TUNING.pestChance, s.year)) {
+    const chance = bySeason(TUNING.pestChance, s);
+    if (chance > 0 && rand(s) < chance) {
       const opts = s.plots.map((p, i) => (p.crop && !isRipe(p.crop) && !p.crop.pest && !immune(s, i) ? i : -1)).filter((i) => i >= 0);
       if (opts.length) {
         const j = pick(s, opts);

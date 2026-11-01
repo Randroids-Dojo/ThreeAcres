@@ -17,8 +17,8 @@ export interface Lost {
   yield: number;
   bloom: number;
   times: number;
-  /** gone: the crop giving it is pulled first. late: this crop will not ripen before the season ends. */
-  why: 'gone' | 'late';
+  /** gone: the crop giving it is pulled first. */
+  why: 'gone';
   /** The plot of the crop that will be gone, for the reason. */
   from: number | null;
 }
@@ -39,7 +39,7 @@ export interface Mark {
 
 export interface Preview {
   plot: number | null;
-  /** A seed: what it would score on that plot, on the night it is pulled. */
+  /** A seed: what it would score on that plot, on the night it is pulled. late: that night is next season (the plot carries over). */
   harvest: { yield: number; bloom: number; score: number; late: boolean } | null;
   /** Crops (and the new seed) whose harvest or growth the play changes. */
   marks: Mark[];
@@ -100,7 +100,6 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
   let harvest: Preview['harvest'] = null;
   const pulled = ev.find((e): e is Extract<typeof e, { t: 'harvest' }> => e.t === 'harvest');
   if (pulled) harvest = { yield: pulled.h.chipsTotal, bloom: pulled.h.multTotal, score: pulled.h.score, late: false };
-  const zero = { yield: 0, bloom: 0, times: 1 };
   const gains = (h: Harvest, from: { chips: number; add: number; times: number }) => {
     const q = parts(h);
     return { yield: h.chipsTotal - from.chips, bloom: q.add - from.add, times: q.times / from.times };
@@ -110,8 +109,7 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     const crop = p.crop;
     if (!crop) return;
     const j = s.plots.findIndex((q) => q.crop?.uid === crop.uid);
-    const late1 = f1[i]!.pull === Infinity;
-    const late0 = j >= 0 && f0[j]!.pull === Infinity;
+    const late1 = f1[i]!.late;
     const paid1 = scoreFor(c, i, f1, true);
     const seen1 = scoreFor(c, i, f1, false);
     // Before the play: the new seed starts from its bare base; a standing crop from what it would get anyway.
@@ -120,17 +118,14 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     const bare = { chips: paid1.base + cellar, add: 0, times: 1 };
     const paid0 = j < 0 ? bare : totals(scoreFor(s, j, f0, true));
     const seen0 = j < 0 ? bare : totals(scoreFor(s, j, f0, false));
-    const seem = gains(seen1, seen0);
-    // What pays: nothing if it won't ripen before the season ends; only nights if the play is what brings it in.
-    const pay = late1 ? zero : late0 ? zero : gains(paid1, paid0);
-    const shown = late0 && !late1 ? zero : seem;
+    const shown = gains(seen1, seen0);
+    // What pays, on the night it is pulled: this season or, the plot carrying over, next.
+    const pay = gains(paid1, paid0);
     if (j < 0) harvest = { yield: paid1.chipsTotal, bloom: paid1.multTotal, score: paid1.score, late: late1 };
     const nights = isRipe(crop) || j < 0 ? 0 : Math.max(0, Math.min(f0[j]!.ripeIn, 40) - Math.min(f1[i]!.ripeIn, 40));
     const m: Mark = { plot: i, yield: pay.yield, bloom: pay.bloom, times: pay.times, nights };
     const lost = { yield: shown.yield - pay.yield, bloom: shown.bloom - pay.bloom, times: shown.times / pay.times };
-    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) {
-      m.lost = { ...lost, why: late1 ? 'late' : 'gone', from: late1 ? null : missingFrom(seen1, paid1) };
-    }
+    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1) };
     if (m.yield || m.bloom || !near(m.times, 1) || m.nights || m.lost) marks.push(m);
   });
   return { plot, harvest: isSeed(card.id) || pulled ? harvest : null, marks };
