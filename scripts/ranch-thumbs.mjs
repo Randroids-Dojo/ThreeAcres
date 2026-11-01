@@ -294,6 +294,60 @@ await p.waitForTimeout(500);
 const got = await p.evaluate(() => { const d = window.__wild; const e = document.querySelector('.rh-say'); return { noPull: d.noPull, tame: d.tame, gone: d.gone, note: e.classList.contains('on') ? e.textContent : '' }; });
 check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && got.note === 'It got away.', `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
 
+// Round 5: a brook digging in shows the time it has left on the tug ring (the fifth playtest's brooks dove after
+// about 3 s with nothing to say so): an outer ring, shown only for a kind with a time, that shrinks as you pull.
+await p.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  s.hour = 10;
+  s.gates.hollow = true;
+  r.sim.phys.gates = { ...s.gates };
+  for (const q of s.slots) { q.t = null; q.n = 0; }
+  const pl = s.player; pl.x = 39; pl.z = 4; pl.y = r.sim.phys.floor(39, 4);
+  const d = r.sim.spawn('brook', 43, 4, false);
+  d.hunger = 0.2;
+  d.hopT = 5;
+  window.__wild = d;
+  r.aimAt(d.x, d.y + 0.25, d.z);
+});
+await p.waitForTimeout(200);
+await touch('touchStart', [[pullBtn.x, pullBtn.y, 24]]);
+const ring = [];
+for (let i = 0; i < 14; i++) {
+  await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
+  await p.waitForTimeout(60);
+  ring.push(await p.evaluate(() => { const c = document.querySelector('.rh-cross'); const l = c.querySelector('.x-left'); return { ...window.ranch.hud.tugState(), shown: c.classList.contains('timed') && getComputedStyle(l).display !== 'none', dash: parseFloat(l.style.strokeDashoffset || '0') }; }));
+}
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+const timed = ring.filter((q) => q.shown && q.left >= 0);
+check("a brook digging in shows its time left on the tug ring, shrinking as you pull", timed.length >= 5 && timed[timed.length - 1].left < timed[0].left - 0.1 && timed[timed.length - 1].dash > timed[0].dash, JSON.stringify(timed.map((q) => q.left.toFixed(2))));
+// A clover has no time: no outer ring.
+await p.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true;
+  for (const q of s.slots) { q.t = null; q.n = 0; }
+  const pl = s.player; pl.x = -16; pl.z = -2; pl.y = r.sim.phys.floor(-16, -2);
+  const d = r.sim.spawn('clover', -16, -7.2, false);
+  d.hopT = 5;
+  window.__wild = d;
+  r.aimAt(d.x, d.y + 0.25, d.z);
+});
+await p.waitForTimeout(200);
+await touch('touchStart', [[pullBtn.x, pullBtn.y, 25]]);
+let cloverRing = null;
+for (let i = 0; i < 8; i++) {
+  await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
+  await p.waitForTimeout(60);
+  const q = await p.evaluate(() => ({ ...window.ranch.hud.tugState(), timed: document.querySelector('.rh-cross').classList.contains('timed') }));
+  if (q.tug > 0) cloverRing = q;
+}
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+check('a clover digging in fills the tug ring with no time ring (it has no time)', !!cloverRing && cloverRing.left === -1 && !cloverRing.timed, JSON.stringify(cloverRing));
+await p.evaluate(() => { const s = window.ranch.sim.s; for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; for (const q of s.slots) { q.t = null; q.n = 0; } });
+
 // Food chosen and aimed so a blow lands in a feeder's hopper: the crosshair marks the feeder.
 const fm = await p.evaluate(() => {
   const r = window.ranch;

@@ -97,7 +97,7 @@ describe('the canister', () => {
     run(sim, 0.3);
     run(sim, 2, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
     expect(d.gone).toBe(true);
-    expect(sim.s.slots[0]).toEqual({ t: 'clover', n: 1 });
+    expect(sim.s.slots[0]).toMatchObject({ t: 'clover', n: 1 });
     run(sim, 0.1, { ...idle, puffPressed: true, puff: true }, aimAt(sim, p.x, p.y + 1.6, p.z - 8));
     expect(sim.s.slots[0].n).toBe(0);
     const out = sim.s.downies.find((q) => !q.gone);

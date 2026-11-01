@@ -115,8 +115,9 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-20 -20 40 40"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/><circle class="x-left" r="17.5" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="110" stroke-dashoffset="0" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
+    this.leftRing = this.cross.querySelector('.x-left')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
     this.arcDot = this.arc.querySelector('.sun')!;
     this.arcMoon = this.arc.querySelector('.moon')!;
@@ -350,16 +351,33 @@ export class Hud {
     this.pageUp = true;
   }
 
-  /** A wild downy digging in against the pull: a ring round the crosshair fills as it tires (0 hides it). */
-  setTug(k: number): void {
+  /**
+   * A wild downy digging in against the pull: a ring round the crosshair fills
+   * as it tires (0 hides it). left: for one that breaks free if you are slow (a
+   * brook diving for the pond, a thistle), the share of its time left, shown
+   * as an outer ring that shrinks (-1: no limit, no outer ring). The fifth
+   * playtest's brooks dove after about 3 s with nothing to say so.
+   */
+  setTug(k: number, left = -1): void {
     const v = k > 0.02 ? Math.min(1, k) : 0;
-    if (Math.abs(v - this.tugShown) < 0.01) return;
+    const l = v > 0 && left >= 0 ? Math.min(1, left) : -1;
+    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01) return;
     this.tugShown = v;
+    this.leftShown = l;
     this.cross.classList.toggle('tug', v > 0);
+    this.cross.classList.toggle('timed', l >= 0);
+    this.cross.classList.toggle('late', l >= 0 && l < 0.35);
     this.tugRing.style.strokeDashoffset = `${(1 - v) * 81.7}`;
+    if (l >= 0) this.leftRing.style.strokeDashoffset = `${(1 - l) * 110}`;
   }
   private tugShown = 0;
+  private leftShown = -1;
   private tugRing!: SVGCircleElement;
+  private leftRing!: SVGCircleElement;
+  /** For checks: the tug ring's fill and the time-left ring's share (-1 hidden). */
+  tugState(): { tug: number; left: number } {
+    return { tug: this.tugShown, left: this.leftShown };
+  }
 
   showZone(name: string): void {
     setText(this.zone, name);

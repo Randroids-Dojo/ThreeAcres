@@ -5,7 +5,11 @@
 // brooks kept) with nothing to choose and nothing lost: "after day 4 it's only
 // chores". Now the board offers two or three each morning and you take one:
 // a fluff order for a day at home, live downies for a trip out, and once you
-// keep two kinds a fluff order for another (prized for thistles).
+// keep two kinds a fluff order for another (prized for thistles). The fifth
+// playtest's offers paid for the same chores in other sizes (360, 380, 363):
+// now there are three kinds of day, a fluff order at home, a trip for downies
+// caught today, and the board's rare downy, one sought-after wild one seen at a
+// landmark and shy of something, paying more than the fluff order.
 //
 // 1. Variety: thirty mornings of offers for four ranches (the board's own
 //    choice, its memory of what it asked for lately included).
@@ -113,8 +117,12 @@ function tripSecs(k: DownyKind, n: number, thumb: 'careful' | 'careless' = 'care
   return TRIP_M[k] / RUN + n * per;
 }
 
+/** The rare one: a trip for one catch, with the hunt for it (the spot, and creeping in the way it allows) a quarter longer. */
+const rareSecs = (k: DownyKind, thumb: 'careful' | 'careless' = 'careful') => tripSecs(k, 1, thumb) * 1.25;
+
 /** What an offer asks of you: a fluff order the share of those downies' fluff by dusk it needs; live downies a trip (real seconds). */
 function ask(sim: Sim, o: Order): { share: number; trip: number } {
+  if (o.rare) return { share: 0, trip: rareSecs(o.kind) };
   if (o.live) return { share: 0, trip: tripSecs(o.kind, o.n) };
   return { share: o.n / Math.max(1, sim.makes(o.kind, 6) * 0.9), trip: 0 };
 }
@@ -153,6 +161,7 @@ for (const r of RANCHES) {
   let prev = '';
   const asked: Record<string, number> = {};
   const ratios: number[] = [];
+  const rares: number[] = [];
   const DAYS = 30;
   for (let d = 2; d < 2 + DAYS; d++) {
     s.day = d;
@@ -167,8 +176,10 @@ for (const r of RANCHES) {
     prev = first;
     if (!dominated(sim, os)) compete++;
     const f = os.find((o) => !o.live);
-    const l = os.find((o) => o.live);
+    const l = os.find((o) => o.live && !o.rare);
     if (f && l) ratios.push(worth(l) / (f.pay / (f.mult - 1)));
+    const rr = os.find((o) => o.rare);
+    if (rr && f) rares.push(worth(rr) / f.pay);
   }
   const kinds = Object.entries(asked)
     .sort((a, b) => b[1] - a[1])
@@ -178,6 +189,10 @@ for (const r of RANCHES) {
   if (ratios.length) {
     ratios.sort((a, b) => a - b);
     console.log(`      a trip's worth against a plain fluff order's: ${ratios[0].toFixed(2)} to ${ratios[ratios.length - 1].toFixed(2)}, middle ${ratios[Math.floor(ratios.length / 2)].toFixed(2)}`);
+  }
+  if (rares.length) {
+    rares.sort((a, b) => a - b);
+    console.log(`      the rare one's pay against the fluff order's: ${rares[0].toFixed(2)} to ${rares[rares.length - 1].toFixed(2)}, middle ${rares[Math.floor(rares.length / 2)].toFixed(2)}`);
   }
 }
 console.log(`   (A trip costs a careful catcher, running: clover ${Math.round(tripSecs('clover', 3))} s for 3, ember ${Math.round(tripSecs('ember', 3))} s for 3, brook ${Math.round(tripSecs('brook', 3))} s for 3. Live downies pay ${Object.entries(LIVE_EACH).map(([k, v]) => `${k} ${v}`).join(', ')} each.)\n`);
@@ -227,7 +242,7 @@ function tend(sim: Sim, r: Ranch, pool: Record<Food, number>): number {
   return coins;
 }
 
-type Way = 'fluff' | 'live' | 'most' | 'careless';
+type Way = 'fluff' | 'live' | 'most' | 'careless' | 'rare';
 function play(r: Ranch, way: Way, days = 3): { coins: number; filled: number; taken: number; away: number } {
   const thumb = way === 'careless' ? 'careless' : 'careful';
   const sim = build(r, 11);
@@ -243,7 +258,7 @@ function play(r: Ranch, way: Way, days = 3): { coins: number; filled: number; ta
     const c0 = s.coins;
     let next = 0;
     let t = 0;
-    let trip: { kind: DownyKind; n: number; back: number } | null = null;
+    let trip: { kind: DownyKind; n: number; back: number; rare: boolean } | null = null;
     while (s.hour < 21) {
       sim.update(dt, idle, aim);
       sim.events.length = 0;
@@ -251,18 +266,21 @@ function play(r: Ranch, way: Way, days = 3): { coins: number; filled: number; ta
       // At 7 am, at the board: take an offer.
       if (s.hour >= 7 && sim.offers().length) {
         const os = sim.offers();
-        const pick = way === 'fluff' ? os.findIndex((o) => !o.live) : way === 'live' || way === 'careless' ? os.findIndex((o) => o.live) : os.indexOf([...os].sort((a, b) => worth(b) - worth(a))[0]);
+        const pick =
+          way === 'fluff' ? os.findIndex((o) => !o.live) : way === 'live' || way === 'careless' ? os.findIndex((o) => o.live && !o.rare) : way === 'rare' ? os.findIndex((o) => o.rare) : os.indexOf([...os].sort((a, b) => worth(b) - worth(a))[0]);
         const i = pick >= 0 ? pick : 0;
         const o = os[i];
         sim.takeOrder(i);
         taken++;
-        // A live order: out at 8 am, away for the trip; the hand tends nothing meanwhile.
-        if (o.live) trip = { kind: o.kind, n: o.n, back: -1 };
+        // A live order (or the rare one): out at 8 am, away for the trip; the hand tends nothing meanwhile.
+        if (o.live) trip = { kind: o.kind, n: o.n, back: -1, rare: !!o.rare };
       }
-      if (trip && trip.back < 0 && s.hour >= 8) trip.back = t + tripSecs(trip.kind, trip.n, thumb);
+      const secs = (q: NonNullable<typeof trip>) => (q.rare ? rareSecs(q.kind, thumb) : tripSecs(q.kind, q.n, thumb));
+      if (trip && trip.back < 0 && s.hour >= 8) trip.back = t + secs(trip);
       if (trip && trip.back >= 0 && t >= trip.back) {
-        away += tripSecs(trip.kind, trip.n, thumb);
-        for (let k = 0; k < trip.n; k++) sim.sellDowny(trip.kind);
+        away += secs(trip);
+        // Caught today (and for the rare order, the rare one): the crate takes them.
+        for (let k = 0; k < trip.n; k++) sim.sellDowny(trip.kind, undefined, undefined, undefined, s.day, trip.rare);
         trip = null;
       }
       const out = !!trip && trip.back >= 0;
@@ -282,13 +300,14 @@ function play(r: Ranch, way: Way, days = 3): { coins: number; filled: number; ta
 }
 
 console.log('3. Three ways of choosing, three days of the real sim each (coins a day over days 2 and 3, the order pays included)');
-console.log('   ranch                                     the fluff order          live downies, careful          live downies, careless         the most pay');
+console.log('   ranch                                     the fluff order          live downies, careful          live downies, careless         the rare one, careful          the most pay');
 for (const r of RANCHES) {
   const a = play(r, 'fluff');
   const b = play(r, 'live');
   const b2 = play(r, 'careless');
+  const b3 = play(r, 'rare');
   const c = play(r, 'most');
   const f = (x: { coins: number; filled: number; taken: number; away: number }) => `${String(Math.round(x.coins)).padStart(5)} (${x.filled} of ${x.taken}${x.away ? `, ${Math.round(x.away)} s out` : ''})`;
-  console.log(`   ${r.name.slice(0, 40).padEnd(40)}  ${f(a).padEnd(24)} ${f(b).padEnd(30)} ${f(b2).padEnd(30)} ${f(c)}`);
+  console.log(`   ${r.name.slice(0, 40).padEnd(40)}  ${f(a).padEnd(24)} ${f(b).padEnd(30)} ${f(b2).padEnd(30)} ${f(b3).padEnd(30)} ${f(c)}`);
 }
 console.log(`   (n of m: orders filled of taken; s out: real seconds a day on the trip. Careless trips take longer: clover ${Math.round(tripSecs('clover', 3, 'careless'))} s, ember ${Math.round(tripSecs('ember', 3, 'careless'))} s, brook ${Math.round(tripSecs('brook', 3, 'careless'))} s for 3.)`);

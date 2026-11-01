@@ -251,7 +251,8 @@ function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r:
         p.z = z;
         p.y = sim.phys.floor(x, z);
         p.vx = p.vy = p.vz = 0;
-        s.slots[0] = { t: 'clover', n: 1 };
+        // (Round 5: a live order wants a downy caught today.)
+        s.slots[0] = { t: 'clover', n: 1, downs: [{ h: 0.3, c: s.day }] };
         s.sel = 0;
         const aim = aimFrom(sim, cx + lx * side, floor + 0.75 + up, cz + lz * side, MUZZLES.phone);
         const said = sim.aimTarget(aim) === 'sell';

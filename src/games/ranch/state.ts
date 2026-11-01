@@ -13,6 +13,7 @@ import {
   type ItemType,
   type Order,
   type PadKind,
+  type Spook,
   type Thing,
   type Tuft,
 } from './defs';
@@ -89,6 +90,12 @@ export interface Downy extends Body {
   /** A thistle's seconds of bolting lately, and how long it is winded for once it has run itself out. Not saved. */
   run: number;
   winded: number;
+  /** The day it was caught from the wild (0: not known, or the porch downy). A live order wants one caught today. */
+  caught: number;
+  /** A rare individual: the morning board's sought-after downy (a gold clover, a rose ember, a silver brook). */
+  rare: boolean;
+  /** What spooks a rare wild one (see `RARE_SPOOK` in sim.ts); '' for none. */
+  spook: Spook | '';
 }
 
 export interface Item extends Body {
@@ -126,12 +133,31 @@ export interface Nettle extends Body {
   roll: number;
   gone: boolean;
   snuffT: number;
+  /** Stepping sideways along something in its way, and for how long; the side it tries. */
+  detourT?: number;
+  detourYaw?: number;
+  detourSide?: number;
+  /** Seconds it has been pushing without getting anywhere. */
+  stuckT?: number;
+}
+
+/**
+ * A downy in the jar: its hunger (kept, so a starving one does not come out
+ * fed: the fifth playtest's 0.06 came out 0.37), the day it was caught (a live
+ * order wants one caught today) and whether it is the board's rare one.
+ */
+export interface DownRec {
+  h: number;
+  c: number;
+  rare?: boolean;
 }
 
 export interface Slot {
   /** What it holds; for the fluff window, the kind of fluff that comes out next. */
   t: Thing | null;
   n: number;
+  /** For a downy's window: each downy in it, oldest first (one per downy). */
+  downs?: DownRec[];
   /** For fluff: the meals you gave that it came from, oldest first (not saved). */
   feeds?: number[];
   /**
@@ -212,7 +238,7 @@ export interface RanchState {
   /** The day the board last posted orders. */
   orderDay: number;
   /** The orders the board has offered lately (kind, live, day), newest last: it asks for what it has not asked for in a while. */
-  orderLog: { kind: DownyKind; live: boolean; day: number }[];
+  orderLog: { kind: DownyKind; live: boolean; day: number; rare?: boolean }[];
   /** Last day the overnight changes ran. */
   night: number;
   nextId: number;
@@ -295,6 +321,7 @@ export function freshState(): RanchState {
 // ---------------------------------------------------------------- save
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
+const isDownyKind = (t: Thing): t is DownyKind => (KINDS as string[]).includes(t);
 
 export interface SaveV1 {
   v: 1;
@@ -303,14 +330,14 @@ export interface SaveV1 {
   coins: number;
   earned: number;
   player: [number, number, number, number, number];
-  /** what, how many, and for the fluff window the kinds in it. */
-  slots: [Thing | null, number, Tuft[]?][];
+  /** what, how many, for the fluff window the kinds in it, and for a downy's window each downy's hunger, day caught and rarity. */
+  slots: [Thing | null, number, Tuft[]?, [number, number, number][]?][];
   sel: number;
   up: Record<BenchUp, number>;
   gates: Record<GateId, boolean>;
   pads: Pad[];
-  /** kind, x, y, z, hunger, tame, homeX, homeZ, keep */
-  downies: [DownyKind, number, number, number, number, number, number, number, number][];
+  /** kind, x, y, z, hunger, tame, homeX, homeZ, keep, day caught, rare (0 no, 1 shy of running, 2 shy of the bellows, 3 rare and caught) */
+  downies: [DownyKind, number, number, number, number, number, number, number, number, number?, number?][];
   /** type, x, y, z, src, rest */
   items: [ItemType, number, number, number, number, number][];
   sources: number[];
@@ -325,7 +352,7 @@ export interface SaveV1 {
   /** Added with orders; older saves have none and get their first at the next morning. */
   orders?: Order[];
   orderDay?: number;
-  orderLog?: { kind: DownyKind; live: boolean; day: number }[];
+  orderLog?: { kind: DownyKind; live: boolean; day: number; rare?: boolean }[];
   /** Added with the lessons; older saves have neither and are credited on load. */
   learn?: string[];
   learnCount?: Record<string, number>;
@@ -340,12 +367,12 @@ export function serialize(s: RanchState): SaveV1 {
     coins: s.coins,
     earned: s.earned,
     player: [r3(p.x), r3(p.y), r3(p.z), r3(p.yaw), r3(p.pitch)],
-    slots: s.slots.map((q) => (q.mix && q.t && isTuft(q.t) ? [q.t, q.n, [...q.mix]] : [q.t, q.n])),
+    slots: s.slots.map((q) => (q.mix && q.t && isTuft(q.t) ? [q.t, q.n, [...q.mix]] : q.downs && q.t && isDownyKind(q.t) ? [q.t, q.n, [], q.downs.map((d) => [r3(d.h), d.c, d.rare ? 1 : 0] as [number, number, number])] : [q.t, q.n])),
     sel: s.sel,
     up: { ...s.up },
     gates: { ...s.gates },
     pads: s.pads.map((q) => ({ ...q, ups: [...q.ups], grow: r3(q.grow), feedT: r3(q.feedT), silo: q.silo.map((x) => ({ ...x })), feeder: { ...q.feeder }, chute: [...q.chute] })),
-    downies: s.downies.filter((d) => !d.gone).map((d) => [d.kind, r3(d.x), r3(d.y), r3(d.z), r3(d.hunger), d.tame ? 1 : 0, r3(d.homeX), r3(d.homeZ), d.keep ? 1 : 0]),
+    downies: s.downies.filter((d) => !d.gone).map((d) => [d.kind, r3(d.x), r3(d.y), r3(d.z), r3(d.hunger), d.tame ? 1 : 0, r3(d.homeX), r3(d.homeZ), d.keep ? 1 : 0, d.caught, d.rare ? (d.spook === 'run' ? 1 : d.spook === 'pull' ? 2 : 3) : 0]),
     items: s.items.filter((i) => !i.gone).map((i) => [i.type, r3(i.x), r3(i.y), r3(i.z), i.src, i.rest ? 1 : 0]),
     sources: s.sources.map((q) => r3(q.t)),
     market: { mult: { ...s.market.mult }, sold: { ...s.market.sold }, prev: { ...s.market.prev } },
@@ -411,6 +438,9 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     wary: 0,
     run: 0,
     winded: 0,
+    caught: 0,
+    rare: false,
+    spook: '',
   };
 }
 
@@ -456,8 +486,10 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.earned = num(d.earned, 0);
   const [px, py, pz, yaw, pitch] = d.player;
   Object.assign(s.player, { x: num(px, START.x), y: num(py, 5), z: num(pz, START.z), yaw: num(yaw, 0), pitch: num(pitch, 0), grounded: true });
-  s.slots = d.slots.map(([t, n, mix]) => {
+  s.slots = d.slots.map(([t, n, mix, downs]) => {
     const q: Slot = { t, n: num(n, 0) };
+    // A downy's window: each downy's hunger, day caught and rarity (an older save's come out as they used to).
+    if (t && isDownyKind(t) && Array.isArray(downs) && downs.length === q.n) q.downs = downs.map(([h, c, r]) => ({ h: num(h, 0.35), c: num(c, 0), ...(r ? { rare: true } : {}) }));
     // The fluff window: the kinds in it (an older save's fluff window holds one kind).
     if (t && isTuft(t)) {
       q.mix = Array.isArray(mix) && mix.length === q.n && mix.every((m) => typeof m === 'string' && isTuft(m)) ? [...mix] : Array.from({ length: q.n }, () => t);
@@ -482,13 +514,16 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.pads = PADS.map((_, i) => ({ ...emptyPad(), ...(d.pads[i] ?? {}) }));
   s.sources = sources.map((q, i) => ({ ...q, t: num(d.sources?.[i], 0) }));
   s.downies = [];
-  for (const [kind, x, y, z, hunger, tame, hx, hz, keep] of d.downies ?? []) {
+  for (const [kind, x, y, z, hunger, tame, hx, hz, keep, caught, rare] of d.downies ?? []) {
     const q = newDowny(s, kind, x, y, z);
     q.hunger = hunger;
     q.tame = !!tame;
     q.homeX = hx;
     q.homeZ = hz;
     q.keep = !!keep;
+    q.caught = num(caught, 0);
+    q.rare = !!rare;
+    q.spook = rare === 1 ? 'run' : rare === 2 ? 'pull' : '';
     q.grounded = false;
     s.downies.push(q);
   }
@@ -509,10 +544,20 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
   s.orders = Array.isArray(d.orders)
     ? d.orders
         .filter((o) => o && KINDS.includes(o.kind) && Number.isFinite(o.n))
-        .map((o) => ({ kind: o.kind, live: !!o.live, n: o.n, got: num(o.got, 0), paid: num(o.paid, 0), mult: num(o.mult, 2), pay: num(o.pay, 0), state: o.state === 'filled' || o.state === 'missed' || o.state === 'offer' ? o.state : 'open' }))
+        .map((o) => ({
+          kind: o.kind,
+          live: !!o.live,
+          n: o.n,
+          got: num(o.got, 0),
+          paid: num(o.paid, 0),
+          mult: num(o.mult, 2),
+          pay: num(o.pay, 0),
+          state: o.state === 'filled' || o.state === 'missed' || o.state === 'offer' ? o.state : 'open',
+          ...(o.rare && Number.isFinite(o.rare.spot) ? { rare: { spot: o.rare.spot, spook: o.rare.spook === 'pull' ? ('pull' as const) : ('run' as const) } } : {}),
+        }))
     : [];
   s.orderDay = num(d.orderDay, 0);
-  s.orderLog = Array.isArray(d.orderLog) ? d.orderLog.filter((o) => o && KINDS.includes(o.kind)).map((o) => ({ kind: o.kind, live: !!o.live, day: num(o.day, 0) })) : [];
+  s.orderLog = Array.isArray(d.orderLog) ? d.orderLog.filter((o) => o && KINDS.includes(o.kind)).map((o) => ({ kind: o.kind, live: !!o.live, day: num(o.day, 0), ...(o.rare ? { rare: true } : {}) })) : [];
   // A save from before the lessons has no list: the director credits it (see creditLessons).
   s.learn = Array.isArray(d.learn) ? d.learn.filter((x) => typeof x === 'string') : [];
   s.learnCount = {};

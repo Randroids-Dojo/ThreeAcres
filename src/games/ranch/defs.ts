@@ -237,18 +237,35 @@ export interface Order {
   pay: number;
   /** offer: on the board, to take or leave; open: taken, today's order. */
   state: 'offer' | 'open' | 'filled' | 'missed';
+  /**
+   * The morning's rare downy (the fifth playtest's top fun change): one
+   * sought-after wild downy, seen at a landmark (`SIGHTINGS[spot]` in
+   * world.ts), shy of one thing. A live order for one, paying more than the
+   * fluff order; it comes when taken and is gone at dusk.
+   */
+  rare?: { spot: number; spook: Spook };
 }
+
+/** What spooks the board's rare downy: running feet, or the bellows' pull from further off than a few metres. */
+export type Spook = 'run' | 'pull';
+
+/** The rare downy of each kind, by its colour: "Gold clover downy". */
+export const RARE_NAME: Record<DownyKind, string> = { clover: 'gold clover', ember: 'rose ember', brook: 'silver brook', thistle: 'pale thistle' };
+/** What the board says spooks it. */
+export const SPOOK_NOTE: Record<Spook, string> = { run: 'shy of running', pull: 'shy of the bellows' };
 
 /** Orders close at dusk. */
 export const ORDER_BY = 19;
 /** The board posts the day's orders in the morning (from dawn until noon; a later start waits for the next morning). */
 export const ORDER_POST: [number, number] = [5, 12];
 /**
- * What a live downy brings in for an order, each: about what a stay-at-home
- * fluff order adds on top of a day's sales, so going out for downies and
- * staying in for fluff compete (see scripts/ranch-orders.ts).
+ * What a live downy brings in for an order, each: a trip pays about a quarter
+ * more than a stay-at-home fluff order adds on top of a day's sales (the fifth
+ * playtest found the trip extra work for the same coins; it was 55, 95, 120),
+ * so going out for downies and staying in for fluff compete (see
+ * scripts/ranch-orders.ts).
  */
-export const LIVE_EACH: Record<DownyKind, number> = { clover: 55, ember: 95, brook: 120, thistle: 300 };
+export const LIVE_EACH: Record<DownyKind, number> = { clover: 66, ember: 110, brook: 140, thistle: 300 };
 /** The fluff window holds this many times what a window of anything else holds: fluff is light. */
 export const FLUFF_ROOM = 2;
 

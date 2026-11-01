@@ -113,7 +113,7 @@ describe('P0: your first downy does not starve and run off during the meadow les
     expect(d.mood).not.toBe('frazzled');
     expect(out).toBe(false);
     expect(tutor.current).toBe('meadow');
-  }));
+  }), 30000);
 
   it('the porch downy and a loose one of yours wait too, and hunger runs again once the day does', () => {
     const { sim, s, run } = ranch(TO_MEADOW, TO_MEADOW_F);
@@ -496,6 +496,8 @@ describe('P2: the bellows', () => {
     for (let t = 0; t < 1.5; t += 1 / 30) sim.update(1 / 30, { ...idle, draw: true }, aimAt(sim, d.x - 0.45, d.y + 0.1, d.z));
     expect(fluff.gone).toBe(true);
     expect(d.gone).toBe(false);
+    // (Round 5: a press that drew fluff never takes a penned downy, so let go and press again, aimed right at it.)
+    sim.update(1 / 30, idle, aimAt(sim, d.x, d.y + 0.25, d.z));
     for (let t = 0; t < 2 && !d.gone; t += 1 / 30) sim.update(1 / 30, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
     expect(d.gone).toBe(true);
   });

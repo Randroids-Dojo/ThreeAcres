@@ -143,8 +143,8 @@ describe('P1: orders for live downies, blown into the sell crate', () => {
       expect(sim.takeOrder(i)).toBe(true);
       const o = sim.order!;
       expect(o.live).toBe(true);
-      // Embers caught (in the jar), blown from the lane into the crate: the crosshair says it would sell.
-      for (let k = 0; k < o.n; k++) sim.stow('ember');
+      // Embers caught today (in the jar), blown from the lane into the crate: the crosshair says it would sell.
+      for (let k = 0; k < o.n; k++) sim.stow('ember', 0, { h: 0.3, c: s.day });
       s.sel = s.slots.findIndex((q) => q.t === 'ember');
       stand(sim, EXCHANGE.x, EXCHANGE.z - 4.2);
       const aim = aimAt(sim, EXCHANGE.x, sim.phys.floor(EXCHANGE.x, EXCHANGE.z) + 0.9, EXCHANGE.z);
@@ -197,7 +197,7 @@ describe('P1: orders for live downies, blown into the sell crate', () => {
     go(0.5);
     expect(tutor.current).toBe('live');
     expect(view().line).toBe('Catch an ember downy for the order.');
-    sim.stow('ember');
+    sim.stow('ember', 0, { h: 0.3, c: s.day });
     go(0.5);
     expect(view().line).toBe('Blow the downy into the sell crate.');
     expect(Math.hypot(tutor.mark.x - EXCHANGE.x, tutor.mark.z - EXCHANGE.z)).toBeLessThan(0.3);
@@ -220,7 +220,7 @@ describe('P1: each morning the board offers a choice, with trade-offs', () => {
       sim.postOrders(true);
       const offers = sim.offers();
       expect(offers.length).toBeGreaterThanOrEqual(2);
-      expect(new Set(offers.map((o) => `${o.kind}${o.live}`)).size).toBe(offers.length);
+      expect(new Set(offers.map((o) => `${o.kind}${o.live}${!!o.rare}`)).size).toBe(offers.length);
       if (offers.some((o) => o.live) && offers.some((o) => !o.live)) both++;
       // Taken at the board's tags: one order for the day, the rest wiped off, and the board has nothing more to offer.
       stand(sim, BOARD.x, BOARD.z - 2.4);
@@ -228,7 +228,8 @@ describe('P1: each morning the board offers a choice, with trade-offs', () => {
       expect(it?.kind).toBe('board');
       const tags = sim.menu(it!);
       expect(tags.length).toBe(offers.length);
-      for (const t of tags) expect(t.note).toMatch(/^Earns [\d,]+ (more )?by dusk$/);
+      // (Round 5: each says what the order itself pays.)
+      for (const t of tags) expect(t.note).toMatch(/Pays [\d,]+/);
       expect(sim.choose(it!, tags[tags.length - 1].id)).toBe(true);
       expect(sim.s.orders.length).toBe(1);
       expect(sim.s.orders[0].state).toBe('open');
@@ -255,25 +256,15 @@ describe('P1: each morning the board offers a choice, with trade-offs', () => {
       expect(r).toBeGreaterThan(0.45);
       expect(r).toBeLessThan(2.2);
     }
-    // Sometimes the trip pays more, sometimes the fluff.
-    expect(ratios.some((r) => r > 1.05)).toBe(true);
-    expect(ratios.some((r) => r < 0.95)).toBe(true);
+    // Round 5: the trip pays a little more than the fluff order (the playtest found it extra work for the same
+    // coins), never a great deal more.
+    ratios.sort((a, b) => a - b);
+    expect(ratios[Math.floor(ratios.length / 2)]).toBeGreaterThan(1.05);
+    expect(ratios[Math.floor(ratios.length / 2)]).toBeLessThan(1.6);
   });
 
-  it("two fluff orders pay for the share of their kind's day they ask, not their fluff's price (brook 620 beside clover 180 once)", () => {
-    let pairs = 0;
-    for (let day = 2; day < 32; day++) {
-      const sim = morning(['clover', 'ember', 'brook'], day);
-      sim.postOrders(true);
-      const fl = sim.offers().filter((o) => !o.live && o.mult === 2);
-      if (fl.length < 2) continue;
-      pairs++;
-      const per = fl.map((o) => o.pay / (o.n / sim.makes(o.kind, 6)));
-      expect(per[1] / per[0]).toBeGreaterThan(0.8);
-      expect(per[1] / per[0]).toBeLessThan(1.25);
-    }
-    expect(pairs).toBeGreaterThan(10);
-  });
+  // (Round 5: the board offers one fluff order a morning, beside a trip for downies and the rare one, so the
+  // offers differ in kind, not size; the test that two fluff orders paid for their share went with the second.)
 
   it('the board varies what it asks for, and asks for a kind you keep but sell little of', () => {
     // The playtest's ranch: lots of clover and ember sold, six brooks kept, brook never asked for.
@@ -330,7 +321,7 @@ describe("P2: the first order comes as soon as the loop lesson ends", () => {
     sim.s.goals = ['catch', 'pen', 'feed', 'sell', 'plant'];
     expect(sim.openGoals(1)[0].id).toBe('order');
     expect(orderLines(sim.s)).toEqual([]);
-    expect(goalLine(sim)).toBe('New orders come to the price board at dawn.');
+    expect(goalLine(sim)).toBe('New orders come to the board at dawn.');
   });
 });
 
@@ -342,11 +333,13 @@ describe('P2: a downy being tugged beats food in the cone, and glides go sideway
   it('pulling at a wild brook beside dewberries: the brook keeps the pull and the berries stay put', () => {
     const sim = quiet(10);
     const s = sim.s;
+    // (No orders posted meanwhile, and close enough that a glide away leaves it in reach: this is about the berries.)
+    s.orderDay = s.day;
     s.gates.hollow = true;
     sim.phys.gates = { ...s.gates };
     const bx = POND.x - 14;
     const bz = POND.z + 10;
-    stand(sim, bx - 5.5, bz);
+    stand(sim, bx - 4.5, bz);
     const d = sim.spawn('brook', bx, bz, false);
     d.hopT = 99;
     // Dewberries lying just past the brook, nearer the crosshair once the brook shifts.

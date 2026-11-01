@@ -335,14 +335,28 @@ void counted;
 await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
-check('the price board chalks up the morning\'s offers: what, by dusk, and what each earns', tagSays.board.length >= 2 && tagSays.board.every((t) => /^\d+ clover (fluff|downies) by dusk, earns [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+check('the price board chalks up the morning\'s offers: what (by dusk, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) by dusk|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
 // The board's tags: one per offer, its note saying what it earns, fitting the tag.
 const boardTags = await page.evaluate(() => {
   const r = window.ranch;
   const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 });
   return opts.map((o) => ({ id: o.id, title: o.title, note: o.note, fit: r.tagLayout(o.title, o.price, o.note).fits }));
 });
-check("the board's tags: one per offer, saying what it earns, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^Earns [\d,]+ (more )?by dusk$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
+check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+, shy of (running|the bellows)\. Pays [\d,]+)$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Every rare downy's tag fits, wherever it was seen and whatever spooks it.
+const rareTags = await page.evaluate(() => {
+  const r = window.ranch;
+  const out = [];
+  r.sim.s.gates.ridge = r.sim.s.gates.hollow = true;
+  for (let spot = 0; spot < 7; spot++) for (const spook of ['run', 'pull']) {
+    const kind = ['clover', 'clover', 'clover', 'ember', 'ember', 'brook', 'brook'][spot];
+    const tg = r.sim.offerTag({ kind, live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 1240, state: 'offer', rare: { spot, spook } });
+    out.push({ ...tg, fit: r.tagLayout(tg.title, null, tg.note).fits });
+  }
+  return out;
+});
+check("every rare downy's tag fits: its name, where it was seen, what spooks it and its pay", rareTags.every((t) => t.fit), JSON.stringify(rareTags.filter((t) => !t.fit)));
 await b.close();
 
 // =================================================================== tags on the phone, played with real touch
@@ -454,6 +468,103 @@ await b.close();
   const cOut = cq.rects.filter((t) => t.l < 0 || t.r > cq.w || t.t < 60 || t.b > cq.h).length;
   check('phone: the check catches tags hung full size up close running off the screen (control)', cOut > 0, `${cOut} of ${cq.rects.length} off at ${ctl.toFixed(2)} m`);
   await ph.evaluate(() => window.ranch.closeMenu());
+  // Round 5: no tag hangs behind its own post. Walking up the lane to a pen post from 1.2 to 2.8 m (the fifth
+  // playtest's tags hung 1.83 m off at every distance, so the post covered a column, twice the very tag the
+  // lesson had chosen): the share of each tag's face the post's pole, brace or arm hides from the eye. The
+  // control hangs them the old way and must find tags covered.
+  const coverRun = async (old) => {
+    const rows = [];
+    for (const dist of [1.2, 1.6, 2.0, 2.4, 2.8]) {
+      for (const ang of [-70, -45, -20, 0, 20, 45, 70]) {
+        const q = await ph.evaluate(([dist, ang, old]) => {
+          const r = window.ranch;
+          const s = r.sim.s;
+          r.closeMenu();
+          r.oldRail = old;
+          s.pads[1].ups = [];
+          // From the post's pole, out into the lane (its normal is +z), turned by ang.
+          const px = 14.8;
+          const pz = 31.8;
+          const a = (ang * Math.PI) / 180;
+          const p = s.player;
+          p.x = px + Math.sin(a) * dist; p.z = pz + Math.cos(a) * dist; p.y = r.sim.phys.floor(p.x, p.z);
+          r.aimAt(px + 0.9, r.sim.phys.floor(px, pz) + 1.6, pz);
+          const near = r.sim.interactable(r.aim);
+          if (!near || near.kind !== 'pad') return null;
+          r.openMenu(near);
+          return true;
+        }, [dist, ang, old]);
+        if (!q) continue;
+        await ph.waitForTimeout(700);
+        const cover = await ph.evaluate(() => window.ranch.tagCover());
+        rows.push({ dist, ang, n: cover.length, covered: cover.filter((c) => c.covered > 0).map((c) => `${c.id} ${(c.covered * 100).toFixed(0)}%`) });
+      }
+    }
+    await ph.evaluate(() => { window.ranch.oldRail = false; window.ranch.closeMenu(); });
+    return rows;
+  };
+  const cov = await coverRun(false);
+  const covOld = await coverRun(true);
+  const bad = cov.filter((q) => q.covered.length);
+  const badOld = covOld.filter((q) => q.covered.length);
+  console.log(`   tags behind the post: ${bad.length} of ${cov.length} spots with a tag covered${bad.length ? ` (${bad.map((q) => `${q.dist}m ${q.ang}deg: ${q.covered.join(', ')}`).join('; ')})` : ''}; hung the old way ${badOld.length} of ${covOld.length} (${badOld.slice(0, 6).map((q) => `${q.dist}m ${q.ang}deg: ${q.covered.join(', ')}`).join('; ')})`);
+  check('phone: walking up to a pen post from 1.2 to 2.8 m at any angle, no tag hangs behind the post', cov.length >= 25 && bad.length === 0, bad.map((q) => `${q.dist}m ${q.ang}deg`).join(' '));
+  check('phone: the check finds tags behind the post when they hang the old way (control)', badOld.length > 0, `${badOld.length} of ${covOld.length}`);
+  // Round 5: the board's offers hang under its chalked prices (they covered them). The board's price rows on
+  // screen against every offer tag, from where you take an order; the control hangs them the old way.
+  const boardRun = async (old) => {
+    const rows = [];
+    for (const dist of [2.2, 2.8, 3.3]) {
+      const q = await ph.evaluate(([dist, old]) => {
+        const r = window.ranch;
+        const s = r.sim.s;
+        r.closeMenu();
+        r.oldRail = old;
+        s.hour = 8;
+        s.learn.includes('orders') || s.learn.push('orders');
+        r.sim.postOrders(true);
+        const board = r.scene.getObjectByName('board');
+        board.updateWorldMatrix(true, false);
+        const e = board.matrixWorld.elements;
+        const p = s.player;
+        // In front of the board (its face looks along its own +z).
+        const nx = e[8];
+        const nz = e[10];
+        const nl = Math.hypot(nx, nz);
+        p.x = e[12] + (nx / nl) * dist; p.z = e[14] + (nz / nl) * dist; p.y = r.sim.phys.floor(p.x, p.z);
+        r.aimAt(e[12], e[13], e[14]);
+        const near = r.sim.interactable(r.aim);
+        if (!near || near.kind !== 'board') return null;
+        r.openMenu(near);
+        return true;
+      }, [dist, old]);
+      if (!q) continue;
+      await ph.waitForTimeout(1100);
+      rows.push(await ph.evaluate((dist) => {
+        const r = window.ranch;
+        const board = r.scene.getObjectByName('board');
+        board.updateWorldMatrix(true, false);
+        const e = board.matrixWorld.elements;
+        // The price rows: across the board, from just under the title rule to under the last row (chalk y 64 to 220 of 384 on its 1.08 m face).
+        const v0 = (0.5 - 220 / 384) * 1.08;
+        const v1 = (0.5 - 64 / 384) * 1.08;
+        const pts = [[-0.68, v0], [0.68, v0], [0.68, v1], [-0.68, v1]].map(([u, v]) => r.project(e[0] * u + e[4] * v + e[12], e[1] * u + e[5] * v + e[13], e[2] * u + e[6] * v + e[14])).filter(Boolean);
+        const rows = { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
+        const tags = r.tagCover();
+        const over = tags.filter((t) => Math.min(t.x1, rows.x1) - Math.max(t.x0, rows.x0) > 2 && Math.min(t.y1, rows.y1) - Math.max(t.y0, rows.y0) > 2);
+        const onScreen = rows.y0 >= 0 && rows.y1 <= innerHeight && tags.every((t) => t.y0 >= 0 && t.y1 <= innerHeight);
+        return { dist, n: tags.length, over: over.length, rows: [Math.round(rows.y0), Math.round(rows.y1)], tags: tags.map((t) => [Math.round(t.y0), Math.round(t.y1)]), onScreen };
+      }, dist));
+      if (dist === 2.8) await ph.screenshot({ path: old ? '/tmp/ranch-tags-board-old.png' : '/tmp/ranch-tags-board.png' });
+    }
+    await ph.evaluate(() => { window.ranch.oldRail = false; window.ranch.closeMenu(); });
+    return rows;
+  };
+  const bq = await boardRun(false);
+  const bqOld = await boardRun(true);
+  console.log(`   board price rows against its offer tags: ${bq.map((q) => `${q.dist}m rows ${q.rows.join('..')} tags ${q.tags.map((t) => t.join('..')).join(',')} over ${q.over}`).join('; ')}; the old way ${bqOld.map((q) => `${q.dist}m over ${q.over}`).join(', ')}`);
+  check("phone: the board's offer tags hang clear of its price rows, all on screen", bq.length === 3 && bq.every((q) => q.n >= 2 && q.over === 0 && q.onScreen), JSON.stringify(bq));
+  check("phone: the check finds the price rows covered when the tags hang the old way (control)", bqOld.some((q) => q.over > 0), JSON.stringify(bqOld));
   // A lesson chooses the tag it teaches: the garden lesson, at an empty plot.
   await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w)); s.coins = 400; s.hour = 10; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
   await ph.waitForFunction(() => window.ranch.seen().lesson === 'garden' && window.ranch.seen().line !== '', null, { timeout: 8000 });

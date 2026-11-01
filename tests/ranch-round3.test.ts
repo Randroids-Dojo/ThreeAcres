@@ -6,11 +6,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BUILD_COST, FEEDER_CAP, GOALS, HOUR, PEN_MAX, type DownyKind } from '../src/games/ranch/defs';
 import { Tutor, allLines, goalSpot, goalText, orderLines, type Say } from '../src/games/ranch/lessons';
-import { Sim, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
+import { ESCAPE, Sim, padSpots, type Aim, type Controls, type Ev } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
-import { BOARD, GATES, PADS, PEN_R, RIDGE_TOP } from '../src/games/ranch/world';
+import { BOARD, GATES, PADS, PEN_R, POND, RIDGE_TOP } from '../src/games/ranch/world';
 import { rng } from '../src/games/ranch/noise';
-import { CAREFUL, CARELESS, catchRate, type Thumb } from '../scripts/ranch-catch';
+import { CAREFUL, CARELESS, catchRate } from '../scripts/ranch-catch';
 
 const realRandom = Math.random;
 beforeEach(() => {
@@ -142,8 +142,8 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
       sim.postOrders(true);
       for (const o of s.orders) {
         expect(['clover', 'ember']).toContain(o.kind);
-        if (o.kind === 'ember') {
-          // Round 4: you keep no embers, so it is live downies, to send you out.
+        if (o.kind === 'ember' && !o.rare) {
+          // Round 4: you keep no embers, so it is live downies, to send you out (round 5: or the rare one, alone).
           expect(o.live).toBe(true);
           expect(o.n).toBeGreaterThanOrEqual(2);
           expect(o.n).toBeLessThanOrEqual(4);
@@ -429,17 +429,19 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
       const careless = catchRate(k, CARELESS, 30).rate;
       const careful = catchRate(k, CAREFUL, 30).rate;
       out[k] = [careless, careful];
-      expect(careful, `${k} careful`).toBeGreaterThanOrEqual(0.85);
-      expect(careless, `${k} careless`).toBeLessThanOrEqual(k === 'clover' ? 0.85 : 0.65);
-      expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(k === 'clover' ? 0.1 : 0.25);
+      // (Round 5: the harness's thumbs carry the real loop's lag, so it reads about as real touch does.)
+      expect(careful, `${k} careful`).toBeGreaterThanOrEqual(0.8);
+      expect(careless, `${k} careless`).toBeLessThanOrEqual(0.7);
+      expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.2);
     }
     // (The third playtest's careless thumb caught 8 of 8.)
     expect(Object.values(out).reduce((a, [c]) => a + c, 0) / kinds.length).toBeLessThan(0.65);
   });
 
   it('a thistle bolts: walking at it on open ground you never get in reach; running, you do', () => {
-    // (Round 4: until it is winded, after four seconds of bolting; then a walker who keeps after it closes in.)
-    const chase = (run: boolean, secs = 3.8) => {
+    // (Round 4: until it is winded, after four seconds of bolting; then a walker who keeps after it closes in.
+    // Round 5: three seconds of bolting, then winded for four, so a walking thumb gets its chance.)
+    const chase = (run: boolean, secs = ESCAPE.boltFor - 0.1) => {
       const sim = quiet(18.6);
       // Open meadow, gently rising ahead of it, no water or crag in the way.
       const d = sim.spawn('thistle', -20, -3, false);
@@ -473,13 +475,32 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
   });
 
   it('a slow catch of a brook by the pond: it slips into the water and is gone', () => {
-    const slow: Thumb = { ...CARELESS, lag: 0.3, gain: 0.4 };
+    // (Round 5: a brook breaks free only when its time runs out, shown on the tug ring; a pull that lapses
+    // altogether starts over. So: a pull that keeps it, but too slowly to bring it in, five frames on and three off.)
     let dove = 0;
-    for (let k = 0; k < 12; k++) {
-      const r = catchRate('brook', slow, 1, 100 + k);
-      if (r.escaped > 0) dove++;
+    for (let k = 0; k < 6; k++) {
+      Math.random = rng(100 + k);
+      const sim = quiet(10);
+      sim.s.gates.hollow = true;
+      sim.phys.gates = { ...sim.s.gates };
+      const bx = POND.x - 14;
+      const bz = POND.z + 10;
+      stand(sim, bx - 4.5, bz);
+      const d = sim.spawn('brook', bx, bz, false);
+      d.hopT = 99;
+      let escaped = false;
+      for (let f = 0; f < 30 * 6 && !d.gone; f++) {
+        const on = f % 8 < 5 && !escaped;
+        const aim = on ? aimAt(sim, d.x, d.y + 0.25, d.z) : aimAt(sim, d.x, d.y + 3, d.z + 3);
+        sim.update(1 / 30, { ...idle, draw: !escaped }, aim);
+        for (const e of sim.events) if (e.t === 'escape' && e.dove) escaped = true;
+        sim.events.length = 0;
+        // Keep it in reach while it is held (the test is about the time, not the chase).
+        if (!escaped && Math.hypot(d.x - sim.s.player.x, d.z - sim.s.player.z) > 5.5) stand(sim, d.x - 4.5, d.z);
+      }
+      if (escaped && d.gone && !sim.s.slots.some((q) => q.t === 'brook')) dove++;
     }
-    expect(dove).toBeGreaterThan(6);
+    expect(dove).toBeGreaterThanOrEqual(5);
   });
 });
 

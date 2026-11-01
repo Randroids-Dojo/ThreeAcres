@@ -138,10 +138,12 @@ describe('the lessons in order', () => {
     sim.spawn('clover', PADS[1].x, PADS[1].z);
     run(2.5);
     expect(lines[8]).toBe('meadow');
-    expect(sim.knows('time')).toBe(false);
+    expect(sim.knows('appetite')).toBe(false);
     n('catch:wild');
     run(1.5);
-    expect(sim.knows('time')).toBe(true);
+    // Round 5: hunger runs again after the meadow; the clock waits for the loop lesson to end.
+    expect(sim.knows('appetite')).toBe(true);
+    expect(sim.knows('time')).toBe(false);
     // The loop comes straight after: no blank journal while coins build up for the next lesson.
     expect(lines.length).toBe(10);
     expect(lines[9]).toBe('farm');

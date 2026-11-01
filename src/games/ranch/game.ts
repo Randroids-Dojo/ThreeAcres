@@ -21,10 +21,11 @@ import {
 } from 'three';
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
-import { CAPS, GOALS, KIND, KINDS, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
+import { CAPS, GOALS, KIND, KINDS, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, type Frame } from './input';
-import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, teachAll, type Say } from './lessons';
+import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, teachAll, type Say } from './lessons';
+import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
 import { PORCH } from './physics';
@@ -42,7 +43,7 @@ import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
 import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from './sim';
 import { capacity, deserialize, serialize, slotCap, summary, type RanchState, type Slot } from './state';
-import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
+import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, type GateId } from './world';
 import './ranch.css';
 
 const EYE = 1.6;
@@ -56,6 +57,8 @@ const FIRST: Record<DownyKind, [string, string]> = {
 };
 
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
+/** The motes about the board's rare downy, by kind. */
+const RARE_GLINT: Record<DownyKind, number> = { clover: 0xffe08a, ember: 0xffb6c8, brook: 0xe8f0ff, thistle: 0xf0e0ff };
 
 /** What a window holds, in words: the fluff window holding more than one kind is just "fluff". */
 function slotName(q: Slot): string {
@@ -146,6 +149,8 @@ export class Ranch {
   private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | null = null;
   /** Seconds the journal goal's spot (a gate) has been pointed at: the edge chevron shows only at first. */
   private goalSpotT = 0;
+  private rareT = 0;
+  private orderKey = '';
   readonly debug: DebugHooks = { afterFrame: null };
   /** Frame stats for scripted checks: CPU ms per frame (update plus render submit). */
   readonly cpu: number[] = [];
@@ -495,6 +500,15 @@ export class Ranch {
     } else this.stuckT = 0;
     if (this.walked > 0.8) this.doneHint('move');
     if (!this.frozen) this.sim.update(dt, c, this.aim);
+    // Running (for the lesson that teaches it): sprinting on the ground at a run.
+    if (c.sprint && p.grounded && Math.hypot(p.vx, p.vz) > 5.5) this.tutor.add(s, 'run', dt);
+    // The board's rare downy, out where it was seen: a few motes of light about it, so it can be told apart.
+    this.rareT -= dt;
+    if (this.rareT <= 0) {
+      this.rareT = 0.7;
+      const rd = this.sim.rareWild();
+      if (rd && Math.hypot(rd.x - p.x, rd.z - p.z) < 45) this.fx.burst(rd.x, rd.y + 0.45, rd.z, RARE_GLINT[rd.kind], 5, 0.7);
+    }
     // Waking: at the darkest moment of the fade, turn to face the yard rather than the door.
     if (this.wakeT > 0) {
       this.wakeT -= dt;
@@ -635,7 +649,7 @@ export class Ranch {
       return { name: KIND[k].name.replace(' downy', ''), price: known ? price : null, trend: Math.sign(price - s.market.prev[k]) };
     });
     // Today's orders, chalked under the prices.
-    const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: this.boardText(o), pay: o.state === 'offer' ? `earns ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`, state: o.state })) : [];
+    const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: this.boardText(o), pay: o.state === 'offer' ? `pays ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`, state: o.state })) : [];
     const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}|${orders.map((o) => `${o.text}:${o.state}`).join(',')}`;
     if (key === this.board.key) return;
     this.board.key = key;
@@ -643,16 +657,17 @@ export class Ranch {
     this.board.tex.needsUpdate = true;
   }
 
-  /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk". */
+  /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk", "gold clover downy, the old oak". */
   private boardText(o: Order): string {
     const name = KIND[o.kind].name.replace(' downy', '');
+    if (o.rare) return `${RARE_NAME[o.kind]} downy, ${SIGHTINGS[o.rare.spot].name}`;
     return o.live ? `${o.n} ${name} downies by dusk` : `${o.n} ${name} fluff by dusk`;
   }
 
   /** For checks: the orders as the board chalks them. */
   boardOrders(): string[] {
     const s = this.sim.s;
-    return s.orderDay === s.day ? s.orders.map((o) => `${this.boardText(o)}, ${o.state === 'offer' ? `earns ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`}${o.state === 'open' || o.state === 'offer' ? '' : `, ${o.state}`}`) : [];
+    return s.orderDay === s.day ? s.orders.map((o) => `${this.boardText(o)}, ${o.state === 'offer' ? `pays ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`}${o.state === 'open' || o.state === 'offer' ? '' : `, ${o.state}`}`) : [];
   }
 
   private render(): void {
@@ -856,7 +871,8 @@ export class Ranch {
           this.fx.coinPop(e.x, y, e.z, 6);
           this.lastSale = e.bonus;
           // While a lesson is up, the page belongs to it: this page waits for it to tick and go.
-          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} ${e.live ? 'downies' : 'fluff'}, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
+          const word = e.rare ? `${RARE_NAME[e.kind].replace(/^./, (c) => c.toUpperCase())} downy` : `${KIND[e.kind].name.replace(' downy', '').replace(/^./, (c) => c.toUpperCase())} ${e.live ? 'downies' : 'fluff'}`;
+          this.queuePage(`Earned ${fmtCoins(e.bonus)} coins`, [{ text: `${word}, ${e.n} of ${e.n}.`, done: true, fresh: true }]);
         } else if (e.state === 'missed') this.hud.note('Dusk. The order went unfilled.', 3);
         break;
       }
@@ -954,7 +970,10 @@ export class Ranch {
     const orders = v.line ? [] : orderLines(s);
     const key = [...orders, goal].join('|');
     if (key !== this.goalShown) {
-      if (goal.split(',')[0] !== this.goalKey) this.goalSpotT = 0;
+      // A new goal, or the rare order's next step: its edge chevron shows again for a few seconds.
+      const ok = (orders[0] ?? '').split(' ').slice(0, 1).join(' ');
+      if (goal.split(',')[0] !== this.goalKey || ok !== this.orderKey) this.goalSpotT = 0;
+      this.orderKey = ok;
       this.goalKey = goal.split(',')[0];
       // A tally ticking up does not bring a hidden page back; a new goal or order does.
       if (key.replace(/\d+/g, '#') !== this.goalShown.replace(/\d+/g, '#')) this.goalHidden = false;
@@ -963,9 +982,12 @@ export class Ranch {
     // The day's orders all filled: that line is ticked.
     const allFilled = s.orders.length > 0 && s.orders.every((o) => o.state === 'filled');
     this.hud.setGoal(this.goalHidden ? [] : [...orders.map((text) => ({ text, done: allFilled })), ...(goal ? [{ text: goal, done: false }] : [])]);
-    // A goal with a place (a gate): an arrow over it, as a lesson would.
+    // The rare order (where it was seen, the downy, then the crate), or a goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
-    if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
+    if (!v.line && !this.goalHidden && !this.tutor.mark.on && orderSpot(s, this.tutor.mark, this.floor)) {
+      this.tutor.mark.on = true;
+      this.goalSpotT += dt;
+    } else if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
     } else if (!g) this.goalSpotT = 0;
@@ -1081,13 +1103,94 @@ export class Ranch {
     const l = Math.hypot(dx, dz) || 1;
     dx /= l;
     dz /= l;
-    const D = clamp(l - 0.3, 1.0, 1.8);
+    let D = clamp(l - 0.3, 1.0, 1.8);
     const ry = Math.atan2(-dx, -dz);
     // The distance they should look to be at: the reading distance, or further if the grid would not fit the width.
     const tanW = Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * (this.w / this.h);
     const half = (Math.min(cols, n) * (0.56 + 0.05) - 0.05) / 2;
     const look = Math.max(this.h > this.w * 1.15 ? 1.8 : 1.7, half / (0.94 * tanW));
-    return { rail: { x: e.x + dx * D, y: e.y + 0.24 * (D / look), z: e.z + dz * D, ax: Math.cos(ry), az: -Math.sin(ry), ry }, scale: D / look };
+    // Never behind their own post: hung nearer than the post's pole (and its brace) wherever it stands in front
+    // of the grid (the fifth playtest's tags hung 1.83 m off at every distance, so walking up the lane put the
+    // post over a column, twice over the very tag the lesson had chosen).
+    if (!this.oldRail && (it.kind === 'pad' || it.kind === 'silo')) {
+      const sp = padSpots(it.id as number).post;
+      for (const px of [sp.x, sp.x + 0.3, sp.x + 0.6]) {
+        const ox = px - e.x;
+        const oz = sp.z - e.z;
+        const depth = ox * dx + oz * dz;
+        const side = Math.abs(ox * dz - oz * dx);
+        if (depth > 0.2 && side < depth * (half / look) + 0.25) D = Math.min(D, Math.max(0.45, depth - 0.32));
+      }
+    }
+    // The price board's offers hang low, under its chalked prices (they hung over them).
+    const drop = it.kind === 'board' && !this.oldRail ? 0.5 : 0;
+    return { rail: { x: e.x + dx * D, y: e.y + (0.24 - drop) * (D / look), z: e.z + dz * D, ax: Math.cos(ry), az: -Math.sin(ry), ry }, scale: D / look };
+  }
+  /** For the tags check's control: hang the grid the old way (at its reading distance, behind the post if need be). */
+  oldRail = false;
+
+  /**
+   * For checks: each hanging tag on screen (CSS px corners) with the share of
+   * nine points across its face that the open post's pole, brace or arm hides
+   * from the eye (0 for a menu that is not a post's).
+   */
+  tagCover(): { x0: number; y0: number; x1: number; y1: number; covered: number; id: string }[] {
+    const out: { x0: number; y0: number; x1: number; y1: number; covered: number; id: string }[] = [];
+    if (!this.menu) return out;
+    const it = this.menu.it;
+    const post = it.kind === 'pad' || it.kind === 'silo' ? padSpots(it.id as number).post : null;
+    const y0 = post ? heightAt(post.x, post.z) : 0;
+    // The post as boxes (see props.ts): the pole, the brace, the arm and its end.
+    const boxes = post
+      ? [
+          [post.x - 0.1, y0, post.z - 0.1, post.x + 0.1, y0 + 2.25, post.z + 0.1],
+          [post.x, y0 + 1.55, post.z - 0.06, post.x + 0.62, y0 + 2.25, post.z + 0.06],
+          [post.x - 0.1, y0 + 2.13, post.z - 0.07, post.x + 3.5, y0 + 2.27, post.z + 0.07],
+          [post.x + 3.44, y0 + 2.07, post.z - 0.06, post.x + 3.56, y0 + 2.33, post.z + 0.06],
+        ]
+      : [];
+    const e = this.eye;
+    const hits = (x: number, y: number, z: number) =>
+      boxes.some(([ax, ay, az, bx, by, bz]) => {
+        // The segment from the eye to the point against the box (slabs).
+        let t0 = 0;
+        let t1 = 0.999;
+        const o = [e.x, e.y, e.z];
+        const d = [x - e.x, y - e.y, z - e.z];
+        const lo = [ax, ay, az];
+        const hi = [bx, by, bz];
+        for (let k = 0; k < 3; k++) {
+          if (Math.abs(d[k]) < 1e-9) {
+            if (o[k] < lo[k] || o[k] > hi[k]) return false;
+            continue;
+          }
+          let ta = (lo[k] - o[k]) / d[k];
+          let tb = (hi[k] - o[k]) / d[k];
+          if (ta > tb) [ta, tb] = [tb, ta];
+          t0 = Math.max(t0, ta);
+          t1 = Math.min(t1, tb);
+          if (t0 > t1) return false;
+        }
+        return true;
+      });
+    const tags = (this.tags as unknown as { tags: { face: Mesh; pivot: Object3D; opt: { id: string } | null; gone: number }[] }).tags;
+    for (const t of tags) {
+      if (!t.opt || t.gone > 0 || !t.pivot.visible) continue;
+      t.face.updateWorldMatrix(true, false);
+      const m = t.face.matrixWorld.elements;
+      const pt = (u: number, v: number) => [m[0] * u + m[4] * v + m[12], m[1] * u + m[5] * v + m[13], m[2] * u + m[6] * v + m[14]];
+      let blocked = 0;
+      let n = 0;
+      for (const u of [-0.24, 0, 0.24]) for (const v of [-0.11, 0, 0.11]) {
+        const [x, y, z] = pt(u, v);
+        n++;
+        if (hits(x, y, z)) blocked++;
+      }
+      const corners = [pt(-0.28, -0.14), pt(0.28, -0.14), pt(0.28, 0.14), pt(-0.28, 0.14)].map(([x, y, z]) => this.project(x, y, z)).filter((q): q is { x: number; y: number } => !!q);
+      if (!corners.length) continue;
+      out.push({ x0: Math.min(...corners.map((q) => q.x)), y0: Math.min(...corners.map((q) => q.y)), x1: Math.max(...corners.map((q) => q.x)), y1: Math.max(...corners.map((q) => q.y)), covered: blocked / n, id: t.opt.id });
+    }
+    return out;
   }
 
   private openMenu(it: Interactable): void {
@@ -1331,10 +1434,18 @@ export class Ranch {
     this.placeAct(touch);
     // J puts the goal line away (or back), unless a lesson has the page.
     if (f.journal && !hud.lessonUp) this.goalHidden = !this.goalHidden;
-    // A wild downy digging in: the crosshair fills as it tires.
+    // A wild downy digging in: the crosshair fills as it tires, and for a brook (or a thistle) an outer ring shows the time left.
     let tug = 0;
-    for (const d of s.downies) if (d.held) tug = Math.max(tug, d.tug / Math.max(0.01, this.sim.tugNeed(d)));
-    hud.setTug(tug);
+    let left = -1;
+    for (const d of s.downies) {
+      if (!d.held) continue;
+      const k = d.tug / Math.max(0.01, this.sim.tugNeed(d));
+      if (k >= tug) {
+        tug = k;
+        left = this.sim.tugLeft(d);
+      }
+    }
+    hud.setTug(tug, left);
     hud.update(dt);
   }
 
@@ -1369,33 +1480,11 @@ export class Ranch {
       this.hud.setEdge(null);
       return;
     }
-    // Camera space: z < 0 is in front.
-    const v = this.tmp.set(m.x, m.y, m.z).applyMatrix4(this.camera.matrixWorldInverse);
-    const behind = v.z > -0.1;
-    this.tmp.set(m.x, m.y, m.z).project(this.camera);
-    const sx = ((this.tmp.x + 1) / 2) * this.w;
-    const sy = ((1 - this.tmp.y) / 2) * this.h;
-    // The band it may sit in: clear of the shell corner, the journal page, the stick and the buttons.
-    const x0 = 26;
-    const x1 = this.w - 26;
-    const y0 = this.h * 0.2;
-    const y1 = this.h * 0.62;
-    if (!behind && sx > x0 && sx < x1 && sy > 8 && sy < this.h - 8) {
-      this.hud.setEdge(null);
-      return;
-    }
-    // In front but off the edge: point straight at it. Behind you: point to the
-    // side you would turn towards, at mid height.
-    let dx = behind ? (v.x >= 0 ? 1 : -1) : v.x;
-    const dy = behind ? 0 : -v.y;
-    if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4) dx = 1;
-    const cx = this.w / 2;
-    const cy = (y0 + y1) / 2;
-    const k = Math.min(Math.abs(dx) > 1e-6 ? (x1 - cx) / Math.abs(dx) : 1e9, Math.abs(dy) > 1e-6 ? (y1 - cy) / Math.abs(dy) : 1e9);
-    const ex = clamp(cx + dx * k, x0, x1);
-    const ey = clamp(cy + dy * k, y0, y1);
-    this.hud.setEdge(ex, ey, Math.atan2(dy, dx));
+    const e = edgeSpot(this.camera, m.x, m.y, m.z, this.w, this.h, this.tmp, this.edgeOut);
+    if (!e) this.hud.setEdge(null);
+    else this.hud.setEdge(e.x, e.y, e.angle);
   }
+  private edgeOut: EdgeSpot = { x: 0, y: 0, angle: 0 };
 
   // ------------------------------------------------------------ audio
 

@@ -41,10 +41,18 @@ export interface Thumb {
 
 /** Radians of view per px of a look drag on touch (the game's). */
 const SENS = 0.0062;
-/** The fourth playtest's careless thumb: 180 ms of lag, 55% a move, 6 px of wobble either way; it walks. */
-export const CARELESS: Thumb = { name: 'careless', lag: 0.18, gain: 0.55, noise: 6 * SENS, run: false };
-/** A careful thumb: sees it in 70 ms, moves 80% of the way, wobbles 1.5 px; runs at a thistle. */
-export const CAREFUL: Thumb = { name: 'careful', lag: 0.07, gain: 0.8, noise: 1.5 * SENS, run: true };
+/**
+ * The real game's own loop adds about 100 ms between what is on screen and a look move landing (the touch
+ * event, a frame, the page): without it this harness ran far kinder than real touch (round 5, the same build:
+ * careless clover 100% here against 50% with real touch). With it, 80 tries a kind here against 20 with real
+ * touch: careless clover 53% (50), ember 55% (35), brook 53% (45), thistle 19% (40); careful 100 (100), 86
+ * (90), 95 (85), 89 (90).
+ */
+export const LOOP_LAG = 0.1;
+/** The fourth playtest's careless thumb: 180 ms of lag (and the loop's), 55% a move, 6 px of wobble either way; it walks. */
+export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0.55, noise: 6 * SENS, run: false };
+/** A careful thumb: sees it in 70 ms (and the loop's), moves 80% of the way, wobbles 1.5 px; runs at a thistle. */
+export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true };
 
 /** The game's frame, and how often the look finger moves. */
 const DT = 1 / 60;
@@ -208,16 +216,62 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
   return { rate: n / tries, secs: n ? secs / n : 0, escaped: esc / tries, food: food / tries, under: under / tries };
 }
 
+/**
+ * Closing on a clover that has seen you, with no pull: walking or running straight at it from 10 m for 20 s.
+ * The gap at the end and the first time you were within Pull's reach (the fifth playtest's walker was still 8 m
+ * off after 20 s; running, it caught one in 4.4 s).
+ */
+export function chaseGap(run: boolean, seed: number): { gap: number; reach: number } {
+  const realRandom = Math.random;
+  Math.random = rng(seed);
+  try {
+    const sim = new Sim(null);
+    const s = sim.s;
+    sim.wild = false;
+    s.downies = [];
+    s.hour = 10;
+    const h = home('clover', seed);
+    const d = sim.spawn('clover', h.x, h.z, false);
+    const p = s.player;
+    const a = Math.random() * Math.PI * 2;
+    p.x = h.x + Math.cos(a) * 10;
+    p.z = h.z + Math.sin(a) * 10;
+    p.y = sim.phys.floor(p.x, p.z);
+    let reach = -1;
+    let t = 0;
+    for (; t < 20; t += DT) {
+      const dx = d.x - p.x;
+      const dz = d.z - p.z;
+      p.yaw = Math.atan2(-dx, -dz);
+      const dist = Math.hypot(dx, dz);
+      if (reach < 0 && dist < 6.5) reach = t;
+      const aim: Aim = { ex: p.x, ey: p.y + 1.6, ez: p.z, dx: -Math.sin(p.yaw), dy: 0, dz: -Math.cos(p.yaw), mx: p.x, my: p.y + 1.4, mz: p.z };
+      sim.update(DT, { moveX: 0, moveZ: dist > 3 ? 1 : 0, sprint: run, jump: false, jumpPressed: false, draw: false, puff: false, puffPressed: false }, aim);
+      sim.events.length = 0;
+    }
+    return { gap: Math.hypot(d.x - p.x, d.z - p.z), reach };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const tries = Number(process.argv[2]) || 80;
   console.log(`Thistledown catches: ${tries} tries per kind and thumb, from 12 m on any dry side (a thistle from 16 m, at dusk), walking in to 5.5 m.`);
-  console.log(`   careless: ${CARELESS.lag * 1000} ms lag, ${Math.round(CARELESS.gain * 100)}% a move, ${(CARELESS.noise / SENS).toFixed(1)} px wobble, walks`);
-  console.log(`   careful:  ${CAREFUL.lag * 1000} ms lag, ${Math.round(CAREFUL.gain * 100)}% a move, ${(CAREFUL.noise / SENS).toFixed(1)} px wobble, runs at a thistle\n`);
+  console.log(`   careless: ${Math.round(CARELESS.lag * 1000)} ms lag (the loop's ${LOOP_LAG * 1000} in it), ${Math.round(CARELESS.gain * 100)}% a move, ${(CARELESS.noise / SENS).toFixed(1)} px wobble, walks`);
+  console.log(`   careful:  ${Math.round(CAREFUL.lag * 1000)} ms lag, ${Math.round(CAREFUL.gain * 100)}% a move, ${(CAREFUL.noise / SENS).toFixed(1)} px wobble, runs at a thistle\n`);
   console.log('   kind      careless  (secs, got away, food drawn)   careful  (secs, got away, food drawn)   gap    glided under 1 m');
   for (const kind of ['clover', 'ember', 'brook', 'thistle'] as DownyKind[]) {
     const a = catchRate(kind, CARELESS, tries);
     const b = catchRate(kind, CAREFUL, tries);
     const pct = (v: number) => `${Math.round(v * 100)}%`.padStart(4);
     console.log(`   ${kind.padEnd(8)}  ${pct(a.rate)}      (${a.secs.toFixed(1)} s, ${pct(a.escaped)}, ${pct(a.food)})       ${pct(b.rate)}     (${b.secs.toFixed(1)} s, ${pct(b.escaped)}, ${pct(b.food)})       ${String(Math.round((b.rate - a.rate) * 100)).padStart(3)} pts  ${pct((a.under + b.under) / 2)}`);
+  }
+  // Closing on a clover that has seen you, walking against running (taught now: the running lesson in the meadow).
+  for (const run of [false, true]) {
+    const rows = Array.from({ length: 12 }, (_, k) => chaseGap(run, 31 + k * 7919));
+    const gaps = rows.map((q) => q.gap).sort((x, y) => x - y);
+    const reached = rows.filter((q) => q.reach >= 0).map((q) => q.reach).sort((x, y) => x - y);
+    console.log(`   closing on a clover that has seen you, ${run ? 'running' : 'walking'} from 10 m: within Pull's reach in ${reached.length} of 12 (middle ${reached.length ? reached[Math.floor(reached.length / 2)].toFixed(1) : '-'} s), ${gaps[Math.floor(gaps.length / 2)].toFixed(1)} m off after 20 s (middle)`);
   }
 }

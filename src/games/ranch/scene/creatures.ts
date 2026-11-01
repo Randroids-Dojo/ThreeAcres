@@ -13,6 +13,7 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   Object3D,
   PlaneGeometry,
@@ -20,6 +21,7 @@ import {
   ShaderMaterial,
   SphereGeometry,
   Vector3,
+  Vector4,
   Euler,
   BoxGeometry,
 } from 'three';
@@ -28,7 +30,7 @@ import { clamp, hash2 } from '../noise';
 import type { Physics } from '../physics';
 import type { RanchState } from '../state';
 import { at, jitter, merge, part } from './geo';
-import { fluff, matte } from './mat';
+import { U, fluff, matte } from './mat';
 
 const _m = new Matrix4();
 const _m2 = new Matrix4();
@@ -231,6 +233,39 @@ function nettleBody(): G {
   return merge(parts);
 }
 
+/** A nettleback's eyes, lit from within (a dark lump at 6 m at night was all the fifth playtest saw of one). */
+function nettleEyes(): G {
+  const parts: G[] = [];
+  for (const s of [-1, 1]) parts.push(part(at(new SphereGeometry(0.042, 8, 6), s * 0.09, 0.235, 0.385), 0xffffff, { vary: 0 }));
+  return merge(parts);
+}
+
+/** The moonlit rim on a nettleback at night (rgb and strength), so its outline reads against the dark grass. */
+export const NETTLE_RIM = { value: new Vector4(0.66, 0.72, 1.0, 0.85) };
+
+/** Matte vertex colour with a cool rim that comes up at night. */
+function nettleMat(flat: boolean): MeshLambertMaterial {
+  const m = matte({ flat });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uNight = U.uNight;
+    sh.uniforms.uNettleRim = NETTLE_RIM;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uNight;\nuniform vec4 uNettleRim;`)
+      .replace(
+        '#include <opaque_fragment>',
+        `{
+          vec3 rn = normalize( normal );
+          vec3 rv = normalize( vViewPosition );
+          float f = clamp( 1.0 - max( dot( rn, rv ), 0.0 ), 0.0, 1.0 );
+          outgoingLight += uNettleRim.rgb * ( f * f ) * uNight * uNettleRim.w * 0.6;
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  m.customProgramCacheKey = () => `nettle:${flat}`;
+  return m;
+}
+
 function nettleSpikes(): G {
   const parts: G[] = [];
   for (let i = 0; i < 46; i++) {
@@ -289,6 +324,9 @@ export class CreatureView {
   readonly wants: Record<Food, InstancedMesh>;
   private nBody: InstancedMesh;
   private nSpikes: InstancedMesh;
+  private nEyes: InstancedMesh;
+  /** For checks: a nettleback's night look (its lit eyes and moonlit rim) on or off. */
+  nettleGlow = true;
   private shadows: InstancedMesh;
   private shadowA: InstancedBufferAttribute;
   /** Shared geometries for the canister's tiny contents. */
@@ -301,6 +339,8 @@ export class CreatureView {
       body[k] = bodyGeometry(k);
       const mat = fluff({ gloss: k === 'brook' ? 0.55 : 0, glow: k === 'ember' ? 0.28 : 0, rim: k === 'brook' ? 0.7 : 1 });
       const m = new InstancedMesh(body[k], mat, CAP);
+      // Per-instance colour: white for most, a tint for the board's rare one (a gold clover, a rose ember, a silver brook).
+      m.setColorAt(0, _c.setRGB(1, 1, 1));
       m.count = 0;
       m.frustumCulled = false;
       m.name = `downy-${k}`;
@@ -343,9 +383,12 @@ export class CreatureView {
       this.wants[k] = m;
       this.root.add(m);
     }
-    this.nBody = new InstancedMesh(nettleBody(), matte(), 8);
-    this.nSpikes = new InstancedMesh(nettleSpikes(), matte({ flat: true }), 8);
-    for (const m of [this.nBody, this.nSpikes]) {
+    this.nBody = new InstancedMesh(nettleBody(), nettleMat(false), 8);
+    this.nSpikes = new InstancedMesh(nettleSpikes(), nettleMat(true), 8);
+    // Warm amber eyes, unlit so they glow in the dark (small beads by day).
+    this.nEyes = new InstancedMesh(nettleEyes(), new MeshBasicMaterial({ color: 0xffc66e }), 8);
+    this.nEyes.name = 'nettle-eyes';
+    for (const m of [this.nBody, this.nSpikes, this.nEyes]) {
       m.count = 0;
       m.frustumCulled = false;
       this.root.add(m);
@@ -409,6 +452,7 @@ export class CreatureView {
       _q.setFromEuler(_e);
       // Pivot squash around the feet so landing squashes into the ground.
       _m.compose(_v.set(d.x, d.y, d.z), _q, _s.set(sxz * scale, sy * scale, sxz * scale));
+      this.bodies[k].setColorAt(n[k], d.rare ? RARE_TINT[k] : WHITE);
       this.bodies[k].setMatrixAt(n[k]++, _m);
       // Eyes sit on the face; blink, and grow when hungry.
       const blink = d.blinkT < 0 ? 0.12 : 1;
@@ -447,6 +491,7 @@ export class CreatureView {
       m.count = n[k];
       m.visible = n[k] > 0;
       m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
     this.eyes.count = ne;
     this.eyes.visible = ne > 0;
@@ -499,17 +544,20 @@ export class CreatureView {
       _m.compose(_v.set(q.x, q.y + lift, q.z), _q, _s.set(1, 1, 1));
       if (q.mode === 'roll') _m.multiply(_m2.makeTranslation(0, -0.2, 0));
       this.nBody.setMatrixAt(nn, _m);
+      this.nEyes.setMatrixAt(nn, _m);
       const b = 1 + q.bristle * 0.35;
       _m.multiply(_m2.makeScale(b, b, b));
       this.nSpikes.setMatrixAt(nn, _m);
       this.shadow(q.x, q.y, q.z, 0.45, lift);
       nn++;
     }
-    for (const m of [this.nBody, this.nSpikes]) {
+    for (const m of [this.nBody, this.nSpikes, this.nEyes]) {
       m.count = nn;
       m.visible = nn > 0;
       m.instanceMatrix.needsUpdate = true;
     }
+    this.nEyes.visible = nn > 0 && this.nettleGlow;
+    NETTLE_RIM.value.w = this.nettleGlow ? 0.85 : 0;
     this.shadows.count = this.shadowN;
     this.shadows.visible = this.shadowN > 0;
     this.shadows.instanceMatrix.needsUpdate = true;
@@ -523,3 +571,11 @@ export class CreatureView {
 }
 
 const _v2c = new Color(1, 1, 1);
+const WHITE = new Color(1, 1, 1);
+/** The board's rare downies, tinted over their kind's colours: gold clover, rose ember, silver brook, pale thistle. */
+const RARE_TINT: Record<DownyKind, Color> = {
+  clover: new Color(1.38, 1.02, 0.6),
+  ember: new Color(1.02, 0.74, 1.12),
+  brook: new Color(1.72, 1.34, 1.04),
+  thistle: new Color(1.25, 1.2, 1.15),
+};
