@@ -13,16 +13,20 @@ import { hash3, Rng } from '../../../render2d/rng';
 import { stageOf, type Crop, type Mark, type Plot, type Season, type SeedId } from '../rules';
 import { paintSeedCrop } from './crops';
 import { paintHiveOnPlot, paintPests } from './glyphs';
-import { basket, bloom, BLOOM, moon, num, numWidth } from './icons';
+import { basket, bloom, BLOOM, bug, moon, num, numWidth } from './icons';
 
 export type PreviewMark = Mark;
 
 export interface Preview {
   marks: PreviewMark[];
-  /** A seed on the plot under the finger: what it would score there. */
-  total: { plot: number; yield: number; bloom: number; score: number } | null;
+  /** A seed on the plot under the finger: what it would score there (late: it won't ripen before the season ends). */
+  total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null;
   /** Bloom has been introduced: show bloom with the total. */
   bloom: boolean;
+  /** Why a greyed bonus won't pay, said under the aimed plot: "The radish is pulled before the carrot ripens." */
+  reason: { plot: number; text: string } | null;
+  /** A short line under the aimed plot when the card would do nothing there. */
+  none: { plot: number | null; text: string } | null;
 }
 
 export interface CropAnim {
@@ -120,6 +124,8 @@ export class Board {
   boost: number[] = [];
   /** What the held card would do, or null. */
   preview: Preview | null = null;
+  /** A crow sits on the bed's corner: one comes tonight. */
+  crow = false;
   /** Checks only: paint the printed frame's rules in this colour, to find them in the pixels. */
   ruleInk: string | null = null;
   frames = 0;
@@ -294,16 +300,6 @@ export class Board {
     for (let i = 0; i < plots.length; i++) this.paintSoil(g, i % this.cols, Math.floor(i / this.cols), plots[i], px, pal);
     g.restore();
 
-    // Key letters along the top and numbers down the side, like a plate's key.
-    g.fillStyle = pal.inkSoft;
-    g.font = `italic 500 ${Math.round(Math.max(10, T * 0.14))}px 'Fraunces Variable', Georgia, serif`;
-    g.textAlign = 'center';
-    for (let c = 0; c < this.cols; c++) g.fillText('ABCDE'[c], this.bx + (c + 0.5) * T, this.by - fw - 5);
-    if (this.bx - this.px0 > 28) {
-      g.textAlign = 'right';
-      for (let rr = 0; rr < this.rows; rr++) g.fillText(String(rr + 1), this.bx - fw - 5, this.by + (rr + 0.55) * T);
-    }
-
     // Caption, between the bed and the printed frame's hairline.
     g.fillStyle = pal.ink;
     g.textAlign = 'center';
@@ -434,6 +430,7 @@ export class Board {
     for (let i = 0; i < this.splash.length; i++) if (this.splash[i] > 0) this.splash[i] = Math.max(0, this.splash[i] - dt * 1.6);
     if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);
 
+    this.drawKey();
     this.drawHighlights(plots);
 
     // Crops and objects, back row first so tall ones overlap the row above.
@@ -444,6 +441,12 @@ export class Board {
       if (this.splash[i] > 0) {
         ctx.fillStyle = `rgba(180, 215, 240, ${this.splash[i] * 0.35})`;
         const c = this.centre(i);
+        ctx.fillRect(c.x - T / 2 + 2, c.y - T / 2 + 2, T - 4, T - 4);
+      }
+      if (p.crop?.pest) {
+        // A sickly wash on the soil, so a pested plot reads from across the table.
+        const c = this.centre(i);
+        ctx.fillStyle = 'rgba(196, 168, 40, 0.3)';
         ctx.fillRect(c.x - T / 2 + 2, c.y - T / 2 + 2, T - 4, T - 4);
       }
       if (p.obj) {
@@ -465,24 +468,142 @@ export class Board {
       this.drop(ctr.x - T * 0.36, ctr.y + T * 0.34, T * 0.07);
     }
 
-    // Ripe-tonight moons and pests on top.
+    // Ripe-tonight moons and pests on top: a pested crop gets a badge with its nights, and if ripe, a struck moon.
+    const day = this.night < 0.05;
     for (let i = 0; i < plots.length; i++) {
       const c = plots[i].crop;
       if (!c) continue;
       const ctr = this.centre(i);
-      if (this.tonight[i] && this.night < 0.05) this.moon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085);
+      if (this.tonight[i] && day) this.moon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085);
       if (c.pest) {
         const a = this.anims.get(c.uid);
-        const s = this.sprite(`pest:${c.uid % 5}`, -0.36, -0.42, 0.36, 0.06, (g, px) => paintPests(g, px, 40 + (c.uid % 5)));
+        const s = this.sprite(`pest:${c.uid % 5}`, -0.44, -0.8, 0.44, 0.1, (g, px) => paintPests(g, px, 40 + (c.uid % 5)));
         const b = this.base(i);
         ctx.globalAlpha = a ? a.alpha : 1;
         ctx.drawImage(s.c, b.x + s.x0 * T, b.y + s.y0 * T - (a?.lift ?? 0) * T, s.w * T, s.h * T);
         ctx.globalAlpha = 1;
+        if (day) {
+          this.pestBadge(i, c.pest);
+          if (c.age >= c.days) this.heldMoon(ctr.x + T * 0.36, ctr.y + T * 0.36, T * 0.085);
+        }
       }
     }
+    this.drawCrow();
 
     this.drawPreview();
     this.drawParticles(dt);
+  }
+
+  /** Key letters along the top and numbers down the side, like a plate's key. They fade at night, when slips fly over them. */
+  private drawKey(): void {
+    const { ctx, T } = this;
+    const a = Math.max(0, 1 - this.night * 1.8);
+    if (a <= 0.01) return;
+    const fw = frameW(T);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = this.pal.inkSoft;
+    ctx.font = `italic 500 ${Math.round(Math.max(10, T * 0.14))}px 'Fraunces Variable', Georgia, serif`;
+    ctx.textAlign = 'center';
+    for (let c = 0; c < this.cols; c++) ctx.fillText('ABCDE'[c], this.bx + (c + 0.5) * T, this.by - fw - 5);
+    if (this.bx - this.px0 > 28) {
+      ctx.textAlign = 'right';
+      for (let rr = 0; rr < this.rows; rr++) ctx.fillText(String(rr + 1), this.bx - fw - 5, this.by + (rr + 0.55) * T);
+    }
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  /** A crow on the bed's top right corner: one comes tonight for a ripe crop no scarecrow guards. */
+  private drawCrow(): void {
+    if (!this.crow || this.night > 0.05) return;
+    const { ctx, T } = this;
+    const fw = frameW(T);
+    const s = T * 0.34;
+    const x = this.bx + this.T * this.cols - s * 0.2;
+    const y = this.by - fw;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#1c1a22';
+    ctx.strokeStyle = '#0a090c';
+    ctx.lineWidth = 1;
+    // Tail, body, head.
+    ctx.beginPath();
+    ctx.moveTo(s * 0.45, -s * 0.35);
+    ctx.lineTo(s * 0.95, -s * 0.1);
+    ctx.lineTo(s * 0.85, -s * 0.02);
+    ctx.lineTo(s * 0.35, -s * 0.22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, -s * 0.42, s * 0.5, s * 0.3, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(-s * 0.42, -s * 0.78, s * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Beak and eye.
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.58, -s * 0.84);
+    ctx.lineTo(-s * 0.92, -s * 0.74);
+    ctx.lineTo(-s * 0.58, -s * 0.7);
+    ctx.closePath();
+    ctx.fillStyle = '#5a5046';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(-s * 0.46, -s * 0.82, s * 0.045, 0, Math.PI * 2);
+    ctx.fillStyle = '#e8d8a0';
+    ctx.fill();
+    // A wing's sheen and the legs gripping the frame.
+    ctx.beginPath();
+    ctx.ellipse(s * 0.05, -s * 0.45, s * 0.3, s * 0.13, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(120, 130, 170, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = '#3a3030';
+    ctx.lineWidth = Math.max(1, s * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.08, -s * 0.15);
+    ctx.lineTo(-s * 0.12, 0);
+    ctx.moveTo(s * 0.1, -s * 0.15);
+    ctx.lineTo(s * 0.08, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Pests on a crop: a badge in the plot's top left with a bug and the nights they stay. */
+  private pestBadge(i: number, nights: number): void {
+    const { ctx, T } = this;
+    const c = this.centre(i);
+    const size = Math.max(11, Math.round(T * 0.15));
+    const text = String(nights);
+    const tw = numWidth(ctx, text, size);
+    const w = size * 1.3 + tw + 8;
+    const h = size + 6;
+    const x = c.x - T / 2 + 3;
+    const y = c.y - T / 2 + 3;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 4);
+    ctx.fillStyle = '#f4e8a8';
+    ctx.fill();
+    ctx.strokeStyle = '#5a4a10';
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    bug(ctx, x + 3 + size * 0.6, y + h / 2, size * 0.55);
+    num(ctx, text, x + size * 1.3 + 4, y + h / 2, size, '#3a2e08');
+  }
+
+  /** A moon with a red stroke through it: this ripe crop will not be pulled tonight. */
+  private heldMoon(x: number, y: number, r: number): void {
+    this.moon(x, y, r);
+    const { ctx } = this;
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.3, y + r * 1.3);
+    ctx.lineTo(x + r * 1.3, y - r * 1.3);
+    ctx.strokeStyle = '#f6eed2';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = '#b8352a';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
   }
 
   /** A blue drop: this plot grows an extra night tonight. */
@@ -509,19 +630,32 @@ export class Board {
     if (!pv || this.night > 0.05) return;
     const { ctx, T } = this;
     const size = Math.max(11, Math.round(T * 0.15));
-    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void): number => {
+    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void, lost = false): number => {
       const tw = numWidth(ctx, text, size);
       const w = tw + size * 1.25 + 6;
       const h = size + 6;
       ctx.beginPath();
       ctx.roundRect(x - w, y, w, h, 4);
-      ctx.fillStyle = 'rgba(251, 244, 222, 0.96)';
+      ctx.fillStyle = lost ? 'rgba(226, 220, 204, 0.94)' : 'rgba(251, 244, 222, 0.96)';
       ctx.fill();
-      ctx.strokeStyle = col;
+      ctx.strokeStyle = lost ? '#8c8676' : col;
       ctx.lineWidth = 1.2;
+      if (lost) ctx.setLineDash([3, 2]);
       ctx.stroke();
-      num(ctx, text, x - w + 3, y + h / 2, size, col);
+      ctx.setLineDash([]);
+      if (lost) ctx.globalAlpha = 0.55;
+      num(ctx, text, x - w + 3, y + h / 2, size, lost ? '#5a5448' : col);
       icon(x - size * 0.62 - 2, y + h / 2);
+      ctx.globalAlpha = 1;
+      if (lost) {
+        // Struck through: shown, but the night won't pay it.
+        ctx.beginPath();
+        ctx.moveTo(x - w + 2, y + h - 3);
+        ctx.lineTo(x - 2, y + 3);
+        ctx.strokeStyle = '#6a6458';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      }
       return h + 2;
     };
     const sign = (v: number) => (v > 0 ? `+${fmt(v)}` : fmt(v));
@@ -533,24 +667,31 @@ export class Board {
       if (m.bloom) y += chip(x, y, sign(m.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
       if (Math.abs(m.times - 1) > 1e-6) y += chip(x, y, `×${fmt(m.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
       if (m.nights) y += chip(x, y, `+${m.nights}`, '#3a4a78', (cx, cy) => moon(ctx, cx, cy, size * 0.42));
+      const l = m.lost;
+      if (l) {
+        if (l.yield) y += chip(x, y, sign(l.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05), true);
+        if (l.bloom) y += chip(x, y, sign(l.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
+        if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
+      }
     }
     const t = pv.total;
+    let under = -1;
     if (t) {
       const c = this.centre(t.plot);
       // The arithmetic only when bloom changes the total; otherwise just what it pays.
-      const showBloom = t.bloom !== 1;
+      const showBloom = t.bloom !== 1 && !t.late;
       const big = Math.max(12, Math.round(T * 0.17));
-      const parts = showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
+      const parts = t.late ? ['0'] : showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
       const widths = parts.map((s) => numWidth(ctx, s, big));
       const icon = big * 1.1;
-      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12;
+      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12 + (t.late ? icon : 0);
       const h = big + 8;
       // Straddling the plot's bottom edge, clear of a thumb on the plot.
       const x0 = c.x - w / 2;
       const y0 = c.y + T / 2 - h * 0.45;
       ctx.beginPath();
       ctx.roundRect(x0, y0, w, h, 5);
-      ctx.fillStyle = 'rgba(42, 30, 18, 0.92)';
+      ctx.fillStyle = t.late ? 'rgba(90, 84, 72, 0.92)' : 'rgba(42, 30, 18, 0.92)';
       ctx.fill();
       let x = x0 + 6;
       basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, '#f6ecd0');
@@ -560,6 +701,31 @@ export class Board {
         num(ctx, s, x, y0 + h / 2, big, col);
         x += widths[k] + 3;
       });
+      if (t.late) this.heldMoon(x + icon * 0.4, y0 + h / 2, big * 0.36);
+      under = y0 + h + 3;
+    }
+    // Why: one plain line under the aimed plot.
+    const why = pv.reason ?? (pv.none ? { plot: pv.none.plot, text: pv.none.text } : null);
+    if (why) {
+      const at = why.plot !== null ? this.centre(why.plot) : { x: this.bx + (T * this.cols) / 2, y: this.by + T * (this.rows - 0.5) };
+      const fs = Math.max(11, Math.round(T * 0.135));
+      ctx.font = `italic 600 ${fs}px 'Fraunces Variable', Georgia, serif`;
+      const tw = ctx.measureText(why.text).width;
+      const w = tw + 14;
+      const h = fs + 9;
+      const x0 = Math.max(this.px0 + 4, Math.min(this.px0 + this.pw - 4 - w, at.x - w / 2));
+      const y0 = under >= 0 ? under : at.y + T / 2 + 2;
+      ctx.beginPath();
+      ctx.roundRect(x0, Math.min(y0, this.py0 + this.ph - h - 4), w, h, 3);
+      ctx.fillStyle = 'rgba(246, 238, 214, 0.97)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(58, 38, 20, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#3a2614';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(why.text, x0 + 7, Math.min(y0, this.py0 + this.ph - h - 4) + h / 2 + 0.5);
+      ctx.textBaseline = 'alphabetic';
     }
   }
 
@@ -636,8 +802,11 @@ export class Board {
     }
     for (const i of h.area) {
       const [x, y, w, hh] = rect(i, 3);
-      ctx.fillStyle = h.water ? 'rgba(70, 140, 225, 0.36)' : 'rgba(255, 220, 120, 0.3)';
+      ctx.fillStyle = h.water ? 'rgba(70, 140, 225, 0.4)' : 'rgba(240, 186, 60, 0.46)';
       ctx.fillRect(x, y, w, hh);
+      ctx.strokeStyle = h.water ? 'rgba(30, 80, 150, 0.75)' : 'rgba(140, 90, 10, 0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(x + 1, y + 1, w - 2, hh - 2);
     }
     const ring = (i: number, col: string, wd: number) => {
       const [x, y, w, hh] = rect(i, 3);

@@ -1,13 +1,17 @@
 // A headless player for tuning quotas and prices. For each play it tries every
 // legal card and target on a copy of the run, resolves tonight on the copy with
 // a sampled rng (so it cannot see the real dice), then rolls the board forward
-// a few calm nights as if it keeps watering, and keeps the best play while it
-// beats ending the day.
+// calm nights to the season's end, discounted, so a perennial that picks for
+// days is worth what it pays; it keeps the best play while it beats ending the
+// day.
 
 import {
   allCards,
   buyCard,
   buyPage,
+  buyScoop,
+  canBuyScoop,
+  scoopPrice,
   canRemove,
   canUpgrade,
   CARDS,
@@ -63,7 +67,7 @@ export class Dice {
 
 const NONE: Ev[] = [];
 
-/** Tonight for real (sampled dice), then up to three calm nights, discounted. */
+/** Tonight for real (sampled dice), then calm nights to the season's end, discounted. */
 function evaluate(s: RunState, sample: number): number {
   const c = cloneRun(s);
   c.rng = sample;
@@ -71,25 +75,27 @@ function evaluate(s: RunState, sample: number): number {
   NONE.length = 0;
   night(c, NONE);
   let v = c.earned - start;
-  const daysLeft = Math.min(3, TUNING.days - s.day);
+  const daysLeft = TUNING.days - s.day;
   if (daysLeft <= 0) return v;
   // Roll forward as if nothing goes wrong.
   c.year = 1;
   c.season = 0;
-  let k = 0.72;
+  const barrel = c.pages.includes('barrel');
+  let k = DISCOUNT;
   for (let d = 0; d < daysLeft; d++) {
     c.dayHarvests = 0;
+    if (barrel) for (let r = 0; r < c.rows; r++) c.plots[r * c.cols].boost += 1;
     const before = c.earned;
     NONE.length = 0;
     night(c, NONE);
     v += (c.earned - before) * k;
-    k *= 0.72;
+    k *= DISCOUNT;
   }
-  // Whatever is still growing after that counts a little, if there's time for it.
-  const left = TUNING.days - s.day - daysLeft;
-  if (left > 0) for (const p of c.plots) if (p.crop) v += SEEDS[p.crop.kind].base * 0.3 * k;
   return v;
 }
+
+/** How much a coin tomorrow is worth against one tonight, to the bot. */
+const DISCOUNT = 0.8;
 
 export interface Play {
   h: number;
@@ -211,11 +217,17 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
   const fuzz = (v: number) => v * (1 + (dice.next() * 2 - 1) * (o.shopNoise ?? o.noise));
   for (let guard = 0; guard < 12; guard++) {
     let did = false;
+    // With the almanac full, a page is only worth it if it beats the weakest kept one by a margin.
+    const full = s.pages.length >= MAX_PAGES;
+    const weakest = full ? [...s.pages].sort((a, b) => pageValue(s, a) - pageValue(s, b))[0] : undefined;
+    const bar = full ? pageValue(s, weakest!) + 3 : 6;
     const pg = sh.pages
       .map((p, i) => ({ p, i, v: fuzz(pageValue(s, p.page)) }))
-      .filter((x) => !x.p.sold && s.pages.length < MAX_PAGES && x.v >= 6)
+      .filter((x) => !x.p.sold && x.v >= bar)
       .sort((a, b) => b.v - a.v)[0];
-    if (pg && pg.p.price <= s.coins && buyPage(s, pg.i)) did = true;
+    if (pg && pg.p.price <= s.coins && buyPage(s, pg.i, weakest)) did = true;
+    // A scoop for good, once there are coins to spare.
+    if (!did && canBuyScoop(s) && s.coins >= 1.8 * scoopPrice(s) && buyScoop(s)) did = true;
     // Save up for a strong page within reach rather than fritter.
     const saving = !did && !!pg && pg.p.price > s.coins && pg.p.price < s.coins * 1.6;
     const cd = sh.cards

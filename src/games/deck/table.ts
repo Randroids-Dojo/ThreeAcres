@@ -43,7 +43,7 @@ import { learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, ty
 import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
 import { Board, type PreviewMark } from './view/board';
-import { costBoxes, faceUrl } from './view/faces';
+import { costBoxes, faceBonus, faceBoxes, faceUrl } from './view/faces';
 import { iconUrl } from './view/icons';
 import { Sheets } from './sheets';
 
@@ -88,6 +88,12 @@ interface CardEl {
 }
 
 const PENTA = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3];
+
+/** In a fanned phone hand, the share of each card's width left showing: its name and its rule's pictures sit inside it. */
+const SHOWN = 0.87;
+
+/** What the second tap does, said on the first: "Tap again to water." */
+const AIM_VERB: Partial<Record<CardId, string>> = { can: 'water', compost: 'lay it', fertiliser: 'feed it', shears: 'cut it', scarecrow: 'set it up', beehive: 'set it up' };
 export function ladder(n: number): number {
   return PENTA[n % 5] * Math.pow(2, Math.floor(n / 5) * 0.5);
 }
@@ -107,6 +113,11 @@ function migrateRun(r: RunState): void {
   delete old.radishesToday;
   delete old.chiliNext;
   r.script ??= [];
+  r.crow ??= false;
+  r.scoops ??= 0;
+  r.guided ??= false;
+  r.stats.pests ??= 0;
+  r.stats.crows ??= 0;
   for (const p of r.plots as (Plot & { wet?: boolean; mulch?: number })[]) {
     delete p.wet;
     delete p.mulch;
@@ -186,6 +197,10 @@ export class Table {
   private cardW = 110;
   private cardH = 154;
   private handRect = { x: 0, y: 0, w: 0, h: 0 };
+  /** The width the hand's cards are drawn at now (a full phone hand shrinks). */
+  handCardW = 110;
+  /** Touch: the plot a held tool is aimed at, waiting for a second tap to play. */
+  private aimed: number | null = null;
   private hintBox = { x: 0, y: 0, w: 0, h: 0 };
   private hoverCard: number | null = null;
   private hoverTimer = 0;
@@ -587,10 +602,25 @@ export class Table {
     const s = this.run;
     const season = SEASON_NAMES[s.season];
     this.ledSeason.textContent = `${season[0].toUpperCase()}${season.slice(1)}, year ${s.year}`;
-    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'Market day' : 'Run over';
+    this.ledDay.textContent = s.phase === 'day' ? `Day ${this.shownDay} of ${TUNING.days}` : s.phase === 'shop' ? 'At the stall' : 'Run over';
     this.ledTally.innerHTML = `<b>${Math.round(this.shownEarned)}</b> of ${s.quota}`;
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
+  }
+
+  /** The purse shows the coins the rules hold: after every purchase in the stall it ticks down to match. */
+  syncPurse(): void {
+    if (this.shownCoins === this.run.coins) return;
+    this.shownCoins = this.run.coins;
+    this.renderLedger();
+    this.purse.classList.remove('tick');
+    void this.purse.offsetWidth;
+    this.purse.classList.add('tick');
+  }
+
+  /** The coins the purse shows, for checks. */
+  get purseText(): string {
+    return this.purse.querySelector('b')?.textContent ?? '';
   }
 
   private placePegs(): void {
@@ -675,9 +705,20 @@ export class Table {
       }
     }
     const n = hand.length;
-    const { cardW: cw, cardH: ch } = this;
+    let { cardW: cw, cardH: ch } = this;
     const R = this.handRect;
-    const avail = R.w - 24;
+    // On the desktop the bench stands right of the hand: leave room for the outer cards' tilt.
+    const avail = R.w - (this.layout === 'phone' ? 12 : n > 5 ? 56 : 24);
+    // A full hand shrinks to fit, so every card keeps its name and its rule in sight
+    // (the next card may cover no more than the strip at its right edge).
+    if (n > 1) {
+      const fit = Math.floor(avail / (1 + (n - 1) * SHOWN));
+      if (fit < cw) {
+        cw = fit;
+        ch = Math.round(cw * 1.4);
+      }
+    }
+    this.handCardW = cw;
     const gap = n > 1 ? Math.min(cw * 0.92, (avail - cw) / (n - 1)) : 0;
     const total = cw + gap * (n - 1);
     const x0 = (R.w - total) / 2;
@@ -685,7 +726,8 @@ export class Table {
     const day = this.run.phase === 'day';
     hand.forEach((card, i) => {
       let c = this.cards.get(card.uid);
-      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}`;
+      const bonus = faceBonus(card.id, this.run.pages);
+      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? 'b' : ''}` : ''}`;
       if (!c) {
         const d = el('div', 'sb-card');
         const img = el('img');
@@ -713,7 +755,11 @@ export class Table {
         d.style.opacity = '';
       }
       if (c.key !== key) {
-        c.img.src = faceUrl(card.id, card.up, showCost);
+        c.img.src = faceUrl(card.id, card.up, showCost, bonus);
+        c.el.dataset.name = CARDS[card.id].name;
+        const fb = faceBoxes(card.id, card.up, showCost, bonus);
+        if (fb.name) c.el.dataset.namebox = [fb.name.x, fb.name.y, fb.name.w, fb.name.h, fb.name.size ?? fb.name.h].map((v) => v.toFixed(1)).join(',');
+        if (fb.rule) c.el.dataset.rulebox = [fb.rule.x, fb.rule.y, fb.rule.w, fb.rule.h].map((v) => v.toFixed(1)).join(',');
         c.key = key;
         const n = costOf(card.id, card.up);
         c.el.setAttribute('aria-label', `${CARDS[card.id].name}${card.up ? ', select' : ''}, ${n === 0 ? 'free' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`}`);
@@ -740,8 +786,9 @@ export class Table {
       const held = this.held?.uid === card.uid;
       const hov = this.hoverCard === card.uid && !this.held;
       let x = x0 + i * gap;
-      let y = R.h - ch - (this.layout === 'phone' ? 12 : 18) + off * off * 2.2;
-      let rot = off * 3.2;
+      // A full hand fans flatter, so the outer cards' tilt neither hides a neighbour's name nor reaches the bench.
+      let y = R.h - ch - (this.layout === 'phone' ? 12 : 18) + off * off * (n > 4 ? 1.2 : 2.2);
+      let rot = off * (n > 4 ? 1.8 : 3.2);
       let sc = 1;
       if (held) {
         // On a phone the bench sits right above the hand: lift a little, so the scoops stay in sight.
@@ -798,6 +845,7 @@ export class Table {
     }
     this.board.tonight = this.busy ? [] : this.shown.map((_, i) => ripeTonight(this.run, i));
     this.board.boost = this.busy ? [] : this.run.plots.map((p) => p.boost);
+    this.board.crow = !this.busy && this.run.phase === 'day' && this.run.crow;
     const nk = this.board.night.toFixed(3);
     if (this.dark.dataset.k !== nk) {
       this.dark.dataset.k = nk;
@@ -839,9 +887,17 @@ export class Table {
       const p = pos(e);
       const i = this.board.pick(p.x, p.y);
       if (this.held) {
-        const t = CARDS[this.cardOf(this.held.uid)!.id].target;
+        const card = this.cardOf(this.held.uid)!;
+        const t = CARDS[card.id].target;
         if (t === 'board' && this.board.onPlate(p.x, p.y)) this.tryPlay(null);
-        else if (i !== null) this.tryPlay(i);
+        else if (i !== null && e.pointerType !== 'mouse' && this.aimFirst(card) && this.aimed !== i && targetsFor(this.run, this.heldIndex()).includes(i)) {
+          // A finger has no hover: the first tap on a plot shows what a tool would do there, the second plays it.
+          this.aimed = i;
+          this.hover = i;
+          this.updateHighlight();
+          this.ctx.audio.cue('deck.hover', { gain: 0.6 });
+          this.say(`Tap again to ${AIM_VERB[card.id] ?? 'play it'}.`, i);
+        } else if (i !== null) this.tryPlay(i);
       } else if (i !== null) {
         this.cursor = i;
         this.inspect(i);
@@ -851,6 +907,12 @@ export class Table {
     this.tableEl.addEventListener('pointerdown', (e) => {
       if (this.busy && this.seq && !(e.target as HTMLElement).closest('.sb-book')) this.skip();
     });
+  }
+
+  /** Tools and objects that go on one plot: on touch they aim on the first tap and play on the second. Seeds plant at once. */
+  private aimFirst(card: Card): boolean {
+    const t = CARDS[card.id].target;
+    return CARDS[card.id].type !== 'seed' && t !== 'board' && t !== 'move';
   }
 
   private cardOf(uid: number): Card | undefined {
@@ -909,7 +971,7 @@ export class Table {
     const def = CARDS[card.id];
     const aim = this.hover ?? (this.ctx.device() === 'key' ? this.cursor : null);
     const marks: PreviewMark[] = [];
-    let total: { plot: number; yield: number; bloom: number; score: number } | null = null;
+    let total: { plot: number; yield: number; bloom: number; score: number; late?: boolean } | null = null;
     if (def.target === 'board') {
       marks.push(...(previewPlay(s, idx, null)?.marks ?? []));
     } else if (def.target === 'move') {
@@ -928,7 +990,29 @@ export class Table {
         for (const i of valid) for (const m of previewPlay(s, idx, i)?.marks ?? []) if (m.plot === i) marks.push(m);
       }
     }
-    b.preview = { marks, total, bloom: this.seen('bloom') };
+    // Why a greyed bonus won't pay, for the plot being aimed at; and a plain word when a card would do nothing.
+    let reason: { plot: number; text: string } | null = null;
+    if (aim !== null) {
+      const l = marks.find((m) => m.lost);
+      if (l?.lost) reason = { plot: aim, text: this.lostWhy(l.plot, l.lost.why, l.lost.from) };
+      else if (total?.late) reason = { plot: aim, text: 'Too late to ripen this season.' };
+    }
+    let none: { plot: number | null; text: string } | null = null;
+    if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: 'No effect now.' };
+    b.preview = { marks, total, bloom: this.seen('bloom'), reason, none };
+  }
+
+  /** "The radish is pulled before the carrot ripens." The held seed stands in for whichever of the two is not on the plot yet. */
+  private lostWhy(plot: number, why: 'gone' | 'late', from: number | null): string {
+    if (why === 'late') return 'Too late to ripen this season.';
+    const s = this.run;
+    const held = this.held ? this.cardOf(this.held.uid) : undefined;
+    const seed = held && CARDS[held.id].type === 'seed' ? held.id : null;
+    const kind = (i: number | null) => (i === null ? null : (s.plots[i].crop?.kind ?? seed));
+    const taker = kind(plot);
+    const giver = kind(from);
+    if (!taker || !giver) return 'Its neighbour is pulled first.';
+    return `The ${CARDS[giver].name.toLowerCase()} is pulled before the ${CARDS[taker].name.toLowerCase()} ripens.`;
   }
 
   private areaOf(card: Card, i: number): number[] {
@@ -1113,6 +1197,8 @@ export class Table {
     if (!card) return;
     this.sheets.closeDetail();
     this.held = { uid, from: null };
+    this.aimed = null;
+    this.hover = null;
     this.tutor.count('pick');
     this.ctx.audio.cue('deck.pick');
     this.updateHighlight();
@@ -1123,6 +1209,10 @@ export class Table {
   putDown(quiet = false): void {
     if (!this.held) return;
     this.held = null;
+    if (this.aimed !== null) {
+      this.aimed = null;
+      this.hover = null;
+    }
     if (!quiet) this.ctx.audio.cue('deck.drop');
     this.updateHighlight();
     this.renderHand();
@@ -1175,6 +1265,10 @@ export class Table {
     const ev = playCard(this.run, idx, plot, to)!;
     for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
     this.held = null;
+    if (this.aimed !== null) {
+      this.aimed = null;
+      this.hover = null;
+    }
     this.handShown = [...this.run.hand];
     this.ctx.audio.cue('deck.play');
     this.tutor.count('play');
@@ -1396,7 +1490,7 @@ export class Table {
     if (p.crop) {
       const c = p.crop;
       const left = c.days - c.age;
-      const state = c.pest ? 'pests on it' : left <= 0 ? 'ripe' : ripeTonight(this.run, i) ? 'ripe tonight' : `${left} ${left === 1 ? 'night' : 'nights'} to go`;
+      const state = c.pest ? `pests, held back ${c.pest} ${c.pest === 1 ? 'night' : 'nights'}` : left <= 0 ? 'ripe' : ripeTonight(this.run, i) ? 'ripe tonight' : `${left} ${left === 1 ? 'night' : 'nights'} to go`;
       this.say(`${at}: ${CARDS[c.kind].name.toLowerCase()}, ${state}.`, i);
     } else if (p.obj) this.say(`${at}: ${CARDS[p.obj].name.toLowerCase()}.`, i);
     else this.say(`${at}: bare soil.`, i);
@@ -1448,6 +1542,11 @@ export class Table {
     if (this.run.phase === 'day' && this.run.energy > from) {
       this.renderBench();
       this.refill(from);
+    }
+    // A crow on the bed's corner at dawn: once its lesson has had its say, a short note each time.
+    if (this.run.phase === 'day' && this.run.crow) {
+      this.ctx.audio.cue('deck.crow', { gain: 0.45, pitch: 1.1 });
+      if (this.tutor.learn.done.includes('crows')) this.say('A crow is about tonight.', null);
     }
   }
 
@@ -1813,8 +1912,13 @@ export class Table {
       void this.peg.offsetWidth;
       this.peg.classList.add('tick');
       if (before < this.run.quota && this.shownEarned >= this.run.quota && this.run.quota > 0) {
+        // The quota is met: the peg drops into the brass hole, gilds, and the table says so.
         this.ctx.audio.cue('deck.quota');
         this.peg.classList.add('met');
+        this.peg.classList.remove('home');
+        void this.peg.offsetWidth;
+        this.peg.classList.add('home');
+        if (this.seen('peg')) this.say('Quota met.', null);
       }
     });
   }

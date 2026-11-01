@@ -504,19 +504,33 @@ export function paintHiveOnPlot(ctx: Ctx, px: number, inkc: string): void {
 /** A blob of a few pests (aphids) for a pested crop, around (0, 0). */
 export function paintPests(ctx: Ctx, px: number, seed: number): void {
   const r = new Rng(seed);
-  // A crawl of aphids up the stem, with a little chewed-leaf shadow under them.
+  // A crawl of fat lime aphids up the stem and leaves, outlined dark so they read against green and soil alike,
+  // with chewed, yellowed leaf behind them.
   ctx.beginPath();
-  ctx.ellipse(0, -0.16, 0.26, 0.17, 0, 0, Math.PI * 2);
-  fill(ctx, '#5a4a20', 0.18);
-  for (let i = 0; i < 14; i++) {
-    const x = r.jit(0.24);
-    const y = r.jit(0.15) - 0.17;
-    blob(ctx, x, y, 0.038, 0.028, r, 0.2, 6, r.next() * 3);
-    fill(ctx, i % 3 ? '#2e3a1a' : '#6a7a2a');
-    ink(ctx, '#141808', inkW(px, 0.5), 0.9);
+  ctx.ellipse(0, -0.3, 0.32, 0.26, 0, 0, Math.PI * 2);
+  fill(ctx, '#c8a828', 0.22);
+  for (let i = 0; i < 9; i++) {
+    const x = r.jit(0.3);
+    const y = -0.08 - r.next() * 0.6;
+    const rx = 0.06 + r.next() * 0.02;
+    // Legs.
     ctx.beginPath();
-    ctx.arc(x - 0.01, y - 0.01, 0.008, 0, Math.PI * 2);
-    fill(ctx, '#d8e0a0', 0.8);
+    for (const k of [-1, 0, 1]) {
+      ctx.moveTo(x + k * rx * 0.4, y);
+      ctx.lineTo(x + k * rx * 0.7 - rx * 0.6, y + rx * 0.9);
+      ctx.moveTo(x + k * rx * 0.4, y);
+      ctx.lineTo(x + k * rx * 0.7 + rx * 0.6, y + rx * 0.9);
+    }
+    ink(ctx, '#1e2408', inkW(px, 0.7), 0.95);
+    blob(ctx, x, y, rx, rx * 0.72, r, 0.12, 7, r.next() * 3);
+    fill(ctx, i % 4 === 0 ? '#d8e85a' : '#a8c832');
+    ink(ctx, '#1e2408', inkW(px, 0.9), 1);
+    ctx.beginPath();
+    ctx.arc(x - rx * 0.6, y - rx * 0.1, rx * 0.32, 0, Math.PI * 2);
+    fill(ctx, '#3a4810');
+    ctx.beginPath();
+    ctx.arc(x + rx * 0.15, y - rx * 0.3, rx * 0.22, 0, Math.PI * 2);
+    fill(ctx, '#f4f8d0', 0.85);
   }
 }
 

@@ -11,10 +11,17 @@
 //     not lift
 //   - the lessons do not survive a reload, or a returning player gets the
 //     guided season again
+//   - anything but the shell's button lies in the shell's corner, at any step
+//   - a radish aimed beside a fresh carrot promises the carrot bloom it won't
+//     get (the night pulls the radish first), or the day 3 line does not teach
+//     the timing
+//   - the stall's first tap buys, or does not say what the card does; the
+//     purse disagrees with the rules after a purchase
 // Screens go to /tmp/deck-lessons/; the step-by-step table to steps-*.json.
 // node scripts/deck-lessons.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { cornerScan } from './deck-checks.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5252';
 const out = '/tmp/deck-lessons';
@@ -145,6 +152,8 @@ async function session(label, viewport, touch) {
     if (t.line) lines.add(t.line);
     const early = Object.entries(t.pieces).filter(([k, on]) => on && !started.has(BRINGS[k]) && !nightBrought.has(k));
     steps.push({ step: name, ...t, ...extra });
+    const corner = await p.evaluate(cornerScan);
+    if (corner.length) check(`${label}: ${name}: the shell's corner is clear`, false, corner.slice(0, 3).join(' | '));
     check(`${label}: ${name}: nothing before its lesson`, early.length === 0, early.length ? `early: ${early.map(([k]) => k).join(', ')}` : `on: ${Object.entries(t.pieces).filter(([, v]) => v).map(([k]) => k).join(', ') || 'plot and hand only'}${t.line ? `; "${t.line}"` : ''}`);
     return t;
   }
@@ -238,6 +247,30 @@ async function session(label, viewport, touch) {
   check(`${label}: the companion lesson: one action`, /beside the carrot/i.test(t.line), t.line);
   let pv = await p.evaluate(() => window.deck.preview());
   const nextTo = [1, 4, 6, 9];
+  if (touch) {
+    // Aim the radish beside the carrot by drag: the radish's +2 pays tonight; the carrot's +1 bloom is greyed with the reason.
+    await p.evaluate(() => window.deck.table.putDown(true));
+    const [x0, y0] = await cardPoint(await handIndex('radish'));
+    const [x1, y1] = await plotPoint(6);
+    await touchEv('touchStart', [[x0, y0, 3]]);
+    for (let i = 1; i <= 12; i++) {
+      await touchEv('touchMove', [[x0 + ((x1 - x0) * i) / 12, y0 + ((y1 - y0) * i) / 12, 3]]);
+      await wait(16);
+    }
+    await wait(80);
+    const aimed = await p.evaluate(() => window.deck.preview());
+    await shot('7a-timing-greyed');
+    // Slide back to the hand before lifting the finger: nothing is planted.
+    for (let i = 11; i >= 0; i--) {
+      await touchEv('touchMove', [[x0 + ((x1 - x0) * i) / 12, y0 + ((y1 - y0) * i) / 12, 3]]);
+      await wait(12);
+    }
+    await touchEv('touchEnd', []);
+    await wait(150);
+    check(`${label}: a radish aimed beside a fresh carrot: +2 pays, the carrot's +1 bloom is greyed with why`, aimed?.total?.score === 4 && aimed.marks.some((m) => m.plot === 5 && m.lost?.bloom === 1) && /The radish is pulled before the carrot ripens/.test(aimed.reason?.text ?? ''), JSON.stringify({ marks: aimed?.marks, reason: aimed?.reason }));
+    await tap(...(await cardPoint(await handIndex('radish'))));
+    pv = await p.evaluate(() => window.deck.preview());
+  }
   const marked = (pv?.marks ?? []).filter((m) => m.yield === 2).map((m) => m.plot).sort();
   check(`${label}: a held radish marks +2 on every plot beside the carrot`, JSON.stringify(marked) === JSON.stringify(nextTo), JSON.stringify(pv?.marks));
   await shot('7-companion-preview');
@@ -246,7 +279,8 @@ async function session(label, viewport, touch) {
     await p.mouse.move(...(await plotPoint(6)));
     await frames(6);
     pv = await p.evaluate(() => window.deck.preview());
-    check(`${label}: hovering shows the total and what the carrot gains`, pv?.total?.score === 4 && pv.marks.some((m) => m.plot === 5 && m.bloom === 1), JSON.stringify(pv));
+    // The carrot ripens tomorrow and the radish is pulled tonight: its +1 bloom is shown greyed, with why, never as a promise.
+    check(`${label}: hovering shows the total, and the carrot's +1 bloom greyed: the radish goes first`, pv?.total?.score === 4 && pv.marks.some((m) => m.plot === 5 && m.bloom === 0 && m.lost?.bloom === 1 && m.lost?.why === 'gone') && /pulled before the carrot ripens/.test(pv.reason?.text ?? ''), JSON.stringify(pv));
     await shot('7b-hover-preview');
     await p.mouse.click(...(await plotPoint(6)));
   } else await tap(...(await plotPoint(6)));
@@ -272,7 +306,7 @@ async function session(label, viewport, touch) {
   // ---------------------------------------------------------------- day 3: bloom, then the scoops
   t = await step('day 3, dawn');
   check(`${label}: day 3 deals more than three scoops' worth`, t.hand.join() === 'radish,radish,carrot,lettuce', t.hand.join());
-  check(`${label}: the bloom lesson`, /around the carrot/i.test(t.line), t.line);
+  check(`${label}: the bloom lesson teaches the timing: the carrot ripens tonight`, /ripens tonight/i.test(t.line), t.line);
   check(`${label}: still no scoops`, !t.pieces.scoops && t.cost === 0);
   await shot('8-bloom');
   // Drag a radish beside the carrot: the carrot's +1 bloom shows while it is over the plot.
@@ -402,7 +436,7 @@ async function session(label, viewport, touch) {
     }
     if (l === 'spent') {
       await shot(`15-spent-day${st.day}`);
-      const before = await p.evaluate(() => window.deck.state().discard.length);
+      const before = await p.evaluate(() => ({ uid: window.deck.state().hand[0].uid, hand: window.deck.state().hand.length }));
       const cp = await cardPoint(0);
       if (touch) await drag(...cp, ...(await center('.sb-heap')));
       else {
@@ -410,8 +444,10 @@ async function session(label, viewport, touch) {
         await p.keyboard.press('KeyX');
       }
       await wait(400);
-      const after = await p.evaluate(() => ({ n: window.deck.state().discard.length, tossed: window.deck.state().tossed }));
-      check(`${label}: a card tossed onto Spent`, after.tossed && after.n === before + 1, JSON.stringify(after));
+      // The tossed card leaves the hand for the spent heap (or, if the tin was empty, straight back into the reshuffled tin) and a fresh one is drawn.
+      const after = await p.evaluate((uid) => { const s = window.deck.state(); return { tossed: s.tossed, gone: !s.hand.some((c) => c.uid === uid), kept: [...s.discard, ...s.draw].some((c) => c.uid === uid), hand: s.hand.length }; }, before.uid);
+      // With the tin empty, the heap is shuffled back in and the tossed card can come straight back: the toss is used and the hand keeps its size either way.
+      check(`${label}: a card tossed onto Spent`, after.tossed && after.hand === before.hand && (after.gone ? after.kept : true), JSON.stringify({ ...after, before: before.hand }));
       t = await step(`day ${st.day}, tossed`);
       check(`${label}: the spent lesson ends with the toss`, t.done.includes('spent'));
       await shot(`16-tossed-day${st.day}`);
@@ -468,6 +504,9 @@ async function session(label, viewport, touch) {
       if (sug.plot === null) await tap(...(await plotPoint(6)));
       else {
         await tap(...(await plotPoint(sug.plot)));
+        // A finger aims a tool on one plot with the first tap and plays it with the second.
+        const aimed = touch && (await p.evaluate((uid) => { const c = window.deck.state().hand.find((x) => x.uid === uid); return !!c && !['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili', 'rain', 'sun', 'storm', 'ladybirds', 'trowel'].includes(c.id); }, uid));
+        if (aimed) await tap(...(await plotPoint(sug.plot)));
         if (sug.to !== undefined && sug.to !== null) await tap(...(await plotPoint(sug.to)));
       }
       await wait(500);
@@ -501,9 +540,14 @@ async function session(label, viewport, touch) {
     check(`${label}: the first stall shows only the goods`, !t.pieces.pages && !t.pieces.services);
     const before = await p.evaluate(() => window.deck.state().coins);
     const idx = await p.evaluate(() => window.deck.state().shop.cards.findIndex((c) => c.price <= window.deck.state().coins));
+    check(`${label}: the first stall stocks a seed`, await p.evaluate(() => window.deck.state().shop.cards.some((c) => ['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili'].includes(c.card))));
     if (touch) {
       const sel = `.sb-good:nth-child(${idx + 1})`;
       await tap(...(await center(sel)));
+      // The first tap says what the card does and how to buy it; it buys nothing.
+      const read = await p.evaluate((i) => ({ slip: document.querySelector('.sb-read')?.textContent ?? '', sentence: window.deck.cardText(window.deck.state().shop.cards[i].card), coins: window.deck.state().coins }), idx);
+      await shot('19b-stall-first-tap');
+      check(`${label}: the stall's first tap reads the card out, and buys nothing`, read.slip.includes(read.sentence) && /Tap again to buy/.test(read.slip) && read.coins === before, JSON.stringify(read));
       await tap(...(await center(sel)));
     } else {
       for (let k = 0; k < 20; k++) {
@@ -517,6 +561,8 @@ async function session(label, viewport, touch) {
     const after = await p.evaluate(() => window.deck.state().coins);
     t = await step('the stall, bought');
     check(`${label}: bought a seed; the lesson ends`, after < before && t.done.includes('coins'), `${before} to ${after}`);
+    const purse = await p.evaluate(() => ({ table: Number(window.deck.purse()), line: Number(document.querySelector('.sb-purse-line b')?.textContent), rules: window.deck.state().coins }));
+    check(`${label}: the purse follows the purchase at once`, purse.table === purse.rules && purse.line === purse.rules, JSON.stringify(purse));
     await p.evaluate(() => document.querySelector('.sb-signpost').scrollIntoView({ block: 'center' }));
     if (touch) await tap(...(await center('.sb-signpost')));
     else await p.mouse.click(...(await center('.sb-signpost')));

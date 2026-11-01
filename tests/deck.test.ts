@@ -2,12 +2,19 @@
 // shop, meta unlocks and determinism.
 import { describe, expect, it } from 'vitest';
 import { cloneRun, Dice, playRun, botDay, botShop } from '../src/games/deck/bot';
+import { newLearn, Tutor, weatherHelps } from '../src/games/deck/lessons';
 import {
   allCards,
   buyCard,
   buyPage,
+  buyScoop,
   CARDS,
   endDay,
+  energyMax,
+  forecast,
+  isTall,
+  SEEDS,
+  unlocksFor,
   leaveShop,
   newMeta,
   GUIDED_DEALS,
@@ -321,16 +328,61 @@ describe('hazards', () => {
   });
 
   it('a scarecrow keeps crows off the 3 by 3', () => {
-    const was = TUNING.crowChance;
-    TUNING.crowChance = [1];
     const s = table(['strawberry', 'scarecrow'], { season: 2 });
     play(s, 'strawberry', 0);
     play(s, 'scarecrow', 5);
     s.plots[0].crop!.age = 3;
+    s.crow = true;
     const ev = endDay(s);
-    TUNING.crowChance = was;
     expect(ev.some((e) => e.t === 'crow')).toBe(false);
     expect(harvests(ev).length).toBe(1);
+  });
+
+  it('a crow is announced at dawn and comes only then; it takes one ripe, unguarded crop', () => {
+    const was = TUNING.crowChance;
+    TUNING.crowChance = [1];
+    const s = table(['strawberry', 'radish'], { season: 2 });
+    play(s, 'strawberry', 0);
+    play(s, 'radish', 15);
+    s.plots[0].crop!.age = 3;
+    expect(s.crow).toBe(false);
+    // No crow was about this morning, so none comes tonight.
+    expect(endDay(s).some((e) => e.t === 'crow')).toBe(false);
+    // The next dawn has one on the plate's edge, before the day's plays.
+    const dawn = s;
+    expect(dawn.crow).toBe(true);
+    const ev = endDay(s);
+    TUNING.crowChance = [0];
+    const s2 = table(['radish'], { season: 2 });
+    endDay(s2);
+    TUNING.crowChance = was;
+    expect(ev.filter((e) => e.t === 'crow').length).toBe(1);
+    expect(s2.crow).toBe(false);
+    expect(s.stats.crows).toBeGreaterThanOrEqual(1);
+  });
+
+  it('pests on a crop hold it back for exactly the nights they show: no growth and no pick', () => {
+    const s = table(['strawberry', 'carrot'], { season: 1 });
+    play(s, 'strawberry', 0);
+    play(s, 'carrot', 15);
+    s.plots[0].crop!.age = 3;
+    s.plots[0].crop!.pest = 1;
+    s.plots[15].crop!.pest = 2;
+    const was = TUNING.pestChance;
+    TUNING.pestChance = [0];
+    TUNING.pestSpread = 0;
+    // One night of pests on a ripe strawberry: not picked tonight (the old rules picked it).
+    expect(harvests(endDay(s)).map((h) => h.kind)).toEqual([]);
+    expect(s.plots[0].crop!.pest).toBe(0);
+    expect(s.plots[15].crop!.age).toBe(0);
+    expect(harvests(endDay(s)).map((h) => h.kind)).toEqual(['strawberry']);
+    // Two nights on the carrot: it stood still both nights, then grows.
+    expect(s.plots[15].crop!.age).toBe(0);
+    expect(s.plots[15].crop!.pest).toBe(0);
+    endDay(s);
+    TUNING.pestChance = was;
+    TUNING.pestSpread = 0.4;
+    expect(s.plots[15].crop!.age).toBe(1);
   });
 });
 
@@ -396,6 +448,54 @@ describe('seasons and the shop', () => {
     expect(s.plots.length).toBe(20);
   });
 
+  it('every stall stocks a seed, and an answer to a hazard the player has met but cannot meet', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const { s } = newRun(seed, null);
+      s.earned = s.quota;
+      toSeasonEnd(s);
+      expect(s.shop!.cards.some((c) => CARDS[c.card].type === 'seed')).toBe(true);
+      // Pests have landed and the player has no ladybirds or garlic: the next stall has one.
+      s.stats.pests = 1;
+      s.stats.crows = 1;
+      s.coins = 1000;
+      reroll(s);
+      const ids = s.shop!.cards.map((c) => c.card);
+      expect(ids.includes('ladybirds') || ids.includes('garlic')).toBe(true);
+      expect(ids).toContain('scarecrow');
+      // Once the player owns a scarecrow, it is no longer held back for them.
+      s.draw.push({ uid: 5000, id: 'scarecrow', up: false });
+      s.draw.push({ uid: 5001, id: 'ladybirds', up: false });
+      let scarecrows = 0;
+      for (let k = 0; k < 10; k++) {
+        reroll(s);
+        s.coins = 1000;
+        if (s.shop!.cards.some((c) => c.card === 'scarecrow')) scarecrows++;
+      }
+      expect(scarecrows).toBeLessThan(10);
+    }
+  });
+
+  it('a full almanac swaps a page for a kept one; coins buy a scoop for good from year 2', () => {
+    const { s } = newRun(3, null);
+    s.year = 2;
+    s.earned = 99999;
+    toSeasonEnd(s);
+    const offered = s.shop!.pages.map((o) => o.page);
+    s.pages = (['barrel', 'cellar', 'bees', 'thumb', 'basket', 'rotation', 'market', 'clover', 'furrow', 'coldframe'] as const).filter((p) => !offered.includes(p)).slice(0, 5);
+    const first = s.pages[0];
+    s.coins = 5000;
+    expect(buyPage(s, 0)).toBeNull();
+    expect(buyPage(s, 0, first)).not.toBeNull();
+    expect(s.pages.length).toBe(5);
+    expect(s.pages).not.toContain(first);
+    expect(s.pages).toContain(offered[0]);
+    const e0 = energyMax(s);
+    expect(buyScoop(s)).not.toBeNull();
+    expect(buyScoop(s)).not.toBeNull();
+    expect(buyScoop(s)).toBeNull();
+    expect(energyMax(s)).toBe(e0 + 2);
+  });
+
   it('only shops from the unlocked pool', () => {
     const { s } = newRun(9, null);
     for (let k = 0; k < 30; k++) {
@@ -412,14 +512,23 @@ describe('seasons and the shop', () => {
 });
 
 describe('meta and saves', () => {
-  it('a finished run unlocks two cards once, and keeps a best record', () => {
+  it('cards unlock by how far a run gets, never by finishing runs', () => {
     const meta = newMeta();
-    const { s } = newRun(3, meta);
+    // Six empty days: a run that met nothing unlocks nothing, however many times.
+    for (let k = 0; k < 3; k++) {
+      const { s } = newRun(3 + k, meta);
+      while (s.phase === 'day') endDay(s);
+      expect(recordRun(meta, s, UNLOCK_ORDER)).toEqual([]);
+    }
+    expect(meta.unlocked).toEqual([]);
+    expect(meta.runs).toBe(3);
+    // Meeting the first quota earns the first pair; meeting three seasons, the second.
+    const { s } = newRun(9, meta);
+    s.stats.seasonsCleared = 3;
     while (s.phase === 'day') endDay(s);
-    expect(recordRun(meta, s, UNLOCK_ORDER)).toEqual(UNLOCK_ORDER.slice(0, 2));
-    expect(recordRun(meta, s, UNLOCK_ORDER)).toEqual(UNLOCK_ORDER.slice(0, 2));
-    expect(meta.unlocked).toEqual(UNLOCK_ORDER.slice(0, 2));
-    expect(meta.runs).toBe(1);
+    expect(recordRun(meta, s, UNLOCK_ORDER)).toEqual(UNLOCK_ORDER.slice(0, 4));
+    expect(recordRun(meta, s, UNLOCK_ORDER)).toEqual(UNLOCK_ORDER.slice(0, 4));
+    expect(unlocksFor(1, UNLOCK_ORDER)).toEqual(UNLOCK_ORDER.slice(0, 2));
     expect(newRun(4, meta).s.pool).toContain(UNLOCK_ORDER[0]);
   });
 
@@ -500,16 +609,45 @@ describe('the guided first season', () => {
 });
 
 describe('previews', () => {
-  it('a radish held next to a carrot shows its +2 and the carrot +1 bloom, and touches nothing', () => {
+  it('a bonus only counts if the crop giving it is still there when the other is pulled', () => {
+    // Day 2 of the guided season: a fresh carrot (two nights) and a radish held beside it (one night).
     const s = table(['carrot', 'radish']);
     play(s, 'carrot', 5);
     const before = JSON.stringify(s);
     const p = previewPlay(s, 0, 6)!;
-    expect(p.harvest).toEqual({ yield: 4, bloom: 1, score: 4 });
+    // The carrot still stands tonight, so the radish's +2 pays.
+    expect(p.harvest).toEqual({ yield: 4, bloom: 1, score: 4, late: false });
     expect(p.marks).toContainEqual({ plot: 6, yield: 2, bloom: 0, times: 1, nights: 0 });
+    // The radish is pulled tonight and the carrot tomorrow: its +1 bloom never pays, so it is greyed with why.
+    const carrot = p.marks.find((m) => m.plot === 5)!;
+    expect(carrot.bloom).toBe(0);
+    expect(carrot.lost).toEqual({ yield: 0, bloom: 1, times: 1, why: 'gone', from: 6 });
+    // And the night agrees: the carrot pays 5 x 1.
+    play(s, 'radish', 6);
+    endDay(s);
+    const h = harvests(endDay(s));
+    expect(h.find((x) => x.kind === 'carrot')!.score).toBe(5);
+    expect(previewPlay(table(['radish']), 0, 15)!.marks).toEqual([]);
+    expect(JSON.stringify(table(['carrot', 'radish']))).not.toBe(before);
+  });
+
+  it('on the night the carrot ripens, the radish beside it does pay its bloom', () => {
+    const s = table(['carrot', 'radish']);
+    play(s, 'carrot', 5);
+    s.plots[5].crop!.age = 1;
+    const p = previewPlay(s, 0, 6)!;
     expect(p.marks).toContainEqual({ plot: 5, yield: 0, bloom: 1, times: 1, nights: 0 });
-    expect(previewPlay(s, 0, 15)!.marks).toEqual([]);
-    expect(JSON.stringify(s)).toBe(before);
+    play(s, 'radish', 6);
+    expect(harvests(endDay(s)).find((x) => x.kind === 'carrot')!.score).toBe(10);
+  });
+
+  it('a seed that cannot ripen before the season ends previews as late, its bonuses greyed', () => {
+    const s = table(['sunflower', 'lettuce']);
+    s.day = 6;
+    play(s, 'sunflower', 5);
+    const p = previewPlay(s, 0, 6)!;
+    expect(p.harvest?.late).toBe(true);
+    expect(p.marks.find((m) => m.plot === 6)?.lost?.why).toBe('late');
   });
 
   it('the can and rain show extra nights, the sun shows yield on crops pulled tonight', () => {
@@ -520,5 +658,103 @@ describe('previews', () => {
     expect(previewPlay(s, 1, null)!.marks.map((m) => m.plot)).toEqual([0]);
     const sun = previewPlay(s, 2, null)!.marks;
     expect(sun).toEqual([{ plot: 15, yield: 3, bloom: 0, times: 1, nights: 0 }]);
+  });
+
+  it('the forecast knows when each crop is pulled and leaves, pests included', () => {
+    const s = table(['carrot', 'strawberry', 'radish']);
+    play(s, 'carrot', 0);
+    play(s, 'strawberry', 1);
+    play(s, 'radish', 2);
+    s.plots[0].crop!.pest = 2;
+    const f = forecast(s);
+    expect(f[2]).toEqual({ ripeIn: 0, pull: 0, leave: 0 });
+    // Two nights held back, then two to grow.
+    expect(f[0]).toEqual({ ripeIn: 3, pull: 3, leave: 3 });
+    // Ripe on night 2, then four picks: nights 2 to 5, the season's last.
+    expect(f[1]).toEqual({ ripeIn: 2, pull: 2, leave: 5 });
+  });
+});
+
+describe('the plot persists', () => {
+  it('the start deck has a tall crop for the lettuce, and perennials at its core', () => {
+    const seeds = START_DECK.filter((id) => CARDS[id].type === 'seed');
+    expect(seeds.some((id) => isTall(id))).toBe(true);
+    const standing = seeds.filter((id) => SEEDS[id as keyof typeof SEEDS].picks > 1 || SEEDS[id as keyof typeof SEEDS].days >= 3);
+    expect(standing.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('through a bot-played first spring, the plot is rarely bare at dawn and crops stand for days', () => {
+    // The old start deck (radishes, carrots, lettuce, cans and a rain) left 0.3 crops at dawn and 77% of dawns bare.
+    let dawns = 0;
+    let crops = 0;
+    let bare = 0;
+    const born = new Map<number, number>();
+    const stood: number[] = [];
+    for (let seed = 1; seed <= 12; seed++) {
+      const { s } = newRun(seed * 97, null);
+      const dice = new Dice(seed);
+      while (s.phase === 'day' && s.season === 0) {
+        const day = s.day;
+        const ev = botDay(s, { noise: 0.15, seed }, dice);
+        for (const e of ev) if (e.t === 'plant') born.set(e.uid, day);
+        const now = new Set(s.plots.map((p) => p.crop?.uid));
+        for (const [uid, d] of born) {
+          if (now.has(uid) && s.phase === 'day') continue;
+          stood.push(day - d + 1);
+          born.delete(uid);
+        }
+        if (s.phase !== 'day') break;
+        const n = s.plots.filter((p) => p.crop).length;
+        dawns++;
+        crops += n;
+        if (n === 0) bare++;
+      }
+    }
+    expect(crops / dawns).toBeGreaterThanOrEqual(2.5);
+    expect(bare / dawns).toBeLessThanOrEqual(0.12);
+    // The old deck's crops stood 1.3 nights on average.
+    expect(stood.reduce((a, b) => a + b, 0) / stood.length).toBeGreaterThanOrEqual(1.8);
+  });
+});
+
+describe('lessons that fit the moment', () => {
+  /** A tutor past the first season's lessons, so the hazard lessons are next. */
+  function tutor(): Tutor {
+    const learn = newLearn();
+    learn.done = ['sow', 'lantern', 'peg', 'stakes', 'companion', 'bloom', 'scoops', 'tin', 'can', 'weather', 'spent', 'newcard'];
+    learn.cards = ['radish', 'carrot', 'lettuce', 'beans', 'strawberry', 'sunflower', 'can', 'rain', 'ladybirds', 'scarecrow', 'garlic'];
+    return new Tutor(learn);
+  }
+
+  it('the weather lesson only comes when the rain would bring a crop in tonight', () => {
+    // The only crop ripens tonight anyway: rain would change nothing (the old lesson spent a scoop on it).
+    const s = table(['radish', 'rain']);
+    play(s, 'radish', 0);
+    expect(weatherHelps(s, 'rain')).toBe(false);
+    // A carrot one night short: rain brings it in tonight.
+    const t = table(['carrot', 'rain']);
+    play(t, 'carrot', 0);
+    expect(weatherHelps(t, 'rain')).toBe(true);
+  });
+
+  it('hazard lessons only name a card the player owns, and the crow comes up at dawn', () => {
+    const s = table(['radish'], { season: 1 });
+    s.plots[3].crop = { uid: 700, kind: 'carrot', age: 0, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 2, sprout: false };
+    for (const own of [[], ['garlic'], ['ladybirds']] as CardId[][]) {
+      const c = cloneRun(s);
+      c.draw = c.draw.filter((x) => x.id !== 'ladybirds' && x.id !== 'garlic' && x.id !== 'scarecrow');
+      for (const id of own) c.draw.push({ uid: 900 + c.draw.length, id, up: false });
+      const line = tutor().update(c, 'touch', null, 0.1, false).line!;
+      expect(line.id).toBe('pests');
+      if (!own.length) expect(line.text).not.toMatch(/ladybird|garlic/i);
+      else expect(line.text.toLowerCase()).toContain(own[0]);
+    }
+    const c = cloneRun(s);
+    c.plots[3].crop = null;
+    c.crow = true;
+    c.draw = c.draw.filter((x) => x.id !== 'scarecrow');
+    expect(tutor().update(c, 'touch', null, 0.1, false).line!.text).not.toMatch(/scarecrow/i);
+    c.draw.push({ uid: 990, id: 'scarecrow', up: false });
+    expect(tutor().update(c, 'touch', null, 0.1, false).line!.text).toMatch(/scarecrow/i);
   });
 });

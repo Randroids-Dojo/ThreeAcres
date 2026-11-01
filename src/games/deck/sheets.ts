@@ -9,6 +9,8 @@ import {
   allCards,
   buyCard,
   buyPage,
+  buyScoop,
+  canBuyScoop,
   canRemove,
   canUpgrade,
   CARDS,
@@ -20,21 +22,24 @@ import {
   removeCard,
   removePrice,
   reroll,
+  scoopPrice,
   SEASON_NAMES,
+  SEEDS,
   TUNING,
   upgradeCard,
   upgradeNote,
+  upgradePrice,
   type Card,
   type CardId,
   type Ev,
   type PageId,
+  type SeedId,
 } from './rules';
 import type { Line } from './lessons';
 import type { Table } from './table';
-import { pinUrl, thingUrl } from './view/art';
+import { pinUrl, scoopUrl, thingUrl } from './view/art';
 import { faceUrl, VARIETY } from './view/faces';
-import { paintBell, paintGlyph, paintStamp } from './view/glyphs';
-import { PALETTES } from '../../render2d/palette';
+import { paintBell, paintStamp } from './view/glyphs';
 
 type Kind = 'menu' | 'rules' | 'deck' | 'stall' | 'entry';
 
@@ -47,6 +52,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+const scoops = (n: number) => (n === 0 ? 'free' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`);
+const lower = (id: CardId) => CARDS[id].name.toLowerCase();
+const lowerFirst = (s: string) => s[0].toLowerCase() + s.slice(1);
 
 function btn(cls: string, html: string, on: () => void): HTMLButtonElement {
   const b = el('button', cls, html);
@@ -55,6 +63,49 @@ function btn(cls: string, html: string, on: () => void): HTMLButtonElement {
     on();
   };
   return b;
+}
+
+/** A card said in plain words: its cost, when a seed ripens, and its rule. */
+export function cardWords(id: CardId, up: boolean): string {
+  const d = CARDS[id];
+  const bits = [`${scoops(costOf(id, up))}.`];
+  if (d.type === 'seed') {
+    const sd = SEEDS[id as SeedId];
+    bits.push(`Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}.`);
+  }
+  bits.push(cardText(id, up));
+  return bits.join(' ');
+}
+
+/** A tin bucket, for throwing a card out. Not the compost heap: compost is a card. */
+function paintBucket(g: CanvasRenderingContext2D, px: number): void {
+  g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(-0.3, -0.18);
+  g.lineTo(0.3, -0.18);
+  g.lineTo(0.23, 0.32);
+  g.lineTo(-0.23, 0.32);
+  g.closePath();
+  g.fillStyle = '#8f969a';
+  g.fill();
+  g.strokeStyle = '#2a1a0a';
+  g.lineWidth = Math.max(px * 1.5, 0.03);
+  g.stroke();
+  g.beginPath();
+  g.ellipse(0, -0.18, 0.3, 0.07, 0, 0, Math.PI * 2);
+  g.fillStyle = '#5a5f62';
+  g.fill();
+  g.stroke();
+  g.beginPath();
+  g.arc(0, -0.2, 0.26, Math.PI * 1.05, Math.PI * 1.95);
+  g.stroke();
+  g.beginPath();
+  for (const y of [0.0, 0.16]) {
+    g.moveTo(-0.27 + y * 0.12, y);
+    g.lineTo(0.27 - y * 0.12, y);
+  }
+  g.lineWidth = Math.max(px, 0.018);
+  g.stroke();
 }
 
 export class Sheets {
@@ -68,6 +119,8 @@ export class Sheets {
   private pickUid: number | null = null;
   /** The stall's lesson line, pinned at its head. */
   private lessonEl = el('div', 'sb-stall-lesson');
+  /** What the stall last did, said once on the reading slip ("Carrot improved: basket 8."). */
+  private done: string | null = null;
 
   constructor(
     private t: Table,
@@ -87,6 +140,7 @@ export class Sheets {
     this.el.innerHTML = '';
     this.el.append(body);
     this.el.dataset.kind = kind;
+    this.el.dataset.phase = this.t.run.phase;
     this.el.classList.add('on');
     this.open = true;
     this.kind = kind;
@@ -111,6 +165,11 @@ export class Sheets {
     this.open = false;
     this.kind = null;
     this.picked = null;
+    this.done = null;
+  }
+
+  private get touch(): boolean {
+    return this.ctx.device() === 'touch';
   }
 
   // ---------------------------------------------------------------- the almanac (pause)
@@ -118,21 +177,22 @@ export class Sheets {
   menu(): void {
     const s = this.t.run;
     const m = this.t.meta;
+    const keys = !this.touch;
     const page = el('div', 'sb-book-page');
     page.append(el('i', 'sb-ribbon'));
     page.append(el('h2', '', 'The almanac'));
-    page.append(el('p', 'sb-sub', `Year ${s.year}, ${s.season === 0 ? 'spring' : SEASON_NAMES[s.season]}. ${s.phase === 'day' ? `Day ${s.day} of ${TUNING.days}.` : ''}`));
+    page.append(el('p', 'sb-sub', `${cap(SEASON_NAMES[s.season])}, year ${s.year}. ${s.phase === 'day' ? `Day ${s.day} of ${TUNING.days}.` : s.phase === 'shop' ? 'At the stall.' : ''}`));
     const toc = el('div', 'sb-toc');
     const row = (label: string, hint: string, on: () => void) => toc.append(btn('sb-toc-row', `<span>${label}</span><i></i><em>${hint}</em>`, on));
-    row('Carry on', 'Esc', () => this.close());
+    row(s.phase === 'shop' ? 'Back to the stall' : 'Carry on', keys ? 'Esc' : '', () => this.back());
     row('Harvest pace', this.t.prefs.fast ? 'fast' : 'easy', () => {
       this.t.prefs.fast = !this.t.prefs.fast;
       this.t.save();
       this.menu();
     });
     row('The rules in brief', '', () => this.rules());
-    if (this.t.seen('tin')) row('Your seed tin', 'D', () => this.deck('tin'));
-    row('Other games', '`', () => {
+    if (this.t.seen('tin')) row('Your seed tin', keys ? 'D' : '', () => this.deck('tin'));
+    row('Other games', keys ? '`' : '', () => {
       this.close();
       this.ctx.openSwitcher();
     });
@@ -140,7 +200,7 @@ export class Sheets {
       if (!this.giveUpArmed) {
         this.giveUpArmed = true;
         const last = toc.lastElementChild as HTMLElement;
-        last.querySelector('span')!.textContent = 'Give up this run: tap again';
+        last.querySelector('span')!.textContent = `Give up this run: ${this.touch ? 'tap' : 'click'} again`;
         return;
       }
       this.giveUpArmed = false;
@@ -150,7 +210,7 @@ export class Sheets {
     this.giveUpArmed = false;
     page.append(toc);
     const best = m.best;
-    const kinds = s.stats.bestKind ? CARDS[s.stats.bestKind].name.toLowerCase() : '';
+    const kinds = s.stats.bestKind ? lower(s.stats.bestKind) : '';
     page.append(
       el(
         'p',
@@ -158,7 +218,8 @@ export class Sheets {
         `${m.runs ? `Runs finished: ${m.runs}. Most seasons: ${best.seasons}. Best harvest: ${best.harvest}.` : 'No runs finished yet.'}${s.stats.bestHarvest ? ` This run's best: ${kinds} for ${s.stats.bestHarvest}.` : ''}`,
       ),
     );
-    page.append(el('p', 'sb-keys', 'Keys: 1 to 7 take up a card (Shift for one you cannot pay for), arrows pick a plot, Enter plays, I reads, E ends the day, X tosses, D opens the tin, Esc puts down.'));
+    // Keys only for a keyboard: a phone has none.
+    if (keys) page.append(el('p', 'sb-keys', 'Keys: 1 to 7 take up a card (Shift for one you cannot pay for), arrows pick a plot, Enter plays, I reads, E ends the day, X tosses, D opens the tin, Esc puts down.'));
     this.show('menu', page);
   }
   private giveUpArmed = false;
@@ -169,14 +230,25 @@ export class Sheets {
     page.append(el('h2', '', 'The rules in brief'));
     const lines = [
       'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner.',
-      'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. The watering can and rain add a night.',
+      'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. Beans and strawberries stay and pick night after night. The watering can and rain add a night.',
       'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
-      'Bonuses come from what stands next to a crop: a carrot gives the radish beside it +2 yield, each radish beside a carrot gives it +1 bloom. Hold a card to see what it would do on each plot.',
-      'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy seed at the market between seasons.',
-      'From summer, pests stop crops growing. From autumn, crows take a ripe crop that no scarecrow guards.',
+      'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
+      'Fill the pegboard to the brass hole by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
+      'From summer, pests settle on crops: a pested crop does not grow or get picked for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
     ];
     for (const l of lines) page.append(el('p', '', l));
+    // Every card the player may meet: what it costs and what it does, in words.
+    page.append(el('h3', 'sb-cards-head', 'The cards'));
+    const ids = new Set<CardId>([...allCards(this.t.run).map((c) => c.id), ...this.t.run.pool]);
+    const order: Record<string, number> = { seed: 0, tool: 1, weather: 2, object: 3 };
+    const list = el('div', 'sb-cardlist');
+    for (const id of [...ids].sort((a, b) => order[CARDS[a].type] - order[CARDS[b].type] || CARDS[a].name.localeCompare(CARDS[b].name))) {
+      const row = el('div', 'sb-cardrow');
+      row.innerHTML = `<img src="${faceUrl(id, false)}" alt=""><p><b>${esc(CARDS[id].name)}</b> ${esc(cardWords(id, false))}</p>`;
+      list.append(row);
+    }
+    page.append(list);
     page.append(btn('sb-plain', 'Back to the almanac', () => this.menu()));
     this.show('rules', page);
   }
@@ -194,12 +266,16 @@ export class Sheets {
     const notes = el('div', 'sb-detail-notes');
     const cost = costOf(card.id, card.up);
     const variety = def.type === 'seed' ? `, <i>${esc(VARIETY[card.id as keyof typeof VARIETY])}</i>` : '';
-    notes.append(el('p', '', `<b>${esc(def.name)}</b>${variety}${card.up ? ', select' : ''}. ${cost === 0 ? 'Free to play.' : `Costs ${cost} ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
-    notes.append(el('p', '', esc(cardText(card.id, card.up))));
+    notes.append(el('p', '', `<b>${esc(def.name)}</b>${variety}${card.up ? ', improved' : ''}. ${cost === 0 ? 'Free to play.' : `Costs ${cost} ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
+    if (def.type === 'seed') {
+      const sd = SEEDS[card.id as SeedId];
+      notes.append(el('p', '', `Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}. ${esc(cardText(card.id, card.up))}`));
+    } else notes.append(el('p', '', esc(cardText(card.id, card.up))));
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
     if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot until the season ends, then comes back to the tin.'));
-    if (!card.up) notes.append(el('p', 'sb-quiet', `Stamped select: ${upgradeNote(card.id)}`));
-    if (!hover) notes.append(el('p', 'sb-quiet', 'Tap to put it back.'));
+    // What improving would do, only once the player has improved a card at the stall.
+    if (!card.up && this.t.tutor.n('improve') > 0) notes.append(el('p', 'sb-quiet', `Improved: ${lowerFirst(upgradeNote(card.id))}`));
+    if (!hover) notes.append(el('p', 'sb-quiet', `${this.touch ? 'Tap' : 'Click'} to put it back.`));
     d.append(notes);
     d.classList.toggle('hover', hover);
     d.classList.add('on');
@@ -220,64 +296,88 @@ export class Sheets {
 
   // ---------------------------------------------------------------- the seed tin
 
+  /**
+   * The seed tin: every card the player owns, in where it is now (the tin, the
+   * hand, the spent heap, out on the plot). At the stall, the same cards to
+   * pick one to throw out or improve, the first tap saying what it would do.
+   */
   deck(which: 'tin' | 'spent' | 'all', pick: 'remove' | 'upgrade' | null = null): void {
     const s = this.t.run;
     if (which === 'tin' && !pick) this.t.tutor.count('tin');
     const wrap = el('div', 'sb-tinview');
     this.pickUid = null;
-    let cards: Card[];
-    let title: string;
-    if (pick) {
-      cards = [...s.draw];
-      title = pick === 'remove' ? `Compost a card for ${removePrice(s)} coins` : `Stamp a card select for ${this.upgradeCost()} coins`;
-    } else if (which === 'spent') {
-      cards = [...s.discard];
-      title = 'Spent this season';
-    } else {
-      cards = s.phase === 'day' ? [...s.draw] : allCards(s);
-      title = s.phase === 'day' ? 'Still in the tin' : 'Your seed tin';
-    }
-    wrap.append(el('h2', '', title));
-    if (pick) wrap.append(el('p', 'sb-sub', pick === 'remove' ? 'Tap a card, then tap it again to compost it.' : 'Tap a card, then tap it again to stamp it.'));
-    else if (s.phase === 'day') wrap.append(el('p', 'sb-sub', `${s.draw.length} in the tin, ${s.hand.length} in hand, ${s.discard.length} spent, ${s.placed.length} out on the plot.`));
     const order: Record<string, number> = { seed: 0, tool: 1, weather: 2, object: 3 };
-    cards.sort((a, b) => order[CARDS[a.id].type] - order[CARDS[b.id].type] || a.id.localeCompare(b.id) || Number(b.up) - Number(a.up));
-    const grid = el('div', 'sb-tingrid');
-    for (const c of cards) {
-      const disabled = pick === 'upgrade' && c.up;
-      const b = btn(`sb-tincard${disabled ? ' off' : ''}`, `<img src="${faceUrl(c.id, c.up)}" alt="${esc(CARDS[c.id].name)}${c.up ? ', select' : ''}">`, () => {
-        if (!pick) {
-          this.detail(c);
-          return;
-        }
-        if (disabled) return;
-        if (this.pickUid !== c.uid) {
-          this.pickUid = c.uid;
-          grid.querySelectorAll('.sb-tincard').forEach((x) => x.classList.remove('lifted'));
-          b.classList.add('lifted');
-          this.ctx.audio.cue('deck.pick');
-          return;
-        }
-        const ev = pick === 'remove' ? removeCard(s, c.uid) : upgradeCard(s, c.uid);
-        if (ev) {
-          this.t.tutor.count('service');
-          this.ctx.audio.cue(pick === 'remove' ? 'deck.remove' : 'deck.buy');
-          this.t.save();
-        } else this.ctx.audio.cue('deck.deny');
-        this.stall();
-      });
-      grid.append(b);
+    const sort = (cards: Card[]) => [...cards].sort((a, b) => order[CARDS[a.id].type] - order[CARDS[b.id].type] || a.id.localeCompare(b.id) || Number(b.up) - Number(a.up));
+    let groups: { head: string | null; cards: Card[]; mark: string }[];
+    if (pick) {
+      wrap.append(el('h2', '', pick === 'remove' ? `Throw out a card, ${removePrice(s)} coins` : `Improve a card, ${upgradePrice(s)} coins`));
+      const read = el('p', 'sb-sub sb-pickline', pick === 'remove' ? 'Tap a card to see it, then tap it again to throw it out.' : 'Tap a card to see what improving does, then tap it again.');
+      wrap.append(read);
+      groups = [{ head: null, cards: sort(s.draw), mark: '' }];
+    } else if (which === 'spent') {
+      wrap.append(el('h2', '', 'Spent this season'));
+      groups = [{ head: null, cards: sort(s.discard), mark: '' }];
+    } else {
+      const all = allCards(s);
+      wrap.append(el('h2', '', 'Your seed tin'));
+      if (s.phase === 'day') {
+        wrap.append(el('p', 'sb-sub', `${all.length} cards: ${s.draw.length} in the tin, ${s.hand.length} in hand, ${s.discard.length} spent${s.placed.length ? `, ${s.placed.length} out on the plot` : ''}.`));
+        groups = [
+          { head: 'In the tin', cards: sort(s.draw), mark: '' },
+          { head: 'In your hand', cards: sort(s.hand), mark: 'hand' },
+          { head: 'Spent', cards: sort(s.discard), mark: 'spent' },
+          { head: 'Out on the plot', cards: sort(s.placed), mark: 'out' },
+        ];
+      } else {
+        wrap.append(el('p', 'sb-sub', `${all.length} cards.`));
+        groups = [{ head: null, cards: sort(all), mark: '' }];
+      }
     }
-    if (!cards.length) grid.append(el('p', 'sb-sub', 'Nothing here.'));
-    wrap.append(grid);
+    for (const g of groups) {
+      if (!g.cards.length && g.head) continue;
+      if (g.head) wrap.append(el('h3', 'sb-tinhead', `${g.head} <span>${g.cards.length}</span>`));
+      const grid = el('div', 'sb-tingrid');
+      for (const c of g.cards) {
+        const disabled = pick === 'upgrade' && c.up;
+        const b = btn(`sb-tincard${disabled ? ' off' : ''}${g.mark ? ` ${g.mark}` : ''}`, `<img src="${faceUrl(c.id, c.up)}" alt="${esc(CARDS[c.id].name)}${c.up ? ', improved' : ''}">`, () => {
+          if (!pick) {
+            this.detail(c);
+            return;
+          }
+          if (disabled) return;
+          if (this.pickUid !== c.uid) {
+            this.pickUid = c.uid;
+            wrap.querySelectorAll('.sb-tincard').forEach((x) => x.classList.remove('lifted'));
+            b.classList.add('lifted');
+            const line = wrap.querySelector('.sb-pickline') as HTMLElement;
+            line.innerHTML =
+              pick === 'remove'
+                ? `Throw out this ${esc(lower(c.id))}? <b>Tap it again.</b>`
+                : `${esc(CARDS[c.id].name)}: ${esc(lowerFirst(upgradeNote(c.id)))} <b>Tap it again to improve it.</b>`;
+            this.ctx.audio.cue('deck.pick');
+            return;
+          }
+          const ev = pick === 'remove' ? removeCard(s, c.uid) : upgradeCard(s, c.uid);
+          if (ev) {
+            this.t.tutor.count('service');
+            if (pick === 'upgrade') this.t.tutor.count('improve');
+            this.ctx.audio.cue(pick === 'remove' ? 'deck.remove' : 'deck.buy');
+            this.done = pick === 'remove' ? `The ${lower(c.id)} is thrown out.` : `${CARDS[c.id].name} improved. ${upgradeNote(c.id)}`;
+            this.doneCard = pick === 'upgrade' ? c : null;
+            this.t.save();
+            this.t.syncPurse();
+          } else this.ctx.audio.cue('deck.deny');
+          this.stall();
+        });
+        grid.append(b);
+      }
+      if (!g.cards.length) grid.append(el('p', 'sb-sub', 'Nothing here.'));
+      wrap.append(grid);
+    }
     wrap.append(btn('sb-plain', pick ? 'Not now' : 'Close the tin', () => this.back()));
     this.show('deck', wrap);
   }
-
-  private upgradeCost(): number {
-    const sh = this.t.run.shop;
-    return TUNING.upgradePrice + TUNING.serviceStep * (sh?.upgraded ?? 0);
-  }
+  private doneCard: Card | null = null;
 
   // ---------------------------------------------------------------- the seed merchant
 
@@ -291,94 +391,136 @@ export class Sheets {
     return d;
   }
 
+  /** The slip that says what a lifted thing is, before the second tap buys it. */
+  private readSlip(html: string): HTMLElement {
+    const p = el('p', 'sb-read', html);
+    p.setAttribute('role', 'status');
+    return p;
+  }
+
+  /** Lift a thing for a second tap, or buy it on the second. */
+  private lift(key: string, buy: () => void): void {
+    if (this.picked !== key) {
+      this.picked = key;
+      this.done = null;
+      this.ctx.audio.cue('deck.pick');
+      this.stall();
+      return;
+    }
+    buy();
+  }
+
   stall(end?: Extract<Ev, { t: 'seasonEnd' }>): void {
     const s = this.t.run;
     const sh = s.shop;
     if (!sh) return;
     void end;
+    this.t.syncPurse();
     const wrap = el('div', 'sb-stall');
-    // Ledger line for the season just closed.
+    const tap = this.touch ? 'Tap' : 'Click';
+    const ask = (price: number, verb = 'buy') => (s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${tap} again to ${verb}, ${price} coins.</em>`);
+    // The head: the sign, the season just closed, the purse, and the almanac.
     const last = s.stats.log[s.stats.log.length - 1];
     const head = el('div', 'sb-stall-head');
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])} is in: ${last.earned} against a quota of ${last.quota}.`));
+    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])} is in. You took ${last.earned} against a quota of ${last.quota}.`));
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins.`));
+    head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
-
     if (this.t.stallLine) wrap.append(this.lessonEl);
+    if (this.done) {
+      const d = el('div', 'sb-done');
+      if (this.doneCard) d.append(Object.assign(el('img'), { src: faceUrl(this.doneCard.id, true), alt: '' }));
+      d.append(el('p', '', esc(this.done)));
+      wrap.append(d);
+    }
+
     // Pages pinned on the back board, once the almanac pages have been brought in.
     const cork = el('div', 'sb-cork');
-    cork.append(el('h3', '', `Almanac pages. You keep up to ${MAX_PAGES}.`));
+    const full = s.pages.length >= MAX_PAGES;
+    cork.append(el('h3', '', full ? `Almanac pages. Yours is full: a new page takes a kept one's place.` : `Almanac pages. You keep up to ${MAX_PAGES}.`));
     const pins = el('div', 'sb-pins');
+    let pageRead: HTMLElement | null = null;
+    const pickedPage = this.picked?.startsWith('page') ? Number(this.picked.slice(4)) : -1;
     sh.pages.forEach((o, i) => {
       const key = `page${i}`;
-      const pageEl = this.pageEl(o.page, o.price, o.sold);
-      const full = s.pages.length >= MAX_PAGES;
       const b = el('button', `sb-pagebtn${this.picked === key ? ' lifted' : ''}`);
-      b.append(pageEl);
-      if (!o.sold && this.picked === key) {
-        const tag = el('span', 'sb-ask', full ? 'Almanac full' : s.coins < o.price ? `Short ${o.price - s.coins}` : 'Tap to buy');
-        b.append(tag);
-      }
+      b.append(this.pageEl(o.page, o.price, o.sold));
       b.disabled = o.sold;
-      b.onclick = () => {
-        if (this.picked !== key) {
-          this.picked = key;
-          this.ctx.audio.cue('deck.pick');
+      b.setAttribute('aria-label', `${PAGES[o.page].name}, ${o.price} coins. ${PAGES[o.page].text}`);
+      if (!o.sold && this.picked === key) {
+        pageRead = this.readSlip(full ? `<b>${esc(PAGES[o.page].name)}</b>. Your almanac is full. <em>${tap} a kept page to swap it out.</em>` : `<b>${esc(PAGES[o.page].name)}</b>. ${esc(PAGES[o.page].text)} ${ask(o.price, 'pin it')}`);
+      }
+      b.onclick = () =>
+        this.lift(key, () => {
+          if (full) return;
+          if (buyPage(s, i)) this.bought('page', `${PAGES[o.page].name} is pinned in your almanac.`);
+          else this.ctx.audio.cue('deck.deny');
           this.stall();
-          return;
-        }
-        if (buyPage(s, i)) {
-          this.t.tutor.count('page');
-          this.ctx.audio.cue('deck.page');
-          this.picked = null;
-          this.t.save();
-        } else this.ctx.audio.cue('deck.deny');
-        this.stall();
-      };
+        });
       pins.append(b);
     });
     if (!sh.pages.length) pins.append(el('p', 'sb-sub', 'No pages left to sell.'));
+    cork.append(pins);
+    if (pageRead) cork.append(pageRead);
     if (s.pages.length) {
       const kept = el('div', 'sb-kept');
       kept.append(el('span', '', 'Kept:'));
-      for (const p of s.pages) kept.append(el('i', '', esc(PAGES[p].name)));
-      cork.append(pins, kept);
-    } else cork.append(pins);
+      for (const p of s.pages) {
+        const key = `kept:${p}`;
+        // With the almanac full and a new page lifted, a kept page can be swapped out: two taps, like everything here.
+        const swap = full && pickedPage >= 0 && !sh.pages[pickedPage].sold;
+        const k = btn(`sb-keptpage${this.picked === key ? ' lifted' : ''}`, esc(PAGES[p].name), () => {
+          if (!swap && !this.picked?.startsWith('kept:')) return;
+          const o = sh.pages[this.swapFor ?? pickedPage];
+          if (this.picked !== key) {
+            this.swapFor = pickedPage >= 0 ? pickedPage : this.swapFor;
+            this.picked = key;
+            this.ctx.audio.cue('deck.pick');
+            this.stall();
+            return;
+          }
+          if (o && buyPage(s, this.swapFor ?? pickedPage, p)) this.bought('page', `${PAGES[o.page].name} takes the place of ${PAGES[p].name}.`);
+          else this.ctx.audio.cue('deck.deny');
+          this.swapFor = null;
+          this.stall();
+        });
+        k.disabled = !swap && !this.picked?.startsWith('kept:');
+        kept.append(k);
+      }
+      cork.append(kept);
+      if (this.picked?.startsWith('kept:') && this.swapFor !== null) {
+        const o = sh.pages[this.swapFor];
+        const out = this.picked.slice(5) as PageId;
+        cork.append(this.readSlip(`Tear out <b>${esc(PAGES[out].name)}</b> for <b>${esc(PAGES[o.page].name)}</b>? ${ask(o.price, 'swap')}`));
+      }
+    }
     if (this.t.seen('pages')) wrap.append(cork);
 
     // The tray of seed and tools, rarer stock laid out larger.
     const tray = el('div', 'sb-tray');
     const goods = el('div', 'sb-goods');
+    let goodRead: HTMLElement | null = null;
     sh.cards.forEach((o, i) => {
       const key = `card${i}`;
       const def = CARDS[o.card];
       const size = def.rarity === 'rare' ? 'l' : def.rarity === 'uncommon' ? 'm' : 's';
       const b = el('button', `sb-good ${size}${o.sold ? ' sold' : ''}${this.picked === key ? ' lifted' : ''}`);
-      b.style.setProperty('--tilt', `${[-5, 3, -2][i]}deg`);
+      b.style.setProperty('--tilt', `${[-5, 3, -2, 4][i % 4]}deg`);
       if (o.sold) {
         b.innerHTML = '<span class="sb-chalk">sold</span>';
         b.disabled = true;
       } else {
         b.innerHTML = `<img src="${faceUrl(o.card, false)}" alt="${esc(def.name)}"><span class="sb-pricetag">${o.price}</span>`;
-        if (this.picked === key) b.append(el('span', 'sb-ask', s.coins < o.price ? `Short ${o.price - s.coins}` : 'Tap to buy'));
+        if (this.picked === key) goodRead = this.readSlip(`<b>${esc(def.name)}</b>, ${esc(cardWords(o.card, false))} ${ask(o.price)}`);
         b.setAttribute('aria-label', `${def.name}, ${o.price} coins. ${def.text}`);
       }
-      b.onclick = () => {
-        if (this.picked !== key) {
-          this.picked = key;
-          this.ctx.audio.cue('deck.pick');
+      b.onclick = () =>
+        this.lift(key, () => {
+          if (buyCard(s, i)) this.bought('buy', `The ${lower(o.card)} goes in your tin.`);
+          else this.ctx.audio.cue('deck.deny');
           this.stall();
-          return;
-        }
-        if (buyCard(s, i)) {
-          this.t.tutor.count('buy');
-          this.ctx.audio.cue('deck.buy');
-          this.picked = null;
-          this.t.save();
-        } else this.ctx.audio.cue('deck.deny');
-        this.stall();
-      };
+        });
       b.oncontextmenu = (e) => {
         e.preventDefault();
         this.detail({ uid: -1, id: o.card, up: false });
@@ -386,31 +528,49 @@ export class Sheets {
       goods.append(b);
     });
     tray.append(goods);
-    // Services on the tray's lip.
+    if (goodRead) tray.append(goodRead);
+    // Services on the tray's lip: throw a card out, improve one, fresh stock, and a scoop from year 2.
     const lip = el('div', 'sb-lip');
-    const pal = PALETTES[1];
-    const thing = (kind: 'stamp' | 'bell' | 'compost', label: string, price: number, ok: boolean, on: () => void) => {
-      const url = thingUrl(kind, 44, (g, px) => {
-        if (kind === 'stamp') paintStamp(g, px, '#2a1a0a');
-        else if (kind === 'bell') paintBell(g, px, '#2a1a0a');
-        else paintGlyph(g, 'compost', px, '#2a1a0a', pal);
-      });
-      const b = btn('sb-thing', `<img src="${url}" alt=""><span>${label}</span><em>${price} coins</em>`, on);
-      b.disabled = !ok;
+    let lipRead: HTMLElement | null = null;
+    const thing = (key: string, url: string, label: string, price: number, ok: boolean, words: string, verb: string, why: string, go: () => void) => {
+      const b = btn(`sb-thing${this.picked === key ? ' lifted' : ''}`, `<img src="${url}" alt=""><span>${label}</span><em>${price} coins</em>`, () =>
+        this.lift(key, () => {
+          if (!ok) {
+            this.ctx.audio.cue('deck.deny');
+            return;
+          }
+          go();
+        }),
+      );
+      if (this.picked === key) lipRead = this.readSlip(`${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`);
       lip.append(b);
     };
-    thing('compost', 'Compost', removePrice(s), canRemove(s), () => this.deck('all', 'remove'));
-    thing('stamp', 'Stamp', this.upgradeCost(), canUpgrade(s), () => this.deck('all', 'upgrade'));
-    thing('bell', 'Fresh stock', sh.reroll, s.coins >= sh.reroll, () => {
+    const bucket = thingUrl('compost', 44, (g, px) => paintBucket(g, px));
+    const stampArt = thingUrl('stamp', 44, (g, px) => paintStamp(g, px, '#2a1a0a'));
+    const bell = thingUrl('bell', 44, (g, px) => paintBell(g, px, '#2a1a0a'));
+    thing('remove', bucket, 'Throw out', removePrice(s), canRemove(s), 'Throw out a card you would rather not draw.', 'choose one', `Your tin keeps at least ${TUNING.minDeck} cards.`, () => this.deck('all', 'remove'));
+    thing('upgrade', stampArt, 'Improve', upgradePrice(s), canUpgrade(s), 'Improve a card: a seed fills a bigger basket, a tool costs a scoop less.', 'choose one', 'Every card is improved.', () => this.deck('all', 'upgrade'));
+    thing('bell', bell, 'Fresh stock', sh.reroll, s.coins >= sh.reroll, 'New cards on the tray.', 'ring for them', '', () => {
       if (reroll(s)) {
         this.t.tutor.count('service');
         this.ctx.audio.cue('deck.reroll');
         this.picked = null;
+        this.done = null;
         this.t.save();
+        this.t.syncPurse();
       }
       this.stall();
     });
-    if (this.t.seen('services')) tray.append(lip);
+    if (s.year >= 2 && s.scoops < TUNING.maxScoops) {
+      thing('scoop', scoopUrl(true), 'A scoop', scoopPrice(s), canBuyScoop(s), 'One more seed scoop on the bench every day, for good.', 'buy it', '', () => {
+        if (buyScoop(s)) this.bought('service', 'A new scoop for the bench, for good.');
+        this.stall();
+      });
+    }
+    if (this.t.seen('services')) {
+      tray.append(lip);
+      if (lipRead) tray.append(lipRead);
+    }
     wrap.append(tray);
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : `On to ${SEASON_NAMES[s.season + 1]}`;
     wrap.append(
@@ -430,6 +590,20 @@ export class Sheets {
     this.show('stall', wrap, this.picked ? '.lifted' : undefined);
     if (!this.picked && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
     wrap.scrollTop = scroll;
+    // Keep the slip that answers a tap in view.
+    (wrap.querySelector('.sb-read') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
+  }
+  private swapFor: number | null = null;
+
+  /** After a purchase: count it for the lessons, voice it, save, and tick the purse down. */
+  private bought(kind: 'buy' | 'page' | 'service', words: string): void {
+    this.t.tutor.count(kind);
+    this.ctx.audio.cue(kind === 'page' ? 'deck.page' : 'deck.buy');
+    this.picked = null;
+    this.done = words;
+    this.doneCard = null;
+    this.t.save();
+    this.t.syncPurse();
   }
 
   /** Pin the stall's lesson line at its head (or take it down). */
@@ -454,14 +628,13 @@ export class Sheets {
     const list = el('ol', 'sb-entries');
     for (const l of s.stats.log) {
       const li = el('li');
-      const when = `${cap(SEASON_NAMES[l.season])}${s.stats.log.some((x) => x.year !== 1) ? `, year ${l.year}` : ''}.`;
-      li.innerHTML = `<b>${when}</b> ${l.earned} pulled against ${l.quota}. ${l.cleared ? 'Met.' : `Short by ${l.quota - l.earned}. The run ends here.`}`;
+      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned} against a quota of ${l.quota}. ${l.cleared ? 'Met.' : `Short by ${l.quota - l.earned}. The run ends here.`}`;
       list.append(li);
     }
     page.append(list);
     const bits: string[] = [];
-    if (s.stats.bestKind) bits.push(`Best single harvest: ${CARDS[s.stats.bestKind].name.toLowerCase()}, for ${s.stats.bestHarvest}.`);
-    bits.push(`Coins pulled in all: ${s.stats.totalEarned}. Harvests: ${s.stats.harvests}.`);
+    if (s.stats.bestKind) bits.push(`Best single harvest: ${lower(s.stats.bestKind)}, for ${s.stats.bestHarvest}.`);
+    bits.push(`Coins taken in all: ${s.stats.totalEarned}. Harvests: ${s.stats.harvests}.`);
     bits.push(`Seasons met: ${s.stats.seasonsCleared}. Your most: ${m.best.seasons}.`);
     for (const b of bits) page.append(el('p', '', b));
     const fresh: CardId[] = s.end?.unlocked ?? [];
@@ -475,7 +648,7 @@ export class Sheets {
         row.append(img);
       }
       page.append(row);
-    } else page.append(el('p', 'sb-quiet', 'The catalogue holds nothing new.'));
+    } else page.append(el('p', 'sb-quiet', 'The catalogue holds nothing new. Meet more seasons in a run to add to it.'));
     page.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
     this.show('entry', page);
     this.ctx.audio.cue('deck.fail');

@@ -50,6 +50,32 @@ export function basket(g: Ctx, x: number, y: number, s: number, col = INK): void
   g.restore();
 }
 
+/** A small aphid: pests. Centred on (x, y), r across its body. */
+export function bug(g: Ctx, x: number, y: number, r: number): void {
+  g.save();
+  g.translate(x, y);
+  g.strokeStyle = '#2a3010';
+  g.lineWidth = Math.max(0.8, r * 0.14);
+  g.beginPath();
+  for (const k of [-1, 0, 1]) {
+    g.moveTo(k * r * 0.35, -r * 0.1);
+    g.lineTo(k * r * 0.6 - r * 0.5, r * 0.55);
+    g.moveTo(k * r * 0.35, -r * 0.1);
+    g.lineTo(k * r * 0.6 + r * 0.5, r * 0.55);
+  }
+  g.stroke();
+  g.beginPath();
+  g.ellipse(0, 0, r * 0.62, r * 0.46, 0, 0, Math.PI * 2);
+  g.fillStyle = '#a8c832';
+  g.fill();
+  g.stroke();
+  g.beginPath();
+  g.arc(-r * 0.55, -r * 0.1, r * 0.26, 0, Math.PI * 2);
+  g.fillStyle = '#4a5a14';
+  g.fill();
+  g.restore();
+}
+
 /** A five-petalled flower in bloom red: bloom. */
 export function bloom(g: Ctx, x: number, y: number, s: number): void {
   g.save();
@@ -261,8 +287,8 @@ const MOON: Bit = { t: 'moon' };
 const map = (k: Diagram): Bit => ({ t: 'map', k });
 const prod = (k: SeedId): Bit => ({ t: 'produce', k });
 
-/** What a card does, as a line of pictures: "carrot +2 basket" for the radish. */
-export function pictogram(id: CardId, up: boolean): Bit[] {
+/** What a card does, as a line of pictures: "carrot +2 basket" for the radish. `bees`: Busy Bees is kept. */
+export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
   switch (id) {
     case 'radish':
       return [prod('carrot'), Y('+2'), BASKET];
@@ -275,7 +301,7 @@ export function pictogram(id: CardId, up: boolean): Bit[] {
     case 'corn':
       return [prod('beans'), B('×1.5'), BLOOMB];
     case 'sunflower':
-      return [map('next'), B('+1'), BLOOMB];
+      return [map('next'), B(bees ? '+2' : '+1'), BLOOMB];
     case 'pumpkin':
       return [map('alone'), B('×2'), BLOOMB];
     case 'strawberry':
@@ -303,7 +329,7 @@ export function pictogram(id: CardId, up: boolean): Bit[] {
     case 'scarecrow':
       return [map('scare')];
     case 'beehive':
-      return [map('area'), B('+1'), BLOOMB];
+      return [map('area'), B(bees ? '+2' : '+1'), BLOOMB];
     case 'rain':
       return [map('all'), MOON, I('+1')];
     case 'sun':

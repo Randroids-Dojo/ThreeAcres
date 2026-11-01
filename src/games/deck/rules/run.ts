@@ -2,8 +2,8 @@
 // plays cards for energy, and End day resolves the night. Every function here
 // mutates the run and returns what happened as events.
 
-import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, MAX_PAGES } from './cards';
-import { emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, quotaFor, TUNING } from './board';
+import { CARDS, costOf, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, MAX_PAGES, UNLOCK_AT } from './cards';
+import { byYear, crowsOn, emptyPlot, energyMax, handSize, isEmpty, isRipe, neighbours, quotaFor, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, Ev, Meta, PageId, Rarity, RunState, Season, Shop } from './types';
@@ -38,6 +38,8 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     earned: 0,
     quota: 0,
     energy: 0,
+    scoops: 0,
+    crow: false,
     tossed: false,
     cols: 4,
     rows: 4,
@@ -51,9 +53,10 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     shop: null,
     nextUid: 1,
     dayHarvests: 0,
+    guided,
     script: guided ? GUIDED_DEALS.map((d) => [...d]) : [],
     pool: [...START_POOL, ...(meta?.unlocked ?? []).filter((c) => !START_POOL.includes(c))],
-    stats: { bestHarvest: 0, bestKind: null, totalEarned: 0, harvests: 0, seasonsCleared: 0, bestDay: 0, log: [] },
+    stats: { bestHarvest: 0, bestKind: null, totalEarned: 0, harvests: 0, seasonsCleared: 0, bestDay: 0, pests: 0, crows: 0, log: [] },
     end: null,
   };
   for (const id of START_DECK) s.draw.push(newCard(s, id));
@@ -102,7 +105,7 @@ export function startSeason(s: RunState, ev: Ev[]): void {
   s.tonight = [];
   s.shop = null;
   s.earned = 0;
-  s.quota = quotaFor(s.year, s.season, s.pages);
+  s.quota = quotaFor(s.year, s.season, s.pages, s.guided);
   s.day = 1;
   s.phase = 'day';
   ev.push({ t: 'season', year: s.year, season: s.season, quota: s.quota });
@@ -115,6 +118,12 @@ export function startDay(s: RunState, ev: Ev[]): void {
   s.dayHarvests = 0;
   if (s.pages.includes('barrel')) for (let r = 0; r < s.rows; r++) s.plots[r * s.cols].boost += 1;
   ev.push({ t: 'dawn', day: s.day });
+  // A crow comes to the plate's edge at dawn, so the day has time to answer it.
+  s.crow = crowsOn(s) && rand(s) < byYear(TUNING.crowChance, s.year);
+  if (s.crow) {
+    s.stats.crows++;
+    ev.push({ t: 'crowAbout' });
+  }
   const deal = s.script.shift();
   if (deal) dealScripted(s, deal, ev);
   else drawUp(s, ev);
@@ -369,24 +378,49 @@ export function cardPrice(s: RunState, id: CardId): number {
   return Math.round(PRICE[CARDS[id].rarity] * priceScale(s));
 }
 
+function rollRarity(s: RunState): Rarity {
+  let r = rand(s);
+  for (const [name, w] of RARITY_WEIGHT) {
+    if (r < w) return name;
+    r -= w;
+  }
+  return 'common';
+}
+
+/** Cards that answer a hazard the run has met, if the player owns none of them: a scarecrow for crows; ladybirds or garlic for pests. */
+export function hazardAnswers(s: RunState): CardId[][] {
+  const own = new Set(allCards(s).map((c) => c.id));
+  const out: CardId[][] = [];
+  if (s.stats.crows > 0 && !own.has('scarecrow')) out.push(['scarecrow']);
+  if (s.stats.pests > 0 && !own.has('ladybirds') && !own.has('garlic')) out.push(['ladybirds', 'garlic']);
+  return out.map((o) => o.filter((c) => s.pool.includes(c))).filter((o) => o.length > 0);
+}
+
+/**
+ * The goods on the tray: always at least one seed, and an answer to any
+ * hazard the run has met that the player cannot yet meet; the rest at random
+ * by rarity.
+ */
 function rollCards(s: RunState): CardId[] {
   const out: CardId[] = [];
-  for (let k = 0; k < 3; k++) {
-    let r = rand(s);
-    let rarity: Rarity = 'common';
-    for (const [name, w] of RARITY_WEIGHT) {
-      if (r < w) {
-        rarity = name;
-        break;
-      }
-      r -= w;
-    }
+  const add = (opts: CardId[]) => {
+    const free = opts.filter((c) => !out.includes(c));
+    if (free.length) out.push(pick(s, free));
+  };
+  for (const answer of hazardAnswers(s)) add(answer);
+  if (!out.some(isSeed)) {
+    const rarity = rollRarity(s);
+    const seeds = s.pool.filter(isSeed);
+    add(seeds.some((c) => CARDS[c].rarity === rarity) ? seeds.filter((c) => CARDS[c].rarity === rarity) : seeds);
+  }
+  while (out.length < TUNING.goods) {
+    const rarity = rollRarity(s);
     let opts = s.pool.filter((c) => CARDS[c].rarity === rarity && !out.includes(c));
     if (!opts.length) opts = s.pool.filter((c) => !out.includes(c));
     if (!opts.length) break;
     out.push(pick(s, opts));
   }
-  return out;
+  return shuffle(s, out);
 }
 
 function rollPages(s: RunState): PageId[] {
@@ -415,13 +449,33 @@ export function buyCard(s: RunState, i: number): Ev[] | null {
   return [{ t: 'buy', card: o.card }];
 }
 
-export function buyPage(s: RunState, i: number): Ev[] | null {
+/** Buy a page. With the almanac full, name a kept page to tear out for it. */
+export function buyPage(s: RunState, i: number, replace?: PageId): Ev[] | null {
   const o = s.shop?.pages[i];
-  if (s.phase !== 'shop' || !o || o.sold || s.coins < o.price || s.pages.length >= MAX_PAGES || s.pages.includes(o.page)) return null;
+  if (s.phase !== 'shop' || !o || o.sold || s.coins < o.price || s.pages.includes(o.page)) return null;
+  const full = s.pages.length >= MAX_PAGES;
+  if (full && (!replace || !s.pages.includes(replace))) return null;
   s.coins -= o.price;
   o.sold = true;
-  s.pages.push(o.page);
+  if (full) s.pages.splice(s.pages.indexOf(replace!), 1, o.page);
+  else s.pages.push(o.page);
   return [{ t: 'page', page: o.page }];
+}
+
+/** A seed scoop for good, from year 2, twice at most. */
+export function scoopPrice(s: RunState): number {
+  return Math.round(TUNING.scoopPrice * Math.pow(2, s.scoops) * priceScale(s));
+}
+
+export function canBuyScoop(s: RunState): boolean {
+  return s.phase === 'shop' && s.year >= 2 && s.scoops < TUNING.maxScoops && s.coins >= scoopPrice(s);
+}
+
+export function buyScoop(s: RunState): Ev[] | null {
+  if (!canBuyScoop(s)) return null;
+  s.coins -= scoopPrice(s);
+  s.scoops++;
+  return [{ t: 'scoop' }];
 }
 
 export function removePrice(s: RunState): number {
@@ -483,10 +537,15 @@ export function leaveShop(s: RunState): Ev[] | null {
 
 // ---------------------------------------------------------------- meta
 
-/** Record a finished run once: two cards unlock for future shops, and the best record updates. */
+/** Cards a run that met this many seasons has earned for the merchant's catalogue: two for each mark reached. */
+export function unlocksFor(seasons: number, order: readonly CardId[]): CardId[] {
+  return order.slice(0, 2 * UNLOCK_AT.filter((n) => seasons >= n).length);
+}
+
+/** Record a finished run once: cards unlock for future shops by how far it got, and the best record updates. */
 export function recordRun(meta: Meta, s: RunState, order: readonly CardId[]): CardId[] {
   if (s.phase !== 'over' || !s.end || s.end.recorded) return s.end?.unlocked ?? [];
-  const fresh = order.filter((c) => !meta.unlocked.includes(c)).slice(0, 2);
+  const fresh = unlocksFor(s.stats.seasonsCleared, order).filter((c) => !meta.unlocked.includes(c));
   meta.unlocked.push(...fresh);
   meta.runs++;
   const b = meta.best;

@@ -113,6 +113,9 @@ export interface RunStats {
   harvests: number;
   seasonsCleared: number;
   bestDay: number;
+  /** Pests landed and crows seen this run: the merchant stocks an answer once a hazard has shown. */
+  pests: number;
+  crows: number;
   /** Every season played, for the almanac entry at the end. */
   log: { year: number; season: Season; earned: number; quota: number; cleared: boolean }[];
 }
@@ -143,6 +146,10 @@ export interface RunState {
   earned: number;
   quota: number;
   energy: number;
+  /** Seed scoops bought for good at the stall, on top of the usual three. */
+  scoops: number;
+  /** A crow is about tonight: rolled at dawn and shown on the plate, so a scarecrow is a choice. */
+  crow: boolean;
   /** Today's toss is used. */
   tossed: boolean;
   cols: number;
@@ -160,6 +167,8 @@ export interface RunState {
   nextUid: number;
   /** Harvests so far today (Market Day). */
   dayHarvests: number;
+  /** A new player's first run: the guided first season, and a gentler first year. */
+  guided: boolean;
   /** The guided first season: the hands still to deal, one list per day. Empty once dealt. */
   script: CardId[][];
   /** The card pool for this run's shop. */
@@ -210,6 +219,8 @@ export type Ev =
   | { t: 'seasonEnd'; cleared: boolean; earned: number; quota: number; year: number; season: Season }
   | { t: 'discardExcess'; cards: Card[] }
   | { t: 'dawn'; day: number }
+  /** A crow sits on the plate's edge at dawn: it takes one ripe, unguarded crop tonight. */
+  | { t: 'crowAbout' }
   | { t: 'season'; year: number; season: Season; quota: number }
   | { t: 'shop' }
   | { t: 'over'; end: RunEnd }
@@ -217,4 +228,5 @@ export type Ev =
   | { t: 'page'; page: PageId }
   | { t: 'remove'; card: Card }
   | { t: 'upgrade'; card: Card }
+  | { t: 'scoop' }
   | { t: 'reroll' };

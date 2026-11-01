@@ -4,7 +4,7 @@
 // another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, SEEDS } from './cards';
-import { around, byYear, crowsOn, guarded, immune, isEmpty, isRipe, isTall, neighbours, pestsOn, TUNING } from './board';
+import { around, byYear, guarded, immune, isEmpty, isRipe, isTall, neighbours, pestsOn, TUNING } from './board';
 import { pick, rand } from './rng';
 import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, Step } from './types';
 
@@ -115,13 +115,22 @@ export function applyHarvest(s: RunState, h: Harvest, ev: Ev[]): void {
   if (before < s.quota && s.earned >= s.quota) ev.push({ t: 'quota', earned: s.earned, quota: s.quota });
 }
 
-/** Resolve the night: weather, growth, pests and mint, crows, then the harvest cascade. */
+/**
+ * Resolve the night: weather, growth, the crow (if one was about at dawn),
+ * the harvest cascade, then pests and mint. Pests on a crop at dusk hold it
+ * back tonight (no growth, no pick) and then count down; pests that land or
+ * spread tonight start holding it back tomorrow. So the nights shown on a
+ * pested crop are exactly the nights it stands still, and what the board
+ * previews in the day is what the night pays, unless a storm or a crow comes.
+ */
 export function night(s: RunState, ev: Ev[]): void {
   const weather = s.tonight;
   s.tonight = [];
   ev.push({ t: 'dusk', weather: [...weather] });
   for (const p of s.plots) p.last = null;
   const startEarned = s.earned;
+  const crow = s.crow;
+  s.crow = false;
 
   // 1. Weather.
   const rains = weather.filter((w) => w === 'rain').length;
@@ -140,6 +149,7 @@ export function night(s: RunState, ev: Ev[]): void {
   // 2. Every crop grows a night, plus any boost from the can or the weather. Pests stop it.
   const extra = rains + storms * 2;
   const growth: NightGrowth[] = [];
+  const pestedAtDusk = s.plots.map((p, i) => (p.crop?.pest ? i : -1)).filter((i) => i >= 0);
   s.plots.forEach((p, i) => {
     const c = p.crop;
     const boost = p.boost;
@@ -151,45 +161,8 @@ export function night(s: RunState, ev: Ev[]): void {
   });
   if (growth.length) ev.push({ t: 'grow', growth });
 
-  // 3. Pests spread and appear; mint spreads.
-  if (pestsOn(s)) {
-    const pested = s.plots.map((p, i) => (p.crop?.pest ? i : -1)).filter((i) => i >= 0);
-    const gone: number[] = [];
-    for (const i of pested) {
-      const c = s.plots[i].crop!;
-      c.pest--;
-      if (!c.pest) gone.push(i);
-    }
-    if (gone.length) ev.push({ t: 'pestGone', plots: gone });
-    for (const i of pested) {
-      if (rand(s) >= TUNING.pestSpread) continue;
-      const opts = neighbours(s, i).filter((j) => s.plots[j].crop && !s.plots[j].crop!.pest && !immune(s, j));
-      if (!opts.length) continue;
-      const j = pick(s, opts);
-      s.plots[j].crop!.pest = TUNING.pestNights;
-      ev.push({ t: 'pest', plot: j, from: i });
-    }
-    if (rand(s) < byYear(TUNING.pestChance, s.year)) {
-      const opts = s.plots.map((p, i) => (p.crop && !isRipe(p.crop) && !p.crop.pest && !immune(s, i) ? i : -1)).filter((i) => i >= 0);
-      if (opts.length) {
-        const j = pick(s, opts);
-        s.plots[j].crop!.pest = TUNING.pestNights;
-        ev.push({ t: 'pest', plot: j, from: null });
-      }
-    }
-  }
-  const mints = s.plots.map((p, i) => (p.crop?.kind === 'mint' && !p.crop.pest ? i : -1)).filter((i) => i >= 0);
-  for (const i of mints) {
-    const opts = neighbours(s, i).filter((j) => isEmpty(s.plots[j]));
-    if (!opts.length) continue;
-    const j = pick(s, opts);
-    const uid = s.nextUid++;
-    s.plots[j].crop = { uid, kind: 'mint', age: 0, days: SEEDS.mint.days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: true };
-    ev.push({ t: 'mint', from: i, to: j, uid });
-  }
-
-  // 4. A crow may take one unguarded ripe crop, then the harvest runs in reading order.
-  if (crowsOn(s) && rand(s) < byYear(TUNING.crowChance, s.year)) {
+  // 3. A crow, if one sat on the plate at dawn, takes one unguarded ripe crop.
+  if (crow) {
     const opts = s.plots.map((p, i) => (p.crop && isRipe(p.crop) && !p.crop.pest && !guarded(s, i) ? i : -1)).filter((i) => i >= 0);
     if (opts.length) {
       const i = pick(s, opts);
@@ -199,11 +172,54 @@ export function night(s: RunState, ev: Ev[]): void {
       if (c.picks >= SEEDS[c.kind].picks) s.plots[i].crop = null;
     }
   }
+
+  // 4. The harvest, in reading order. Neighbour rules read the board as it starts.
   const snap = snapshot(s);
   for (let i = 0; i < s.plots.length; i++) {
     const c = s.plots[i].crop;
     if (!c || c.pest || !isRipe(c)) continue;
     applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev);
+  }
+
+  // 5. Pests count down, may spread, and new ones may land on a growing crop.
+  if (pestsOn(s)) {
+    const gone: number[] = [];
+    const still = pestedAtDusk.filter((i) => s.plots[i].crop?.pest);
+    for (const i of still) {
+      const c = s.plots[i].crop!;
+      c.pest--;
+      if (!c.pest) gone.push(i);
+    }
+    if (gone.length) ev.push({ t: 'pestGone', plots: gone });
+    for (const i of still) {
+      if (rand(s) >= TUNING.pestSpread) continue;
+      const opts = neighbours(s, i).filter((j) => s.plots[j].crop && !s.plots[j].crop!.pest && !immune(s, j));
+      if (!opts.length) continue;
+      const j = pick(s, opts);
+      s.plots[j].crop!.pest = TUNING.pestNights;
+      s.stats.pests++;
+      ev.push({ t: 'pest', plot: j, from: i });
+    }
+    if (rand(s) < byYear(TUNING.pestChance, s.year)) {
+      const opts = s.plots.map((p, i) => (p.crop && !isRipe(p.crop) && !p.crop.pest && !immune(s, i) ? i : -1)).filter((i) => i >= 0);
+      if (opts.length) {
+        const j = pick(s, opts);
+        s.plots[j].crop!.pest = TUNING.pestNights;
+        s.stats.pests++;
+        ev.push({ t: 'pest', plot: j, from: null });
+      }
+    }
+  }
+
+  // 6. Mint creeps into an empty neighbour.
+  const mints = s.plots.map((p, i) => (p.crop?.kind === 'mint' && !p.crop.pest ? i : -1)).filter((i) => i >= 0);
+  for (const i of mints) {
+    const opts = neighbours(s, i).filter((j) => isEmpty(s.plots[j]));
+    if (!opts.length) continue;
+    const j = pick(s, opts);
+    const uid = s.nextUid++;
+    s.plots[j].crop = { uid, kind: 'mint', age: 0, days: SEEDS.mint.days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: true };
+    ev.push({ t: 'mint', from: i, to: j, uid });
   }
   s.stats.bestDay = Math.max(s.stats.bestDay, s.earned - startEarned);
 }

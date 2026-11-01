@@ -4,7 +4,7 @@
 
 import type { GameModule } from '../../shell/types';
 import './deck.css';
-import { buyCard, buyPage, CARD_IDS, CARDS, leaveShop, reroll, type RunState } from './rules';
+import { buyCard, buyPage, CARD_IDS, CARDS, cardText, leaveShop, reroll, type RunState } from './rules';
 import { bestPlay, type Play } from './bot';
 import { Table, type SaveData } from './table';
 import { newLearn, Tutor, type Piece } from './lessons';
@@ -33,11 +33,17 @@ export interface DeckDebug {
   fast(on: boolean): void;
   /** Screen rects for scripted taps. */
   rects(): { cards: DOMRect[]; plots: DOMRect[]; lantern: DOMRect; heap: DOMRect; book: DOMRect };
+  /** The coins the table's purse shows. */
+  purse(): string;
+  /** A card's rule as a sentence. */
+  cardText(id: string): string;
+  /** Deal a hand of these cards (checks: a full phone hand). */
+  hand(ids: string[]): void;
   tally(): string;
   shownScores(): number[];
   frames(): number;
   frameMs(): number[];
-  shop: { buy(i: number): boolean; page(i: number): boolean; reroll(): boolean; leave(): boolean };
+  shop: { buy(i: number): boolean; page(i: number, replace?: string): boolean; reroll(): boolean; leave(): boolean };
   /** What the balance bot would play now (null: end the day). */
   suggest(): Play | null;
   /** Harvest scores the rules reported this session, in order. */
@@ -72,6 +78,7 @@ export const game: GameModule = {
     t.start();
     const after = () => {
       t.save();
+      t.syncPurse();
       t.sheets.stall();
     };
     window.deck = {
@@ -118,6 +125,14 @@ export const game: GameModule = {
         };
       },
       tally: () => t.tallyText,
+      purse: () => t.purseText,
+      cardText: (id) => cardText(id as never, false),
+      hand: (ids) => {
+        const s = t.run;
+        s.draw.push(...s.hand);
+        s.hand = ids.map((id) => ({ uid: s.nextUid++, id: id as never, up: false }));
+        t.syncAll();
+      },
       shownScores: () => t.shownScores,
       ruleScores: () => t.ruleScores,
       suggest: () => (t.run.phase === 'day' ? bestPlay(t.run, t.run.day + t.run.season * 7) : null),
@@ -129,8 +144,8 @@ export const game: GameModule = {
           after();
           return ok;
         },
-        page: (i) => {
-          const ok = !!buyPage(t.run, i);
+        page: (i, replace) => {
+          const ok = !!buyPage(t.run, i, replace as never);
           after();
           return ok;
         },

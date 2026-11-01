@@ -89,15 +89,22 @@ export function cardText(id: CardId, up: boolean): string {
   return up && d.upText ? d.upText : d.text;
 }
 
-/** Can this card be upgraded to something better? Free cards gain a stronger rule instead. */
+/** What improving a card does, said plainly: "Basket 5 to 8." Free cards gain a stronger rule instead. */
 export function upgradeNote(id: CardId): string {
   const d = CARDS[id];
-  if (d.type === 'seed') return `Base yield ${SEEDS[id as SeedId].base} to ${baseChips(id as SeedId, true)}.`;
+  if (d.type === 'seed') return `Basket ${SEEDS[id as SeedId].base} to ${baseChips(id as SeedId, true)}.`;
   if (d.upText) return d.upText;
-  return `Costs ${costOf(id, true)} instead of ${d.cost}.`;
+  const n = costOf(id, true);
+  return `Costs ${n === 0 ? 'nothing' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`} instead of ${d.cost}.`;
 }
 
-export const START_DECK: CardId[] = ['radish', 'radish', 'radish', 'radish', 'radish', 'carrot', 'carrot', 'carrot', 'lettuce', 'lettuce', 'can', 'can', 'can', 'rain'];
+/**
+ * The start deck. Its core stands on the plot for days: beans and a
+ * strawberry pick night after night, the carrot takes three nights and the
+ * sunflower is the tall crop the lettuce wants, so the plot fills and what
+ * you sow today has to fit what is already there.
+ */
+export const START_DECK: CardId[] = ['radish', 'radish', 'radish', 'radish', 'carrot', 'carrot', 'carrot', 'lettuce', 'beans', 'beans', 'strawberry', 'sunflower', 'can', 'can'];
 
 /** The shop's pool before any unlocks. */
 export const START_POOL: CardId[] = ['radish', 'carrot', 'lettuce', 'beans', 'sunflower', 'strawberry', 'garlic', 'can', 'compost', 'fertiliser', 'ladybirds', 'scarecrow', 'rain', 'sun'];
@@ -105,10 +112,13 @@ export const START_POOL: CardId[] = ['radish', 'carrot', 'lettuce', 'beans', 'su
 /** Cards cut from the game, and what an old save's copies become. */
 export const RETIRED: Record<string, CardId> = { hose: 'rain', mulch: 'can' };
 
-/** Locked cards, unlocked two per finished run in this order. */
+/** Locked cards, unlocked two at a time in this order. */
 export const UNLOCK_ORDER: CardId[] = ['beehive', 'chili', 'corn', 'wheat', 'pumpkin', 'shears', 'mint', 'trowel', 'storm'];
 
-export const PRICE: Record<Rarity, number> = { common: 15, uncommon: 28, rare: 45 };
+/** Seasons met in one run that unlock the next pair: earned by getting further, never by finishing runs. */
+export const UNLOCK_AT = [1, 3, 5, 7, 9];
+
+export const PRICE: Record<Rarity, number> = { common: 20, uncommon: 40, rare: 65 };
 
 export interface PageDef {
   id: PageId;
@@ -118,16 +128,16 @@ export interface PageDef {
 }
 
 export const PAGES: Record<PageId, PageDef> = {
-  barrel: { id: 'barrel', name: 'Rain Barrel', price: 60, text: 'Column A grows an extra night every night.' },
-  cellar: { id: 'cellar', name: 'Root Cellar', price: 70, text: 'Radishes and carrots get +3 yield.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 80, text: 'Sunflowers and beehives give +2 bloom, not +1.' },
-  thumb: { id: 'thumb', name: 'Green Thumb', price: 120, text: 'A fourth seed scoop every day.' },
-  basket: { id: 'basket', name: 'Big Basket', price: 100, text: 'Hand size +1.' },
-  rotation: { id: 'rotation', name: 'Crop Rotation', price: 70, text: 'Sow a different crop where one was just pulled: +4 yield.' },
-  market: { id: 'market', name: 'Market Day', price: 90, text: 'Every fifth harvest in a day is x2.' },
-  clover: { id: 'clover', name: 'Four-Leaf Clover', price: 100, text: 'One harvest in eight comes up golden, x3.' },
-  furrow: { id: 'furrow', name: 'Long Furrow', price: 110, text: 'The plot gains a fifth column.' },
-  coldframe: { id: 'coldframe', name: 'Cold Frame', price: 60, text: 'Winter quotas are 20% lower.' },
+  barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
+  cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +3 yield.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Sunflowers and beehives give +2 bloom, not +1.' },
+  thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'A fourth seed scoop every day.' },
+  basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
+  rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },
+  market: { id: 'market', name: 'Market Day', price: 130, text: 'Every fifth harvest in a day is x2.' },
+  clover: { id: 'clover', name: 'Four-Leaf Clover', price: 140, text: 'One harvest in eight comes up golden, x3.' },
+  furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column.' },
+  coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
 };
 
 export const PAGE_IDS = Object.keys(PAGES) as PageId[];
