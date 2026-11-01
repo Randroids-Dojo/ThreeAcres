@@ -11,7 +11,7 @@ import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
 import { MILESTONES, stockCount } from '../sim/goals';
 import { season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, WorldState } from '../sim/types';
-import { el, esc, fmt, toggle } from './dom';
+import { clock, el, esc, fmt, toggle } from './dom';
 import { icon } from './icons';
 
 export interface DialogHost {
@@ -35,6 +35,8 @@ export class Dialogs {
   private pressedScrim = false;
   private kind = '';
   private tab: Tab = 'fields';
+  /** What Enter does while a question is open: its main button. */
+  private yes: (() => void) | null = null;
 
   constructor(private host: DialogHost) {
     const head = el('header');
@@ -56,6 +58,8 @@ export class Dialogs {
   private show(title: string, kind: string, sticky = false): void {
     this.title.textContent = title;
     this.kind = kind;
+    this.yes = null;
+    this.root.dataset.kind = kind;
     this.sticky = sticky;
     this.pressedScrim = false;
     this.open = true;
@@ -73,6 +77,40 @@ export class Dialogs {
     toggle(this.scrim, 'on', false);
     this.host.onChange(false);
     this.host.cue('close');
+  }
+
+  /** Enter pressed while a dialog is open: take its main button, if it has one. */
+  accept(): boolean {
+    if (!this.open || !this.yes) return false;
+    this.yes();
+    return true;
+  }
+
+  /**
+   * A question with two answers: the main one (stamped, primary) and "Not
+   * now". Used before spending a lot and before sleeping away a morning.
+   */
+  private ask(title: string, kind: string, text: string, yesLabel: string, onYes: () => void, back?: () => void): void {
+    this.show(title, kind);
+    this.body.innerHTML = '';
+    this.body.append(el('p', '', text));
+    const row = el('div', 'row ask');
+    const yes = el('button', 'btn primary', esc(yesLabel));
+    const go = () => {
+      this.close();
+      onYes();
+    };
+    yes.onclick = go;
+    const no = el('button', 'btn', 'Not now');
+    no.onclick = () => (back ? back() : this.close());
+    row.append(yes, no);
+    this.body.append(row);
+    this.yes = go;
+  }
+
+  /** Sleeping before noon asks first. */
+  confirmSleep(minute: number, onYes: () => void): void {
+    this.ask('Sleep now?', 'sleep', `It is only ${clock(minute)}. Crops grow and the crate ships overnight, and the rest of today is gone.`, 'Sleep', onYes);
   }
 
   /** Re-render the open dialog after the farm changed (a purchase, a delivery). */
@@ -116,6 +154,7 @@ export class Dialogs {
     const list = el('div', 'list');
     switch (this.tab) {
       case 'requests': {
+        list.append(el('p', 'legend', smithLine(s)));
         if (!s.orders.length) list.append(el('p', 'legend', 'No requests just now. More come with the mornings.'));
         for (const o of s.orders) {
           const it = o.items[0];
@@ -123,7 +162,7 @@ export class Dialogs {
           const days = o.due - s.day;
           const name = it.n === 1 ? CROPS[it.crop].name.toLowerCase() : CROPS[it.crop].plural;
           const ready = have >= it.n;
-          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}. Pays ${fmt(o.reward)}</span></span>`);
+          const note = el('div', 'item', `<span class="blob">${cropArt(it.crop)}</span><span class="tx"><b>${it.n} ${name}</b><span>For ${esc(o.who)}. ${have} of ${it.n} in the crate, ${days <= 0 ? 'wanted today' : days === 1 ? 'wanted by tomorrow' : `${days} days left`}.</span><span class="pay">Pays ${fmt(o.reward)} and a good word</span></span>`);
           if (ready) {
             const b = el('button', 'btn primary', 'Deliver');
             b.onclick = () => {
@@ -135,20 +174,18 @@ export class Dialogs {
           }
           list.append(note);
         }
-        list.append(el('p', 'legend', 'Whatever a request needs goes with the crate at night, before the rest is sold.'));
+        list.append(el('p', 'legend', 'What a request needs stays in the crate for it and goes at night, before the rest is sold.'));
         break;
       }
       case 'fields':
         for (const p of s.parcels) {
           const it = el('div', `item ${p.owned ? 'done' : ''}`, `<span class="ic">${icon('leaf')}</span><span class="tx"><b>Field ${p.id + 1}</b><span>${p.owned ? 'Yours' : `Four by four, meadow. ${fmt(p.price)} coins`}</span></span>`);
           if (!p.owned) {
-            const b = el('button', 'btn primary', 'Buy');
-            b.disabled = s.coins < p.price;
-            b.onclick = () => {
-              this.host.send({ type: 'buyParcel', id: p.id });
-              this.host.cue('buy');
-              setTimeout(() => this.refresh(), 0);
-            };
+            const short = s.coins < p.price;
+            const b = el('button', 'btn primary', short ? `Need ${fmt(p.price)}` : 'Buy');
+            b.disabled = short;
+            // A field is a big spend: the card asks before it buys.
+            b.onclick = () => this.parcel(p.id, () => this.board('fields'));
             it.append(b);
           }
           list.append(it);
@@ -184,12 +221,21 @@ export class Dialogs {
           if (next) {
             const b = el('button', 'btn primary', 'Buy');
             b.disabled = s.coins < next.cost || s.rep < next.rep;
-            if (s.rep < next.rep) b.textContent = `Rep ${next.rep}`;
-            b.onclick = () => {
-              this.host.send({ type: 'upgrade', tool: t });
-              this.host.cue('buy');
-              setTimeout(() => this.refresh(), 0);
-            };
+            if (s.rep < next.rep) b.textContent = `Reputation ${next.rep}`;
+            else if (s.coins < next.cost) b.textContent = `Need ${fmt(next.cost)}`;
+            b.onclick = () =>
+              this.ask(
+                `${next.name}?`,
+                'buy',
+                `${fmt(next.cost)} coins. It works ${what(level + 1)}${t === 'can' ? ` and holds ${CAN_WATER[level + 1]}` : ''}. You have ${fmt(s.coins)}.`,
+                `Buy for ${fmt(next.cost)}`,
+                () => {
+                  this.host.send({ type: 'upgrade', tool: t });
+                  this.host.cue('buy');
+                  setTimeout(() => this.board('tools'), 0);
+                },
+                () => this.board('tools'),
+              );
             it.append(b);
           }
           list.append(it);
@@ -297,28 +343,44 @@ export class Dialogs {
 
   // ------------------------------------------------------------ parcel
 
-  parcel(id: number): void {
+  /** A field for sale: what it is, its price, and a confirm. `back` returns to wherever it was asked from. */
+  parcel(id: number, back?: () => void): void {
     const s = this.host.state();
     const p = s.parcels[id];
     if (!p || p.owned) return;
     this.show(`Field ${id + 1} is for sale`, 'parcel');
     this.body.innerHTML = '';
-    this.body.append(el('p', '', `Four by four, meadow now. Rich soil that has not been farmed. ${fmt(p.price)} coins.`));
-    const row = el('div', 'row');
-    row.style.cssText = 'display:flex;gap:8px';
-    const buy = el('button', 'btn primary', `Buy for ${fmt(p.price)}`);
-    buy.disabled = s.coins < p.price;
-    buy.onclick = () => {
+    this.body.append(el('p', '', `Four by four, meadow now. Rich soil that has not been farmed. ${fmt(p.price)} coins. You have ${fmt(s.coins)}.`));
+    const row = el('div', 'row ask');
+    const short = s.coins < p.price;
+    const buy = el('button', 'btn primary', short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
+    buy.disabled = short;
+    const go = () => {
       this.host.send({ type: 'buyParcel', id });
       this.host.cue('buy');
       this.close();
     };
+    buy.onclick = go;
     const no = el('button', 'btn', 'Not now');
-    no.onclick = () => this.close();
+    no.onclick = () => (back ? back() : this.close());
     row.append(buy, no);
     this.body.append(row);
-    if (s.coins < p.price) this.body.append(el('p', 'legend', `You have ${fmt(s.coins)}.`));
+    this.yes = short ? null : go;
   }
+}
+
+/** Requests and the smith: how far the town's good word has got, and what the next one brings. */
+export function smithLine(s: WorldState): string {
+  const next = (['hoe', 'can'] as const)
+    .map((t) => ({ t, u: TOOL_UPGRADES[t][s.tools[t]] }))
+    .filter((x) => x.u && x.u.rep > s.rep)
+    .sort((a, b) => a.u!.rep - b.u!.rep)[0];
+  const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+  const n = (k: number) => words[k] ?? String(k);
+  const head = `Each request filled is a good word in town. ${s.rep === 0 ? 'None yet' : `${n(s.rep)} so far`}.`;
+  if (!next) return `${head} The smith will make you anything he has.`;
+  const left = next.u!.rep - s.rep;
+  return `${head} ${n(left)} more and the smith makes you a ${next.u!.name.toLowerCase()}.`;
 }
 
 /** Notes on a corkboard never hang quite straight. */

@@ -6,16 +6,16 @@
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
-import { homestead, resolve } from '../sim/actions';
+import { homestead, resolve, sowing } from '../sim/actions';
 import type { Command } from '../sim/commands';
-import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
-import { CROP_IDS, CROPS, inSeason, QUALITY_NAME } from '../sim/crops';
+import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
+import { CROP_IDS, CROPS, cropWord, QUALITY_NAME } from '../sim/crops';
 import { canDeliver, MILESTONES, stockCount } from '../sim/goals';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import { propAt } from '../sim/map';
 import type { BuildKind, CropId, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
-import { brief, describe, denyText } from './describe';
+import { brief, canLevel, describe, denyText, seedNote } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
@@ -28,6 +28,8 @@ export interface HudHost {
   openBoard(tab?: string): void;
   offerParcel(id: number): void;
   project(x: number, y: number, h?: number): { x: number; y: number } | null;
+  /** Sleep from the button (asks first before noon). */
+  sleep(): void;
   input: Input;
 }
 
@@ -66,6 +68,7 @@ export class Hud {
   private buildOpen = false;
   private lastDeny = { text: '', t: 0 };
   private foldedGoals = false;
+  private lastAim: { x: number; y: number } | null = null;
   /** What acting would do now: a verb from the tool, or a word of its own (the notice board). */
   private aimVerb: { verb: Verb | null; ok: boolean; label?: string; icon?: IconId } | null = null;
 
@@ -74,6 +77,7 @@ export class Hud {
       input: host.input,
       state: host.state,
       aimVerb: () => this.aimVerb,
+      water: () => (host.state().tool === 'can' ? canLevel(host.state()) : null),
       cycleTool: () => this.cycleTool(false),
       toolIcon: () => TOOL_ICON[host.state().tool],
       toolName: () => TOOL_NAME[host.state().tool],
@@ -144,14 +148,20 @@ export class Hud {
     setText(this.date, `${SEASON_NAMES[sn]} ${dayOfSeason(s.day)}`);
     setText(this.clockEl, s.rules.clock === 'turns' ? `${s.ap} of ${s.apMax} moves` : clock(s.minute));
     const wild = s.rules.weather === 'wild';
-    const fc = wild && this.knows(s, 'forecast') ? `<span class="fc">${s.forecast.map((w) => `<span class="ic" title="${WEATHER_NAMES[w]}">${icon(WEATHER_ICON[w])}</span>`).join('')}</span>` : '';
+    // The next three days, read as a sentence: "Sunny, then rain, sun, cloud".
+    const fc = wild && this.knows(s, 'forecast') ? `<span class="fc" title="The next three days: ${s.forecast.map((w) => WEATHER_NAMES[w].toLowerCase()).join(', ')}"><span class="then">then</span>${s.forecast.map((w) => `<span class="ic" title="${WEATHER_NAMES[w]}">${icon(WEATHER_ICON[w])}</span>`).join('')}</span>` : '';
     setHtml(this.sky, `<span class="ic">${icon(WEATHER_ICON[s.weather])}</span><span>${WEATHER_NAMES[s.weather]}</span>${fc}`);
 
     const key = s.rules.clock;
     if (key !== this.meterKey) {
       this.meterKey = key;
       this.meterRow.innerHTML = '';
-      if (key === 'day') this.meterRow.append(el('div', 'meter', '<i></i>'));
+      if (key === 'day') {
+        // Labelled, so the bar says what it is: the work left in you today.
+        this.meterRow.classList.add('stamina');
+        this.meterRow.title = 'Stamina: every job uses a little. Sleep to fill it.';
+        this.meterRow.append(el('span', 'mlbl', 'Stamina'), el('div', 'meter', '<i></i>'));
+      }
       else if (key === 'turns') this.meterRow.append(el('div', 'pips'));
       else {
         const sp = el('div', 'speed');
@@ -170,7 +180,7 @@ export class Hud {
     }
     toggle(this.meterRow, 'gone', key === 'day' && !this.knows(s, 'stamina'));
     if (key === 'day') {
-      const m = this.meterRow.firstElementChild as HTMLElement;
+      const m = this.meterRow.querySelector('.meter') as HTMLElement;
       const f = s.stamina / s.staminaMax;
       (m.firstElementChild as HTMLElement).style.width = `${Math.round(f * 100)}%`;
       toggle(m, 'low', f < 0.2);
@@ -261,7 +271,7 @@ export class Hud {
         const b = el('button', 'tool act', `<span class="ic">${icon('moon')}</span><span class="lbl">${act}</span>`);
         b.title = `${act} (Enter)`;
         b.onclick = () => {
-          this.host.send({ type: 'sleep' });
+          this.host.sleep();
           this.host.cue('tap');
         };
         this.toolbar.append(b);
@@ -281,11 +291,16 @@ export class Hud {
       const on = t === 'seeds' ? (r.tools === 'kit' ? s.tool === 'seeds' : this.seedOpen) : s.tool === t;
       toggle(b, 'on', on);
     }
-    const can = this.toolbar.querySelector<HTMLElement>('.tool[data-tool="can"] .watermeter > i');
-    if (can) {
-      const max = CAN_WATER[s.tools.can];
-      can.style.width = `${Math.round((s.water / max) * 100)}%`;
-      toggle(can.parentElement!, 'low', s.water <= Math.max(2, max * 0.15));
+    // The can always shows its water: a gauge on the tool, and "Empty" in place of its name when it is.
+    const canBtn = this.toolbar.querySelector<HTMLElement>('.tool[data-tool="can"]');
+    const lvl = canLevel(s);
+    if (canBtn && lvl) {
+      const bar = canBtn.querySelector<HTMLElement>('.watermeter > i')!;
+      bar.style.setProperty('--level', `${Math.round(lvl.frac * 100)}%`);
+      toggle(canBtn, 'low', lvl.low && !lvl.empty);
+      toggle(canBtn, 'empty', lvl.empty);
+      setText(canBtn.querySelector('.lbl')!, lvl.empty ? 'Empty' : 'Can');
+      canBtn.title = lvl.empty ? 'The can is empty. Fill the can at the well or the pond' : `Can: ${lvl.left} of ${lvl.max} left`;
     }
     const chip = this.toolbar.querySelector<HTMLElement>('.seedchip');
     // The chosen seed sits on the Seeds tool as its little plate.
@@ -295,34 +310,65 @@ export class Hud {
     }
     const actBtn = this.toolbar.querySelector<HTMLElement>('.tool.act');
     if (actBtn) toggle(actBtn, 'ready', (r.clock === 'turns' && s.ap - s.jobs.length <= 0) || (r.clock === 'day' && (s.stamina < 4 || s.minute > 960)));
-    // Seed bar shows prices, locks and the selection.
+    // Seed bar shows prices, locks and the selection. Sunup offers what grows
+    // now, next season's crops in the last days of a season (marked), and
+    // marks what is too late to ripen before the turn.
     for (const b of this.seedbar.querySelectorAll<HTMLElement>('.seed')) {
       const c = b.dataset.crop as CropId;
+      const note = seedNote(s, c);
       toggle(b, 'on', s.seed === c);
-      toggle(b, 'locked', r.goal === 'almanac' && !s.almanac.unlocked.includes(c));
-      // Sunup offers only what can be sown this season.
-      toggle(b, 'gone', homestead(s) && !inSeason(c, season(s.day)));
+      toggle(b, 'locked', (r.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || note.state === 'late');
+      toggle(b, 'next', note.state === 'next');
+      toggle(b, 'gone', homestead(s) && note.state === 'off');
+      setText(b.querySelector('.pr')!, note.price);
+      setText(b.querySelector('.wh')!, note.when);
     }
     for (const b of this.buildbar.querySelectorAll<HTMLElement>('.seed')) toggle(b, 'on', s.buildKind === b.dataset.kind);
     const seedVisible = this.seedOpen && (r.tools === 'smart' || s.tool === 'seeds');
     const buildVisible = this.buildOpen && s.tool === 'build';
     toggle(this.seedbar, 'hidden', !seedVisible);
     toggle(this.buildbar, 'hidden', !buildVisible);
+    // A picker opens away from the plot being worked: up top when that plot is low on the screen.
+    let below = '';
+    if (seedVisible || buildVisible) {
+      const up = this.workLow();
+      toggle(this.seedbar, 'up', up);
+      toggle(this.buildbar, 'up', up);
+      // Toasts (a "too late" note from a tap on a seed, say) then show just under the picker, not behind it.
+      if (up) below = `${Math.round((seedVisible ? this.seedbar : this.buildbar).getBoundingClientRect().bottom - this.root.getBoundingClientRect().top + 8)}px`;
+    }
+    // With a dialog open, toasts show just under it when there is room (else at the foot of the screen).
+    const host = this.root.parentElement;
+    if (!below && host?.classList.contains('dialog-open')) {
+      const d = host.querySelector('.dialog.on')?.getBoundingClientRect();
+      const top = this.root.getBoundingClientRect().top;
+      if (d && this.root.clientHeight - (d.bottom - top) > 150) below = `${Math.round(d.bottom - top + 10)}px`;
+    }
+    if (this.toasts.style.top !== below) this.toasts.style.top = below;
     // An open picker has the player's attention: the lesson line and caption step aside.
     toggle(this.root, 'picking', seedVisible || buildVisible);
+  }
+
+  /** Is the plot being worked (the aim) in the lower part of the screen, where a picker would cover it? */
+  private workLow(): boolean {
+    const a = this.lastAim;
+    if (!a) return false;
+    const p = this.host.project(a.x + 0.5, a.y + 0.5, 0);
+    return !!p && p.y > this.root.clientHeight * 0.52;
   }
 
   private renderSeedbar(s: WorldState): void {
     this.seedbar.innerHTML = '';
     for (const c of CROP_IDS) {
       const d = CROPS[c];
-      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr">${d.seed} &middot; ${d.days}d</span>`);
+      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"></span><span class="wh"></span>`);
       b.dataset.crop = c;
-      b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. ${d.likes}.`;
+      b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}. ${d.likes}.`;
       b.onclick = () => {
         const st = this.host.state();
-        if (!inSeason(c, season(st.day))) {
-          this.toast(`${d.name} grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}.`, 'deny');
+        const sw = homestead(st) ? sowing(st.day, c) : null;
+        if (sw && !sw.ok) {
+          this.toast(sw.late ? `${sw.reason}.` : `${d.name} grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}.`, 'deny');
           this.host.cue('deny');
           return;
         }
@@ -391,6 +437,7 @@ export class Hud {
   }
 
   private updateInfo(s: WorldState, aim: { x: number; y: number } | null): void {
+    this.lastAim = aim;
     if (!aim) {
       toggle(this.info, 'empty', true);
       this.aimVerb = null;
@@ -436,13 +483,23 @@ export class Hud {
       case 'coins':
         if (e.x !== undefined && e.y !== undefined) this.float(e.x + 0.5, e.y + 0.5, `+${fmt(e.amount)}`);
         break;
-      case 'harvest':
+      case 'harvest': {
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
+        // A crop a request wants says how far along the request is, right where it was picked.
+        const o = homestead(s) ? s.orders.find((q) => q.items[0].crop === e.crop) : null;
+        if (o && e.by === s.actors[0].id) {
+          const it = o.items[0];
+          const have = Math.min(stockCount(s, it.crop), it.n);
+          this.float(e.x + 0.5, e.y + 0.5, have >= it.n ? `${it.n} ${cropWord(it.crop, it.n)} ready for ${o.who}` : `${have} of ${it.n} for ${o.who}`);
+          break;
+        }
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
         break;
+      }
       case 'milestone': {
+        // A milestone reads as something won, not a task: "Your first harvest is in".
         const m = MILESTONES.find((x) => x.id === e.id);
-        if (m && s.rules.goal === 'market') this.toast(`<b>Milestone</b><br>${esc(m.text)}`, 'big');
+        if (m && s.rules.goal === 'market') this.toast(`<b>${esc(m.done)}</b>`, 'big');
         break;
       }
       case 'goal':
@@ -457,8 +514,9 @@ export class Hud {
         else this.toast('<b>Order filled</b>', 'big');
         break;
       case 'request':
-        if (e.done) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins and a little reputation.`, 'big', 3200);
-        else this.toast(`${esc(e.who)} found what they needed elsewhere.`, '');
+        // Filled overnight requests are on the morning card; this is one handed over by day.
+        if (e.done && s.turnover < 0) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins and a good word.`, 'big', 3200);
+        else if (!e.done) this.toast(`${esc(e.who)} found what they needed elsewhere.`, '');
         break;
       case 'upgrade': {
         const u = TOOL_UPGRADES[e.tool][e.level - 1];
@@ -477,7 +535,7 @@ export class Hud {
         this.morning(s);
         break;
       case 'buy':
-        if (e.item.startsWith('field:')) this.toast('The field is yours. Hoe it to plant.', '');
+        if (e.item.startsWith('field:')) this.toast('The field is yours.', '');
         break;
       case 'sell':
         break;
@@ -547,12 +605,16 @@ export class Hud {
     const sold = r.sold.reduce((a, x) => a + x.n, 0);
     const value = r.sold.reduce((a, x) => a + x.value, 0);
     const bits: string[] = [];
+    for (const f of r.filled ?? []) bits.push(`${esc(f.who)} paid ${fmt(f.reward)}`);
     if (sold) bits.push(`Sold ${sold} for ${fmt(value)}`);
+    for (const k of r.kept ?? []) bits.push(`${k.n} ${cropWord(k.crop, k.n)} kept for a request`);
     if (r.grew) bits.push(`${r.grew} grew`);
     if (r.crewWork) bits.push(`the crew did ${r.crewWork} jobs overnight`);
     if (r.wages) bits.push(`wages ${r.wages}`);
     if (r.withered) bits.push(`${r.withered} withered`);
+    if (r.turned) bits.push(`the turn took ${r.turned} green ${r.turned === 1 ? 'crop' : 'crops'}`);
     if (r.eaten) bits.push(`crows ate ${r.eaten}`);
+    if (r.gift) bits.push(`a neighbour left ${fmt(r.gift)} coins for seed`);
     // Only news earns a morning card.
     if (!bits.length) return;
     const weather = WEATHER_NAMES[s.weather].toLowerCase();

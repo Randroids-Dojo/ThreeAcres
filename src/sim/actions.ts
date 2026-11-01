@@ -1,11 +1,11 @@
 // What a tool does to a tile, and doing it. resolve() is pure and is also used
 // by the UI for the highlight; perform() changes the farm and reports events.
 
-import { BUILD_COST, CAN_WATER, STAMINA_COST } from './constants';
+import { BUILD_COST, CAN_WATER, DAYS_PER_SEASON, SEASON_PREVIEW_DAYS, STAMINA_COST } from './constants';
 import { CROPS, inSeason, QUALITY_MULT, stageOf } from './crops';
 import { propAt } from './map';
 import { feedAround, needsWater, qualityAt, soak } from './soil';
-import { buildAt, idx, inMap, isField, owned, plots, season, SEASON_NAMES } from './world';
+import { buildAt, dayOfSeason, idx, inMap, isField, owned, plots, season, SEASON_NAMES } from './world';
 import type { Actor, BuildKind, CropId, SimEvent, ToolId, Verb, WorldState } from './types';
 
 export interface Resolved {
@@ -29,8 +29,65 @@ export function homestead(s: WorldState): boolean {
   return s.rules.goal === 'market' && s.rules.tools === 'kit';
 }
 
+/** Sunup's sowing calendar for a crop today. */
+export interface Sowing {
+  /** It can go in today. */
+  ok: boolean;
+  /** It is next season's crop, offered early in the last days of this one. */
+  next: boolean;
+  /** It grows now but would not ripen before the turn, which would take it. */
+  late: boolean;
+  reason: string;
+}
+
+/** Nights left before the season turns, tonight included. */
+export function nightsToTurn(day: number): number {
+  return DAYS_PER_SEASON - dayOfSeason(day) + 1;
+}
+
+/**
+ * Can a crop go in today under Sunup's seasons? What grows now can, unless
+ * it would still be green when the season turns and does not grow in the
+ * next one. In the last days of a season the next season's crops can go in
+ * early: they grow on and are in season when it turns.
+ */
+export function sowing(day: number, crop: CropId): Sowing {
+  const now = season(day);
+  const next = ((now + 1) % 4) as 0 | 1 | 2 | 3;
+  const left = nightsToTurn(day);
+  const name = CROPS[crop].name;
+  if (!inSeason(crop, now)) {
+    if (inSeason(crop, next) && left <= SEASON_PREVIEW_DAYS) return { ok: true, next: true, late: false, reason: '' };
+    return { ok: false, next: false, late: false, reason: `${name} won\u2019t grow in ${SEASON_NAMES[now].toLowerCase()}` };
+  }
+  if (!inSeason(crop, next) && CROPS[crop].days > left) return { ok: false, next: false, late: true, reason: `Too late. ${name} won\u2019t ripen before ${SEASON_NAMES[next].toLowerCase()}` };
+  return { ok: true, next: false, late: false, reason: '' };
+}
+
+/** Would watering soak this plot? Owned, hoed, nothing built on it, and not already wet. */
+function soakable(s: WorldState, x: number, y: number): boolean {
+  if (!owned(s, x, y) || buildAt(s, x, y)) return false;
+  const p = plots(s, x, y);
+  return p.tilled && !(s.rules.growth === 'classic' ? p.wet : p.moisture >= 3);
+}
+
+/** Would the hoe turn this plot? Owned meadow with nothing on it. */
+function tillable(s: WorldState, x: number, y: number): boolean {
+  if (!owned(s, x, y) || buildAt(s, x, y)) return false;
+  const p = plots(s, x, y);
+  return !p.tilled && !p.crop;
+}
+
+/** The plots the farmer's tool would work from here: the upgraded can and hoe reach past the aimed one. */
+function toolArea(s: WorldState, x: number, y: number, level: number): { x: number; y: number }[] {
+  return homestead(s) && level > 0 ? area(s.actors[0], x, y, level) : [{ x, y }];
+}
+
 function plantCheck(s: WorldState, crop: CropId): Resolved {
-  if (homestead(s) && !inSeason(crop, season(s.day))) return NO('plant', `${CROPS[crop].name} won\u2019t grow in ${SEASON_NAMES[season(s.day)].toLowerCase()}`);
+  if (homestead(s)) {
+    const sw = sowing(s.day, crop);
+    if (!sw.ok) return NO('plant', sw.reason);
+  }
   if (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(crop)) return NO('plant', `${CROPS[crop].name} is not in your almanac yet`);
   if (s.coins < CROPS[crop].seed) return NO('plant', `${CROPS[crop].name} seeds cost ${CROPS[crop].seed}`);
   return { verb: 'plant', ok: true, reason: '', crop };
@@ -74,17 +131,21 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
     case 'hoe':
       if (build) return { verb: 'clear', ok: true, reason: '', build: build.kind };
       if (crop?.dead) return { verb: 'clear', ok: true, reason: '' };
-      if (!plot.tilled) return { verb: 'till', ok: true, reason: '' };
+      // The upgraded hoe works its whole row or square, so it can still turn meadow beside a hoed plot.
+      if (toolArea(s, x, y, s.tools.hoe).some((t) => tillable(s, t.x, t.y))) return { verb: 'till', ok: true, reason: '' };
       return NO('till', crop ? 'Something is growing here' : 'Already hoed');
     case 'can':
-      if (build) return NO('water', 'Nothing to water');
-      if (!plot.tilled) return NO('water', 'Hoe it first');
-      if (s.rules.growth === 'classic' ? plot.wet : plot.moisture >= 3) return NO('water', 'Already watered');
-      if (homestead(s) && s.water <= 0) return NO('water', 'The can is empty. Fill it at the well or the pond');
+      // The same for the upgraded can: aimed at a wet plot, it still waters the dry ones in its reach.
+      if (!toolArea(s, x, y, s.tools.can).some((t) => soakable(s, t.x, t.y))) {
+        if (build) return NO('water', 'Nothing to water');
+        if (!plot.tilled) return NO('water', 'Hoe this plot first');
+        return NO('water', 'Already watered');
+      }
+      if (homestead(s) && s.water <= 0) return NO('water', 'The can is empty. Fill the can at the well');
       return { verb: 'water', ok: true, reason: '' };
     case 'seeds':
       if (build) return NO('plant', 'Something is built here');
-      if (!plot.tilled) return NO('plant', 'Hoe it first');
+      if (!plot.tilled) return NO('plant', 'Hoe this plot first');
       if (crop) return NO('plant', 'Already planted');
       return plantCheck(s, s.seed);
     case 'hands':
@@ -158,7 +219,8 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
         if (!owned(s, t.x, t.y)) continue;
         const p = plots(s, t.x, t.y);
         if (!p.tilled || buildAt(s, t.x, t.y)) continue;
-        if (t !== tiles[0] && (s.rules.growth === 'classic' ? p.wet : p.moisture >= 3)) continue;
+        // A hand watering one plot soaks it; the farmer's can skips plots that are wet already, so no water is wasted.
+        if ((limited || t !== tiles[0]) && !soakable(s, t.x, t.y)) continue;
         soak(p);
         if (limited) s.water -= 1;
         ev.push({ type: 'water', x: t.x, y: t.y, by });
@@ -197,7 +259,8 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       plot.nutrient = Math.max(0, plot.nutrient - def.feed);
       if (c.kind === 'beans') feedAround(s, x, y);
       ev.push({ type: 'harvest', x, y, crop: c.kind, quality: q, by });
-      if (def.regrow > 0) {
+      // Sunup: a regrowing crop kept past its season for its last ripe pick is done after it.
+      if (def.regrow > 0 && !(homestead(s) && !inSeason(c.kind, season(s.day)))) {
         c.picks += 1;
         c.age = def.days - def.regrow;
         c.stage = stageOf(c.kind, c.age);

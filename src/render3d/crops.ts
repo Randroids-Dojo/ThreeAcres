@@ -1,7 +1,9 @@
 // The crops in the ground, instanced per crop and stage, with the per-tile
 // animations events trigger (a bounce when they grow, a droop when they
-// wither, a shake on deny), bugs crawling on them, quality pips, and the
-// produce that arcs into the crate at harvest.
+// wither, a shake on deny), bugs crawling on them (big enough to see on a
+// phone, and the plant turns a sickly yellow), a soft gold ring on the soil
+// under every ripe crop so a ready plot reads at a glance, quality pips, and
+// the produce that arcs into the crate at harvest.
 
 import {
   BufferGeometry,
@@ -10,8 +12,10 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   Quaternion,
+  RingGeometry,
   Vector3,
   type Material,
 } from 'three';
@@ -105,8 +109,15 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
     }
   }
 
-  const bugMat = patch(new MeshLambertMaterial({ color: '#2b211c', emissive: '#120a06' }), { snow: 0 });
+  const bugMat = patch(new MeshLambertMaterial({ color: '#2a1d16', emissive: '#1c0c06' }), { snow: 0 });
   const bugs = make(ico(1, 0), bugMat, cap * 12, false);
+  // Ripe: a soft gold ring on the soil around the plant.
+  const ringGeo = new RingGeometry(0.33, 0.45, 28, 1).rotateX(-Math.PI / 2);
+  const ringMat = new MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.6, depthWrite: false });
+  const rings = make(ringGeo, ringMat, cap, false);
+  rings.name = 'ripe-rings';
+  rings.receiveShadow = false;
+  rings.renderOrder = 2;
   const pipMat = patch(new MeshLambertMaterial({ vertexColors: true, emissive: '#3a3020' }), { snow: 0 });
   const pipGeos = pipModels();
   const pips = [null, make(pipGeos[1], pipMat, cap, false), make(pipGeos[2], pipMat, cap, false), make(pipGeos[3], pipMat, cap, false)];
@@ -143,6 +154,7 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
         for (let k = 0; k < 6; k++) c[k] = 0;
       }
       let bugN = 0;
+      let ringN = 0;
       const pipN = [0, 0, 0, 0];
       const W = st.W;
       for (let i = 0; i < st.plots.length; i++) {
@@ -196,23 +208,36 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
         _m.compose(_p, _q, _s);
         mesh.setMatrixAt(n, _m);
         const tone = 0.93 + hash2(x, y, 9) * 0.12;
-        mesh.setColorAt(n, _c.setRGB(tone, tone, tone * 0.98));
+        // A bugged plant yellows, so the trouble shows from across the field.
+        // (Instance colours multiply the leaf colour, so red is pushed up to turn green leaves a sickly olive.)
+        if (crop.bugs > 0 && !crop.dead) mesh.setColorAt(n, _c.setRGB(tone * 1.9, tone * 0.95, tone * 0.35));
+        else mesh.setColorAt(n, _c.setRGB(tone, tone, tone * 0.98));
+
+        // Ripe: the gold ring, breathing a little.
+        if (crop.stage === 4 && !crop.dead) {
+          const k = 1 + Math.sin(now * 2.4 + h * 6) * 0.04;
+          _q.identity();
+          _p.set(x + 0.5, SOIL_Y + 0.012, y + 0.5);
+          _s.set(k, 1, k);
+          _m.compose(_p, _q, _s);
+          rings.setMatrixAt(ringN++, _m);
+        }
 
         // Bugs: crawlers on the plant and gnats circling above it, more as the count rises.
         if (crop.bugs > 0 && !crop.dead) {
-          const top = Math.max(0.12, models.height[kind][crop.stage]);
+          const top = Math.max(0.16, models.height[kind][crop.stage]);
           const nb = Math.min(3, crop.bugs);
           for (let b = 0; b < nb * 2; b++) {
             const ph = now * (0.7 + b * 0.13) + b * 2.1 + h * 6;
             const rr = 0.12 + (b % 3) * 0.06;
-            _p.set(x + 0.5 + Math.cos(ph) * rr, SOIL_Y + 0.03 + ((b * 0.37) % 1) * top * 0.6, y + 0.5 + Math.sin(ph) * rr * 0.8);
+            _p.set(x + 0.5 + Math.cos(ph) * rr, SOIL_Y + 0.05 + ((b * 0.37) % 1) * top * 0.7, y + 0.5 + Math.sin(ph) * rr * 0.8);
             _q.identity();
-            _s.set(0.034, 0.026, 0.03);
+            _s.set(0.058, 0.044, 0.05);
             _m.compose(_p, _q, _s);
             bugs.setMatrixAt(bugN++, _m);
             const gp = now * (3.2 + b * 0.5) + b * 1.7;
-            _p.set(x + 0.5 + Math.cos(gp) * 0.18, SOIL_Y + top + 0.1 + Math.sin(gp * 1.7) * 0.06, y + 0.5 + Math.sin(gp) * 0.14);
-            _s.set(0.018, 0.018, 0.018);
+            _p.set(x + 0.5 + Math.cos(gp) * 0.2, SOIL_Y + top + 0.14 + Math.sin(gp * 1.7) * 0.07, y + 0.5 + Math.sin(gp) * 0.16);
+            _s.set(0.03, 0.03, 0.03);
             _m.compose(_p, _q, _s);
             bugs.setMatrixAt(bugN++, _m);
           }
@@ -233,6 +258,7 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
         commit(deadMesh[id], Math.min(cap, counts[id][5]));
       }
       commit(bugs, bugN, false);
+      commit(rings, ringN, false);
       for (let q = 1; q <= 3; q++) commit(pips[q]!, pipN[q], false);
 
       // Flyers: an arc from the plot into the crate, spinning.
@@ -268,6 +294,8 @@ export function buildCrops(s: Readonly<WorldState>, mats: Materials): Crops {
       for (const g of pipGeos) g.dispose();
       bugMat.dispose();
       pipMat.dispose();
+      ringGeo.dispose();
+      ringMat.dispose();
     },
   };
   return self;

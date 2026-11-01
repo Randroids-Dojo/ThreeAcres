@@ -8,7 +8,7 @@ import { CROPS } from './crops';
 import { BUNK } from './map';
 import { pathNextTo, pathTo } from './path';
 import { needsWater } from './soil';
-import { idx, owned, walkable } from './world';
+import { idx, inMap, owned, walkable } from './world';
 import type { Actor, Facing, Job, SimEvent, Verb, WorldState } from './types';
 
 const RADIUS = 0.28;
@@ -35,6 +35,41 @@ export function facingTile(a: Actor): { x: number; y: number } {
   const t = tileOf(a);
   const v = facingVec(a.facing);
   return { x: t.x + v.x, y: t.y + v.y };
+}
+
+/**
+ * The tile acting works on under walk control: the one in front when acting
+ * there would do something, else the nearest useful tile in reach (the
+ * farmer's own and the eight around it), ties going to the one most in front.
+ * Walking along a row while holding act then works each plot in turn, and
+ * the well or the board answer from any side. `useful` says what counts;
+ * the sim asks the tool, the director also counts the notice board. Null
+ * when nothing in reach is useful.
+ */
+export function snapAim(a: Actor, useful: (x: number, y: number) => boolean): { x: number; y: number } | null {
+  const front = facingTile(a);
+  if (inMap(front.x, front.y) && useful(front.x, front.y)) return front;
+  const t = tileOf(a);
+  const v = facingVec(a.facing);
+  let best: { x: number; y: number } | null = null;
+  let bestScore = Infinity;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = t.x + dx;
+      const y = t.y + dy;
+      if (!inMap(x, y) || !useful(x, y)) continue;
+      const cx = x + 0.5 - a.x;
+      const cy = y + 0.5 - a.y;
+      const d = Math.hypot(cx, cy);
+      const ahead = d > 1e-6 ? (cx * v.x + cy * v.y) / d : 1;
+      const score = d - 0.35 * ahead;
+      if (score < bestScore - 1e-9) {
+        bestScore = score;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
 }
 
 function faceTowards(a: Actor, dx: number, dy: number): void {

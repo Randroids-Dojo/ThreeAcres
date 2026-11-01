@@ -4,7 +4,7 @@
 
 import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
 import { resolve } from '../../sim/actions';
-import { facingTile, farmer } from '../../sim/actors';
+import { facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
@@ -73,6 +73,7 @@ export class Director {
       },
       offerParcel: (id) => this.dialogs.parcel(id),
       project: (x, y, h) => this.r3d?.project(x, y, h) ?? null,
+      sleep: () => this.sleep(),
       input: this.input,
     });
     this.dialogs = new Dialogs({
@@ -163,6 +164,8 @@ export class Director {
       else this.ctx.openSwitcher();
       return true;
     }
+    // Enter answers an open question (sleep now?, buy this?) with its main button.
+    if (code === 'Enter' && this.dialogs.open) return this.dialogs.accept();
     if (this.dialogs.open) return false;
     if (/^Digit[1-5]$/.test(code)) {
       this.hud.toolByNumber(Number(code[5]));
@@ -175,7 +178,7 @@ export class Director {
         this.tutor.board(this.state);
         return true;
       case 'Enter':
-        this.input.push({ type: 'sleep' });
+        this.sleep();
         return true;
       case 'KeyQ':
         this.hud.cycleTool(shift);
@@ -196,23 +199,66 @@ export class Director {
     return false;
   }
 
+  /**
+   * Sleep from the button or Enter. Before noon it asks first, so a stray tap
+   * does not throw away a morning, except while the first lesson teaches it
+   * and when there is no stamina left to spend.
+   */
+  sleep(): void {
+    const s = this.state;
+    if (s.turnover >= 0) return;
+    const teaching = !s.learn.includes('lesson:sleep');
+    if (s.minute < 360 && !teaching && s.stamina >= 10) {
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }));
+      return;
+    }
+    this.input.push({ type: 'sleep' });
+  }
+
   // ------------------------------------------------------------ frame
 
-  private aim(): { x: number; y: number } | null {
+  private atBoard(x: number, y: number): boolean {
+    return propAt(x, y)?.kind === 'board' && this.state.learn.includes('board');
+  }
+
+  /**
+   * The tile acting would work on, and whether acting there does anything: a
+   * tapped tile for a moment, else the plot in front, else (when that has
+   * nothing to do) the nearest useful one in reach, the notice board included.
+   * The same choice the simulation makes for the act command.
+   */
+  private aimAt(): { x: number; y: number; useful: boolean } | null {
     const s = this.state;
-    if (this.walkAim && this.t - this.walkAim.t < 1.2) return this.walkAim;
-    const t = facingTile(farmer(s));
-    return inMap(t.x, t.y) ? t : null;
+    const ok = (x: number, y: number) => {
+      const r = resolve(s, s.tool, x, y);
+      return !!(r.verb && r.ok);
+    };
+    if (this.walkAim && this.t - this.walkAim.t < 1.2) return { ...this.walkAim, useful: this.atBoard(this.walkAim.x, this.walkAim.y) || ok(this.walkAim.x, this.walkAim.y) };
+    const f = farmer(s);
+    const t = facingTile(f);
+    // Facing the board reads it. Otherwise the simulation's own choice comes first (so the button never
+    // promises what acting would not do), and the board only when nothing else in reach is useful.
+    if (inMap(t.x, t.y) && this.atBoard(t.x, t.y)) return { ...t, useful: true };
+    const snapped = snapAim(f, ok) ?? snapAim(f, (x, y) => this.atBoard(x, y));
+    if (snapped) return { ...snapped, useful: true };
+    return inMap(t.x, t.y) ? { ...t, useful: false } : null;
+  }
+
+  private aim(): { x: number; y: number } | null {
+    const a = this.aimAt();
+    return a ? { x: a.x, y: a.y } : null;
   }
 
   view(dt: number): FrameView {
     const s = this.state;
-    const aim = this.aim();
+    const aim = this.aimAt();
     let highlight: FrameView['highlight'] = null;
-    if (aim) {
+    if (aim && s.turnover < 0) {
       const r = resolve(s, s.tool, aim.x, aim.y);
-      // Only what the tool can do is marked. A refusal explains itself when you try.
-      if (r.verb && r.ok) highlight = { x: aim.x, y: aim.y, verb: r.verb, ok: true };
+      // What acting would do is marked brightly; otherwise a faint cursor shows the plot in front.
+      // (A refusal explains itself when you try.)
+      if (aim.useful) highlight = { x: aim.x, y: aim.y, verb: this.atBoard(aim.x, aim.y) ? null : r.verb, ok: true };
+      else highlight = { x: aim.x, y: aim.y, verb: null, ok: false };
     }
     return {
       state: s,
@@ -242,10 +288,10 @@ export class Director {
     const s = this.state;
 
     let cmds = this.input.collect(dt);
-    // The notice board is in the yard: face it and act to read it.
-    const front = facingTile(farmer(s));
+    // The notice board is in the yard: act beside it, from any side, or tap it, to read it.
+    const aimed = this.aimAt();
     const atBoard = (x: number, y: number) => propAt(x, y)?.kind === 'board';
-    if (cmds.some((c) => (c.type === 'act' && atBoard(front.x, front.y)) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
+    if (cmds.some((c) => (c.type === 'act' && aimed && aimed.useful && atBoard(aimed.x, aimed.y)) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
       cmds = cmds.filter((c) => c.type !== 'act' && c.type !== 'actAt');
       this.dialogs.board();
       this.tutor.board(s);

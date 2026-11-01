@@ -1,7 +1,9 @@
 // The farm's buildings and fixtures from src/sim/map.ts: the house, the
-// bunkhouse, the shipping crate and the notice board, with the lanterns, the
-// road out to town and a little yard dressing. Static, merged, rebuilt with
-// the season. Windows and lantern glass share one glowing material.
+// shipping crate, the notice board and the well, with the lanterns, the road
+// out to town and a little yard dressing. Static, merged, rebuilt with the
+// season. Windows and lantern glass share one glowing material. Sunup is
+// farmed alone, so the old crew mode's bunkhouse is not built (its ground is
+// open yard), and there is only the one well, the working one.
 
 import { CanvasTexture, Color, Group, Mesh, MeshLambertMaterial, PlaneGeometry, SRGBColorSpace, Vector3 } from 'three';
 import { PROPS, ROAD } from '../sim/map';
@@ -118,7 +120,7 @@ export function buildProps(season: Season, mats: Materials, glass: MeshLambertMa
     const cx = p.x + p.w / 2;
     const cz = p.y + p.h / 2;
     if (p.kind === 'house') house(b, gl, lamps, cx, cz, p.w, p.h, p.doorX + 0.5, season, chimney);
-    else if (p.kind === 'bunkhouse') bunkhouse(b, gl, lamps, cx, cz, p.w, p.h, p.doorX + 0.5, r);
+    else if (p.kind === 'bunkhouse') continue;
     else if (p.kind === 'crate') crate(b, cx, cz, crateMouth);
     else if (p.kind === 'well') well(b, cx, cz);
     else board(b, cx, cz, p.w);
@@ -293,55 +295,6 @@ function lanternPost(b: GeoBuilder, gl: GeoBuilder, lamps: Lamp[], x: number, z:
   lamps.push({ x: x + 0.16, y: 0.75, z, pool: 1.6, size: 0.7 });
 }
 
-function bunkhouse(b: GeoBuilder, gl: GeoBuilder, lamps: Lamp[], cx: number, cz: number, w: number, h: number, doorX: number, r: () => number): void {
-  const ww = w - 0.3;
-  const dd = h - 0.4;
-  const base = 0.1;
-  const logs = 7;
-  const lr = 0.07;
-  b.add(block(ww + 0.1, base, dd + 0.1, 0.03), at(cx, base / 2, cz), C.plinthDark);
-  // Solid core so gaps between logs never show light.
-  b.add(block(ww - 0.06, logs * lr * 2 - 0.02, dd - 0.06, 0.01), at(cx, base + logs * lr, cz), C.log2);
-  for (let i = 0; i < logs; i++) {
-    const y = base + lr + i * lr * 2;
-    const k = i % 2 ? C.log : C.log2;
-    for (const s of [-1, 1]) {
-      b.add(cyl(lr, lr, ww + 0.16, 7), at(cx - (ww + 0.16) / 2, y, cz + s * dd / 2, 0, 0, -Math.PI / 2), k, { flat: true });
-      b.add(cyl(lr * 0.95, lr * 0.95, dd + 0.16, 7), at(cx + s * ww / 2, y + lr * 0.5, cz - (dd + 0.16) / 2, 0, Math.PI / 2, 0), k, { flat: true });
-    }
-  }
-  // Log ends at the corners.
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (let i = 0; i < logs; i += 2) b.add(cyl(lr * 0.8, lr * 0.8, 0.01, 7), at(cx + sx * (ww / 2 + 0.08), base + lr + i * lr * 2, cz + sz * dd / 2, 0, 0, -Math.PI / 2), C.logEnd);
-  const eave = base + logs * lr * 2;
-  const pitch = 0.5;
-  const halfD = dd / 2 + 0.14;
-  gable(b, cx - ww / 2, cz - dd / 2, cz + dd / 2, eave, eave + Math.tan(pitch) * (dd / 2), C.log2, -1);
-  gable(b, cx + ww / 2, cz - dd / 2, cz + dd / 2, eave, eave + Math.tan(pitch) * (dd / 2), C.log2, 1);
-  roofSlopes(b, cx, cz, ww + 0.4, halfD, eave - 0.05, pitch, 0.07, C.roof2, C.roof2Dark, 4);
-  // Stovepipe.
-  b.add(cyl(0.05, 0.05, 0.55, 7), at(cx - ww / 2 + 0.5, eave + 0.2, cz - 0.15), C.metal, { flat: true });
-  b.add(cone(0.09, 0.07, 7), at(cx - ww / 2 + 0.5, eave + 0.75, cz - 0.15), C.metal, { flat: true });
-  const front = cz + dd / 2 + lr;
-  b.add(block(0.42, 0.76, 0.05, 0.01), at(doorX, base + 0.38, front), C.plank);
-  for (let i = -1; i <= 1; i++) b.add(block(0.012, 0.74, 0.01, 0.004), at(doorX + i * 0.12, base + 0.38, front + 0.03), C.log2);
-  b.add(ball(0.02, 6, 4), at(doorX + 0.14, base + 0.38, front + 0.04), C.brass);
-  // Porch: boards, two posts, a roof and a bench.
-  b.add(block(1.5, 0.05, 0.3, 0.01), at(doorX, 0.06, front + 0.13), C.log);
-  for (const s of [-1, 1]) b.add(block(0.06, 0.9, 0.06, 0.01), at(doorX + s * 0.7, 0.45, front + 0.24), C.log2);
-  b.add(block(1.62, 0.05, 0.42, 0.015), at(doorX, 0.93, front + 0.16, 0, 0.2, 0), C.roof2Dark);
-  b.add(block(0.5, 0.04, 0.14, 0.01), at(doorX + 0.5, 0.2, front + 0.1), C.log);
-  for (const s of [-1, 1]) b.add(block(0.04, 0.18, 0.12, 0.005), at(doorX + 0.5 + s * 0.2, 0.09, front + 0.1), C.log2);
-  windowAt(b, gl, lamps, doorX - 0.75, base + 0.52, front + 0.01, 0.34, 0.3, 'z', 1, false, false, 0);
-  windowAt(b, gl, lamps, doorX + 0.95, base + 0.52, front + 0.01, 0.34, 0.3, 'z', 1, false, false, 0);
-  wallLantern(b, gl, lamps, doorX - 0.36, base + 0.72, front + 0.01);
-  // Wood pile on the west end.
-  for (let i = 0; i < 9; i++) {
-    const row = Math.floor(i / 3);
-    const col2 = i % 3;
-    b.add(cyl(0.055, 0.055, 0.42, 6), at(cx - ww / 2 - 0.16, 0.06 + row * 0.1, cz - 0.2 + col2 * 0.12 + row * 0.05, 0, Math.PI / 2, 0), r() < 0.5 ? C.log : C.log2, { flat: true });
-  }
-}
-
 function crate(b: GeoBuilder, cx: number, cz: number, mouth: Vector3): void {
   const w = 0.78;
   const d = 0.62;
@@ -426,19 +379,6 @@ function yard(b: GeoBuilder, season: Season, r: () => number): void {
   hay(11.5, 1.45, 0, 0.1);
   hay(12.2, 1.5, 0, -0.15);
   hay(11.85, 1.5, 0.26, 0.05);
-  // A stone well in the far corner.
-  const wx = 17.75;
-  const wz = 1.7;
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2;
-    b.add(block(0.14, 0.24, 0.1, 0.02), at(wx + Math.cos(a) * 0.26, 0.12, wz + Math.sin(a) * 0.26, -a), (_w, n) => (n.y > 0.5 ? C.stone : col('#a39a8a')));
-  }
-  b.add(cyl(0.22, 0.22, 0.01, 10), at(wx, 0.16, wz), col('#2e4a55'));
-  for (const s of [-1, 1]) b.add(block(0.05, 0.7, 0.05, 0.01), at(wx + s * 0.3, 0.35, wz), C.post);
-  b.add(cyl(0.03, 0.03, 0.64, 6), at(wx - 0.32, 0.6, wz, 0, 0, -Math.PI / 2), C.post);
-  b.add(block(0.78, 0.04, 0.26, 0.01), at(wx, 0.78, wz - 0.1, 0, -0.5, 0), C.roof);
-  b.add(block(0.78, 0.04, 0.26, 0.01), at(wx, 0.78, wz + 0.1, 0, 0.5, 0), C.roofDark);
-  b.add(cyl(0.06, 0.05, 0.08, 7), at(wx + 0.05, 0.4, wz), C.log, { flat: true });
   // A bench and a few flower pots by the house, and a scatter of logs.
   if (season !== 3) {
     for (let i = 0; i < 3; i++) {

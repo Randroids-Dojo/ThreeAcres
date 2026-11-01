@@ -1,25 +1,29 @@
 // What the farm is for, per goal rule: market milestones, almanac seasons and
 // town orders. Selling lives here too, because the goal decides how it works.
 
-import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_SLOTS, TOWN } from './constants';
+import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, requestSlots, TOWN } from './constants';
 import { CROP_IDS, CROPS, count, inSeason } from './crops';
 import { season } from './world';
-import { priceOf } from './actions';
+import { nightsToTurn, priceOf, sowing } from './actions';
 import { pick, rand, randInt, shuffle } from './rng';
 import type { CropId, DayReport, Goal, GoalKind, Order, SimEvent, WorldState } from './types';
 
 // ---------------------------------------------------------------- selling
 
-/** Sell every unit of one crop in stock. Returns coins made. */
-export function sellCrop(s: WorldState, crop: CropId, ev: SimEvent[], report?: DayReport): number {
+/** Sell every unit of one crop in stock, but `keep` of them (the plainest). Returns coins made. */
+export function sellCrop(s: WorldState, crop: CropId, ev: SimEvent[], report?: DayReport, keep = 0): number {
   const grades = s.stock[crop];
   let n = 0;
   let value = 0;
+  let held = keep;
   for (let q = 0; q < 4; q++) {
-    if (!grades[q]) continue;
-    value += priceOf(s, crop, q) * grades[q];
-    n += grades[q];
-    grades[q] = 0;
+    const hold = Math.min(held, grades[q]);
+    held -= hold;
+    const sell = grades[q] - hold;
+    if (!sell) continue;
+    value += priceOf(s, crop, q) * sell;
+    n += sell;
+    grades[q] = hold;
   }
   if (!n) return 0;
   s.coins += value;
@@ -110,38 +114,113 @@ export function ordersOvernight(s: WorldState, ev: SimEvent[]): void {
 
 // ---------------------------------------------------------------- town requests (Sunup)
 
+/** Living crops of a kind on the farm, and the fewest days until one of them is ripe. */
+function growing(s: WorldState, crop: CropId): { n: number; soonest: number } {
+  let n = 0;
+  let soonest = Infinity;
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (!c || c.dead || c.kind !== crop || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+    n++;
+    soonest = Math.min(soonest, Math.max(0, CROPS[crop].days - c.age));
+  }
+  return { n, soonest };
+}
+
+/** The last day a crop can be handed over: the end of its season, unless it also grows in the next. */
+function lastDayFor(s: WorldState, crop: CropId): number {
+  const turn = s.day + nightsToTurn(s.day) - 1;
+  const next = (season(s.day) + 1) % 4;
+  return inSeason(crop, next) ? Infinity : turn;
+}
+
+function round5(n: number): number {
+  return Math.max(5, Math.round(n / 5) * 5);
+}
+
 /**
- * Townsfolk ask for a few of one crop that is in season. A request is filled
- * from the crate when the day ends, before the rest ships, and pays well over
- * market price plus a point of reputation, which the smith wants before he
- * will make better tools. Requests that run out simply lapse.
+ * Townsfolk ask for a few of one crop. A request is filled from the crate
+ * when the day ends, before the rest ships, and pays well over market price
+ * plus a point of reputation, which the smith wants before he will make
+ * better tools. Requests are the backbone of a day: always a crop that can
+ * be grown and handed over in time (from seed today, or already in the
+ * ground), never due after its season ends, sized to the farm, and a fresh
+ * one is pinned as soon as one is filled. The very first is a few radishes,
+ * cheap to grow, so it can be filled with what the first days teach.
  */
-export function makeRequest(s: WorldState): Order {
-  const now = season(s.day);
-  const known = s.rep < 2 ? ['radish', 'lettuce', 'carrot', 'strawberry', 'beans', 'sunflower'] : CROP_IDS;
-  let kinds = CROP_IDS.filter((c) => known.includes(c) && inSeason(c, now) && !s.orders.some((o) => o.items[0].crop === c));
-  if (!kinds.length) kinds = CROP_IDS.filter((c) => inSeason(c, now));
-  const crop = kinds[Math.floor(rand(s) * kinds.length)];
-  const big = CROPS[crop].price > 150;
-  const n = big ? randInt(s, 1, 2) : randInt(s, 3, 5) + Math.min(4, Math.floor(s.rep / 3));
+export function makeRequest(s: WorldState): Order | null {
+  const known = s.rep < 2 ? ['radish', 'lettuce', 'carrot', 'strawberry', 'beans', 'sunflower', 'corn'] : CROP_IDS;
+  const first = s.rep === 0 && !(s.requested ?? 0);
+  type Option = { crop: CropId; last: number; have: number; soonest: number; seedOk: boolean; growOk: boolean };
+  const options: Option[] = [];
+  // A crop no other request wants, if any will do; else a second request for one that is wanted already.
+  const fresh = CROP_IDS.filter((c) => !s.orders.some((o) => o.items[0].crop === c));
+  const pool = fresh.some((c) => known.includes(c) && feasible(s, c)) ? fresh : CROP_IDS;
+  for (const crop of pool) {
+    if (!known.includes(crop)) continue;
+    const g = growing(s, crop);
+    const last = lastDayFor(s, crop);
+    // Some could be in the crate in time: from seed sown today (ripe after its days), or already in the ground.
+    const seedOk = sowing(s.day, crop).ok && s.day + CROPS[crop].days <= last;
+    const growOk = g.n > 0 && s.day + g.soonest <= last;
+    if (!seedOk && !growOk) continue;
+    options.push({ crop, last, have: g.n, soonest: g.soonest, seedOk, growOk });
+  }
+  let pickFrom = options;
+  if (first) {
+    const radish = options.filter((o) => o.crop === 'radish');
+    if (radish.length) pickFrom = radish;
+  }
+  // Nothing can be grown and handed over in time (the very end of a season): no request today.
+  if (!pickFrom.length) return null;
+  const o = pickFrom[Math.floor(rand(s) * pickFrom.length)];
+  const big = CROPS[o.crop].price > 150;
+  const fields = s.parcels.filter((p) => p.owned).length;
+  // Small, and a little bigger as the town and the farm grow.
+  let n = first ? 3 : big ? randInt(s, 1, 2) : randInt(s, 2, 4) + Math.min(4, Math.floor(s.rep / 3) + (fields - 1));
+  // Out of seed time, it asks only for what is already growing.
+  if (!o.seedOk) n = Math.max(1, Math.min(n, o.have));
+  // Ready when enough is in the ground, or when seed sown today would be.
+  const ready = o.growOk && o.have >= n ? Math.min(o.soonest, o.seedOk ? CROPS[o.crop].days : Infinity) : CROPS[o.crop].days;
+  const slack = first ? 2 : randInt(s, 2, 3);
+  const due = Math.min(o.last, s.day + ready + slack);
+  s.requested = (s.requested ?? 0) + 1;
   return {
     id: s.nextId++,
     who: pick(s, TOWN),
-    items: [{ crop, n }],
-    reward: Math.round((CROPS[crop].price * n * 1.5) / 5) * 5,
+    items: [{ crop: o.crop, n }],
+    reward: round5(CROPS[o.crop].price * n * 1.5) + 10,
     rep: 1,
-    due: s.day + Math.max(3, CROPS[crop].days + 1) + randInt(s, 0, 2),
+    due,
   };
+}
+
+/** Could some of this crop be in the crate before its season ends? */
+function feasible(s: WorldState, crop: CropId): boolean {
+  const last = lastDayFor(s, crop);
+  const g = growing(s, crop);
+  return (sowing(s.day, crop).ok && s.day + CROPS[crop].days <= last) || (g.n > 0 && s.day + g.soonest <= last);
 }
 
 /** One request at a time until the first is filled, then a few. */
 export function fillRequests(s: WorldState): void {
-  const slots = s.rep >= 1 ? REQUEST_SLOTS : 1;
-  while (s.orders.length < slots) s.orders.push(makeRequest(s));
+  const slots = requestSlots(s.rep);
+  while (s.orders.length < slots) {
+    const o = makeRequest(s);
+    if (!o) break;
+    s.orders.push(o);
+  }
+}
+
+/** How many of each crop the open requests still want from the crate. */
+export function wanted(s: WorldState): Partial<Record<CropId, number>> {
+  const out: Partial<Record<CropId, number>> = {};
+  for (const o of s.orders) for (const it of o.items) out[it.crop] = (out[it.crop] ?? 0) + it.n;
+  return out;
 }
 
 /** At nightfall: fill what the crate can, let the late ones go. */
-export function settleRequests(s: WorldState, ev: SimEvent[]): void {
+export function settleRequests(s: WorldState, ev: SimEvent[], report?: DayReport): void {
   for (const o of s.orders.slice()) {
     if (canDeliver(s, o)) {
       const it = o.items[0];
@@ -155,6 +234,7 @@ export function settleRequests(s: WorldState, ev: SimEvent[]): void {
       s.coins += o.reward;
       s.stats.earned += o.reward;
       s.rep += o.rep;
+      if (report) (report.filled ??= []).push({ who: o.who, reward: o.reward });
       ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: o.reward });
     } else if (o.due <= s.day) {
       s.orders = s.orders.filter((x) => x !== o);
@@ -277,17 +357,18 @@ export function joinAlmanac(s: WorldState): void {
 
 // ---------------------------------------------------------------- milestones
 
-export const MILESTONES: { id: string; text: string }[] = [
-  { id: 'first', text: 'Bring in a first harvest' },
-  { id: 'field2', text: 'Buy a second field' },
-  { id: 'coins1k', text: 'Hold 1,000 coins' },
-  { id: 'pumpkin', text: 'Grow a pumpkin' },
-  { id: 'gold', text: 'Harvest a gold crop' },
-  { id: 'hand', text: 'Hire a farmhand' },
-  { id: 'every', text: 'Harvest every kind of crop' },
-  { id: 'coins5k', text: 'Hold 5,000 coins' },
-  { id: 'allfields', text: 'Own every field' },
-  { id: 'year', text: 'Farm for a whole year' },
+/** `text` is the goal as a list item; `done` is how it reads once it is yours. */
+export const MILESTONES: { id: string; text: string; done: string }[] = [
+  { id: 'first', text: 'Bring in a first harvest', done: 'Your first harvest is in' },
+  { id: 'field2', text: 'Buy a second field', done: 'A second field, yours' },
+  { id: 'coins1k', text: 'Hold 1,000 coins', done: 'A thousand coins in the tin' },
+  { id: 'pumpkin', text: 'Grow a pumpkin', done: 'Your first pumpkin' },
+  { id: 'gold', text: 'Harvest a gold crop', done: 'A gold crop' },
+  { id: 'hand', text: 'Hire a farmhand', done: 'A farmhand joins you' },
+  { id: 'every', text: 'Harvest every kind of crop', done: 'Every kind of crop, grown' },
+  { id: 'coins5k', text: 'Hold 5,000 coins', done: 'Five thousand coins in the tin' },
+  { id: 'allfields', text: 'Own every field', done: 'Every field, yours' },
+  { id: 'year', text: 'Farm for a whole year', done: 'A whole year on the farm' },
 ];
 
 export function checkMilestones(s: WorldState, ev: SimEvent[]): void {

@@ -1,7 +1,9 @@
 // Markers on tiles: the aimed tile (a frame, a fill and a floating verb
-// badge, red-tinged when the action cannot happen) and queued jobs (a pennant
-// on a stake coloured by verb, and a chalk mark of the verb on the ground,
-// both dimmer while no one has claimed the job).
+// badge, red-tinged when the action cannot happen; a faint frame alone when
+// it is only the plot in front, with nothing to do), the rest of an upgraded
+// tool's reach (faint frames on the other plots it would work), and queued
+// jobs (a pennant on a stake coloured by verb, and a chalk mark of the verb
+// on the ground, both dimmer while no one has claimed the job).
 
 import {
   CanvasTexture,
@@ -23,6 +25,7 @@ import {
   Vector3,
 } from 'three';
 import type { FrameView } from '../contract';
+import { area, homestead } from '../sim/actions';
 import type { Verb, WorldState } from '../sim/types';
 import { GeoBuilder, block, cyl } from './builder';
 import type { Materials } from './materials';
@@ -268,6 +271,14 @@ export function buildMarkers(mats: Materials, cap: number): Markers {
   hl.add(fill, frame, badge);
   hl.visible = false;
   group.add(hl);
+  // The reach of an upgraded can or hoe: faint frames on the other plots it would work.
+  const reachMat = new MeshBasicMaterial({ color: '#fff8e6', transparent: true, opacity: 0.55, depthWrite: false });
+  const reach = new InstancedMesh(frame.geometry, reachMat, 8);
+  reach.renderOrder = 30;
+  reach.frustumCulled = false;
+  reach.count = 0;
+  reach.visible = false;
+  group.add(reach);
 
   // Job pennants: one instanced mesh, coloured per verb.
   const pb = new GeoBuilder();
@@ -301,24 +312,47 @@ export function buildMarkers(mats: Materials, cap: number): Markers {
     update(v, now) {
       const s = v.state as WorldState;
       const h = v.highlight;
+      let nReach = 0;
       if (h && h.x >= 0 && h.y >= 0 && h.x < s.W && h.y < s.H) {
         hl.visible = true;
-        const pulse = 1 + Math.sin(now * 5) * 0.02;
+        // Nothing to do here: only a faint, still frame on the plot in front, so you can see what you face.
+        const faint = !h.ok && h.verb === null;
+        const pulse = faint ? 1 : 1 + Math.sin(now * 5) * 0.02;
         hl.position.set(h.x + 0.5, 0, h.y + 0.5);
         frame.position.y = 0.1;
         frame.scale.set(pulse, 1, pulse);
         fill.position.y = 0.075;
-        const bad = !h.ok;
+        const bad = !h.ok && !faint;
         frameMat.color.set(bad ? '#ff8f7a' : '#fff8e6');
+        frameMat.opacity = faint ? 0.4 : 0.95;
         ghostMat.color.copy(frameMat.color);
+        ghostMat.opacity = faint ? 0.12 : 0.3;
+        fill.visible = !faint;
         fillMat.color.set(bad ? '#ff6a52' : '#fff8e6');
         fillMat.opacity = bad ? 0.26 : 0.16;
-        badge.visible = h.verb !== null || bad;
+        badge.visible = !faint && (h.verb !== null || bad);
         if (badge.visible) {
           badge.material = badgeMat(h.verb, bad);
           badge.position.set(0, 0.62 + Math.sin(now * 3) * 0.03, 0);
         }
+        // An upgraded can or hoe works more than the aimed plot: show the rest of its reach.
+        const level = h.verb === 'water' ? s.tools?.can ?? 0 : h.verb === 'till' ? s.tools?.hoe ?? 0 : 0;
+        if (h.ok && level > 0 && homestead(s) && s.actors[0]) {
+          for (const t of area(s.actors[0], h.x, h.y, level)) {
+            if (nReach >= 8 || (t.x === h.x && t.y === h.y)) continue;
+            const i = t.y * s.W + t.x;
+            if (s.tiles[i] !== 'field' || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned) continue;
+            _q.identity();
+            _p.set(t.x + 0.5, 0.1, t.y + 0.5);
+            _s.set(0.94, 1, 0.94);
+            _m.compose(_p, _q, _s);
+            reach.setMatrixAt(nReach++, _m);
+          }
+        }
       } else hl.visible = false;
+      reach.count = nReach;
+      reach.visible = nReach > 0;
+      if (nReach) reach.instanceMatrix.needsUpdate = true;
 
       let n = 0;
       for (const vb of VERBS) counts[vb] = 0;
@@ -362,6 +396,7 @@ export function buildMarkers(mats: Materials, cap: number): Markers {
       fill.geometry.dispose();
       frameMat.dispose();
       ghostMat.dispose();
+      reachMat.dispose();
       fillMat.dispose();
       for (const m of badges.values()) {
         m.map?.dispose();

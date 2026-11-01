@@ -76,7 +76,7 @@ describe('a crow will not wait', () => {
     s.day = 5;
     s.coins = 500;
     const t = new Tutor();
-    expect(t.update(s, 0.1, true).line).toBe('Buy a second field. Hoe it first.');
+    expect(t.update(s, 0.1, true).line).toBe('Buy a second field.');
     s.crows.push({ id: 901, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
     expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     t.onEvent(s, { type: 'crowScared', id: 901, x: 3, y: 5 } as never);
@@ -84,6 +84,40 @@ describe('a crow will not wait', () => {
     t.update(s, 0.1, true);
     expect(t.update(s, 0.1, true).line).toBe('Scarecrows keep crows away. Build one.');
     for (let i = 0; i < 100; i++) t.update(s, 0.1, true);
-    expect(t.update(s, 0.1, true).line).toBe('Buy a second field. Hoe it first.');
+    expect(t.update(s, 0.1, true).line).toBe('Buy a second field.');
+  });
+});
+
+describe('Sunup copy after the playtest', () => {
+  it('says where and what: no vague lines, no lines that misfire', () => {
+    const lines = allLines(world('sunup'));
+    expect(lines).toContain('Read the board.');
+    expect(lines).toContain('Hoe the new field.');
+    expect(lines).toContain('Tap a radish to harvest it.');
+    expect(lines).toContain('Fill the can at the well.');
+    for (const l of lines) expect(l, l).not.toMatch(/pinned|^Grow it|Done for today|Hoe it first/);
+  });
+
+  it('never says "Build one" to a farmer who cannot pay for it', async () => {
+    const { Tutor } = await import('../src/games/homestead/lessons');
+    const s = world('sunup');
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'pests', 'bugs']) s.learn.push(`lesson:${id}`);
+    s.coins = 0;
+    const t = new Tutor();
+    const line = t.update(s, 0.1, true).line;
+    expect(line).toBe('Scarecrows keep crows away. They cost 40.');
+  });
+
+  it('a milestone reads as something won, not a task', async () => {
+    const { MILESTONES } = await import('../src/sim/goals');
+    for (const m of MILESTONES) expect(m.done, m.done).not.toMatch(/^(Bring|Buy|Hold|Grow|Harvest|Hire|Own|Farm)\b/);
+  });
+
+  it('a refusal says where: hoe this plot', async () => {
+    const { resolve } = await import('../src/sim/actions');
+    const s = world('sunup');
+    s.parcels[1].owned = true;
+    expect(resolve(s, 'seeds', 8, 6).reason).toBe('Hoe this plot first');
+    expect(resolve(s, 'can', 8, 6).reason).toBe('Hoe this plot first');
   });
 });

@@ -1,14 +1,14 @@
 // A simple farmer that plays any mix through commands only, the same way a
 // person would. Used by the tests and by ?autoplay in the browser.
 
-import { resolve } from './actions';
+import { resolve, sowing } from './actions';
 import { farmer } from './actors';
 import type { Command } from './commands';
-import { CROP_IDS, CROPS, inSeason } from './crops';
+import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
-import { DAYS_PER_SEASON, TOOL_UPGRADES } from './constants';
+import { TOOL_UPGRADES } from './constants';
 import { canDeliver } from './goals';
-import { owned, season } from './world';
+import { owned } from './world';
 import type { CropId, ToolId, WorldState } from './types';
 
 const KIT: ToolId[] = ['hands', 'can', 'seeds', 'hoe'];
@@ -16,10 +16,12 @@ const KIT: ToolId[] = ['hands', 'can', 'seeds', 'hoe'];
 export interface Bot {
   idle: number;
   wait: number;
+  /** Seconds between actions under walk control. 0.05 is the quick bot; about a second plays at a person's pace. */
+  pace: number;
 }
 
-export function newBot(): Bot {
-  return { idle: 0, wait: 0 };
+export function newBot(pace = 0.05): Bot {
+  return { idle: 0, wait: 0, pace };
 }
 
 function inGround(s: WorldState, c: CropId): number {
@@ -31,13 +33,19 @@ function inGround(s: WorldState, c: CropId): number {
 function bestSeed(s: WorldState): CropId {
   let allowed = s.rules.goal === 'almanac' ? s.almanac.unlocked : CROP_IDS;
   if (homestead(s)) {
-    // Only what grows this season, and nothing that will not ripen before the turn.
-    const left = DAYS_PER_SEASON - ((s.day - 1) % DAYS_PER_SEASON);
-    const ok = allowed.filter((c) => inSeason(c, season(s.day)) && CROPS[c].days < left);
-    allowed = ok.length ? ok : allowed.filter((c) => inSeason(c, season(s.day)));
-    if (!allowed.length) allowed = ['radish'];
+    // What the sowing calendar allows today: in season and ripe before the turn, or next season's near the end.
+    const ok = allowed.filter((c) => sowing(s.day, c).ok);
+    allowed = ok.length ? ok : ['radish'];
   }
-  // Orders first: whatever an order still needs.
+  // Orders and requests first: whatever one still needs and can be grown in time.
+  if (homestead(s)) {
+    for (const o of s.orders) {
+      for (const it of o.items) {
+        const have = s.stock[it.crop].reduce((a, b) => a + b, 0) + inGround(s, it.crop);
+        if (have < it.n && allowed.includes(it.crop) && CROPS[it.crop].seed <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
+      }
+    }
+  }
   if (s.rules.goal === 'orders') {
     for (const o of s.orders) {
       for (const it of o.items) {
@@ -140,7 +148,7 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
       const c = todo[0];
       if (s.tool !== c.tool) out.push({ type: 'tool', tool: c.tool });
       out.push({ type: 'actAt', x: c.x, y: c.y });
-      bot.wait = 0.05;
+      bot.wait = bot.pace ?? 0.05;
     }
   }
 

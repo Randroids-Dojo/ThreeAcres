@@ -17,6 +17,8 @@ export interface TouchHost {
   state(): WorldState;
   /** What the act button would do right now. */
   aimVerb(): { verb: Verb | null; ok: boolean; label?: string; icon?: IconId } | null;
+  /** The can's water while it is in hand, for the gauge on the act button. */
+  water(): { frac: number; empty: boolean; low: boolean } | null;
   cycleTool(): void;
   toolIcon(): IconId;
   toolName(): string;
@@ -26,17 +28,22 @@ export interface TouchHost {
 const VERB_ICON: Record<Verb, IconId> = { till: 'hoe', water: 'can', plant: 'seeds', harvest: 'hands', tend: 'hands', clear: 'hoe', build: 'build', scare: 'hands', refill: 'can' };
 const STICK_R = 50;
 const DEAD = 0.16;
+/** A touch on the stick zone that moves less than this and lifts sooner is a tap on the farm. */
+const TAP_SLOP = 10;
+const TAP_MS = 350;
 
 export class TouchControls {
   readonly el = el('div', 'touch');
   private zone = el('div', 'ts-zone');
   private base = el('div', 'ts-base', '<span class="ts-ring"></span>');
   private knob = el('div', 'ts-knob');
-  private act = el('button', 'tb tb-act', '<span class="ic"></span><span class="tb-t"></span>');
+  private act = el('button', 'tb tb-act', '<span class="ic"></span><span class="tb-t"></span><span class="tb-water"><i></i></span>');
   private tool = el('button', 'tb tb-tool', '<span class="ic"></span><span class="tb-t"></span>');
   private clear = el('button', 'tb tb-clear', '<span class="tb-t">Clear jobs</span>');
   private stickId: number | null = null;
   private origin = { x: 0, y: 0 };
+  /** Where and when the stick's touch began, to tell a tap from a push. */
+  private press = { x: 0, y: 0, t: 0, far: false };
   private held = new Map<HTMLElement, number>();
   /** Lab hook (?touch): show the controls whatever the device. */
   forced = false;
@@ -97,9 +104,17 @@ export class TouchControls {
     if (!show || !walk) return;
     const aim = this.host.aimVerb();
     const verb = aim?.verb ?? null;
-    setHtml(this.act.firstElementChild!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : 'hands')));
-    setText(this.act.lastElementChild!, aim?.label ?? (verb ? (verb === 'tend' ? 'Bugs' : verb === 'scare' ? 'Shoo' : VERB_NAMES[verb]) : ''));
+    const water = this.host.water();
+    setHtml(this.act.querySelector('.ic')!, icon(aim?.icon ?? (verb ? VERB_ICON[verb] : 'hands')));
+    // A verb on the button, always: Pick for the bugs, Shoo for a crow. An empty can says so.
+    const word = aim?.label ?? (verb ? actWord(verb) : '');
+    setText(this.act.querySelector('.tb-t')!, water?.empty && !(aim && aim.ok) ? 'Empty' : word);
     toggle(this.act, 'no', !(aim && aim.ok));
+    // With the can in hand the button carries its water gauge.
+    toggle(this.act, 'can', !!water);
+    toggle(this.act, 'empty', !!water?.empty);
+    toggle(this.act, 'low', !!water?.low && !water.empty);
+    if (water) (this.act.querySelector('.tb-water > i') as HTMLElement).style.width = `${Math.round(water.frac * 100)}%`;
     setHtml(this.tool.firstElementChild!, icon(this.host.toolIcon()));
     setText(this.tool.lastElementChild!, this.host.toolName());
   }
@@ -132,6 +147,7 @@ export class TouchControls {
     this.stickId = e.pointerId;
     capture(this.zone, e.pointerId);
     this.origin = { x: e.clientX, y: e.clientY };
+    this.press = { x: e.clientX, y: e.clientY, t: performance.now(), far: false };
     this.place();
     this.base.classList.add('active');
     this.knob.style.transform = '';
@@ -139,6 +155,7 @@ export class TouchControls {
 
   private stickMove(e: PointerEvent): void {
     if (e.pointerId !== this.stickId) return;
+    if (Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > TAP_SLOP) this.press.far = true;
     let dx = e.clientX - this.origin.x;
     let dy = e.clientY - this.origin.y;
     const d = Math.hypot(dx, dy);
@@ -166,6 +183,13 @@ export class TouchControls {
 
   private stickEnd(e: PointerEvent): void {
     if (e.pointerId !== this.stickId) return;
+    // A quick tap that never pushed the stick was meant for the farm under it: walk there and act,
+    // and the stick goes back to rest rather than staying where the tap landed.
+    if (e.type === 'pointerup' && !this.press.far && performance.now() - this.press.t < TAP_MS) {
+      this.host.input.tapScreen(e.clientX, e.clientY);
+      this.base.style.left = '';
+      this.base.style.top = '';
+    }
     this.stickId = null;
     this.base.classList.remove('active');
     this.knob.style.transform = '';
@@ -187,6 +211,11 @@ export class TouchControls {
     for (const b of this.held.keys()) b.classList.remove('down');
     this.held.clear();
   }
+}
+
+/** The word on the act button for a verb: short, and always a verb. */
+export function actWord(verb: Verb): string {
+  return verb === 'tend' ? 'Pick' : verb === 'scare' ? 'Shoo' : VERB_NAMES[verb];
 }
 
 /** A short buzz on phones that have one. */

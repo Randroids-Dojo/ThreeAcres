@@ -5,9 +5,9 @@
 import { choreNow, hands } from './actors';
 import { AP_MAX, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, HAND_NIGHT_JOBS, HAND_WAGE, SCARECROW_RADIUS } from './constants';
 import { CROP_IDS, stageOf } from './crops';
-import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, updateGoals } from './goals';
-import { homestead } from './actions';
-import { inSeason } from './crops';
+import { endRound, fillOrders, fillRequests, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted } from './goals';
+import { homestead, sowing } from './actions';
+import { CROPS, inSeason } from './crops';
 import { HOME } from './map';
 import { rand, randInt } from './rng';
 import { refreshQuality, soak, wateredForTonight } from './soil';
@@ -56,10 +56,15 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
 
   // Growth.
   const heat = s.weather === 'heat';
+  const sunup = homestead(s);
+  // Sunup's soil holds a full watering for two days (one in a heat wave).
+  const holdsWater = sunup && s.rules.growth === 'classic';
   for (let y = 0; y < s.H; y++) {
     for (let x = 0; x < s.W; x++) {
       if (!isField(s, x, y)) continue;
       const p = s.plots[idx(x, y)];
+      // Sunup: a crop that withered on an earlier night has gone back into the soil by now.
+      if (sunup && p.crop?.dead) p.crop = null;
       const c = p.crop;
       if (c && !c.dead && c.stage < 4) {
         if (c.bugs > 0) {
@@ -91,15 +96,27 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
         }
       }
       // Soil overnight. Both measures are kept so the soil rule can switch freely.
-      p.wet = false;
       p.moisture = Math.max(0, p.moisture - (heat ? 2 : 1));
+      p.wet = holdsWater ? p.wet && p.moisture >= 2 : false;
       if (!p.crop && p.tilled) p.nutrient = Math.min(3, p.nutrient + 0.25);
     }
   }
 
-  // Requests take their share of the crate first, then the rest ships.
-  if (homestead(s)) settleRequests(s, ev);
-  if (s.rules.goal !== 'orders') for (const crop of CROP_IDS) sellCrop(s, crop, ev, report);
+  // Requests take their share of the crate first, then the rest ships. What
+  // an open request still needs stays in the crate for it.
+  const hold: Partial<Record<string, number>> = {};
+  if (sunup) {
+    settleRequests(s, ev, report);
+    const want = wanted(s);
+    for (const crop of CROP_IDS) {
+      const n = Math.min(want[crop] ?? 0, stockCount(s, crop));
+      if (n > 0) {
+        hold[crop] = n;
+        (report.kept ??= []).push({ crop, n });
+      }
+    }
+  }
+  if (s.rules.goal !== 'orders') for (const crop of CROP_IDS) sellCrop(s, crop, ev, report, hold[crop] ?? 0);
   const crew = hands(s);
   if (crew.length) {
     report.wages = Math.min(s.coins, crew.length * HAND_WAGE);
@@ -118,17 +135,27 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
       startRound(s);
     }
     ev.push({ type: 'season', season: season(s.day), round: Math.floor((s.day - 1) / DAYS_PER_SEASON) });
-    // The turn of the season takes whatever does not grow in the new one.
-    if (homestead(s)) {
-      for (let y = 0; y < s.H; y++) {
-        for (let x = 0; x < s.W; x++) {
-          const c = s.plots[idx(x, y)].crop;
-          if (!c || c.dead || inSeason(c.kind, season(s.day))) continue;
-          c.dead = true;
-          report.withered++;
-          ev.push({ type: 'wither', x, y, crop: c.kind });
+    // The turn of the season takes what does not grow in the new one and is
+    // still green. Ripe crops wait to be picked, and what it takes is simply
+    // gone by morning: nothing withered to clear.
+    if (sunup) {
+      const now = season(s.day);
+      let turned = 0;
+      for (let i = 0; i < s.plots.length; i++) {
+        const p = s.plots[i];
+        const c = p.crop;
+        if (!c) continue;
+        if (c.dead) {
+          p.crop = null;
+          continue;
         }
+        if (inSeason(c.kind, now) || c.stage === 4) continue;
+        p.crop = null;
+        turned++;
       }
+      if (turned) report.turned = turned;
+      // A request for a crop out of season now goes quietly (only older saves can have one).
+      s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || stockCount(s, it.crop) >= it.n));
     }
   }
   s.report = report;
@@ -214,10 +241,40 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   }
 
   if (s.rules.goal === 'orders') fillOrders(s);
+  if (homestead(s)) {
+    const gift = rescue(s);
+    if (gift && s.report) s.report.gift = gift;
+  }
   if (homestead(s) && s.learn.includes('requests')) fillRequests(s);
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);
   ev.push({ type: 'dawn', day: s.day, weather: s.weather, season: season(s.day) });
+}
+
+/**
+ * Sunup must always leave a way to earn. A farm with nothing growing, nothing
+ * in the crate and too few coins for any seed that can go in today would be
+ * stuck for good, so a neighbour leaves enough for four packets of the
+ * cheapest. Returns the coins given (0 when the farm is not stuck).
+ */
+export function rescue(s: WorldState): number {
+  let living = false;
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (c && !c.dead && s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned) {
+      living = true;
+      break;
+    }
+  }
+  if (living) return 0;
+  if (CROP_IDS.some((c) => stockCount(s, c) > 0)) return 0;
+  const seeds = CROP_IDS.filter((c) => sowing(s.day, c).ok).map((c) => CROPS[c].seed);
+  if (!seeds.length) return 0;
+  const cheapest = Math.min(...seeds);
+  if (s.coins >= cheapest) return 0;
+  const gift = cheapest * 4 - s.coins;
+  s.coins += gift;
+  return gift;
 }
 
 /** Is (x, y) within a scarecrow's watch? */

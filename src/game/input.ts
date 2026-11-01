@@ -92,6 +92,17 @@ export class Input {
     this.queue.push({ type: 'act' });
   }
 
+  /**
+   * A tap at a point on the screen (client px), from a control that lies over
+   * the farm: the walk stick's capture zone forwards quick taps here, so a
+   * tap on a plot works wherever on the screen the plot is.
+   */
+  tapScreen(clientX: number, clientY: number): void {
+    if (this.host.blocked() || this.host.rules().control !== 'walk') return;
+    const r = this.stage.getBoundingClientRect();
+    this.tapAt(clientX - r.left, clientY - r.top);
+  }
+
   /** The touch act button is held: repeat like a held Space bar. */
   setActHeld(on: boolean): void {
     this.touchActHeld = on;

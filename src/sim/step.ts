@@ -2,9 +2,9 @@
 // current clock rule, runs people and crows, and returns what happened.
 
 import { canAfford, homestead, resolve } from './actions';
-import { dropJobsOf, facingTile, farmer, hands, startAction, tickActors, tileOf, walkFarmer, walkTo } from './actors';
+import { dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tickActors, tileOf, walkFarmer, walkTo } from './actors';
 import type { Command } from './commands';
-import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, REQUEST_SLOTS, TOOL_UPGRADES } from './constants';
+import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, DAY_SECONDS, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, NIGHT_SECONDS, requestSlots, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, nightfall, turnsMinute } from './day';
 import { checkMilestones, deliver, draft, fillOrders, fillRequests, joinAlmanac, sellCrop, updateGoals } from './goals';
@@ -71,7 +71,7 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
     updateGoals(s, ev);
   }
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
-  if (homestead(s) && s.learn.includes('requests') && s.orders.length < (s.rep >= 1 ? REQUEST_SLOTS : 1)) fillRequests(s);
+  if (homestead(s) && s.learn.includes('requests') && s.orders.length < requestSlots(s.rep)) fillRequests(s);
   if (s.rules.crew === 'crew' && !s.actors.some((a) => a.role === 'hand')) hire(s, ev, true);
   checkMilestones(s, ev);
 
@@ -164,7 +164,12 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     case 'act': {
       if (!awake || s.rules.control !== 'walk' || f.task) return;
-      const t = facingTile(f);
+      // Sunup snaps to the nearest useful plot in reach when the one in front has nothing to do.
+      const useful = (x: number, y: number) => {
+        const r = resolve(s, s.tool, x, y);
+        return !!(r.verb && r.ok);
+      };
+      const t = (homestead(s) ? snapAim(f, useful) : null) ?? facingTile(f);
       if (!inMap(t.x, t.y)) return;
       const r = resolve(s, s.tool, t.x, t.y);
       if (r.verb && r.ok) startAction(s, f, r, t.x, t.y, ev);
@@ -177,6 +182,11 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       const t = tileOf(f);
       const near = Math.max(Math.abs(t.x - c.x), Math.abs(t.y - c.y)) <= 1;
       const r = resolve(s, s.tool, c.x, c.y);
+      // A tap on a field for sale offers it, from wherever the farmer stands.
+      if (r.reason === 'unowned') {
+        ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
+        break;
+      }
       if (near) {
         if (r.verb && r.ok) startAction(s, f, r, c.x, c.y, ev);
         else if (r.reason) ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
@@ -236,6 +246,11 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       s.coins -= p.price;
       p.owned = true;
       ev.push({ type: 'buy', item: `field:${p.id}`, cost: p.price });
+      // A field is bought as meadow: however it was bought, the hoe comes with it.
+      if (homestead(s) && !s.learn.includes('hoe')) {
+        s.learn.push('hoe');
+        ev.push({ type: 'unlock', what: 'hoe' });
+      }
       break;
     }
     case 'hire':

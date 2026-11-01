@@ -57,6 +57,11 @@ export function inSeason(kind: CropId, season: number): boolean {
   return CROPS[kind].seasons.includes(season);
 }
 
+/** The name for a count of a crop, without the number: "radish" or "radishes". */
+export function cropWord(kind: CropId, n: number): string {
+  return n === 1 ? CROPS[kind].name.toLowerCase() : CROPS[kind].plural;
+}
+
 export function count(kind: CropId, n: number): string {
   return `${n} ${n === 1 ? CROPS[kind].name.toLowerCase() : CROPS[kind].plural}`;
 }

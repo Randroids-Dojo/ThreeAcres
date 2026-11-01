@@ -297,8 +297,9 @@ svg { width: 100%; height: 100%; display: block; }
 .item .tx { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .item .tx b { font-family: var(--serif); font-weight: 650; font-size: 15px; font-variation-settings: 'SOFT' 100; }
 .item .tx span { font-size: 12.5px; color: var(--ink2); line-height: 1.35; }
-.item .btn { min-height: 0; padding: 4px 9px; font-size: 13px; font-family: var(--serif); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; background: transparent; color: #2f6a2a; border: 2px solid #2f6a2a; border-radius: 3px; box-shadow: none; transform: rotate(-5deg); }
-.item .btn:disabled { color: #8b7d63; border-color: #b3a383; opacity: 1; }
+.item .btn { min-height: 0; padding: 4px 9px; font-size: 13.5px; font-family: var(--serif); font-weight: 700; background: transparent; color: #2f6a2a; border: 2px solid #2f6a2a; border-radius: 3px; box-shadow: none; transform: rotate(-5deg); white-space: nowrap; }
+/* What you cannot afford yet is not stamped: a faint dashed outline, upright, saying what it needs. */
+.item .btn:disabled { color: #8b7d63; border-color: #b3a383; border-style: dashed; background: rgba(60, 40, 20, 0.05); transform: none; font-weight: 600; opacity: 1; cursor: default; }
 .item.done { filter: saturate(0.6); }
 .item .blob { width: 34px; height: 34px; flex: none; }
 .order .items i.crop { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; margin-right: 3px; }
@@ -467,3 +468,66 @@ svg { width: 100%; height: 100%; display: block; }
 @keyframes tpoint-bob { from { transform: translateX(-4px); } to { transform: translateX(3px); } }
 @media (prefers-reduced-motion: reduce) { .tpoint.over svg { animation: none; } }
 
+
+/* ---------------------------------------------------------------- Sunup, after the playtest */
+/* The can's water, always on the can: a level up the side of the tool (it fills from the bottom, like the can),
+   amber when low, and the tool itself says Empty in place of its name when there is none. */
+.tool .watermeter { position: absolute; right: 5px; top: 9px; height: 28px; width: 5px; border-radius: 3px; background: rgba(0, 0, 0, 0.38); box-shadow: 0 0 0 1px rgba(255, 230, 190, 0.2); overflow: hidden; pointer-events: none; display: flex; align-items: flex-end; }
+.tool .watermeter > i { display: block; width: 100%; height: var(--level, 100%); background: #6fb2e8; border-radius: 3px; transition: height 0.2s ease; }
+.tool.on .watermeter { background: rgba(45, 36, 22, 0.16); box-shadow: 0 0 0 1px rgba(45, 36, 22, 0.25); }
+.tool.on .watermeter > i { background: #2f78c4; }
+.tool.low .watermeter > i { background: #e9a23b; }
+.tool.empty .watermeter { box-shadow: 0 0 0 1.5px #e0674b; }
+.tool.empty .lbl { opacity: 1 !important; color: #ffb39f; }
+.tool.on.empty .lbl { color: #b4472f; }
+.tool.empty .ic { opacity: 0.6; }
+/* The act button carries a gauge too while the can is in hand, below its word. */
+.tb-act .tb-water { display: none; position: absolute; left: 26%; right: 26%; bottom: 11px; height: 5px; border-radius: 3px; background: rgba(45, 36, 22, 0.18); overflow: hidden; }
+.tb-act.can .tb-water { display: block; }
+.tb-act .tb-water > i { display: block; height: 100%; background: #2f78c4; border-radius: 3px; }
+.tb-act.low .tb-water > i { background: #d48a1f; }
+.tb-act.empty .tb-water { box-shadow: inset 0 0 0 1.5px #c4473a; }
+.tb-act.empty .tb-t { color: #b4472f; }
+.tb-act.can .ic { margin-top: -8px; }
+.tb-act.can .tb-t { margin-bottom: 12px; }
+
+/* Stamina and the forecast say what they are. */
+.daycard .stamina { display: flex; align-items: center; gap: 7px; }
+.daycard .stamina .mlbl { font-size: 11px; font-weight: 700; color: var(--cream2); letter-spacing: 0.02em; }
+.daycard .stamina .meter { width: 110px; }
+.daycard .sky .fc { align-items: center; }
+.daycard .sky .fc .then { font-size: 12px; margin: 0 2px 0 1px; color: var(--cream2); }
+
+/* Seed cards: the price and what it sells for, and how long (or the season, or too late). */
+.seed { height: auto; min-height: 76px; min-width: 82px; padding: 5px 5px 6px; }
+.seed .wh { font-size: 10.5px; color: var(--ink2); line-height: 1.1; }
+.seed .pr { white-space: nowrap; }
+.seed.next { background: #e7efce; box-shadow: 0 2px 0 #9fae6f; }
+.seed.next .wh { color: #3f6a22; font-weight: 700; }
+.seed.locked .wh { color: #9a3b26; font-weight: 700; }
+.seed.locked { opacity: 0.55; }
+/* Every seed in reach of a thumb: the picker wraps onto a second row rather than scrolling seeds off the screen. */
+.seedbar { flex-wrap: wrap; justify-content: center; width: max-content; overflow-x: visible; }
+@media (max-width: 640px) { .seedbar { max-width: calc(4 * 86px + 12px); } }
+/* Up top when the plot being worked is low on the screen, so the picker never covers it. */
+.seedbar.up, .buildbar.up { bottom: auto !important; top: calc(112px + var(--safe-t)); }
+
+/* The board hangs from a fixed top, so its tabs stay put from tab to tab (centred, a shorter tab moved them),
+   and grows down; one row of tabs on a phone. */
+.dialog[data-kind='board'] { top: max(calc(64px + var(--safe-t)), calc(50% - 330px)); transform: translate(-50%, 10px) scale(0.98); max-height: calc(100% - max(calc(64px + var(--safe-t)), calc(50% - 330px)) - 24px); }
+.dialog.on[data-kind='board'] { transform: translate(-50%, 0); }
+.dialog .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 2px 2px; margin: -4px -2px 0; }
+/* A scroll container in a height-limited grid would be squashed to nothing: rows take their full height and the body scrolls. */
+.dialog .body { grid-auto-rows: max-content; }
+.dialog .tabs button { flex: none; }
+.item .tx .pay { color: #2f6a2a; font-weight: 650; }
+.dialog .ask { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .dialog[data-kind='board'] { max-height: calc(100% - 2 * (64px + var(--safe-t))); }
+  .dialog .tabs { gap: 4px; }
+  .dialog .tabs button { padding: 6px 9px 7px; font-size: 12.5px; }
+}
+/* Toasts show over an open board, below it, never behind it. */
+.toasts { z-index: 7; }
+.dialog-open .toasts { top: auto; bottom: calc(8px + var(--safe-b)); }
+.dialog-open .toasts[style*='top'] { bottom: auto; }

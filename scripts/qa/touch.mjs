@@ -2,8 +2,11 @@
 // node scripts/qa/touch.mjs [base url]
 // Checks: controls show on touch and hide on a key press; the floating stick
 // walks the farmer; walking and acting at once (two fingers); hold-to-repeat;
-// one-finger painting under point control; a two-finger pinch zooms without
-// painting; the clear button drops jobs.
+// the act button lights with its word wherever acting would do something; the
+// can's water gauge on the rack and the act button (full, half, empty); a
+// faint cursor on the plot in front even when nothing can be done there (read
+// back from the frame); the well answers from its side and corner, not only
+// its door; sleeping before noon asks first; a tap picks every seed.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -73,10 +76,21 @@ check('no duplicate tool button over the farm', !(await visible('.tb-tool')));
 await p.keyboard.press('KeyD');
 await p.waitForTimeout(100);
 check('a key press hides the touch controls', !(await visible('.tb-act')));
-await touch('touchStart', [[300, 400, 6]]);
+// (A tap on the open yard: a tap on a field for sale would offer it.)
+const yard = await p.evaluate(() => window.sunup.r3d.project(12.5, 3.5, 0));
+await touch('touchStart', [[yard.x, yard.y, 6]]);
 await touch('touchEnd', []);
 await p.waitForTimeout(100);
 check('a touch brings them back', await visible('.tb-act'));
+check('and a tap on the yard opens nothing', !(await p.evaluate(() => window.sunup.dialogs.open)));
+// A tap on a field for sale, from across the farm, offers it (the field lesson points at it).
+const forSale = await p.evaluate(() => window.sunup.r3d.project(9, 7, 0));
+await touch('touchStart', [[forSale.x, forSale.y, 6]]);
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+check('a tap on the field for sale offers it', await p.evaluate(() => window.sunup.dialogs.open && /Field 2 is for sale/.test(document.querySelector('.dialog h2').textContent)));
+await p.evaluate(() => window.sunup.dialogs.close(true));
+await p.waitForTimeout(300);
 
 // The round button lights up, with the word for it, wherever acting would do
 // something, and a real tap does that thing: the notice board opens, the well
@@ -109,7 +123,8 @@ check('at the notice board the button is lit and says Read', ab.lit && ab.word =
 await tapAct();
 check('a tap at the board opens it, and it stays open (the tap does not close it again)', await p.evaluate(() => window.sunup.dialogs.open));
 // A tap on the backdrop, away from the board, still closes it.
-const backdrop = await p.evaluate(() => { const r = document.querySelector('.dialog').getBoundingClientRect(); return [Math.max(12, r.left / 2), Math.max(r.top / 2, 80)]; });
+// The middle of the larger free gap, above or below the board.
+const backdrop = await p.evaluate(() => { const r = document.querySelector('.dialog').getBoundingClientRect(); const below = innerHeight - r.bottom; return [innerWidth / 2, below > r.top ? r.bottom + below / 2 : Math.max(8, r.top / 2)]; });
 await touch('touchStart', [[backdrop[0], backdrop[1], 10]]);
 await touch('touchEnd', []);
 await p.waitForTimeout(350);
@@ -127,6 +142,112 @@ await standAt(6, 3, 'e');
 await p.waitForTimeout(250);
 ab = await actButton();
 check('facing the bare yard, the button is dim and says nothing', !ab.lit && ab.word === '', JSON.stringify(ab));
+
+// The cursor: even with nothing to do, a faint frame shows on the plot in front. Read the frame back with the
+// markers drawn and hidden, at that plot.
+const tileLight = (x, y) => p.evaluate(([x, y]) => new Promise((done) => {
+  const d = window.sunup.r3d.debug;
+  const pt = window.sunup.r3d.project(x + 0.5, y + 0.5, 0.1);
+  d.afterFrame = (gl) => {
+    d.afterFrame = null;
+    const k = gl.drawingBufferWidth / innerWidth;
+    const n = 16;
+    const px = new Uint8Array(n * n * 4);
+    gl.readPixels(Math.round(pt.x * k - n / 2), Math.round(gl.drawingBufferHeight - pt.y * k - n / 2), n, n, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+    done(sum / (n * n * 3));
+  };
+}), [x, y]);
+// The frame is drawn on the edge of the tile, so sample there: a quarter tile in from the edge nearest the farmer.
+const view = await p.evaluate(() => window.sunup.view(0).highlight);
+check('facing the bare yard, the cursor still marks the plot in front, faintly', !!view && view.x === 7 && view.y === 3 && !view.ok && view.verb === null, JSON.stringify(view));
+const markersOn = await tileLight(6.55, 2.6);
+await p.evaluate(() => { window.sunup.r3d.debug.scene.getObjectByName('markers').visible = false; });
+const markersOff = await tileLight(6.55, 2.6);
+await p.evaluate(() => { window.sunup.r3d.debug.scene.getObjectByName('markers').visible = true; });
+check('and the faint frame is really drawn there', markersOn - markersOff > 4, `light ${markersOn.toFixed(1)} with, ${markersOff.toFixed(1)} without`);
+
+// The can's water is always on the can: a gauge on the rack, and on the act button while the can is in hand.
+await p.evaluate(() => { window.sunup.state.water = 12; window.sunup.hud.pickTool('can'); });
+await standAt(3, 4, 's');
+await p.waitForTimeout(250);
+const gauge = () => p.evaluate(() => {
+  const g = document.querySelector('.toolbar .tool[data-tool="can"] .watermeter');
+  const r = g.getBoundingClientRect();
+  const fill = g.firstElementChild.getBoundingClientRect();
+  const a = document.querySelector('.tb-act .tb-water');
+  const ar = a.getBoundingClientRect();
+  const af = a.firstElementChild.getBoundingClientRect();
+  const cs = getComputedStyle(g);
+  // The rack's gauge is a level up the side of the can; the act button's runs across under its word.
+  return { w: r.width, h: r.height, shown: cs.display !== 'none' && Number(cs.opacity) > 0.5, frac: fill.height / Math.max(1, r.height), act: { w: ar.width, h: ar.height, frac: af.width / Math.max(1, ar.width) }, label: document.querySelector('.toolbar .tool[data-tool="can"] .lbl').textContent, word: document.querySelector('.tb-act .tb-t').textContent };
+});
+let gg = await gauge();
+check('the can shows its water on the rack (a real, visible gauge, full)', gg.shown && gg.h >= 24 && gg.w >= 4 && gg.frac > 0.95, JSON.stringify(gg));
+// Nothing on the can tool or the button is struck through: the gauge sits clear of the words.
+const clear = await p.evaluate(() => {
+  const gap = (a, b) => { const r = a.getBoundingClientRect(); const q = b.getBoundingClientRect(); return !(r.left < q.right && q.left < r.right && r.top < q.bottom && q.top < r.bottom); };
+  const tool = document.querySelector('.toolbar .tool[data-tool="can"]');
+  const act = document.querySelector('.tb-act');
+  return gap(tool.querySelector('.watermeter'), tool.querySelector('.lbl')) && gap(act.querySelector('.tb-water'), act.querySelector('.tb-t'));
+});
+check('the gauges sit clear of the words', clear);
+check('and on the act button while the can is in hand', gg.act.w >= 20 && gg.act.h >= 4 && gg.act.frac > 0.95, JSON.stringify(gg.act));
+await p.evaluate(() => { window.sunup.state.water = 6; });
+await p.waitForTimeout(350);
+gg = await gauge();
+check('half a can reads half', Math.abs(gg.frac - 0.5) < 0.08 && Math.abs(gg.act.frac - 0.5) < 0.08, JSON.stringify(gg));
+// Empty: the rack says Empty, so does the button, and the line points back to the well.
+await p.evaluate(() => {
+  const st = window.sunup.state;
+  st.water = 0;
+  st.learn.push('lesson:well');
+  for (const q of st.plots) if (q.crop && q.crop.kind === 'carrot') { q.wet = false; q.moisture = 1; }
+});
+await p.waitForTimeout(350);
+gg = await gauge();
+const emptyLine = await p.evaluate(() => document.querySelector('.hint.on')?.textContent ?? '');
+const emptyPt = await p.evaluate(() => document.querySelector('.tpoint').classList.contains('on'));
+check('an empty can says Empty on the rack and on the button', gg.label === 'Empty' && gg.word === 'Empty' && gg.frac < 0.02, JSON.stringify(gg));
+check('and the line points back to the well', emptyLine === 'Can empty. Fill the can at the well.' && emptyPt, `${emptyLine} pointer ${emptyPt}`);
+await p.screenshot({ path: '/tmp/acres-touch-empty-can.png' });
+
+// The well answers from any side: from beside it and from its corner, facing away from it, the button reads
+// Fill the can and a tap fills it.
+await p.evaluate(() => window.sunup.hud.pickTool('hands'));
+for (const [x, y, facing] of [[10, 3, 'n'], [12, 2, 'e'], [12, 1, 'w']]) {
+  await p.evaluate(() => { window.sunup.state.water = 1; });
+  await standAt(x, y, facing);
+  await p.waitForTimeout(250);
+  ab = await actButton();
+  const hl = await p.evaluate(() => window.sunup.view(0).highlight);
+  await tapAct();
+  const w = await p.evaluate(() => window.sunup.state.water);
+  check(`at the well from ${x},${y} facing ${facing}: the cursor and button find the well and a tap fills the can`, ab.lit && ab.word === 'Fill the can' && hl?.x === 11 && hl?.y === 2 && hl.ok && w === 12, JSON.stringify({ ab, hl, w }));
+}
+
+// Sleeping before noon asks first; Not now keeps the day.
+await p.evaluate(() => { window.sunup.input.push({ type: 'unlock', what: 'sleep' }); const st = window.sunup.state; st.learn.push('lesson:sleep'); st.minute = 150; st.stamina = 80; });
+await p.waitForTimeout(250);
+const tapSleep = async () => {
+  const [x, y] = await p.evaluate(() => { const r = document.querySelector('.toolbar .tool.act').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await touch('touchStart', [[x, y, 11]]);
+  await touch('touchEnd', []);
+  await p.waitForTimeout(400);
+};
+await tapSleep();
+const asked = await p.evaluate(() => ({ open: window.sunup.dialogs.open, title: document.querySelector('.dialog h2')?.textContent ?? '', night: window.sunup.state.turnover }));
+check('Sleep at 8:30 am asks first', asked.open && asked.title === 'Sleep now?' && asked.night < 0, JSON.stringify(asked));
+const notNow = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog .ask .btn')].find((e) => e.textContent === 'Not now'); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+await touch('touchStart', [[notNow[0], notNow[1], 12]]);
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+check('Not now keeps the day', await p.evaluate(() => !window.sunup.dialogs.open && window.sunup.state.turnover < 0 && window.sunup.state.day === 1));
+await p.evaluate(() => { window.sunup.state.minute = 400; });
+await tapSleep();
+check('after noon, Sleep sleeps at once', await p.evaluate(() => !window.sunup.dialogs.open && window.sunup.state.turnover >= 0));
+await p.waitForTimeout(3200);
 
 // The seed picker opens over the left half of the screen, where the walk
 // stick's capture zone is. A real tap on every seed must pick that seed.

@@ -49,8 +49,8 @@ export interface RunResult {
 }
 
 /** Play with the bot until `days` have passed (or a step cap), checking invariants. */
-export function play(s: WorldState, days: number, opts: { dt?: number; maxSteps?: number; each?: (s: WorldState, i: number) => Command[] } = {}): RunResult {
-  const bot = newBot();
+export function play(s: WorldState, days: number, opts: { dt?: number; maxSteps?: number; pace?: number; each?: (s: WorldState, i: number) => Command[] } = {}): RunResult {
+  const bot = newBot(opts.pace);
   const dt = opts.dt ?? 1 / 30;
   const target = s.day + days;
   const max = opts.maxSteps ?? 400000;
@@ -68,4 +68,27 @@ export function play(s: WorldState, days: number, opts: { dt?: number; maxSteps?
     }
   }
   return { events, steps: i, problems };
+}
+
+/** Sunup: mark lessons finished and the features they bring in, as if the farm had been taught them. */
+export function teach(s: WorldState, lessons: string[], features: string[] = []): WorldState {
+  for (const id of lessons) if (!s.learn.includes(`lesson:${id}`)) s.learn.push(`lesson:${id}`);
+  for (const f of features) if (!s.learn.includes(f)) s.learn.push(f);
+  return s;
+}
+
+/** Sunup's lessons in order up to the requests, with what they bring in. */
+export const EARLY = ['pull', 'water', 'well', 'sleep', 'broke', 'plant'];
+export const EARLY_FEATURES = ['can', 'sleep', 'coins', 'seeds', 'stamina'];
+
+/** Stand the farmer on a tile, facing a way, idle. */
+export function stand(s: WorldState, x: number, y: number, facing: 'n' | 'e' | 's' | 'w'): void {
+  const f = s.actors[0];
+  f.x = x + 0.5;
+  f.y = y + 0.5;
+  f.facing = facing;
+  f.angle = { n: -Math.PI / 2, s: Math.PI / 2, e: 0, w: Math.PI }[facing];
+  f.task = null;
+  f.path = [];
+  f.aim = null;
 }

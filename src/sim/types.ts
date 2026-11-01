@@ -222,6 +222,14 @@ export interface DayReport {
   eaten: number;
   crewWork: number;
   income: number;
+  /** Sunup: crops held back in the crate for a request still short of its count. */
+  kept?: { crop: CropId; n: number }[];
+  /** Sunup: crops the season's turn took (out of season and not yet ripe). */
+  turned?: number;
+  /** Sunup: requests filled overnight and what they paid. */
+  filled?: { who: string; reward: number }[];
+  /** Sunup: coins a neighbour left so a farm with nothing left can start again. */
+  gift?: number;
 }
 
 export interface WorldState {
@@ -279,6 +287,8 @@ export interface WorldState {
 
   market: Market;
   orders: Order[];
+  /** Sunup: town requests pinned so far (the first is always a cheap one). Missing in older saves. */
+  requested?: number;
   rep: number;
   almanac: Almanac;
   milestones: Record<string, boolean>;

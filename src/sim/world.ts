@@ -156,7 +156,9 @@ export function walkable(s: WorldState, x: number, y: number): boolean {
   if (!inMap(x, y)) return false;
   const k = s.tiles[idx(x, y)];
   if (k === 'wood' || k === 'water') return false;
-  if (propAt(x, y)) return false;
+  const p = propAt(x, y);
+  // Sunup is farmed alone: the crew's bunkhouse is not built, and its ground is open yard.
+  if (p && !(p.kind === 'bunkhouse' && s.rules.crew === 'solo' && s.rules.tools === 'kit' && s.rules.goal === 'market')) return false;
   return true;
 }
 

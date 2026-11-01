@@ -1,7 +1,11 @@
 // The camera: always looking north so the screen agrees with the 2D page.
 // Close follows the farmer at a three-quarter angle, about nine tiles across
-// the short side. Wide frames the farm from higher up, with pan and zoom.
-// pick and project use a copy of the matrices last drawn.
+// the short side; on a tall phone screen it looks down more steeply and fits
+// the whole depth of the farm between the day card and the tool rack. Either
+// way it stays inside the farm: it slides with the farmer only as far as the
+// farm's edges, so the view is farm, not sky or the soil under the diorama.
+// Wide frames the farm from higher up, with pan and zoom. pick and project
+// use a copy of the matrices last drawn.
 
 import { Matrix4, PerspectiveCamera, Vector3, Vector4 } from 'three';
 import type { CameraIntent } from '../contract';
@@ -13,7 +17,12 @@ const PITCH_WIDE = (60 * Math.PI) / 180;
 /** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
 const PITCH_WIDE_TALL = (66 * Math.PI) / 180;
 const CLOSE_TILES = 9;
-const SCREEN_CORNERS: readonly (readonly [number, number])[] = [
+/** Tall screens: steeper, a little wider, and kept inside the farm. */
+export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.5, maxTiles: 12, bandTop: 100, bandBottom: 112 };
+/** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
+const BOUNDS = { x0: 0.02, x1: 19.98, z1: 15.25 };
+/** The back row of trees, roughly: how high their crowns reach and how far in they stand. */
+const TREE_TOP = { y: 1.75, z: 0.5 };const SCREEN_CORNERS: readonly (readonly [number, number])[] = [
   [-1, -1],
   [1, -1],
   [-1, 1],
@@ -148,16 +157,133 @@ export function makeRig(): Rig {
     goal.tz = clamp(fit.tz + intent.panY, 0, H);
   };
 
-  const closeGoal = (intent: CameraIntent) => {
+  /** Where a screen point (NDC) meets the ground, for a camera placed at a pose. Rays above the horizon count as very far. */
+  const groundHit = (cam: PerspectiveCamera, nx: number, ny: number, out: Vector3) => {
+    a.set(nx, ny, -1).unproject(cam);
+    b.set(nx, ny, 1).unproject(cam);
+    const dy = b.y - a.y;
+    if (dy > -1e-6) return out.set(a.x + (b.x - a.x) * 1e3, 0, a.z + (b.z - a.z) * 1e3);
+    const tt = -a.y / dy;
+    return out.set(a.x + (b.x - a.x) * tt, 0, a.z + (b.z - a.z) * tt);
+  };
+  const hitL = new Vector3();
+  const hitR = new Vector3();
+
+  /** Screen y in px of a point, for a camera placed at a pose. */
+  const screenY = (cam: PerspectiveCamera, x: number, y: number, z: number) => {
+    a.set(x, y, z).project(cam);
+    return ((1 - a.y) / 2) * h;
+  };
+  let zKey = '';
+  const zRange = { lo: 0, hi: 0 };
+  /** The target z at which a point sits at screen y `py`: moving the camera south lifts everything on screen. */
+  const solveZ = (p: Pose, x: number, y: number, z: number, py: number) => {
+    const q: Pose = { ...p };
+    let lo = -40;
+    let hi = 60;
+    for (let it = 0; it < 32; it++) {
+      q.tz = (lo + hi) / 2;
+      place(tmpCam, q);
+      if (screenY(tmpCam, x, y, z) > py) lo = q.tz;
+      else hi = q.tz;
+    }
+    return (lo + hi) / 2;
+  };
+
+  /**
+   * Slides a pose so the clear band of the screen (below the day card, above
+   * the tool rack) shows farm. Sliding the target moves the view without
+   * turning it, so a ground measurement is exact. Across, the farm is wider
+   * than the view: it slides with the farmer and stops at the edges. Up and
+   * down, the back trees' tops never drop below the top of the band (no sky
+   * in it) and the front edge never rises above its bottom (no void in it).
+   * A tall phone sees more rows than the farm has: then the trees sit at the
+   * top of the band and the farm keeps still, its spare depth at the bottom
+   * behind the controls.
+   */
+  const keepInside = (p: Pose, W: number, H: number) => {
+    tmpCam.aspect = w / h;
+    const top = Math.min(h * 0.3, TALL.bandTop);
+    const bot = h - Math.min(h * 0.3, TALL.bandBottom);
+    const nyTop = 1 - (2 * top) / h;
+    const x0 = BOUNDS.x0;
+    const x1 = W + (BOUNDS.x1 - 20);
+    const slide = (lo: number, hi: number, min: number, max: number) => {
+      if (hi - lo >= max - min) return (min + max) / 2 - (lo + hi) / 2;
+      if (lo < min) return min - lo;
+      if (hi > max) return max - hi;
+      return 0;
+    };
+    place(tmpCam, p);
+    // Across, on a tall screen the far edge of the band is the widest row in view: keep that one inside, and every
+    // nearer row is too. A wide screen fans out much more towards the back, so it keeps the middle of the band
+    // inside (the side belts of trees fill its far corners) and the farmer stays nearer the middle.
+    const nyRow = w / h < 1 ? nyTop : (nyTop + 1 - (2 * bot) / h) / 2;
+    groundHit(tmpCam, -1, nyRow, hitL);
+    groundHit(tmpCam, 1, nyRow, hitR);
+    p.tx += slide(hitL.x, hitR.x, x0, x1);
+    // Up and down: the limits depend only on the screen and the pose's tilt and distance, so solve them once per size.
+    const key = `${w}x${h}:${p.pitch.toFixed(4)}:${p.dist.toFixed(3)}:${top}:${bot}:${W}x${H}`;
+    if (key !== zKey) {
+      zKey = key;
+      const back = solveZ(p, W / 2, TREE_TOP.y, TREE_TOP.z, top);
+      const front = solveZ(p, W / 2, 0, H + (BOUNDS.z1 - 15), bot);
+      zRange.lo = back;
+      zRange.hi = Math.max(back, front);
+    }
+    p.tz = clamp(p.tz, zRange.lo, zRange.hi);
+  };
+
+  let tilesKey = '';
+  let tallTiles = 11;
+  /**
+   * Tiles across a tall screen: as many as lets the whole farm, from the back
+   * trees to the front hedge, run from the top of the clear band down to the
+   * tool rack, between 10 and 12. A taller phone gets slightly bigger tiles
+   * rather than empty space under the farm. Solved once per screen size.
+   */
+  const tilesForTall = (W: number, H: number) => {
+    const key = `${w}x${h}:${W}x${H}`;
+    if (key === tilesKey) return tallTiles;
+    tilesKey = key;
+    const t = Math.tan((FOV * Math.PI) / 360);
+    const top = Math.min(h * 0.3, TALL.bandTop);
+    const bot = h - Math.min(h * 0.3, TALL.bandBottom);
+    const frontAt = (tiles: number) => {
+      const q: Pose = { tx: W / 2, tz: H / 2, dist: tiles / (2 * t * (w / h)), pitch: TALL.pitch };
+      q.tz = solveZ(q, W / 2, TREE_TOP.y, TREE_TOP.z, top);
+      place(tmpCam, q);
+      return screenY(tmpCam, W / 2, 0, H + (BOUNDS.z1 - 15));
+    };
+    let lo = TALL.minTiles;
+    let hi = TALL.maxTiles;
+    // More tiles, smaller farm, front edge higher on screen.
+    if (frontAt(lo) <= bot) tallTiles = lo;
+    else if (frontAt(hi) >= bot) tallTiles = hi;
+    else {
+      for (let it = 0; it < 24; it++) {
+        const mid = (lo + hi) / 2;
+        if (frontAt(mid) > bot) lo = mid;
+        else hi = mid;
+      }
+      tallTiles = hi;
+    }
+    return tallTiles;
+  };
+
+  const closeGoal = (intent: CameraIntent, W: number, H: number) => {
     const zoom = clamp(intent.zoom || 1, 0.6, 2.5);
     const t = Math.tan((FOV * Math.PI) / 360);
     const aspect = w / h;
-    // Nine tiles across the short side at the farmer.
-    const dist = aspect < 1 ? CLOSE_TILES / (2 * t * aspect) : (CLOSE_TILES * Math.sin(PITCH_CLOSE)) / (2 * t);
-    goal.pitch = PITCH_CLOSE;
+    const tall = aspect < 1;
+    // Nine tiles across the short side at the farmer; ten to twelve on a tall screen, looking down more steeply.
+    const dist = tall ? tilesForTall(W, H) / (2 * t * aspect) : (CLOSE_TILES * Math.sin(PITCH_CLOSE)) / (2 * t);
+    goal.pitch = tall ? TALL.pitch : PITCH_CLOSE;
     goal.dist = dist / zoom;
     goal.tx = intent.focusX;
     goal.tz = intent.focusY;
+    // Both shapes keep to the farm: no void past its edges, no sky below the top of the clear band.
+    keepInside(goal, W, H);
   };
 
   const updateSpan = () => {
@@ -203,7 +329,7 @@ export function makeRig(): Rig {
     ground,
     update(intent, W, H, dt, snap) {
       if (intent.mode === 'wide') wideGoal(intent, W, H);
-      else closeGoal(intent);
+      else closeGoal(intent, W, H);
       if (snap) Object.assign(cur, goal);
       else {
         const k = 1 - Math.exp(-dt * (intent.mode === 'wide' ? 9 : 6));
@@ -225,6 +351,8 @@ export function makeRig(): Rig {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       fitKey = '';
+      tilesKey = '';
+      zKey = '';
     },
     pick(px, py, W, H) {
       if (!drawn) return null;
