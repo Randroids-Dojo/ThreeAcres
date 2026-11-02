@@ -335,6 +335,6 @@ describe('the lessons and the copy', () => {
     expect(news).toMatch(/crows ate 1 and 2 withered/);
     expect(news).not.toMatch(/grew/);
     s.report = { day: 9, sold: [{ crop: 'radish', n: 8, value: 240 }], wages: 0, grew: 27, withered: 0, eaten: 0, crewWork: 0, income: 240, ripe: 6 };
-    expect(morningNews(s)).toBe('Sold 8 for 240, 6 ripe to pick.');
+    expect(morningNews(s)).toBe('Yesterday you sold 8 for 240, 6 ripe to pick.');
   });
 });

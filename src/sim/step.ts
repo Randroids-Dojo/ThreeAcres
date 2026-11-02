@@ -1,13 +1,13 @@
 // One tick of the farm. Applies the player's commands, moves the clock by the
 // current clock rule, runs people and crows, and returns what happened.
 
-import { canAfford, daySeconds, fieldRep, homestead, resolve, resolveBuild } from './actions';
+import { canAfford, daySeconds, fieldPrice, fieldRep, homestead, resolve, resolveBuild } from './actions';
 import { dropJobsOf, facingTile, farmer, hands, queueTap, snapAim, startAction, tapTool, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
 import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, landBugs, nightfall, turnsMinute } from './day';
-import { acceptRequest, checkMilestones, claimCrops, deliver, draft, dropLost, fillOrders, fillRequests, joinAlmanac, lostFor, readRequests, sellCrop, updateGoals } from './goals';
+import { acceptRequest, checkMilestones, claimCrops, deliver, deliverReady, draft, dropLost, fillOrders, fillRequests, freshenOffers, joinAlmanac, lostFor, readRequests, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -76,7 +76,15 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   }
   if (s.rules.goal === 'orders' && !s.orders.length) fillOrders(s);
   // The first request comes as soon as the board brings requests in; the rest come with the mornings.
-  if (homestead(s) && s.learn.includes('requests') && !s.requested && !s.orders.length) fillRequests(s);
+  // Round 9: the first is a pair, which may not fit a farm with no soil or coins free: then it is asked for again at
+  // most once a game hour (not every frame).
+  if (homestead(s) && s.learn.includes('requests') && !s.requested && !s.orders.length) {
+    const hour = s.day * 24 + Math.floor(s.minute / 60);
+    if (s.firstTry !== hour) {
+      s.firstTry = hour;
+      fillRequests(s);
+    }
+  }
   // Sunup: at 13:00 bugs land again, as they do at dawn, so the afternoon has a look worth taking.
   if (homestead(s) && s.rules.clock === 'day' && minutesBefore < MIDDAY_MINUTE && s.minute >= MIDDAY_MINUTE && s.midday !== s.day && s.learn.includes('pests') && s.rules.weather === 'wild') {
     s.midday = s.day;
@@ -87,6 +95,8 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   if (homestead(s) && s.orders.length && (ev.some((e) => e.type === 'plant') || commands.some((c) => c.type === 'accept'))) claimCrops(s);
   // Round 7: a crop sown for a request lost by day can leave the request nothing to come: it is lost there and then.
   if (homestead(s) && s.orders.length && s.turnover < 0 && ev.some((e) => e.type === 'crowEat')) dropLost(s, ev);
+  // Round 9: a request whose crops are all in the crate is handed over at once: the crate ships them (one clear way).
+  if (homestead(s) && s.orders.length && s.turnover < 0 && ev.some((e) => e.type === 'harvest' || e.type === 'crowEat' || e.type === 'wither')) deliverReady(s, ev);
   checkMilestones(s, ev);
 
   if ((s.rules.clock === 'day' || s.rules.clock === 'flow') && s.minute >= DAY_MINUTES) {
@@ -95,6 +105,9 @@ export function step(s: WorldState, dt: number, commands: Command[] = []): SimEv
   }
   return ev;
 }
+
+/** Round 9: jobs a held act key may do on a plot just passed: free of coins and undoing nothing. */
+const FREE_ON_THE_MOVE = new Set<string>(['water', 'harvest', 'tend', 'clear', 'scare']);
 
 function beginNight(s: WorldState, ev: SimEvent[]): void {
   if (s.turnover >= 0) return;
@@ -194,12 +207,22 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         const r = resolve(s, s.tool, x, y);
         return !!(r.verb && r.ok);
       };
-      const t = (homestead(s) ? snapAim(f, useful, !!c.held) : null) ?? facingTile(f);
+      // Round 9: a held key works a plot it has just passed, too, when the job costs no coins and undoes nothing
+      // (water, a harvest, bugs, a crow): a zigzag watering pass left 4 of 11 dry. Seed and the hoe still never go behind.
+      const free = (x: number, y: number) => {
+        const r = resolve(s, s.tool, x, y);
+        return !!(r.verb && r.ok && FREE_ON_THE_MOVE.has(r.verb));
+      };
+      const t = (homestead(s) ? (snapAim(f, useful, !!c.held) ?? (c.held ? snapAim(f, free) : null)) : null) ?? facingTile(f);
       if (!inMap(t.x, t.y)) return;
       const r = resolve(s, s.tool, t.x, t.y);
       // Too tired, a held key says it once (the press), not again with every repeat.
       if (r.verb && r.ok && c.held && canAfford(s, r.verb)) return;
-      if (r.verb && r.ok) startAction(s, f, r, t.x, t.y, ev);
+      if (r.verb && r.ok && startAction(s, f, r, t.x, t.y, ev) && c.held) {
+        // (Started by a held key: the walk waits for the work beside it.)
+        const task = (f as Actor).task;
+        if (task) task.held = true;
+      }
       // A held key walking past nothing to do says nothing; a press says why not.
       else if (r.reason && !c.held) ev.push({ type: 'deny', x: t.x, y: t.y, reason: r.reason });
       break;
@@ -285,10 +308,13 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     case 'buyParcel': {
       const p = s.parcels[c.id];
-      if (!p || p.owned || s.coins < p.price || s.rep < fieldRep(s, c.id)) return;
-      s.coins -= p.price;
+      const price = fieldPrice(s, c.id);
+      if (!p || p.owned || s.coins < price || s.rep < fieldRep(s, c.id)) return;
+      s.coins -= price;
       p.owned = true;
-      ev.push({ type: 'buy', item: `field:${p.id}`, cost: p.price });
+      // Round 9: a fair's prize goes on the field it was used for.
+      if (price < p.price) s.fieldOff = 0;
+      ev.push({ type: 'buy', item: `field:${p.id}`, cost: price });
       // A field is bought as meadow: however it was bought, the hoe comes with it.
       if (homestead(s) && !s.learn.includes('hoe')) {
         s.learn.push('hoe');
@@ -331,6 +357,9 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     case 'readBoard':
       if (homestead(s)) readRequests(s);
+      break;
+    case 'freshen':
+      if (homestead(s) && s.learn.includes('requests')) freshenOffers(s);
       break;
     case 'buildAt': {
       // Sunup: one build on one plot, from the lesson's pointer once the player has said yes. The tool in hand stays

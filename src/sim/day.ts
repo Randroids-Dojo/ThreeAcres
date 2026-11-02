@@ -5,7 +5,7 @@
 import { choreNow, hands } from './actors';
 import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, FLOCK_CHANCE, FLOCK_HOURS, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
 import { CROP_IDS, stageOf } from './crops';
-import { claimCrops, endRound, fillOrders, fillRequests, lostFor, ordersOvernight, sellCrop, settleRequests, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
+import { claimCrops, endRound, fillOrders, fillRequests, judgeFair, lostFor, offered, ordersOvernight, sellCrop, settleRequests, startFair, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
 import { homestead, sowing } from './actions';
 import { CROPS, inSeason } from './crops';
 import { HOME } from './map';
@@ -138,6 +138,9 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
   if (sunup) {
     claimCrops(s);
     settleRequests(s, ev, report);
+    // Round 9: the night of the season's fair.
+    const fair = judgeFair(s);
+    if (fair) report.fair = fair;
     const want = wanted(s);
     for (const crop of CROP_IDS) {
       const n = Math.min(want[crop] ?? 0, stockCount(s, crop));
@@ -183,6 +186,8 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
         turned++;
       }
       if (turned) report.turned = turned;
+      // Round 9: a new season, a new fair (one set for this season by a late Accept stays).
+      if (s.fair && s.day > s.fair.day) startFair(s);
       // A request for a crop out of season now goes quietly (only older saves can have one).
       s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || Math.min(o.got ?? 0, it.n) >= it.n));
     }
@@ -308,8 +313,12 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   // Requests that can no longer be met are withdrawn, with a word on the morning card; then new ones may come.
   if (homestead(s) && s.learn.includes('requests')) {
     withdrawRequests(s, ev, s.report);
+    const before = new Set(s.orders.map((o) => o.id));
     fillRequests(s, true);
     claimCrops(s);
+    // Round 9: the morning card says when new requests are on the board (the eighth playtest's came with only a badge).
+    const pinned = s.orders.filter((o) => offered(o) && !before.has(o.id)).length;
+    if (pinned && s.report) s.report.offered = pinned;
   }
   if (s.weather === 'storm') ev.push({ type: 'thunder' });
   refreshQuality(s);

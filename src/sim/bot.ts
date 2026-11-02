@@ -1,13 +1,13 @@
 // A simple farmer that plays any mix through commands only, the same way a
 // person would. Used by the tests and by ?autoplay in the browser.
 
-import { resolve, sowing } from './actions';
+import { fieldPrice, resolve, sowing } from './actions';
 import { farmer, wellsFrom } from './actors';
 import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
 import { BUILD_COST, TOOL_UPGRADES } from './constants';
-import { canDeliver, canMeet, gainOf, isTaken, lastSowOf, offered, stillToSow } from './goals';
+import { canDeliver, canMeet, clearOf, fairNow, forFair, gainOf, isTaken, lastSowOf, offered, stillToSow } from './goals';
 import { guarded } from './day';
 import { owned } from './world';
 import type { CropId, Order, RequestKind, ToolId, WorldState } from './types';
@@ -20,10 +20,11 @@ export interface Bot {
   /** Seconds between actions under walk control. 0.05 is the quick bot; about a second plays at a person's pace. */
   pace: number;
   /**
-   * Sunup: how it takes one of a pair on the board: the one with the bigger gain, always the bold one (rush, long,
-   * big), always the safe one (easy, quick, small), or none at all.
+   * Sunup: how it takes one of a pair on the board: the one with the bigger gain, the one that clears more, a careful
+   * player's (round 9: while the season's fair still wants requests, one due by the fair; else the one that clears
+   * more), always the bold one (rush, long, big), always the safe one (easy, quick, small), or none at all.
    */
-  choose: 'gain' | 'bold' | 'safe' | 'none';
+  choose: 'gain' | 'clear' | 'fair' | 'bold' | 'safe' | 'none';
   /** A busy player: it goes to bed once the clock passes this many game minutes after 6:00 (undefined: when done). */
   bedtime?: number;
   /** Sunup: the day it last bought a field, a tool or a sprinkler (one a day, like a person). */
@@ -31,7 +32,7 @@ export interface Bot {
 }
 
 export function newBot(pace = 0.05, opts: Partial<Pick<Bot, 'choose' | 'bedtime'>> = {}): Bot {
-  return { idle: 0, wait: 0, pace, choose: opts.choose ?? 'gain', bedtime: opts.bedtime };
+  return { idle: 0, wait: 0, pace, choose: opts.choose ?? 'fair', bedtime: opts.bedtime };
 }
 
 const BOLD = new Set<RequestKind>(['rush', 'long', 'big']);
@@ -42,6 +43,16 @@ export function botPick(s: WorldState, how: Bot['choose']): Order | null {
   const offers = s.orders.filter((o) => offered(o) && canMeet(s, o));
   if (!offers.length) return null;
   if (how === 'gain') return offers.reduce((a, b) => (gainOf(b) > gainOf(a) ? b : a));
+  const most = (xs: Order[]) => xs.reduce((a, b) => (clearOf(b) > clearOf(a) ? b : a));
+  if (how === 'clear') return most(offers);
+  if (how === 'fair') {
+    // Round 9: a careful player counts what the fair still wants against the requests already on their way to it.
+    const f = fairNow(s);
+    const coming = s.orders.filter((o) => isTaken(o) && forFair(s, o)).length;
+    const inTime = offers.filter((o) => forFair(s, o));
+    if (f && f.got + coming < f.want && inTime.length) return most(inTime);
+    return most(offers);
+  }
   const want = offers.find((o) => (how === 'bold') === BOLD.has(o.kind ?? 'single'));
   return want ?? offers[0];
 }
@@ -183,7 +194,7 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   const next = s.parcels.find((p) => !p.owned);
   // (One big purchase a day: a field, a tool or a sprinkler.)
   let spent = homestead(s) && bot.bought === s.day;
-  if (!spent && next && s.coins > next.price + (homestead(s) ? seedReserve(s, next.w * next.h) : 150)) {
+  if (!spent && next && s.coins > fieldPrice(s, next.id) + (homestead(s) ? seedReserve(s, next.w * next.h) : 150)) {
     out.push({ type: 'buyParcel', id: next.id });
     spent = true;
     bot.bought = s.day;

@@ -22,7 +22,7 @@ import type { FrameView, Renderer } from '../contract';
 import type { Season, SimEvent, Weather, WorldState } from '../sim/types';
 import { buildActors, type Actors } from './actors';
 import { buildBuilds, type Builds } from './builds';
-import { makeRig } from './camera';
+import { makeRig, ownedBox } from './camera';
 import { buildCrops, makeTimers, type Crops, type TileTimers } from './crops';
 import { makeEffects, type Effects } from './effects';
 import { buildFields, type Fields } from './fields';
@@ -32,6 +32,7 @@ import { buildMarkers, type Markers } from './markers';
 import { U, armNaNWatch, makeMaterials, patch } from './materials';
 import { computeSky, makeSky, SEASONS, stormDawn } from './palette';
 import { buildProps, makeGlassMaterial, signTexture, type Props } from './props';
+import { buildRibbons } from './ribbons';
 import { makeScreen } from './screen';
 import { buildTerrain, makeWaterMaterial, type Terrain } from './terrain';
 import { clamp, col, lerp, smooth } from './util';
@@ -117,6 +118,9 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
   let effects: Effects | null = null;
   let timers: TileTimers = makeTimers(1);
   let glowWisps = true;
+  // Round 9: a ribbon on the house for each season's fair won.
+  const ribbons = buildRibbons();
+  scene.add(ribbons.group);
   let W = 20;
   let H = 15;
 
@@ -304,6 +308,7 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
     else if (sn !== season) {
       buildSeason(s, sn);
     }
+    ribbons.set((s as WorldState & { ribbons?: number }).ribbons ?? 0);
     setQuality(v.quality);
     const dt = snap ? 0 : clamp(v.dt, 0, 0.1);
     clock += dt;
@@ -328,7 +333,7 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
     const tFlash = now - (effects?.thunderAt ?? -1e6);
     const flash = tFlash >= 0 && tFlash < 0.9 ? Math.max(0, Math.sin(tFlash * 22)) * Math.exp(-tFlash * 5) + (tFlash > 0.18 && tFlash < 0.5 ? 0.6 * Math.exp(-(tFlash - 0.18) * 8) : 0) : 0;
     const flashK = v.reducedMotion ? 0.35 : 1;
-    rig.update(v.camera, W, H, dt, snap);
+    rig.update(v.camera, W, H, dt, snap, ownedBox(s.parcels));
     fitShadow();
     key.color.copy(sky.keyColor);
     key.intensity = sky.keyI + flash * 3.5 * flashK;
@@ -457,10 +462,11 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
       if (v.state !== world) buildWorld(v.state, v.season);
       W = v.state.W;
       H = v.state.H;
-      rig.update(v.camera, W, H, 0, true);
+      rig.update(v.camera, W, H, 0, true, ownedBox(v.state.parcels));
     },
     dispose() {
       disposeWorld();
+      ribbons.dispose();
       terrain?.dispose();
       props?.dispose();
       glow?.dispose();

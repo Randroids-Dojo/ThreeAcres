@@ -228,8 +228,10 @@ describe('P1: the board headlines the gain over market', () => {
       fillRequests(s, true);
       for (const o of s.orders) {
         const t = noteText(s, o);
-        expect(t.head).toBe(`+${gain(o).toLocaleString('en-US')} over market`);
-        expect(t.lines.join(' | ')).toMatch(/^\d+ [a-z]+ for .+ \| Plant \d+ (today|by [A-Za-z]+( \d+)?), seed [\d,]+ \| Ripe in \d+ days, due [A-Za-z]+ \d+, (no day|a day|\d days) to spare$/);
+        // Round 9: what it clears in all (pay less seed), then its plots and days, so a pair reads as a trade.
+        const clear = o.reward - o.items[0].n * CROPS[o.items[0].crop].seed;
+        expect(t.head).toBe(`+${clear.toLocaleString('en-US')}`);
+        expect(t.lines.join(' | ')).toMatch(/^for \d+ plots?, \d+ days? \| \d+ [a-z]+ for .+ \| Plant (today|by [A-Za-z]+( \d+)?), seed [\d,]+ \| Due [A-Za-z]+ \d+, (no day|a day|\d days) to spare( \| (In time for|After) the fair)?$/);
         expect(t.lines.join(' ')).not.toMatch(/Pays/);
       }
     }
@@ -298,7 +300,8 @@ describe('P1: no line sends the farmer to bed with work waiting', () => {
 
 describe('P1: the early field leaves coins to sow it', () => {
   it('"Buy a second field." waits until buying it leaves 150 for seed', () => {
-    const s = teach(world('sunup', 3), [...EARLY, 'requests', 'deliver'], [...EARLY_FEATURES, 'board', 'requests']);
+    // (Round 9: the field lesson comes once the first pair is decided.)
+    const s = teach(world('sunup', 3), [...EARLY, 'requests', 'sowfor', 'deliver', 'choose'], [...EARLY_FEATURES, 'board', 'requests']);
     s.day = 5;
     const t = new Tutor();
     s.coins = 270;

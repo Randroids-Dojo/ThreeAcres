@@ -118,7 +118,9 @@ export function walkFarmer(s: WorldState, mx: number, my: number, dt: number, ev
   const len = Math.hypot(mx, my);
   // Sunup keeps walking, a little slower, through a quick job: holding the act button along a row is one smooth walk.
   const working = !!a.task && homestead(s) && ON_THE_MOVE.has(a.task.verb);
-  if ((a.task && !working) || len < 0.15) {
+  // Round 9: walking with the act key held waits for the work beside it to be done before it walks past (a zigzag
+  // watering pass left 4 of 11 dry: two rows at once outran the can).
+  if ((a.task && !working) || len < 0.15 || (working && a.task!.held && workBeside(s, a, mx, my))) {
     a.moving = false;
     return;
   }
@@ -140,6 +142,29 @@ export function walkFarmer(s: WorldState, mx: number, my: number, dt: number, ev
   }
   if (moved > 0) stepSound(s, a, moved, ev);
 }
+
+/**
+ * Round 9: is there free work for the tool in hand (water, a harvest, bugs)
+ * on a plot in reach beside or behind the farmer, as it walks (mx, my), other
+ * than the one being worked? A held act key does it before walking past.
+ */
+function workBeside(s: WorldState, a: Actor, mx: number, my: number): boolean {
+  const t = tileOf(a);
+  const len = Math.hypot(mx, my) || 1;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const x = t.x + dx;
+    const y = t.y + dy;
+    if (!inMap(x, y) || (a.task && a.task.x === x && a.task.y === y)) continue;
+    const cx = x + 0.5 - a.x;
+    const cy = y + 0.5 - a.y;
+    // Only what the walk is about to leave behind: beside the farmer, or just behind.
+    if ((cx * mx + cy * my) / len > 0.35) continue;
+    const r = resolve(s, s.tool, x, y);
+    if (r.verb && r.ok && BESIDE_JOBS.has(r.verb)) return true;
+  }
+  return false;
+}
+const BESIDE_JOBS = new Set<Verb>(['water', 'harvest', 'tend', 'clear']);
 
 /** Follow the current path. In turns the steps are quick hops. */
 function followPath(s: WorldState, a: Actor, dt: number, ev: SimEvent[]): void {

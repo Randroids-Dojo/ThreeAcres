@@ -1,12 +1,12 @@
 // What the farm is for, per goal rule: market milestones, almanac seasons and
 // town orders. Selling lives here too, because the goal decides how it works.
 
-import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_CLOSE, REQUEST_EDGE, REQUEST_FLOOR, REQUEST_GAIN_PER_PLOT, REQUEST_GRACE, REQUEST_LOOK, REQUEST_MAX, REQUEST_MAX_BIG, REQUEST_MIN, REQUEST_MOST, REQUEST_RATE, REQUEST_SHARE, REQUEST_SOW, REQUEST_SPAN, requestSlots, TOWN } from './constants';
+import { DAYS_PER_SEASON, FAIR_LEAD, FAIR_LEAN, FAIR_MORE, FAIR_OFF, FIRST_PAIR_MOST, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_CLOSE, REQUEST_EDGE, REQUEST_FLOOR, REQUEST_GAIN_PER_PLOT, REQUEST_GRACE, REQUEST_LOOK, REQUEST_MAX, REQUEST_MAX_BIG, REQUEST_MIN, REQUEST_MOST, REQUEST_RATE, REQUEST_SHARE, REQUEST_SOW, REQUEST_SPAN, requestSlots, TOWN } from './constants';
 import { CROP_IDS, CROPS, count, inSeason } from './crops';
 import { season } from './world';
 import { nightsToTurn, priceOf, sowing } from './actions';
 import { pick, rand, randInt, shuffle } from './rng';
-import type { Crop, CropId, DayReport, Goal, GoalKind, LossCause, Order, RequestFail, RequestKind, SimEvent, WorldState } from './types';
+import type { Crop, CropId, DayReport, Fair, Goal, GoalKind, LossCause, Order, RequestFail, RequestKind, SimEvent, WorldState } from './types';
 
 // ---------------------------------------------------------------- selling
 
@@ -116,6 +116,8 @@ function payRequest(s: WorldState, o: Order, ev: SimEvent[], report?: DayReport)
   // and crows that took one crop of each of five requests kept the copper can locked at reputation 2).
   const rep = full ? o.rep : (o.rep * got) / it.n;
   addRep(s, rep);
+  // Round 9: the season's fair counts every request filled in its season (in full or short).
+  if (s.fair && s.day >= s.fair.start && s.day <= s.fair.day) s.fair.got += 1;
   if (report) (report.filled ??= []).push({ who: o.who, reward: pay, ...(full ? {} : { got, of: it.n }) });
   ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: pay, crop: it.crop, ...(full ? {} : { got, of: it.n }), rep });
   return pay;
@@ -291,9 +293,16 @@ function ripeBy(s: WorldState, c: Crop, due: number): boolean {
  * counter), which accepting it would take up. Nothing already growing when it
  * was pinned counts, nor anything in the crate it did not grow.
  */
-function countsFor(s: WorldState, o: Order, c: Crop): boolean {
+function countsFor(_s: WorldState, o: Order, c: Crop): boolean {
   if (c.dead || c.kind !== o.items[0].crop) return false;
-  return isTaken(o) ? c.for === o.id : c.id > o.id && !sownForOpen(s, c);
+  // Round 9: an offer counts nothing; only crops planted after Accept count (the ninth playtest's offer read "18
+  // radishes, 16 planted" for market radishes sown before Accept, beside a partner stamped "No room").
+  return isTaken(o) && c.for === o.id;
+}
+
+/** The first crop id that can count for a taken request: planted after Accept (round 9), or since it was pinned. */
+function countsFrom(o: Order): number {
+  return o.from ?? o.id + 1;
 }
 
 /**
@@ -356,7 +365,7 @@ export function claimCrops(s: WorldState): void {
     if (have >= it.n) continue;
     for (let i = 0; i < s.plots.length && have < it.n; i++) {
       const c = s.plots[i].crop;
-      if (!c || c.dead || c.kind !== it.crop || c.id <= o.id || !ownedPlot(s, i) || sownForOpen(s, c) || !ripeBy(s, c, o.due)) continue;
+      if (!c || c.dead || c.kind !== it.crop || c.id < countsFrom(o) || !ownedPlot(s, i) || sownForOpen(s, c) || !ripeBy(s, c, o.due)) continue;
       c.for = o.id;
       have++;
     }
@@ -464,7 +473,7 @@ export function owedToday(s: WorldState): { o: Order; n: number }[] {
  * (or seed coins) than the farm has free by their planting days, after what
  * the taken requests still owe. Null when the farm could take both.
  */
-export function clashOf(s: WorldState, a: Order, b: Order): { kind: 'soil' | 'coins'; need: number; have: number } | null {
+export function clashOf(s: WorldState, a: Order, b: Order): { kind: 'soil' | 'coins'; need: number; have: number; coins?: number; ripe?: number; owed?: number } | null {
   const held = owed(s);
   const last = Math.max(sowByOf(a), sowByOf(b));
   const plots = stillToSow(s, a) + stillToSow(s, b);
@@ -473,7 +482,8 @@ export function clashOf(s: WorldState, a: Order, b: Order): { kind: 'soil' | 'co
   const coins = stillToSow(s, a) * CROPS[a.items[0].crop].seed + stillToSow(s, b) * CROPS[b.items[0].crop].seed;
   // Round 8: counted as the pair was priced, on what the farm can spend now (its coins and what is ripe today).
   const budget = Math.max(0, Math.min(sowBudget(s, last), sowBudget(s, s.day)) - held.coins);
-  if (coins > budget) return { kind: 'coins', need: coins, have: budget };
+  // Round 9: the coins as the coin box shows them, and what is ripe beside them ("You have 520" with 255 in the box).
+  if (coins > budget) return { kind: 'coins', need: coins, have: budget, coins: s.coins, ripe: Math.max(0, Math.min(sowBudget(s, last), sowBudget(s, s.day)) - s.coins), owed: held.coins };
   return null;
 }
 
@@ -490,6 +500,31 @@ export function freshOf(o: Order): number {
 export function gainOf(o: Order): number {
   const it = o.items[0];
   return o.reward - it.n * CROPS[it.crop].price;
+}
+
+/**
+ * Round 9: what a request clears in all: its pay less its seed, what the farm ends up with (the crops are paid at
+ * market as they go into the crate, the gain when it is filled). The board headlines this with its plots and days
+ * ("+415 for 10 plots, 6 days"): the eighth playtest's "+415 over market" put the bigger number on the bold side
+ * nearly every time, and "within a fifth per plot-day" never showed on screen.
+ */
+export function clearOf(o: Order): number {
+  const it = o.items[0];
+  return o.reward - it.n * CROPS[it.crop].seed;
+}
+
+/** Round 9: one side of a pair as the board reads it: what it clears, the plots it takes and the days they are tied up. */
+export function tradeOf(o: Order): { clear: number; plots: number; days: number } {
+  const it = o.items[0];
+  return { clear: clearOf(o), plots: it.n, days: CROPS[it.crop].days };
+}
+
+/**
+ * Round 9: does one side of a pair win on every line at once: clears at least as much, on no more plots, in no more
+ * days? A pair is a trade only when neither does (one quicker or smaller, the other bigger).
+ */
+export function dominates(a: { clear: number; plots: number; days: number }, b: { clear: number; plots: number; days: number }): boolean {
+  return a.clear >= b.clear && a.plots <= b.plots && a.days <= b.days;
 }
 
 /** Plot-days a request's fresh sowing takes: the soil it holds, and for how long. */
@@ -688,23 +723,15 @@ export function offerKey(crops: CropId[]): string {
  * no such pair the morning brings one request, or none.
  * Returns the requests to pin: one, two, or none when nothing fits.
  */
-export function offerRequests(s: WorldState): Order[] {
-  const first = s.rep === 0 && !(s.requested ?? 0);
-  if (first) {
-    const d = CROPS.radish;
-    const o = offer(s, 'radish', 2, { plots: 0, coins: 0 }, REQUEST_GRACE.other);
-    const sowBy = Math.min(s.day + 2, lastDayFor(s, 'radish') - d.days);
-    if (!o && (sowBy < s.day || !sowing(s.day, 'radish').ok)) return [];
-    s.requested = (s.requested ?? 0) + 1;
-    s.lastOffer = offerKey(['radish']);
-    const r = order(s, o ?? { crop: 'radish', sowBy, due: Math.min(sowBy + d.days + 1, lastDayFor(s, 'radish')), room: 3, coins: 30, cap: 3 }, 3, fives(REQUEST_RATE * 3 * d.days), 'first', pick(s, TOWN));
-    // The lesson's own request: taken at once.
-    delete r.taken;
-    return [r];
-  }
+export function offerRequests(s: WorldState, prefer?: { kind?: string; crops: CropId[] }): Order[] {
+  // Round 9: the first offer is a small pair too, read on the day the board is (the ninth playtest's first choice
+  // came on Spring 9, about eight minutes in; Spring 4 to 7 had nothing to decide). It asks for a few plots of the
+  // cheap spring crops, one quicker or smaller, the other bigger, and only one can be taken, so it need not compete
+  // for the farm's soil or coins.
+  const first = !(s.requested ?? 0);
   // Crops that regrow are left out: their seed pays back over many picks, which a request for one pick would hide,
   // so a request for them reads as a bad deal beside any other.
-  const known = CROP_IDS.filter((c) => CROPS[c].regrow === 0 && (s.rep >= 2 || c !== 'pumpkin'));
+  const known = CROP_IDS.filter((c) => CROPS[c].regrow === 0 && (s.rep >= 2 || c !== 'pumpkin') && (!first || CROPS[c].seed <= 15));
   const days = randInt(s, REQUEST_SOW[0], REQUEST_SOW[1]);
   // What the taken requests still need sowing takes its soil and seed first.
   const held = owed(s);
@@ -725,11 +752,14 @@ export function offerRequests(s: WorldState): Order[] {
     const t = timing(kind, days);
     return offer(s, crop, t.days, held, t.grace, t.look);
   };
-  const size = (o: Offer, n: number) => Math.max(REQUEST_MIN, Math.min(o.cap, Math.ceil(plots * REQUEST_MOST), Math.round(n)));
+  const most = first ? FIRST_PAIR_MOST : Math.ceil(plots * REQUEST_MOST);
+  const size = (o: Offer, n: number) => Math.max(REQUEST_MIN, Math.min(o.cap, most, Math.round(n)));
   // Each morning tries the sorts of pair in a fresh order, the one offered last time last. A wet morning tries the rush
-  // first (sow today): rain waters what goes in today, so the day has a sowing to plan.
+  // first (sow today): rain waters what goes in today, so the day has a sowing to plan. An offer made again to fit the
+  // farm (round 9) tries its own sort and crops first.
   const wet = s.weather === 'rain' || s.weather === 'storm';
-  const order3 = shuffle(s, CONTRASTS.slice()).sort((a, b) => Number(a.id === s.pairKind) - Number(b.id === s.pairKind) || (wet ? Number(b.id === 'risk') - Number(a.id === 'risk') : 0));
+  const order3 = shuffle(s, CONTRASTS.slice()).sort((a, b) => Number(b.id === prefer?.kind) - Number(a.id === prefer?.kind) || Number(a.id === s.pairKind && !prefer) - Number(b.id === s.pairKind && !prefer) || (wet ? Number(b.id === 'risk') - Number(a.id === 'risk') : 0));
+  const same = (two: CropId[]) => !!prefer && offerKey(two) === offerKey(prefer.crops);
   for (const c of order3) {
     // The crops each sort wants, always two different ones (round 7: four pairs in seven were one crop on both sides,
     // "10 corn +440 or +350"): any two for risk; the fastest against a slower one for time; the cheapest seed against
@@ -743,6 +773,7 @@ export function offerRequests(s: WorldState): Order[] {
       else if (c.id === 'time' && db.days >= da.days + 2) options.push([a, b]);
       else if (c.id === 'size' && db.seed >= da.seed * 1.5) options.push([b, a]);
     }
+    options.sort((x, y) => Number(same(y)) - Number(same(x)));
     for (const [safeCrop, boldCrop] of options) {
       const so = make(safeCrop, c.safe);
       const bo = make(boldCrop, c.bold);
@@ -752,23 +783,29 @@ export function offerRequests(s: WorldState): Order[] {
       const spare = (o: Offer) => o.due - o.sowBy - CROPS[o.crop].days;
       if (spare(so) < 1 || (c.id === 'risk' ? spare(bo) > 0 : spare(bo) < 1)) continue;
       const share = REQUEST_SHARE[c.safe as keyof typeof REQUEST_SHARE] ?? 0.3;
-      const ns = size(so, plots * share);
+      const ns = first ? REQUEST_MIN : size(so, plots * share);
       const span = c.bold === 'long' ? REQUEST_SPAN.long : c.bold === 'big' ? REQUEST_SPAN.big : 1;
       // The two compete for the same free soil or the same coins, so taking one really costs the other: both grow
       // together until they cannot both be sown. A pair that cannot be made to compete is not offered (round 7: one
       // wanted 450 coins and 10 plots, the other the same, from a farm with 1,180 coins and 22 bare plots). The bold
       // one is sized from the safe one each time, its plot-days rounded up, so it never falls short of its span.
-      for (const k of [1, 1.25, 1.5, 2, 2.5, 3, 4]) {
+      for (const k of first ? [1] : [1, 1.25, 1.5, 2, 2.5, 3, 4]) {
         const nsk = size(so, ns * k);
         const nbk = size(bo, Math.ceil((span * nsk * CROPS[safeCrop].days) / CROPS[boldCrop].days - 1e-9));
         // A big request is half as many again as the small one, or the pair does not say what it is.
         if (c.id === 'size' && nbk < 1.5 * nsk) continue;
         const p = pricePair(s, { o: so, n: nsk }, { o: bo, n: nbk }, c.bold);
-        if (!p || !competes(so, p.ns, bo, p.nb)) continue;
+        if (!p || (!first && !competes(so, p.ns, bo, p.nb))) continue;
         // Each still pays clearly over market once the cap has scaled it (a big crop on a small farm may not).
         if (p.safe < REQUEST_FLOOR * p.ns * CROPS[safeCrop].price || p.bold < REQUEST_FLOOR * p.nb * CROPS[boldCrop].price) continue;
-        s.lastOffer = offerKey([safeCrop, boldCrop]);
-        return pinPair(s, [order(s, so, p.ns, p.safe, c.safe, names[0]), order(s, bo, p.nb, p.bold, c.bold, names[1])], c.id);
+        const two = [order(s, so, p.ns, p.safe, c.safe, names[0], undefined, 0), order(s, bo, p.nb, p.bold, c.bold, names[1], undefined, 0)];
+        // Round 9: a trade, read at a glance: neither side clears as much on as few plots in as few days (the ninth
+        // playtest's Summer 4 sunflowers won on every line).
+        const [ts, tb] = two.map(tradeOf);
+        if (dominates(ts, tb) || dominates(tb, ts)) continue;
+        for (const o of two) o.id = s.nextId++;
+        noteOffer(s, offerKey([safeCrop, boldCrop]));
+        return pinPair(s, two, c.id);
       }
     }
   }
@@ -778,15 +815,45 @@ export function offerRequests(s: WorldState): Order[] {
     if (offerKey([crop]) === s.lastOffer) continue;
     const o = make(crop, 'single');
     if (!o) continue;
-    let n = size(o, plots * REQUEST_SHARE.single);
+    let n = size(o, first ? REQUEST_MIN : plots * REQUEST_SHARE.single);
     while (n > REQUEST_MIN && fives(REQUEST_RATE * n * CROPS[crop].days) > gainCap(s)) n--;
     const gain = fives(REQUEST_RATE * n * CROPS[crop].days);
     if (gain > gainCap(s) || gain < 10) continue;
     s.requested = (s.requested ?? 0) + 1;
-    s.lastOffer = offerKey([crop]);
+    noteOffer(s, offerKey([crop]));
     return [order(s, o, n, gain, 'single', names[0])];
   }
   return [];
+}
+
+/** The crops of the offer just pinned, and of the one before it (round 9: an offer made again is checked against that). */
+function noteOffer(s: WorldState, key: string): void {
+  s.offerBefore = s.lastOffer ?? '';
+  s.lastOffer = key;
+}
+
+/**
+ * Round 9: offers that no longer fit the farm (seed sown since they were
+ * pinned took their soil, or coins went on a field) are made again to fit
+ * it, the same sort and crops first, so the board never shows a side it
+ * would stamp "No room" or "Need 60" (the ninth playtest's Summer 9 radishes
+ * read "No room", and Autumn 3's lettuces beside 16 market radishes). Run as
+ * the board is read. Returns true when it changed the board.
+ */
+export function freshenOffers(s: WorldState): boolean {
+  const stale = s.orders.filter((o) => offered(o) && !!whyNot(s, o));
+  if (!stale.length) return false;
+  const groups = new Set(stale.map((o) => o.pair ?? o.id));
+  const was = s.orders.filter((o) => offered(o) && groups.has(o.pair ?? o.id));
+  const crops = was.map((o) => o.items[0].crop);
+  const kind = was.length === 2 ? s.pairKind : undefined;
+  s.orders = s.orders.filter((o) => !was.includes(o));
+  s.requested = Math.max(0, (s.requested ?? 0) - was.length);
+  // The pair made again may be the same two crops: it is checked against the offer before it.
+  s.lastOffer = s.offerBefore ?? '';
+  const again = offerRequests(s, { kind, crops });
+  s.orders.push(...again);
+  return true;
 }
 
 /**
@@ -801,6 +868,10 @@ export function acceptRequest(s: WorldState, id: number, ev: SimEvent[]): boolea
   o.taken = true;
   o.seen = true;
   o.got ??= 0;
+  // Round 9: only crops planted from now on count for it.
+  o.from = s.nextId;
+  // The first Accept sets the season's fair (or the next season's, with too few days left in this one).
+  if (s.fair === undefined) startFair(s, nightsToTurn(s.day) < FAIR_LEAD);
   for (const q of s.orders.slice()) {
     if (q === o || q.pair === undefined || q.pair !== o.pair || !offered(q)) continue;
     s.orders = s.orders.filter((x) => x !== q);
@@ -809,6 +880,65 @@ export function acceptRequest(s: WorldState, id: number, ev: SimEvent[]): boolea
   // Seed sown for it since it was pinned (before Accept) counts for it now.
   claimCrops(s);
   return true;
+}
+
+/**
+ * Round 9: the season's fair, on the season's last day, wants so many
+ * requests filled that season (more as the farm grows, `fairWant`). Set at
+ * the first Accept, then each new season. `next`: the first Accept came too
+ * late in a season, so the first fair is the next season's.
+ */
+export function startFair(s: WorldState, next = false): void {
+  const start = next ? s.day + nightsToTurn(s.day) : s.day;
+  s.fair = { start, day: start - ((start - 1) % DAYS_PER_SEASON) + DAYS_PER_SEASON - 1, want: fairWant(s, start), got: 0 };
+}
+
+/** Round 9: what a season's fair wants: two more requests than the fields owned, one fewer in summer, one more in autumn. */
+export function fairWant(s: WorldState, day: number): number {
+  const fields = s.parcels.filter((p) => p.owned).length;
+  return fields + FAIR_MORE - FAIR_LEAN[season(day)];
+}
+
+/** Round 9: the fair this farm is working towards now (null before the first Accept, or between a late Accept and its season). */
+export function fairNow(s: WorldState): Fair | null {
+  return s.fair && s.day >= s.fair.start && s.day <= s.fair.day ? s.fair : null;
+}
+
+/** Round 9: is a request due by the fair this season (so filling it counts there)? */
+export function forFair(s: WorldState, o: Order): boolean {
+  const f = s.fair;
+  return !!f && o.due <= f.day && o.due >= f.start;
+}
+
+/**
+ * Round 9: the night of the fair: a ribbon for the house and a fifth off
+ * the next field (one prize waits at a time) if it got what it wanted.
+ * Returns what the morning card says. Run at nightfall, after the night's
+ * requests are paid, on the fair's own day.
+ */
+export function judgeFair(s: WorldState): { got: number; want: number; won: boolean } | null {
+  const f = s.fair;
+  if (!f || s.day !== f.day) return null;
+  const won = f.got >= f.want;
+  if (won) {
+    s.ribbons = (s.ribbons ?? 0) + 1;
+    if (s.parcels.some((p) => !p.owned)) s.fieldOff = FAIR_OFF;
+  }
+  return { got: f.got, want: f.want, won };
+}
+
+/**
+ * Round 9: a taken request whose crops are all in the crate is handed over at
+ * once, by day: the crate ships them, one clear way (the ninth playtest never
+ * saw the board's Deliver stamp named on the farm, and requests also went
+ * overnight). A short one goes once nothing more is growing for it.
+ */
+export function deliverReady(s: WorldState, ev: SimEvent[]): void {
+  if (!(s.rules.goal === 'market' && s.rules.tools === 'kit')) return;
+  for (const o of [...s.orders].sort(byDue)) {
+    if (!isTaken(o) || !(o.got ?? 0) || !canDeliver(s, o)) continue;
+    ev.push({ type: 'coins', amount: payRequest(s, o, ev) });
+  }
 }
 
 /** The board's requests have been read: none of them is new any more (the badge counts new ones only). */

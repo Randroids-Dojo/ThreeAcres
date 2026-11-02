@@ -44,8 +44,8 @@ export const PARCELS = [
   { x: 7, y: 5, w: 4, h: 4, price: 250 },
   { x: 2, y: 10, w: 4, h: 4, price: 800 },
   { x: 7, y: 10, w: 4, h: 4, price: 1500 },
-  { x: 12, y: 5, w: 4, h: 4, price: 2400 },
-  { x: 12, y: 10, w: 4, h: 4, price: 3500 },
+  { x: 12, y: 5, w: 4, h: 4, price: 3000 },
+  { x: 12, y: 10, w: 4, h: 4, price: 4500 },
 ] as const;
 
 export type PropKind = 'house' | 'crate' | 'board' | 'bunkhouse' | 'well';

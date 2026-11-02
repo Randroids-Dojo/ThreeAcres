@@ -294,8 +294,8 @@ describe('P2: a wet morning says what it is for', () => {
     const s = farm(89);
     s.weather = 'rain';
     s.report = { day: 5, sold: [{ crop: 'radish', n: 4, value: 120 }], wages: 0, grew: 0, withered: 0, eaten: 0, crewWork: 0, income: 120 };
-    expect(hud.morningNews(s)).toBe('Sold 4 for 120, what you plant today needs no water.');
+    expect(hud.morningNews(s)).toBe('Yesterday you sold 4 for 120, what you plant today needs no water.');
     s.weather = 'sun';
-    expect(hud.morningNews(s)).toBe('Sold 4 for 120.');
+    expect(hud.morningNews(s)).toBe('Yesterday you sold 4 for 120.');
   });
 });

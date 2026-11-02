@@ -104,11 +104,9 @@ describe('P1: a crop is paid for the moment it goes into the crate', () => {
       step(s, 0.016, [{ type: 'act' }]);
       for (let k = 0; k < 20; k++) step(s, 1 / 30);
     }
-    expect(s.coins).toBe(2 * CROPS.radish.price);
+    // Round 9: the crate hands the request over the moment the last of it goes in, by day (no stamp, no night).
     expect(o.got).toBe(2);
-    nightfall(s, []);
     expect(s.orders.some((q) => q.id === o.id)).toBe(false);
-    expect(s.report?.filled?.[0].reward).toBe(40);
     expect(s.coins).toBe(2 * CROPS.radish.price + 40);
     expect(s.rep).toBe(4);
   });
@@ -205,8 +203,9 @@ describe('P1: a pair is always a choice', () => {
       const c = (goals as { clashOf?: (s: WorldState, a: Order, b: Order) => { kind: string; need: number; have: number } | null }).clashOf?.(s, offer[0], offer[1]);
       expect(c, `${s.day}`).toBeTruthy();
       const words = (dialogs as { clashWords?: (c: unknown) => string }).clashWords?.(c) ?? '';
-      expect(words).toMatch(/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/);
-      expect(words.split(/\s+/).length).toBeLessThanOrEqual(8);
+      // (Round 9: the coins as the coin box shows them, and what is ripe beside them.)
+      expect(words).toMatch(/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+(, plus [\d,]+ ripe)?(, [\d,]+ owed)?\.$/);
+      expect(words.split(/\s+/).length).toBeLessThanOrEqual(c?.kind === 'soil' ? 8 : 13);
       said++;
     }
     expect(said).toBeGreaterThan(150);
@@ -457,14 +456,18 @@ describe('P3: the small things', () => {
     expect(hud.morningNews(s)).not.toMatch(/needs no water/);
   });
 
-  it('an offer with some planted for it since it was pinned says so: "6 planted, plant 9 more"', () => {
+  // Round 9: an offer counts nothing planted before Accept (the ninth playtest's "18 radishes, 16 planted" were market
+  // radishes); once taken, what is planted for it counts, and the line says "more".
+  it('an offer counts nothing planted before Accept; once taken, the line says "more"', () => {
     const s = farm(71, { coins: 900, day: 13, fields: 2 });
     const o: Order = { id: s.nextId++, who: 'Pell’s pickles', items: [{ crop: 'sunflower', n: 15 }], reward: 15 * CROPS.sunflower.price + 305, rep: 1, due: 20, sowBy: 13, made: 13, seen: true, kind: 'rush', taken: false };
     s.orders = [o];
     fieldTiles(s).slice(0, 6).forEach((i) => plant(s, i % s.W, Math.floor(i / s.W), 'sunflower', 0));
-    expect(noteText(s, o).lines.join(' ')).toMatch(/6 planted, plant 9 more today/);
-    // And the lesson line, once it is taken, says "more".
-    o.taken = true;
+    expect(noteText(s, o).lines.join(' ')).not.toMatch(/planted/);
+    expect(goals.requestHave(s, o)).toBe(0);
+    for (const p of s.plots) if (p.crop?.kind === 'sunflower') p.crop = null;
+    expect(step(s, 0.016, [{ type: 'accept', id: o.id }])).toBeTruthy();
+    fieldTiles(s).filter((i) => !s.plots[i].crop).slice(0, 6).forEach((i) => plant(s, i % s.W, Math.floor(i / s.W), 'sunflower', 0));
     goals.claimCrops(s);
     const line = new Tutor().update(teach(s, ALL.filter((l) => l !== 'sowfor'), FEATURES), 0.1, true).line;
     expect(line).toBe('Plant 9 more sunflowers for the request.');

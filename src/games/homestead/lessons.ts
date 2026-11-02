@@ -10,10 +10,10 @@ import { BUILD_COST, FIELD_SEED, TOOL_UPGRADES } from '../../sim/constants';
 import { CROP_IDS, CROPS, cropWord } from '../../sim/crops';
 import { nightsToTurn, sowing, workLeft } from '../../sim/actions';
 import { guardedSure } from '../../sim/day';
-import { isTaken, offered, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
+import { isTaken, offered, owed, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
 import { wellsFrom } from '../../sim/actors';
-import { season, SEASON_NAMES } from '../../sim/world';
+import { dayOfSeason, season, SEASON_NAMES } from '../../sim/world';
 import type { BuildKind, Crop, SimEvent, WorldState } from '../../sim/types';
 
 type Point = { x: number; y: number };
@@ -58,6 +58,16 @@ interface Lesson {
   build?: BuildKind;
   /** While this holds, the lesson steps aside (its line goes, unfinished) and waits: the scarecrow line while it cannot be paid for. */
   hold?(s: WorldState): boolean;
+  /**
+   * Round 9: the farmer has already done what it says (the whole farm is in view): it finishes quietly, never shown,
+   * and what it brings still comes ("Tap View to see the whole farm." came back while the whole farm was in view).
+   */
+  pass?(s: WorldState): boolean;
+  /**
+   * Round 9: a count line ("Plant 1 more radish for the request.") goes the moment its count is met, not four seconds
+   * later (it stayed about 3 s after the third went in).
+   */
+  instant?: boolean;
 }
 
 const ownedAt = (s: WorldState, i: number) => s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned;
@@ -170,7 +180,19 @@ const fieldOpen = (s: WorldState, i: number) => {
  * soil. Never a crop: building goes on bare soil only.
  */
 const buildSpot = (s: WorldState, guard: boolean) =>
-  nearest(s, (_c, i) => bareAt(s, i) && midField(s, i) && (!guard || fieldOpen(s, i))) ?? nearest(s, (_c, i) => bareAt(s, i) && midField(s, i)) ?? nearest(s, (_c, i) => bareAt(s, i));
+  nearest(s, (_c, i) => bareAt(s, i) && midField(s, i) && (!guard || fieldOpen(s, i))) ?? nearest(s, (_c, i) => bareAt(s, i) && midField(s, i));
+/**
+ * Round 9: coins the requests want for seed: what the taken ones still owe, and the dearer of what is on offer. A
+ * paid lesson (a scarecrow, a sprinkler) waits while paying for it would leave less (the ninth playtest's scarecrow
+ * lesson took 40 of 120 coins on the morning an offer needed 60, and a neighbour left seed money three mornings
+ * running).
+ */
+export function seedWanted(s: WorldState): number {
+  const offers = s.orders.filter(offered).map((o) => stillToSow(s, o) * CROPS[o.items[0].crop].seed);
+  return owed(s).coins + (offers.length ? Math.max(...offers) : 0);
+}
+/** Round 9: can the farm pay for a build and still sow what its requests want? */
+const paidOk = (s: WorldState, cost: number) => s.coins - cost >= seedWanted(s);
 /** The nearest bare plot, or null when every plot is sown or built on (a line about bare soil waits for one). */
 const bareSpot = (s: WorldState) => nearest(s, (_c, i) => bareAt(s, i));
 /** Can the smith make something now that the farm can pay for: a better can or hoe (one the farm has), its reputation and its coins enough? */
@@ -292,6 +314,9 @@ const LESSONS: Lesson[] = [
       return it ? `Plant ${n}${more} ${cropWord(it.crop, n)} for the request.` : 'Plant seeds for the request.';
     },
     done: (s) => !toSowFor(s),
+    instant: true,
+    // Round 9: a farm that has taken no request by Spring 6 is not held back by it (the field lesson comes after it).
+    pass: (s) => s.day >= 6 && !toSowFor(s),
     hold: (s) => !bareSpot(s),
     point: (s) => bareSpot(s),
   },
@@ -304,8 +329,11 @@ const LESSONS: Lesson[] = [
     id: 'deliver',
     after: ['requests'],
     unlocks: [],
-    // (Only a request the player took: an offer on the board is not yet theirs to fill.)
-    ready: (s) => !!theRequest(s) || (s.day >= 7 && s.orders.some(isTaken)),
+    // (Only a request the player took: an offer on the board is not yet theirs to fill.) Round 9: only once one is ripe
+    // (from Spring 7 it said "Harvest 3 radishes" with none ripe); from Spring 9 with none ripe it passes quietly, so the
+    // lessons after it never wait on a request nobody grew for.
+    ready: (s) => !!theRequest(s),
+    pass: (s) => s.day >= 9 && !theRequest(s),
     text: (s) => {
       const it = (theRequest(s)?.o ?? s.orders.find(isTaken))?.items[0];
       return it ? `Harvest ${it.n} ${cropWord(it.crop, it.n)}. The crate ships them.` : 'Harvest what it asks. The crate ships it.';
@@ -320,19 +348,36 @@ const LESSONS: Lesson[] = [
     // The first pair of requests: only one of them can be taken, with the board's Accept. Points at the board; ends
     // when one is accepted (or the pair has gone). Planting never takes one.
     id: 'choose',
-    after: ['deliver'],
+    // Round 9: the first offer is a pair, on the day the board is read.
+    after: ['requests'],
     unlocks: [],
     act: 'board',
     ready: (s) => !!thePair(s),
     text: () => 'Two requests on the board. Accept one.',
     done: (s) => !thePair(s),
+    // Round 9: taken already, on the board, the line has nothing left to say (it showed for 4 s after the Accept).
+    pass: (s) => !thePair(s) && s.orders.some(isTaken),
     point: () => ({ x: prop('board').x, y: prop('board').y + 0.1 }),
+  },
+  {
+    // Round 9: the season's fair, set by the first Accept: one line, on a day nothing else new came, and its quiet
+    // line on the day card comes with it.
+    id: 'fair',
+    after: ['choose'],
+    unlocks: ['fair'],
+    stagger: true,
+    ready: (s) => !!s.fair && s.orders.some(isTaken),
+    text: (s) => (s.fair ? `The fair wants ${s.fair.want} requests by ${SEASON_NAMES[season(s.fair.day)]} ${dayOfSeason(s.fair.day)}.` : 'The fair wants requests filled.'),
+    passive: 4,
   },
   {
     // Not before buying it leaves coins to sow it (the fifth playtest spent 250 of 270 and sat broke for five days).
     // The board's Fields tab comes with it.
     id: 'field',
-    after: ['deliver'],
+    // Round 9: once the first pair is decided, not once its request is delivered: the ninth playtest's Spring 5 to 8 had
+    // 490 coins, a full field and nothing to do while the first request grew (it came on Spring 9). It still waits its
+    // turn behind the request's own lines.
+    after: ['choose'],
     unlocks: ['fields'],
     ready: (s) => s.coins >= s.parcels[1].price + FIELD_SEED && fields(s) === 1,
     text: () => 'Buy a second field.',
@@ -378,7 +423,9 @@ const LESSONS: Lesson[] = [
     // Held until the farm can pay for one (the fifth playtest was told to sleep at 6 am, with a request waiting), and
     // until there is bare soil to build on (the sixth was told to build on bare soil with every plot sown).
     ready: (s) => s.day > doneOn(s, 'pests') && s.coins >= BUILD_COST.scarecrow,
-    hold: (s) => s.coins < BUILD_COST.scarecrow || !bareSpot(s),
+    // Round 9: not while the requests want the coins for seed, and only on a bare plot in the middle of a field (with
+    // field 2's middle full it built at a corner, where it watches the least).
+    hold: (s) => !paidOk(s, BUILD_COST.scarecrow) || !buildSpot(s, true),
     text: () => 'Build a scarecrow on bare soil.',
     done: (s, _n, acted) => acted || s.builds.some((b) => b.kind === 'scarecrow'),
     point: (s) => buildSpot(s, true),
@@ -405,7 +452,7 @@ const LESSONS: Lesson[] = [
     ready: (s) => fields(s) >= 2 && s.coins >= BUILD_COST.sprinkler && s.day > doneOn(s, 'forecast'),
     text: () => 'Build a sprinkler to water around it.',
     passive: 6,
-    hold: (s) => s.coins < BUILD_COST.sprinkler || !bareSpot(s),
+    hold: (s) => !paidOk(s, BUILD_COST.sprinkler) || !buildSpot(s, false),
     point: (s) => buildSpot(s, false),
     build: 'sprinkler',
   },
@@ -455,6 +502,8 @@ const LESSONS: Lesson[] = [
     // came for 7 seconds while the tester was still hoeing, and went unseen.
     ready: (s) => fields(s) >= 2 && (!meadow(s) || s.day > doneOn(s, 'hoe')),
     text: (_s, touch) => (touch ? 'Tap View to see the whole farm.' : 'Press C to see the whole farm.'),
+    // Round 9: already looking at the whole farm (after a crow took the line over, say): nothing to tell.
+    pass: (s) => s.rules.camera === 'wide' && fields(s) >= 2,
     // Pressing C or tapping View does what it says: the line goes; or once read while idle.
     passive: 8,
   },
@@ -603,6 +652,13 @@ export class Tutor {
     // alone: a calm or urgent lesson ends when its job is done, a passive one when its act is done or its line has been
     // read for its seconds while the farmer stood idle; and every line stays at least MIN_SHOW seconds, its job done or
     // not (a job done stays done: the line lingers, then goes).
+    // Round 9: a lesson whose job the farmer has already done finishes quietly, its features still brought in.
+    const passQuietly = (l: Lesson) => {
+      for (const what of l.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
+      finish(l);
+    };
+    if (this.active?.pass?.(s) && !s.learnCount[`over:${this.active.id}`]) passQuietly(this.active);
+    for (const l of LESSONS) if (l !== this.active && !finished(l.id) && l.pass && l.after.every(finished) && l.pass(s)) passQuietly(l);
     if (this.active) {
       const l = this.active;
       const seen = n(`seen:${l.id}`);
@@ -619,7 +675,8 @@ export class Tutor {
         // Done: the line stays until it has been up long enough to be read, but never into the next morning (the sleep
         // line, done by sleeping, must not greet the farmer at dawn).
         s.learnCount[`over:${l.id}`] ??= s.day;
-        if (seen >= MIN_SHOW || s.day > s.learnCount[`over:${l.id}`]) finish(l);
+        // (A count line goes at once: its count is met.)
+        if (seen >= MIN_SHOW || s.day > s.learnCount[`over:${l.id}`] || (l.instant && met)) finish(l);
       } else if (l.hold?.(s)) this.active = null;
       // (One on hold steps aside, unfinished, until it can go on.)
     }
@@ -636,10 +693,9 @@ export class Tutor {
     }
     if (!this.active && awake) {
       let next = urgentNow() ?? LESSONS.find(eligible) ?? null;
-      // A keyboard lesson passes quietly on touch (what it brings in still comes).
-      while (next?.keys && touch) {
-        for (const what of next.unlocks) if (!s.learn.includes(what)) cmds.push({ type: 'unlock', what });
-        finish(next);
+      // A keyboard lesson passes quietly on touch (what it brings in still comes), and so does one already done.
+      while ((next?.keys && touch) || next?.pass?.(s)) {
+        passQuietly(next!);
         next = urgentNow() ?? LESSONS.find(eligible) ?? null;
       }
       this.active = next;

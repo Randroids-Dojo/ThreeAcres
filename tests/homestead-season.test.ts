@@ -29,7 +29,8 @@ describe('the season turn can be planned for', () => {
     s.day = 8;
     s.seed = 'beans';
     expect(resolve(s, 'seeds', 2, 7)).toMatchObject({ verb: 'plant', ok: true });
-    expect(seedNote(s, 'beans')).toMatchObject({ state: 'next', when: 'Summer crop' });
+    // (Round 9: with its days, as the other cards show them.)
+    expect(seedNote(s, 'beans')).toMatchObject({ state: 'next', when: 'Summer, 5 days' });
   });
 
   it('blocks and marks seeds that would still be green when the season turns', () => {

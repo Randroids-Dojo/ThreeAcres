@@ -482,7 +482,7 @@ describe('P3: the small things', () => {
     const pinned = (hud as { pinnedNews?: (s: WorldState) => string }).pinnedNews;
     expect(pinned?.(s)).toMatch(/4 ripe to pick/);
     for (let x = 2; x < 6; x++) plots(s, x, 5).crop = null;
-    expect(pinned?.(s)).toBe('Sold 2 for 60.');
+    expect(pinned?.(s)).toBe('Yesterday you sold 2 for 60.');
   });
 
   it('the meadow caption says what it is, then what to do ("Meadow hoe this plot to plant it" had no colon)', () => {

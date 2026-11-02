@@ -156,7 +156,8 @@ export function seedNote(s: WorldState, c: CropId): { price: string; when: strin
   const price = `${d.seed} \u00b7 sells ${d.price}`;
   if (!homestead(s)) return { price, when: `${d.days} days`, state: 'now' };
   const sw = sowing(s.day, c);
-  if (sw.next) return { price, when: `${SEASON_NAMES[(season(s.day) + 1) % 4]} crop`, state: 'next' };
+  // Round 9: a next season's seed shows its days too (on Spring 8 the cards said "Summer crop", not "6 days").
+  if (sw.next) return { price, when: `${SEASON_NAMES[(season(s.day) + 1) % 4]}, ${d.days} days`, state: 'next' };
   if (sw.late) return { price, when: 'Too late', state: 'late' };
   if (!sw.ok) return { price, when: d.seasons.map((n) => SEASON_NAMES[n]).join(', '), state: 'off' };
   // Round 7: a crop that ripens only if watered every night until the turn says so before it goes in.

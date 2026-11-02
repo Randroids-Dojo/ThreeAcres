@@ -687,3 +687,39 @@ svg { width: 100%; height: 100%; display: block; }
 .seed .pr .cm svg { width: 100%; height: 100%; display: block; }
 .seed.poor .pr .cm { color: #9a3b26; }
 @media (min-width: 900px) and (min-height: 640px) { .seed .pr .cm { width: 12px; height: 12px; } }
+
+/* ---------------------------------------------------------------- Sunup, after the ninth playtest */
+/* A pair reads as a trade at a glance: the two notes side by side on every screen, each the same shape, what it clears
+   first, then its plots and days ("+415 over market" put the bigger number on the bold side nearly every time). */
+.list .pair { align-items: stretch; }
+@media (max-width: 560px) { .list .pair { grid-template-columns: 1fr auto 1fr; gap: 5px; } .list .pair .or { align-self: center; padding: 2px 5px 3px; font-size: 13px; } }
+.pair .item.req { flex-direction: column; align-items: stretch; gap: 5px; padding: 11px 9px 9px; }
+.pair .item.req .blob { position: absolute; top: 7px; right: 7px; width: 26px; height: 26px; }
+.pair .item.req .tx { gap: 1px; }
+.pair .item.req .btn.accept { align-self: center; margin-top: auto; }
+.item.req .tx .trade { color: var(--ink); font-weight: 750; font-size: 13.5px; }
+.item.req .tx .what { color: var(--ink2); }
+.item.req .tx .fair { color: #2f6a2a; font-weight: 650; }
+.item.req .tx .fair.late { color: #8a5a12; }
+@media (min-width: 900px) and (min-height: 640px) { .item.req .tx .trade { font-size: 15.5px; } }
+/* The season's fair, on the board and as one quiet line on the day card. */
+.cork .legend.fairline { background: #fbf3df; font-weight: 600; }
+.daycard .fairrow { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--cream2); }
+.daycard .fairrow .ic { width: 13px; height: 13px; color: #f4c95a; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+.daycard .fairrow.gone { display: none; }
+@media (min-width: 900px) and (min-height: 640px) { .daycard .fairrow { font-size: 13.5px; } .daycard .fairrow .ic { width: 15px; height: 15px; } }
+/* Words over a plot, refusals above all, sit over the lesson's chevron ("Nothing gr\/wing here"). */
+.floaters { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+/* The keys on the tools read: a cream cap at the top left, clear of the can's water gauge on the right (they were
+   about 9 px grey on brown, and the 2 sat on the gauge). */
+.tool .key, .tool.act .key { top: 3px; left: 4px; right: auto; min-width: 14px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px; background: #f4e8c8; color: var(--ink); font-size: 10.5px; font-weight: 800; line-height: 15px; text-align: center; letter-spacing: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+@media (min-width: 900px) and (min-height: 640px) {
+  .tool .key, .tool.act .key { font-size: 12.5px; height: 17px; line-height: 17px; min-width: 17px; }
+  /* Seed cards are wider with bigger words on a desktop (about 90 px with 11 px text). */
+  .seed { min-width: 112px; min-height: 86px; }
+  .seed .nm { font-size: 15px; }
+  .seed .pr, .seed .wh { font-size: 14px; }
+  .seed .key { font-size: 13px; color: rgba(45, 36, 22, 0.7); }
+}
+/* On the tool in hand (cream), its key cap turns ink, so it still reads. */
+.tool.on .key { background: var(--ink); color: #f4e8c8; }

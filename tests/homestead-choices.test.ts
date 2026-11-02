@@ -139,6 +139,9 @@ describe('a morning offers two requests, and only one can be taken', () => {
       sowFor(s, a, 1);
       step(s, 0.016);
       expect(s.orders.map((o) => o.id)).toEqual([a.id, b.id]);
+      // (Round 9: and counts for neither: only crops planted after Accept count. Cleared again, the offer fits.)
+      for (const p of s.plots) if (p.crop && p.crop.id > a.id) p.crop = null;
+      s.coins += seedOf(a);
       const ev = step(s, 0.016, [{ type: 'accept', id: a.id }]);
       expect(s.orders.map((o) => o.id), `kept ${a.items[0].n} ${a.items[0].crop}`).toContain(a.id);
       expect(s.orders.map((o) => o.id), `withdrew ${b.items[0].n} ${b.items[0].crop}`).not.toContain(b.id);
@@ -282,18 +285,30 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     expect(Math.max(...ratios)).toBeLessThanOrEqual(2);
   });
 
-  it('the first is still three radishes, and nothing more comes until it is filled', () => {
+  // Round 9: the first offer is a small pair of cheap crops (it was three radishes, taken at once); one more pair can
+  // come the morning after it is taken, and nothing more until the first is filled.
+  it('the first is a small pair of cheap crops, and only one more pair comes until it is filled', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const s = teach(world('sunup', seed * 13), EARLY, EARLY_FEATURES);
       s.day = 3;
       for (const p of s.plots) p.crop = null;
       s.learn.push('requests');
       step(s, 0.016);
+      expect(s.orders.length, `seed ${seed}`).toBe(2);
+      for (const o of s.orders) {
+        expect(o.items[0].n).toBeLessThanOrEqual(5);
+        expect(CROPS[o.items[0].crop].seed).toBeLessThanOrEqual(15);
+        expect(o.reward / (o.items[0].n * CROPS[o.items[0].crop].price)).toBeGreaterThanOrEqual(1.15);
+      }
+      step(s, 0.016, [{ type: 'accept', id: s.orders[0].id }]);
       expect(s.orders.length).toBe(1);
-      expect(s.orders[0].items[0]).toEqual({ crop: 'radish', n: 3 });
-      expect(s.orders[0].reward / 90).toBeGreaterThanOrEqual(1.4);
       for (let k = 0; k < 3; k++) fillRequests(s, true);
-      expect(s.orders.length).toBe(1);
+      expect(s.orders.length).toBeLessThanOrEqual(3);
+      const taken = s.orders.filter((o) => o.taken !== false).length;
+      for (const o of s.orders.filter((q) => q.taken === false)) step(s, 0.016, [{ type: 'accept', id: o.id }]);
+      for (let k = 0; k < 3; k++) fillRequests(s, true);
+      expect(s.orders.length).toBeLessThanOrEqual(2);
+      expect(taken).toBe(1);
     }
   });
 
@@ -304,11 +319,13 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
     const [a] = s.orders;
-    // Sown for, but not chosen: nothing new comes.
-    sowFor(s, a, fresh(s, a));
+    // Not chosen: nothing new comes.
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
+    // (Round 9: sown for after Accept, as only that counts.)
     step(s, 0.016, [{ type: 'accept', id: a.id }]);
+    sowFor(s, a, fresh(s, a));
+    step(s, 0.016);
     nightfall(s, []);
     // The other went, and a new pair came: the morning's choice again.
     expect(s.orders.some((o) => o.id === a.id)).toBe(true);

@@ -14,11 +14,20 @@ import { clamp, lerp } from './util';
 const FOV = 30;
 const PITCH_CLOSE = (48 * Math.PI) / 180;
 const PITCH_WIDE = (60 * Math.PI) / 180;
-/** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
-const PITCH_WIDE_TALL = (66 * Math.PI) / 180;
 const CLOSE_TILES = 9;
-/** A phone's whole-farm view puts the back trees' tops this far down the screen, just under the day card (px). */
+/** A phone's whole-farm view keeps the six fields below the day card (px). */
 const WIDE_TALL_TOP = 104;
+/**
+ * Round 9: and above the stick and the lesson line (px from the bottom, at most 30% of the screen). It fitted all six
+ * fields, the yard and the back trees, and sat them under the day card, which left the bottom 40% blank cream with
+ * the lesson line floating in it and plots about 25 px across (p037): now it fits the fields the farm owns (never
+ * narrower than the first two), a little steeper, and sits them in the middle of the clear band.
+ */
+const WIDE_TALL_BOTTOM = 270;
+/** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
+const PITCH_WIDE_TALL_FIELDS = (72 * Math.PI) / 180;
+/** The six fields' plots, with a hair of margin: columns 2 to 15, rows 5 to 13. */
+const FIELDS_BOX = { x0: 1.75, z0: 4.6, x1: 16.25, z1: 14.25 };
 /** Tall screens: steeper, a little wider, and kept inside the farm. */
 export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.8, maxTiles: 12, bandTop: 100, bandBottom: 112 };
 /** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
@@ -38,10 +47,31 @@ interface Pose {
   pitch: number;
 }
 
+/** Round 9: the ground a phone's whole-farm view frames: the fields the farm owns. */
+export interface FieldBox {
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+}
+
+/** The fields' box for the whole-farm view: what the farm owns, never narrower than the first two fields. */
+export function ownedBox(parcels: readonly { x: number; y: number; w: number; h: number; owned: boolean }[]): FieldBox {
+  const box = { x0: 2, z0: 5, x1: 11, z1: 9 };
+  for (const p of parcels) {
+    if (!p.owned) continue;
+    box.x0 = Math.min(box.x0, p.x);
+    box.z0 = Math.min(box.z0, p.y);
+    box.x1 = Math.max(box.x1, p.x + p.w);
+    box.z1 = Math.max(box.z1, p.y + p.h);
+  }
+  return { x0: box.x0 - 0.25, z0: box.z0 - 0.4, x1: box.x1 + 0.25, z1: box.z1 + 0.25 };
+}
+
 export interface Rig {
   camera: PerspectiveCamera;
   /** Moves the camera towards the intent. snap jumps straight there. */
-  update(intent: CameraIntent, W: number, H: number, dt: number, snap: boolean): void;
+  update(intent: CameraIntent, W: number, H: number, dt: number, snap: boolean, fields?: FieldBox): void;
   /** Call after drawing: keeps the matrices pick and project use. */
   commit(): void;
   resize(w: number, h: number): void;
@@ -163,19 +193,21 @@ export function makeRig(): Rig {
     }
   };
 
-  const wideGoal = (intent: CameraIntent, W: number, H: number) => {
+  const wideGoal = (intent: CameraIntent, W: number, H: number, fields: FieldBox) => {
     const portrait = w / h < 1;
-    const key = `${w}x${h}:${W}x${H}`;
+    const key = `${w}x${h}:${W}x${H}:${fields.x0},${fields.z0},${fields.x1},${fields.z1}`;
     if (key !== fitKey) {
       fitKey = key;
       // Portrait frames the six fields (columns 1.5 to 16.5), panning reaches the rest; landscape shows the whole slab.
       if (portrait) {
-        fitBox(1.5, 1, 16.5, H - 1, PITCH_WIDE_TALL, 0.012, fit);
-        // The farm is narrower than a phone is tall, so there is height to spare. As close up, the back trees sit
-        // at the top of the clear band, just under the day card, and the spare height goes to the bottom, behind
-        // the stick and the act button: centred on the screen, the top of it was blank sky (the sixth playtest:
-        // the top 40%), and the lesson line lay over the front fields.
-        fit.tz = solveZ(fit, 10, TREE_TOP.y, TREE_TOP.z, Math.min(h * 0.3, WIDE_TALL_TOP));
+        fitBox(fields.x0, fields.z0, fields.x1, fields.z1, PITCH_WIDE_TALL_FIELDS, 0.006, fit);
+        // The farm is narrower than a phone is tall, so there is height to spare. Round 9: the fields it owns sit in
+        // the middle of the clear band, between the day card and the stick, the yard above them (the sixth playtest
+        // found the top 40% blank sky with the whole slab centred on the screen; the ninth, the bottom 40% blank with
+        // the trees pinned under the day card).
+        const top = Math.min(h * 0.3, WIDE_TALL_TOP);
+        const bottom = h - Math.min(h * 0.3, WIDE_TALL_BOTTOM);
+        fit.tz = solveZ(fit, (fields.x0 + fields.x1) / 2, 0, (fields.z0 + fields.z1) / 2, (top + bottom) / 2);
       } else fitBox(-0.2, -0.2, W + 0.2, H + 0.2, PITCH_WIDE, 0.05, fit, 2.2);
     }
     const zoom = clamp(intent.zoom || 1, 0.6, 2.5);
@@ -355,8 +387,8 @@ export function makeRig(): Rig {
     target,
     span,
     ground,
-    update(intent, W, H, dt, snap) {
-      if (intent.mode === 'wide') wideGoal(intent, W, H);
+    update(intent, W, H, dt, snap, fields) {
+      if (intent.mode === 'wide') wideGoal(intent, W, H, fields ?? FIELDS_BOX);
       else closeGoal(intent, W, H);
       if (snap) Object.assign(cur, goal);
       else {

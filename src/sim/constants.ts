@@ -80,9 +80,27 @@ export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; n
 
 /** Town requests open at once under the homestead: one until the first is filled; after that a pair on offer and what is under way. A pair comes only while fewer than this are open. */
 export const REQUEST_SLOTS = 4;
+/**
+ * Round 9: before the first request is filled, two can be open (the first taken, and a second pair on offer the
+ * morning after): the ninth playtest's Spring 4 to 7 had nothing to decide while the first one grew.
+ */
 export function requestSlots(rep: number): number {
-  return rep >= 1 ? REQUEST_SLOTS : 1;
+  return rep >= 1 ? REQUEST_SLOTS : 2;
 }
+/** Round 9: the first offer is a small pair, a few plots each, so the first choice comes on the day the board is read. */
+export const FIRST_PAIR_MOST = 5;
+/**
+ * Round 9: the season's fair, on its last day, wants so many requests filled that season: two more than the fields
+ * owned when the season began, one fewer in summer (only two crops a request can ask for grow then), one more in autumn
+ * (five can, and a careful player met five in nine autumns in ten). The
+ * ninth playtest had no reason to keep going after about day 16 ("it is a sum, not a choice"). Met, it gives a ribbon
+ * for the house and a fifth off the next field (`FAIR_OFF`), so the coins have somewhere to go.
+ */
+export const FAIR_MORE = 2;
+export const FAIR_LEAN = [0, 1, -1, 0] as const;
+export const FAIR_OFF = 0.2;
+/** Round 9: a fair needs at least this many days of its season left when it is first set, or it waits for the next season. */
+export const FAIR_LEAD = 6;
 /**
  * What a request pays over market (its gain) for each plot and day its sowing
  * takes, on average across a pair. Round 8: the two of a pair are priced on

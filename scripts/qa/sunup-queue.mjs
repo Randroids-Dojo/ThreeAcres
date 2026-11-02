@@ -255,7 +255,7 @@ await p.waitForTimeout(800);
   await settle();
   await p.waitForTimeout(400);
   const chips = await p.evaluate(() => { clearInterval(window.__chipProbe); return { most: window.__chips.most, overlap: window.__chips.overlap, texts: [...window.__chips.texts] }; });
-  check('eight quick picks for one request: one chip at a time, updated in place, never two over each other', chips.most === 1 && chips.overlap === 0 && chips.texts.includes('8 radishes ready'), JSON.stringify(chips));
+  check('eight quick picks for one request: one chip at a time, updated in place, never two over each other', chips.most === 1 && chips.overlap === 0 && (chips.texts.includes('8 radishes ready') || chips.texts.includes('All 8 radishes in')), JSON.stringify(chips));
 }
 
 // 6. The board on a phone: the pair and its clash line on the first screen, above the requests already taken.

@@ -20,9 +20,9 @@ describe('Sunup copy after the second playtest', () => {
     const s = world('sunup');
     s.report = { day: 4, sold: [{ crop: 'radish', n: 4, value: 120 }], wages: 0, grew: 2, withered: 0, eaten: 0, crewWork: 0, income: 120, filled: [{ who: 'Old Tamsin', reward: 145 }], lapsed: [{ who: 'The lighthouse keeper', crop: 'corn', n: 8 }] };
     // Round 4: three clauses at most, the most pressing kept ("2 grew" counted stage changes; Sunup says what is ripe).
-    expect(morningNews(s)).toBe('Old Tamsin paid 145, sold 4 for 120, the lighthouse keeper gave up on the corn.');
+    expect(morningNews(s)).toBe('Yesterday you sold 4 for 120, Old Tamsin paid 145, the lighthouse keeper gave up on the corn.');
     s.report = { day: 4, sold: [{ crop: 'radish', n: 4, value: 120 }], wages: 0, grew: 0, withered: 0, eaten: 0, crewWork: 0, income: 120 };
-    expect(morningNews(s)).toBe('Sold 4 for 120.');
+    expect(morningNews(s)).toBe('Yesterday you sold 4 for 120.');
     expect(sentence([])).toBe('');
   });
 

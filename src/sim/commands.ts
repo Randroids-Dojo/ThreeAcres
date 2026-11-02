@@ -31,6 +31,8 @@ export type Command =
   | { type: 'accept'; id: number }
   /** Sunup: the board's requests have been read: none of them is new now. */
   | { type: 'readBoard' }
+  /** Sunup, round 9: the board is being read: an offer that no longer fits the farm is made again to fit it. */
+  | { type: 'freshen' }
   /** Sunup: build one of a kind on a plot, once: walk there and build it; the tool in hand stays in hand. */
   | { type: 'buildAt'; x: number; y: number; kind: BuildKind }
   | { type: 'sell'; crop: CropId }

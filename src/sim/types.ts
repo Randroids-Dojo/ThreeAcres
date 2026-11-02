@@ -110,6 +110,8 @@ export interface ActorTask {
   /** Seconds into the action and its length. Renderers animate from these. */
   t: number;
   dur: number;
+  /** Sunup, round 9: started by a held act key (the farmer walks on through it, but waits for work beside it). */
+  held?: boolean;
 }
 
 export interface Actor {
@@ -217,6 +219,23 @@ export interface Order {
   got?: number;
   /** Sunup: crops sown for it that were lost, by cause, so a request that fails says why. */
   lost?: Partial<Record<LossCause, number>>;
+  /**
+   * Sunup, round 9: the id counter when it was accepted: only crops planted after Accept count for it (the ninth
+   * playtest's offer read "18 radishes, 16 planted" for market radishes sown before Accept). Missing in older saves
+   * and for requests taken before round 9: they count crops planted since they were pinned.
+   */
+  from?: number;
+}
+
+/**
+ * Sunup, round 9: the season's fair, on its last day: it wants so many requests filled that season, counted from
+ * `start`; met, a ribbon for the house and a point of reputation.
+ */
+export interface Fair {
+  start: number;
+  day: number;
+  want: number;
+  got: number;
 }
 
 /** What took a crop: crows, bugs, a dry night, a heat wave's night, or the season's turn. */
@@ -310,6 +329,10 @@ export interface DayReport {
   flock?: boolean;
   /** Sunup: crops the bugs left on others spread to overnight. */
   spread?: number;
+  /** Sunup, round 9: new requests pinned on the board this morning (the eighth playtest's came with only a badge). */
+  offered?: number;
+  /** Sunup, round 9: the fair, judged on the night of its day. */
+  fair?: { got: number; want: number; won: boolean };
 }
 
 export interface WorldState {
@@ -423,6 +446,16 @@ export interface WorldState {
   lastOffer?: string;
   /** Sunup, round 7: taken requests lost by day (nothing left growing for them, no time to plant again), for the morning card. */
   goneToday?: { who: string; crop: CropId; n: number; why?: RequestFail; lost?: number }[];
+  /** Sunup, round 9: the crops of the offer before the last (an offer made again to fit the farm is checked against it). */
+  offerBefore?: string;
+  /** Sunup, round 9: this season's fair (or the next season's, set late in a season). Missing until the first Accept. */
+  fair?: Fair | null;
+  /** Sunup, round 9: fairs won, each a ribbon on the house. */
+  ribbons?: number;
+  /** Sunup, round 9: the game hour the first pair was last asked for (it is asked again at most once an hour). */
+  firstTry?: number;
+  /** Sunup, round 9: a fair's prize waiting: this share off the next field bought. */
+  fieldOff?: number;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */

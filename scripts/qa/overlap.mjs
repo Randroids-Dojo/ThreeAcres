@@ -20,7 +20,7 @@
 // behind it), and Escape gives the keyboard back to the farm; the forecast's
 // words stay inside the day card.
 // Round 4: the whole-farm view on a phone and a desktop (View, or C): no
-// overlaps, and every plot of all six fields between the day card and the
+// overlaps, and every plot of the owned fields between the day card and the
 // controls; a busy night's morning card says three clauses at most; the
 // board's notes run ten words at most and its close button says Close; the
 // board and View buttons wear their words; the forecast's words are 11 px or
@@ -185,7 +185,11 @@ async function run(label, viewport, touch) {
       window.sunup.dialogs.close(true);
       Object.assign(st, { day: 6, rep: 1, requested: 1, orders: [], coins: 300 });
       for (const q of st.plots) if (q.crop && q.crop.stage < 4) q.crop = null;
-      window.sunup.pinRequests();
+      // (A morning can bring one request alone; this needs a pair, so it asks again until one comes.)
+      for (let k = 0; k < 12 && st.orders.length !== 2; k++) {
+        Object.assign(st, { orders: [], requested: 1, lastOffer: '', rng: (st.rng + 7919 * (k + 1)) | 0 });
+        window.sunup.pinRequests();
+      }
       window.sunup.dialogs.board('requests');
     })],
     // Round 5: one of the pair taken: its note says what is growing for it and when it is wanted.
@@ -329,13 +333,15 @@ async function run(label, viewport, touch) {
       if (q.n !== 2 || !q.or) hits.push(`the pair is not shown (${JSON.stringify(q)})`);
       if (!q.inside) hits.push('a request note runs off the board');
       if (q.clash) hits.push('the two notes or the "or" overlap');
-      // Round 5: each offer headlines its gain over market, and carries an Accept stamp.
-      const g = await p.evaluate(() => [...document.querySelectorAll('.dialog .pair .item.req')].map((e) => ({ head: e.querySelector('.tx > b')?.textContent ?? '', green: getComputedStyle(e.querySelector('.tx > b')).color, size: parseFloat(getComputedStyle(e.querySelector('.tx > b')).fontSize), stamp: e.querySelector('.btn')?.textContent ?? '' })));
-      if (g.length !== 2 || g.some((x) => !/^\+[\d,]+ over market$/.test(x.head) || x.stamp !== 'Accept' || x.size < 15)) hits.push(`offer notes ${JSON.stringify(g)}`);
+      // Round 5: each offer headlines its gain, and carries an Accept stamp. Round 9: what it clears, then its plots and
+      // days, the two notes side by side and the same shape (their lines at the same heights).
+      const g = await p.evaluate(() => [...document.querySelectorAll('.dialog .pair .item.req')].map((e) => ({ head: e.querySelector('.tx > b')?.textContent ?? '', trade: e.querySelector('.tx .trade')?.textContent ?? '', tradeY: Math.round(e.querySelector('.tx .trade')?.getBoundingClientRect().top ?? -1), top: Math.round(e.getBoundingClientRect().top), green: getComputedStyle(e.querySelector('.tx > b')).color, size: parseFloat(getComputedStyle(e.querySelector('.tx > b')).fontSize), stamp: e.querySelector('.btn')?.textContent ?? '' })));
+      if (g.length !== 2 || g.some((x) => !/^\+[\d,]+$/.test(x.head) || !/^for \d+ plots?, \d+ days?$/.test(x.trade) || x.stamp !== 'Accept' || x.size < 15)) hits.push(`offer notes ${JSON.stringify(g)}`);
+      if (g.length === 2 && (Math.abs(g[0].top - g[1].top) > 3 || Math.abs(g[0].tradeY - g[1].tradeY) > 3)) hits.push(`the pair's notes are not side by side ${JSON.stringify(g)}`);
     }
     if (name === 'board requests, one taken') {
       const q = await p.evaluate(() => ({ pair: document.querySelectorAll('.dialog .pair').length, taken: [...document.querySelectorAll('.dialog .item.req.taken')].map((e) => [...e.querySelectorAll('.tx > *')].map((c) => c.textContent)) }));
-      if (q.pair !== 0 || q.taken.length !== 1 || !/^For .+, \+[\d,]+ over market$/.test(q.taken[0][1]) || !/wanted by|Wanted by/.test(q.taken[0][q.taken[0].length - 1])) hits.push(`taken note ${JSON.stringify(q)}`);
+      if (q.pair !== 0 || q.taken.length !== 1 || !/^For .+, \+[\d,]+ in all$/.test(q.taken[0][1]) || !/wanted by|Wanted by/.test(q.taken[0][q.taken[0].length - 1])) hits.push(`taken note ${JSON.stringify(q)}`);
     }
     if (name === 'board requests, five notes and the morning card') {
       const q = await p.evaluate(() => {
@@ -364,7 +370,7 @@ async function run(label, viewport, touch) {
         return { stamps, clash: !!clash && clash.bottom <= br.bottom + 1 };
       });
       if (first.stamps.length !== 2 || !first.stamps.every(Boolean) || !first.clash) hits.push(`the pair is not all on the board's first screen ${JSON.stringify(first)}`);
-      if (!/^Spring 4, cloudyOld Tamsin paid 145/.test(q.card)) hits.push(`no morning card pinned on the board (${q.card})`);
+      if (!/^Spring 4, cloudy(Yesterday you sold 8 for 340, )?Old Tamsin paid 145/.test(q.card)) hits.push(`no morning card pinned on the board (${q.card})`);
       if (!/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8) hits.push(`the pair's clash line reads "${q.clash}"`);
       if (!q.onScreen) hits.push('the board runs off the screen');
       if (!q.fits && !q.scrolls) hits.push(`the board's notes run past its foot and do not scroll ${JSON.stringify(q.h)}`);
@@ -427,7 +433,8 @@ async function run(label, viewport, touch) {
         const bottom = Math.min(...lows);
         let inside = 0;
         let n = 0;
-        for (const pc of st.parcels) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
+        // (Round 9: a phone frames the fields the farm owns, to fill the band; every plot of those is in view.)
+        for (const pc of st.parcels.filter((q) => q.owned)) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
           n++;
           const pt = window.sunup.r3d.project(x + 0.5, y + 0.5, 0.3);
           if (pt && pt.x > 4 && pt.x < innerWidth - 4 && pt.y > top && pt.y < bottom) inside++;
@@ -554,8 +561,9 @@ async function chipCheck(p, label) {
     await p.waitForTimeout(90);
   }
   await p.waitForTimeout(4500);
-  const c = await p.evaluate(() => { clearInterval(window.__chipProbe); return { ...window.__chips, got: window.sunup.state.orders[0]?.got ?? -1 }; });
-  const ok = c.overlap === 0 && c.most <= 1 && c.got === 8;
+  // (Round 9: the crate hands the request over the moment the eighth goes in.)
+  const c = await p.evaluate(() => { clearInterval(window.__chipProbe); const st = window.sunup.state; return { ...window.__chips, got: st.orders[0]?.got ?? (st.orders.length ? -1 : 'handed over') }; });
+  const ok = c.overlap === 0 && c.most <= 1 && (c.got === 8 || c.got === 'handed over');
   if (!ok) failed++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} a quick run of picks for one request shows one chip at a time, never two over each other  (${JSON.stringify(c)})`);
   await p.evaluate(() => { const st = window.sunup.state; st.orders = []; });

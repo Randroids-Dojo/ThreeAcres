@@ -150,7 +150,8 @@ describe('a bot farm at a person’s pace over thirty days', () => {
       // (Round 7: every crop is paid for as it goes into the crate, so a harvest is planted again the same day and soil
       // no longer sits bare for want of coins: about a quarter more by day 30, a twentieth more by day 10.)
       expect(s.stats.earned).toBeLessThan(17000);
-      expect(morning[30]).toBeLessThan(3000);
+      // (Round 9: the fifth and sixth fields cost 3,000 and 4,500, a fair's ribbon takes a fifth off: coins gather for them.)
+      expect(morning[30]).toBeLessThan(3600);
       expect(s.parcels.filter((p) => p.owned).length).toBeLessThanOrEqual(5);
       expect(s.parcels.filter((p) => p.owned).length).toBeGreaterThanOrEqual(2);
       expect(filled).toBeGreaterThanOrEqual(3);

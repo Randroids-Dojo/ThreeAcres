@@ -154,11 +154,13 @@ export class Input {
     }
     out.unshift({ type: 'move', x: mx, y: my });
     // Holding the act key repeats, so walking down a row works each plot ahead in turn. A repeat is marked held: it
-    // works what the farmer walks past at the side, never a plot already behind.
+    // works what the farmer walks past at the side, never seed or the hoe on a plot already behind. Round 9: it repeats
+    // every twentieth of a second (the simulation waits for the job in hand), so the next plot is worked the moment
+    // the last job ends (a zigzag watering pass left 4 of 11 dry: the repeat came 0.12 s late, past the plot).
     if (this.keys.has('Space') || this.keys.has('KeyE') || this.touchActHeld) {
       this.actHeld += dt;
       if (this.actHeld > 0.22) {
-        this.actHeld = 0.1;
+        this.actHeld = 0.17;
         out.push({ type: 'act', held: true });
       }
     } else this.actHeld = 0;

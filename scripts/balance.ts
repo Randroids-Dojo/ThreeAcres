@@ -51,6 +51,13 @@
 // each plot-day; requests filled short, and the reputation on days 10, 20
 // and 30. It reads the rules only through what round 7 had too, so it runs on
 // the committed code for a before.
+// Round 9 adds the season's fair (fairs won of those held, by season), the
+// mornings with 1,500 coins or more and nothing the farm may buy (no field or
+// tool its reputation and coins allow) and the longest run of them, and for
+// each pair as pinned whether one side wins on what it clears, its plots and
+// its days at once (headlined on the board now), and whether either side
+// could not be met at that moment. It reads the rules only through what round
+// 8 had too, so it runs on the committed code for a before.
 // npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs] [--mornings]
 import * as C from '../src/sim/constants';
 import { sowing } from '../src/sim/actions';
@@ -193,6 +200,25 @@ interface Farm {
   repOn: Record<number, number>;
   /** Round 8: the day the can reached copper and gold (0: never). */
   canOn: [number, number];
+  /** Round 9: each fair as judged (its day, got, want, won); mornings with 1,500+ coins and nothing to buy, by day. */
+  fairs: { day: number; got: number; want: number; won: boolean }[];
+  idleRich: number[];
+  /** Round 9: pairs as pinned: one side wins on clear, plots and days at once; a side that could not be met then. */
+  pairs9: { dominated: boolean; unmet: number }[];
+}
+
+/**
+ * Round 9: is there anything the farm's coins can go towards: the next field or a tool whose reputation the farm
+ * has (saving up for its price counts)? With 1,500 coins and nothing, the coins have no use.
+ */
+function canBuyAnything(s: WorldState): boolean {
+  const next = s.parcels.find((p) => !p.owned);
+  if (next && s.rep >= ((C as unknown as { FIELD_REP: number[] }).FIELD_REP[next.id] ?? 0)) return true;
+  for (const t of ['can', 'hoe'] as const) {
+    const u = C.TOOL_UPGRADES[t][s.tools[t]];
+    if (u && s.rep >= u.rep) return true;
+  }
+  return false;
 }
 
 const JOBS = new Set(['till', 'water', 'plant', 'harvest', 'tend', 'refill', 'clear', 'build']);
@@ -313,6 +339,9 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
   const repOn: Record<number, number> = {};
   let waterSecs = 0;
   const canOn: [number, number] = [0, 0];
+  const fairs: Farm['fairs'] = [];
+  const idleRich: number[] = [];
+  const pairs9: Farm['pairs9'] = [];
   const r = play(s, DAYS, {
     pace,
     each: (st: WorldState) => {
@@ -331,6 +360,8 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
         withdrawn += ((st.report as unknown as { withdrawn?: unknown[] }).withdrawn ?? []).length;
         lapsedReported += ((st.report as unknown as { lapsed?: unknown[] }).lapsed ?? []).length;
         eatenReported += st.report.eaten;
+        const fr = (st.report as unknown as { fair?: { got: number; want: number; won: boolean } }).fair;
+        if (fr) fairs.push({ day: st.day - 1, ...fr });
         for (const g of [...((st.report as unknown as { withdrawn?: { why?: string }[] }).withdrawn ?? []), ...((st.report as unknown as { lapsed?: { why?: string }[] }).lapsed ?? [])]) {
           goneAll++;
           if (g.why) goneWhy++;
@@ -369,6 +400,7 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
         lastDay = st.day;
         morning[st.day] = st.coins;
         repOn[st.day] = st.rep + ((st as WorldState & { repPart?: number }).repPart ?? 0);
+        if (st.coins >= 1500 && !canBuyAnything(st)) idleRich.push(st.day);
         earnedBy[st.day] = st.stats.earned;
         if (wasTired) tiredDays++;
         wasTired = false;
@@ -418,6 +450,13 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
           if (c && !c.dead && c.stage === 4 && ownedAt(st, i)) ripe += CROPS[c.kind].price;
         }
         const seedOf = (o: Order) => o.items[0].n * CROPS[o.items[0].crop].seed;
+        {
+          // Round 9: the board's lines for each side: what it clears (pay less seed), its plots and its days.
+          const tr = (o: Order) => ({ clear: o.reward - o.items[0].n * CROPS[o.items[0].crop].seed, plots: o.items[0].n, days: CROPS[o.items[0].crop].days });
+          const [x, y] = fresh2.map(tr);
+          const dom = (p: typeof x, q: typeof x) => p.clear >= q.clear && p.plots <= q.plots && p.days <= q.days;
+          pairs9.push({ dominated: dom(x, y) || dom(y, x), unmet: fresh2.filter((o) => !!G.whyNot(st, o)).length });
+        }
         pairs8.push({ affordable: fresh2.filter((o) => seedOf(o) <= st.coins).length, today: fresh2.filter((o) => seedOf(o) <= st.coins + ripe).length, within: gap <= 0.2 + 1e-9, gap });
       }
       for (const e of ev) if (e.type === 'request' && e.done && (e as { of?: number }).of) shortFills++;
@@ -541,6 +580,9 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
     shortFills,
     repOn,
     canOn,
+    fairs,
+    idleRich,
+    pairs9,
   };
 }
 
@@ -890,6 +932,22 @@ for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the
   const p8 = farms.flatMap((f) => f.pairs8);
   console.log(`           pairs ${p8.length}: both sides payable that morning with the coins in hand and what is ripe to pick ${pct(p8.filter((x) => x.today === 2).length, p8.length)}, neither ${pct(p8.filter((x) => x.today === 0).length, p8.length)} (with the coins in hand alone ${pct(p8.filter((x) => x.affordable === 2).length, p8.length)}, neither ${pct(p8.filter((x) => x.affordable === 0).length, p8.length)}); within a fifth on what they clear a plot-day ${pct(p8.filter((x) => x.within).length, p8.length)} (gap median ${Math.round(100 * med(p8.map((x) => x.gap)))}%, largest ${Math.round(100 * Math.max(0, ...p8.map((x) => x.gap)))}%)`);
   console.log(`           requests filled short ${avg((f) => f.shortFills).toFixed(1)} a farm; reputation on the mornings of days 10, 20, 30: ${[10, 20, 30].map((d) => avg((f) => f.repOn[d] ?? f.rep).toFixed(1)).join(', ')}; copper can on day ${med(farms.map((f) => f.canOn[0]).filter(Boolean)) || 'never'} (${farms.filter((f) => f.canOn[0]).length}/${farms.length}), gold can on day ${med(farms.map((f) => f.canOn[1]).filter(Boolean)) || 'never'} (${farms.filter((f) => f.canOn[1]).length}/${farms.length})`);
+  // Round 9.
+  const fs = farms.flatMap((f) => f.fairs);
+  const bySeason = [10, 20, 30, 40].map((d) => fs.filter((x) => x.day === d)).filter((x) => x.length);
+  console.log(`  round 9: fairs held ${fs.length}, won ${fs.filter((x) => x.won).length} (${pct(fs.filter((x) => x.won).length, fs.length)}); by season ${bySeason.map((xs) => `day ${xs[0].day}: ${xs.filter((x) => x.won).length} of ${xs.length}, wanted ${med(xs.map((x) => x.want))}, got median ${med(xs.map((x) => x.got))}`).join('; ') || 'none'}`);
+  const runs = farms.map((f) => {
+    let best = 0;
+    let run = 0;
+    for (let d = 1; d <= DAYS; d++) {
+      run = f.idleRich.includes(d) ? run + 1 : 0;
+      best = Math.max(best, run);
+    }
+    return best;
+  });
+  console.log(`           mornings with 1,500+ coins and nothing to buy: ${avg((f) => f.idleRich.length).toFixed(1)} a farm (per farm ${farms.map((f) => f.idleRich.length).join(' ')}); longest run median ${med(runs)}, most ${Math.max(0, ...runs)} days`);
+  const p9 = farms.flatMap((f) => f.pairs9);
+  console.log(`           pairs ${p9.length}: one side wins on clear, plots and days at once ${pct(p9.filter((x) => x.dominated).length, p9.length)}; sides that could not be met as pinned ${p9.reduce((a, x) => a + x.unmet, 0)}`);
   if (PAIRS) {
     // Every pair the bot was offered, played out both ways by a diligent player and a busy one.
     type Out = { kinds: string; bold: number; safe: number; diligent: number; busy: number; scale: number; noise: number; free: number; coins: number };

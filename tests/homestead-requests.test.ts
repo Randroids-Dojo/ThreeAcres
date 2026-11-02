@@ -21,16 +21,19 @@ function onDay3(seed: number) {
 }
 
 describe('the first request', () => {
-  it('is always three radishes, cheap to grow and due after they can ripen', () => {
+  // Round 9: a small pair of cheap crops to choose between (it was always three radishes, taken at once).
+  it('is a small pair of cheap crops, each due after it can ripen', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const s = onDay3(seed * 7919);
       s.learn.push('requests');
       step(s, 0.016);
-      expect(s.orders.length).toBe(1);
-      const o = s.orders[0];
-      expect(o.items[0], `seed ${seed}`).toEqual({ crop: 'radish', n: 3 });
-      expect(o.due - s.day).toBeGreaterThanOrEqual(CROPS.radish.days);
-      expect(o.reward).toBeGreaterThan(3 * CROPS.radish.price);
+      expect(s.orders.length, `seed ${seed}`).toBe(2);
+      for (const o of s.orders) {
+        expect(o.items[0].n).toBeLessThanOrEqual(5);
+        expect(CROPS[o.items[0].crop].seed).toBeLessThanOrEqual(15);
+        expect(o.due - s.day).toBeGreaterThanOrEqual(CROPS[o.items[0].crop].days);
+        expect(o.reward).toBeGreaterThan(o.items[0].n * CROPS[o.items[0].crop].price);
+      }
     }
   });
 });
@@ -100,14 +103,15 @@ describe('requests fit the season', () => {
   // Round 2: requests were constant (a filled one replaced at once, three open from reputation 4). Round 3: one
   // until the first is filled; after that they come with the mornings, a pair at a time, and no new pair while one
   // still waits to be chosen.
-  it('come one at a time until the first is filled, then a pair with the mornings, and none while a pair waits', () => {
+  // Round 9: the first is a pair too, and one more pair can come before it is filled.
+  it('come a pair at a time, two open until the first is filled, and none while a pair waits', () => {
     const s = onDay3(9);
     s.learn.push('requests');
     step(s, 0.016);
-    expect(s.orders.length).toBe(1);
-    // Mornings bring nothing more while the first is unfilled.
+    expect(s.orders.length).toBe(2);
+    // Mornings bring nothing more while the pair waits to be chosen.
     for (let k = 0; k < 5; k++) fillRequests(s, true);
-    expect(s.orders.length).toBe(1);
+    expect(s.orders.length).toBe(2);
     s.orders = [];
     s.rep = 1;
     s.coins = 400;

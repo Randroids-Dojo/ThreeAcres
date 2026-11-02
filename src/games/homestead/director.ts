@@ -26,6 +26,8 @@ import type { GameContext } from '../../shell/types';
 const PROP_HEIGHT: Record<string, number> = { well: 1.3, board: 1.6 };
 /** A wide screen's close camera looks this many tiles south of the farmer. */
 const CLOSE_LEAD = 1.4;
+/** Round 9: the furthest south of a field's top row a wide screen's close camera looks, so that row clears the day card. */
+const FIELD_TOP_CLEAR = 3.5;
 
 export class Director {
   state: WorldState;
@@ -51,6 +53,8 @@ export class Director {
   readonly tutor = new Tutor();
   frames = 0;
   events: SimEvent[] = [];
+  /** Round 9: the board is making stale offers again (it steps the farm once, with no time passing). */
+  private freshening = false;
 
   constructor(state: WorldState, private ctx: GameContext) {
     this.state = state;
@@ -104,6 +108,16 @@ export class Director {
       pickBuild: (k: BuildKind) => {
         this.input.push({ type: 'buildKind', kind: k });
         this.input.push({ type: 'tool', tool: 'build' });
+      },
+      // Round 9: the board is being read: offers that no longer fit the farm are made again at once, before it shows.
+      freshen: () => {
+        if (this.freshening) return;
+        this.freshening = true;
+        try {
+          for (const e of step(this.state, 0, [{ type: 'freshen' }])) this.dispatch(e);
+        } finally {
+          this.freshening = false;
+        }
       },
     });
     ctx.root.append(this.stage, this.hud.root, this.dialogs.scrim, this.dialogs.root);
@@ -168,6 +182,11 @@ export class Director {
         fx += Math.max(-4, Math.min(4, (p.x - f.x) * 0.45));
         fy += Math.max(0, p.y - f.y) * 0.35;
       }
+      // Round 9: standing in a field (or beside it), its top row stays clear of the day card: the look ahead stops
+      // short of hiding it (from field 1's lower rows its top row sat under the date).
+      const t = { x: Math.floor(f.x), y: Math.floor(f.y) };
+      const field = this.state.parcels.find((q) => t.x >= q.x - 1 && t.x <= q.x + q.w && t.y >= q.y - 1 && t.y <= q.y + q.h);
+      if (field && !(p && p.y > field.y + field.h)) fy = Math.min(fy, Math.max(f.y, field.y + FIELD_TOP_CLEAR));
     }
     return { mode, focusX: fx, focusY: fy, zoom: c.zoom, panX: mode === 'wide' ? c.panX : 0, panY: mode === 'wide' ? c.panY : 0 };
   }

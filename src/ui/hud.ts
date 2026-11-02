@@ -93,7 +93,12 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES, ripeNow?: num
   // Round 7: one short of its count is paid for what it got ("paid 285 for 14 of 15").
   if (filled.length === 1) bits.push([3, 0, `${esc(townName(filled[0].who))} paid ${fmt(filled[0].reward)}${filled[0].of ? ` for ${filled[0].got} of ${filled[0].of}` : ''}`]);
   else if (filled.length > 1) bits.push([3, 0, `${filled.length} requests paid ${fmt(filled.reduce((a, f) => a + f.reward, 0))}`]);
-  if (sold) bits.push([4, 1, `sold ${sold} for ${fmt(value)}`]);
+  // Round 9: the crate paid as each crop went in, so this is yesterday's ("Sold 4 for 220" read as money still to come).
+  if (sold) bits.push([4, -0.5, `yesterday you sold ${sold} for ${fmt(value)}`]);
+  // Round 9: the season's fair, judged last night: first of all.
+  if (r.fair) bits.push([0.5, -1, r.fair.won ? 'the fair gave you a ribbon' : `no ribbon at the fair, ${r.fair.got} of ${r.fair.want} requests`]);
+  // Round 9: new requests on the board say so (the eighth playtest's came with only a badge).
+  if (r.offered) bits.push([2.5, 9, r.offered >= 2 ? 'two new requests on the board' : 'a new request on the board']);
   // What was lost, in one clause.
   const lost: string[] = [];
   if (r.eaten) lost.push(`crows ate ${r.eaten}`);
@@ -138,6 +143,18 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES, ripeNow?: num
   if (r.wages) bits.push([6, 10, `wages ${r.wages}`]);
   const kept = bits.map((b, i) => ({ b, i })).sort((x, y) => x.b[0] - y.b[0] || x.i - y.i).slice(0, Math.max(0, room));
   return sentence(kept.sort((x, y) => x.b[1] - y.b[1] || x.i - y.i).map((x) => x.b[2]));
+}
+
+/**
+ * Round 9: the fair as the day card says it, one quiet line: "Fair Spring 10:
+ * 1 of 4" (a ribbon won says so). Empty before there is a fair.
+ */
+export function fairShort(s: WorldState): string {
+  const f = s.fair;
+  if (!f) return '';
+  const day = `${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}`;
+  if (s.day < f.start) return `Fair ${day}: ${f.want} requests`;
+  return f.got >= f.want ? `Fair ${day}: ribbon won` : `Fair ${day}: ${f.got} of ${f.want}`;
 }
 
 /** Sunup: crops ripe on the farm right now, to pick. */
@@ -265,6 +282,10 @@ export class Hud {
   private clockEl = el('span', 'clock');
   private sky = el('div', 'sky');
   private meterRow = el('div');
+  /** Round 9: the requests taken, as last seen (a request handed over at its last pick has left the farm by then). */
+  private takenSeen = new Map<number, { n: number; crop: CropId; got: number }>();
+  /** Round 9: the season's fair, one quiet line under the stamina bar ("Fair Spring 10: 1 of 4"). */
+  private fairRow = el('div', 'fairrow');
   private coins = el('div', 'coins');
   private coinsNum = el('span', 'num');
   private goals = el('div', 'goals');
@@ -319,7 +340,7 @@ export class Hud {
     const top = el('div', 'topbar');
     const when = el('div', 'when');
     when.append(this.date, this.clockEl);
-    this.day.append(when, this.sky, this.meterRow);
+    this.day.append(when, this.sky, this.meterRow, this.fairRow);
     this.coins.append(el('span', 'ic', icon('coin')), this.coinsNum);
     const board = this.boardBtn;
     board.innerHTML = `<span class="ic">${icon('board')}</span><span class="tlbl">Board</span><span class="badge"></span><span class="kcap">B</span>`;
@@ -429,6 +450,11 @@ export class Hud {
       }
     }
     toggle(this.meterRow, 'gone', key === 'day' && !this.knows(s, 'stamina'));
+    for (const o of s.orders) if (isTaken(o)) this.takenSeen.set(o.id, { n: o.items[0].n, crop: o.items[0].crop, got: o.got ?? 0 });
+    // Round 9: the fair's line arrives with its lesson.
+    const fair = homestead(s) && this.knows(s, 'fair') ? fairShort(s) : '';
+    toggle(this.fairRow, 'gone', !fair);
+    setHtml(this.fairRow, fair ? `<span class="ic">${icon('starFill')}</span><span>${esc(fair)}</span>` : '');
     if (key === 'day') {
       const m = this.meterRow.querySelector('.meter') as HTMLElement;
       const f = s.stamina / s.staminaMax;
@@ -826,6 +852,14 @@ export class Hud {
         // A crop sown for a request says how far along the request is, right where it was picked.
         // Short, so it fits over the plot: the crop names the request. (Round 6: only what was sown for it counts.)
         const o = homestead(s) && e.req !== undefined ? s.orders.find((q) => q.id === e.req && isTaken(q)) : null;
+        // Round 9: the last of a request's crops hands it over in the same moment: its chip says it is all in.
+        const gone = !o && e.req !== undefined ? this.takenSeen.get(e.req) : undefined;
+        if (gone && e.by === s.actors[0].id) {
+          // (One short of its count, after a crow, it says how many it got.)
+          const got = Math.min(gone.n, gone.got + 1);
+          this.requestChip(e.req!, e.x + 0.5, e.y + 0.5, got >= gone.n ? `All ${gone.n} ${cropWord(gone.crop, gone.n)} in` : `${got} of ${gone.n} ${cropWord(gone.crop, gone.n)}`);
+          break;
+        }
         if (o && e.by === s.actors[0].id) {
           const it = o.items[0];
           const have = Math.min(o.got ?? 0, it.n);

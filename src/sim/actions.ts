@@ -502,6 +502,17 @@ export function sleepAsk(s: WorldState, opts: { teaching: boolean; flock: boolea
 /** Sunup: before this game minute (6 pm), sleep always asks first. */
 export const SLEEP_ASK_BEFORE = 720;
 
+/**
+ * Sunup, round 9: what the land agent asks for a field now: its price, less
+ * a fair's prize when one is waiting (a fifth off), in fifties.
+ */
+export function fieldPrice(s: WorldState, id: number): number {
+  const p = s.parcels[id];
+  if (!p) return Infinity;
+  const off = homestead(s) ? (s.fieldOff ?? 0) : 0;
+  return off > 0 ? Math.round((p.price * (1 - off)) / 50) * 50 : p.price;
+}
+
 /** Sunup: the reputation the land agent wants before he sells a field (0 under other rules, or when it is owned). */
 export function fieldRep(s: WorldState, id: number): number {
   const p = s.parcels[id];

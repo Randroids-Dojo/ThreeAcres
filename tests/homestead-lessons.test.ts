@@ -83,7 +83,8 @@ describe('a crow will not wait', () => {
   it('takes the line from a calm lesson, then hands it back', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
+    // (Round 9: the field lesson comes once the first pair is decided.)
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'sowfor', 'deliver', 'choose', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
     s.learn.push('pests');
     s.day = 5;
     s.coins = 500;
