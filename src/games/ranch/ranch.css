@@ -43,6 +43,9 @@
 .rh-cross .x-left { display: none; stroke: #b9d4f6; transition: stroke-dashoffset 0.08s linear; }
 .rh-cross.tug.timed .x-left { display: inline; }
 .rh-cross.tug.timed.late .x-left { stroke: #ffc49a; }
+/* It puffs up to pull back (the tell, round 8): the ring swells and goes pale gold, a beat before it turns warm. */
+.rh-cross.tug.tell .x-tug { stroke: #ffe7a0; stroke-width: 3.6; }
+.rh-cross.tug.tell { color: #fff0c4; transform: scale(1.22); transition: transform 0.12s ease-out; }
 /* It pulls back: the ring goes warm and thick and pulses (let go of Pull); held on through it, the crosshair shakes. */
 .rh-cross.tug.back .x-tug { stroke: #ff8f5e; stroke-width: 4.2; transition: none; }
 .rh-cross.tug.back { color: #ffb08a; animation: rh-pull 0.32s ease-in-out infinite alternate; }
@@ -51,7 +54,8 @@
 @keyframes rh-strain { 0% { transform: translate(-2px, 1px) scale(1.15); } 50% { transform: translate(2px, -1px) scale(1.15); } 100% { transform: translate(-2px, 1px) scale(1.15); } }
 @media (prefers-reduced-motion: reduce) { .rh-cross.tug.back, .rh-cross.tug.back.strain { animation: none; transform: scale(1.15); } }
 /* The rare one's fed window: a small ring over it on a dark track, emptying as its calm runs out, warm near the end. */
-.rh-fed { position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; display: none; opacity: 0.95; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.6)); }
+/* (Round 8: 36 px, beside the downy rather than stacked over it with the arrow; it was about 15 px and hard to read at 10 m.) */
+.rh-fed { position: absolute; left: -18px; top: -18px; width: 36px; height: 36px; display: none; opacity: 0.95; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.6)); }
 /* (Not there at all when off: hidden by opacity alone it sat in the shell's corner.) */
 .rh-fed.on { display: block; }
 .rh-fed svg { width: 100%; height: 100%; display: block; }
@@ -175,7 +179,8 @@
 .rt.on { display: block; }
 .rt-look { position: absolute; z-index: 2; right: 0; top: 0; width: 50%; bottom: 0; pointer-events: auto; touch-action: none; }
 .rt-stick { position: absolute; z-index: 4; left: 0; top: 30%; width: 44%; bottom: 0; pointer-events: auto; touch-action: none; }
-.rt-base { position: absolute; left: 84px; top: calc(100% - 140px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(251, 246, 234, 0.55); background: rgba(34, 28, 50, 0.16); opacity: 0.5; transition: opacity 0.15s; }
+/* The stick's resting circle sits 8 px or more clear of the windows' tap targets (round 8). */
+.rt-base { position: absolute; left: 77px; top: calc(100% - 140px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(251, 246, 234, 0.55); background: rgba(34, 28, 50, 0.16); opacity: 0.5; transition: opacity 0.15s; }
 .rt-base.on { opacity: 1; transition: none; }
 .rt-base.rim { border-color: #fff1c4; }
 .rt-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(251, 246, 234, 0.82); box-shadow: 0 2px 6px rgba(20, 16, 36, 0.35); }

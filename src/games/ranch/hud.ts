@@ -57,6 +57,40 @@ export interface PageLine {
   plain?: boolean;
 }
 
+/**
+ * A press on a small target (a slot window, the bellows' body): a tap only if it lifts without having dragged; a
+ * drag (10 px or more) is handed on to the stick or the look, and lifting after it chooses nothing (round 8: a
+ * window was chosen the moment a thumb landed, so walks to the crate switched fluff to clover heads).
+ */
+export class Press {
+  static readonly DRAG = 10;
+  id = -1;
+  x = 0;
+  y = 0;
+  private dragged = false;
+  down(id: number, x: number, y: number): void {
+    this.id = id;
+    this.x = x;
+    this.y = y;
+    this.dragged = false;
+  }
+  /** True the moment the press becomes a drag. */
+  move(id: number, x: number, y: number): boolean {
+    if (id !== this.id || this.dragged || Math.hypot(x - this.x, y - this.y) < Press.DRAG) return false;
+    this.dragged = true;
+    return true;
+  }
+  /** Lifted: a tap if it never dragged. */
+  up(id: number): boolean {
+    if (id !== this.id) return false;
+    this.id = -1;
+    return !this.dragged;
+  }
+  cancel(id: number): void {
+    if (id === this.id) this.id = -1;
+  }
+}
+
 export class Hud {
   /** Seconds a window must be held to tip it out. */
   static readonly HOLD_EMPTY = 0.55;
@@ -106,7 +140,7 @@ export class Hud {
   private lessonLine = '';
   private lessonDone = false;
   /** With no lesson up, the day's orders and the next goal sit on the page instead; what they are, and what is showing. */
-  private goalWant: { text: string; done: boolean }[] = [];
+  private goalWant: { text: string; done: boolean; plain?: boolean }[] = [];
   private goalShown = '';
   /** A window held down: which, since when (a long press tips it out). */
   private slotHold: { i: number; id: number; t: number; fired: boolean; x: number; y: number } | null = null;
@@ -134,6 +168,7 @@ export class Hud {
     for (let i = 0; i < 5; i++) {
       const b = el('button', 'rh-slotbtn');
       b.setAttribute('aria-label', `Window ${i + 1}. Tap to choose, hold to empty`);
+      const press = new Press();
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -142,25 +177,34 @@ export class Hud {
         } catch {
           // Synthetic pointers.
         }
-        this.onSlot(i);
-        // Held on: after a moment the window tips out (the ring fills while you hold).
+        // Nothing is chosen yet: a window is chosen only when the finger lifts without dragging (round 8: a
+        // walking thumb that landed on a window switched fluff to clover heads, and Blow sent food at the crate).
+        // Held on, after a moment the window tips out (the ring fills while you hold).
+        press.down(e.pointerId, e.clientX, e.clientY);
         this.slotHold = { i, id: e.pointerId, t: 0, fired: false, x: e.clientX, y: e.clientY };
         b.classList.add('holding');
       });
       // A thumb that lands on a window and moves meant to walk (or look): hand it over, and tip nothing out.
       b.addEventListener('pointermove', (e) => {
         const h = this.slotHold;
-        if (!h || h.id !== e.pointerId || h.fired || Math.hypot(e.clientX - h.x, e.clientY - h.y) < 10) return;
+        if (!h || h.id !== e.pointerId || h.fired || !press.move(e.pointerId, e.clientX, e.clientY)) return;
         this.slotHold = null;
         b.classList.remove('holding');
         this.onSlotDrag(e.pointerId, h.x, h.y);
       });
       const release = (e: PointerEvent) => {
+        press.cancel(e.pointerId);
         if (this.slotHold?.id !== e.pointerId) return;
         this.slotHold = null;
         b.classList.remove('holding');
       };
-      b.addEventListener('pointerup', release);
+      // Lifted without dragging (and not held long enough to tip it out): that window is chosen.
+      b.addEventListener('pointerup', (e) => {
+        const h = this.slotHold;
+        const tap = press.up(e.pointerId);
+        release(e);
+        if (tap && h && h.id === e.pointerId && !h.fired) this.onSlot(i);
+      });
       b.addEventListener('pointercancel', release);
       b.addEventListener('lostpointercapture', release);
       b.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -168,11 +212,25 @@ export class Hud {
     }
     for (let i = 0; i < 5; i++) this.slotIcons.push({ el: el('div', 'rh-slotico'), key: '' });
     this.bellowsBtn.setAttribute('aria-label', 'Next window');
+    // The bellows' body flicks to the next window, also only on a lift without a drag (a drag hands over to the look or the stick).
+    const body = new Press();
     this.bellowsBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.onCycle();
+      try {
+        this.bellowsBtn.setPointerCapture(e.pointerId);
+      } catch {
+        // Synthetic pointers.
+      }
+      body.down(e.pointerId, e.clientX, e.clientY);
     });
+    this.bellowsBtn.addEventListener('pointermove', (e) => {
+      if (body.move(e.pointerId, e.clientX, e.clientY)) this.onSlotDrag(e.pointerId, body.x, body.y);
+    });
+    this.bellowsBtn.addEventListener('pointerup', (e) => {
+      if (body.up(e.pointerId)) this.onCycle();
+    });
+    this.bellowsBtn.addEventListener('pointercancel', (e) => body.cancel(e.pointerId));
     this.el.append(this.fed, this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, ...this.slotIcons.map((q) => q.el), this.slotSel, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
     this.pause.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
@@ -361,7 +419,7 @@ export class Hud {
    * sit on the journal page: a few calm lines, the same page. A goal just done
    * (a timed page) has the page first. An empty list puts it away.
    */
-  setGoal(lines: { text: string; done: boolean }[]): void {
+  setGoal(lines: { text: string; done: boolean; plain?: boolean }[]): void {
     this.goalWant = lines;
     if (this.lessonLine || this.pageT > 0) return;
     this.showGoal();
@@ -377,11 +435,12 @@ export class Hud {
       }
       return;
     }
-    const line = lines.map((l) => `${l.done ? '+' : ''}${l.text}`).join('|');
+    const line = lines.map((l) => `${l.done ? '+' : ''}${l.plain ? '~' : ''}${l.text}`).join('|');
     if (line === this.goalShown && this.pageUp) return;
     const fresh = !this.pageUp;
     this.goalShown = line;
-    this.pageBody.innerHTML = `<ul>${lines.map((l) => `<li class="${l.done ? 'done' : ''}">${BOX}<span>${l.text}</span></li>`).join('')}</ul>`;
+    // A line of news ("Order filled. New ones come at dawn.") has no box to tick: a fact is not a task.
+    this.pageBody.innerHTML = `<ul>${lines.map((l) => `<li class="${l.done ? 'done' : ''} ${l.plain ? 'plain' : ''}">${l.plain ? '' : BOX}<span>${l.text}</span></li>`).join('')}</ul>`;
     this.page.classList.add('lesson', 'goal');
     this.page.classList.remove('note');
     if (fresh) {
@@ -401,16 +460,20 @@ export class Hud {
    * pulling back now (the ring warm and pulsing: let go); strain: you are
    * holding on through it (the ring shakes: it is about to slip free).
    */
-  setTug(k: number, left = -1, back = false, strain = 0): void {
-    const v = k > 0.02 || back ? Math.max(0.03, Math.min(1, k)) : 0;
+  setTug(k: number, left = -1, back = false, strain = 0, tell = false): void {
+    const v = k > 0.02 || back || tell ? Math.max(0.03, Math.min(1, k)) : 0;
     const l = v > 0 && left >= 0 ? Math.min(1, left) : -1;
     const b = v > 0 && back;
     const st = b && strain > 0.02;
-    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01 && b === this.backShown && st === this.strainShown) return;
+    const tl = v > 0 && tell && !b;
+    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01 && b === this.backShown && st === this.strainShown && tl === this.tellShown) return;
     this.tugShown = v;
     this.leftShown = l;
     this.backShown = b;
     this.strainShown = st;
+    this.tellShown = tl;
+    // It puffs up to pull back (the tell): the ring swells, pale gold, just before it turns warm.
+    this.cross.classList.toggle('tell', tl);
     this.cross.classList.toggle('tug', v > 0);
     this.cross.classList.toggle('timed', l >= 0);
     this.cross.classList.toggle('late', l >= 0 && l < 0.35);
@@ -424,11 +487,12 @@ export class Hud {
   private leftShown = -1;
   private backShown = false;
   private strainShown = false;
+  private tellShown = false;
   private tugRing!: SVGCircleElement;
   private leftRing!: SVGCircleElement;
   /** For checks: the tug ring's fill, the time-left ring's share (-1 hidden), and whether it shows a pull back (and you straining against it). */
-  tugState(): { tug: number; left: number; back: boolean; strain: boolean } {
-    return { tug: this.tugShown, left: this.leftShown, back: this.backShown, strain: this.strainShown };
+  tugState(): { tug: number; left: number; back: boolean; strain: boolean; tell: boolean } {
+    return { tug: this.tugShown, left: this.leftShown, back: this.backShown, strain: this.strainShown, tell: this.tellShown };
   }
 
   /** The rare one's fed window over it at (x, y) CSS px, its share left 0..1; share < 0 hides it. */
@@ -561,9 +625,9 @@ export class Hud {
   }
 
   /** Tap targets over the bellows: one per slot window, sized to their spacing, and the body behind them. */
-  placeSlots(spots: ({ x: number; y: number } | null)[], show: boolean, body: { x0: number; y0: number; x1: number; y1: number } | null, point = -1): void {
-    // The pointed window shows on every device: keys and pads switch slots too.
-    const ps = point >= 0 ? spots[point] : null;
+  placeSlots(spots: ({ x: number; y: number } | null)[], show: boolean, body: { x0: number; y0: number; x1: number; y1: number } | null, point = -1, drawn = spots): void {
+    // The pointed window shows on every device: keys and pads switch slots too (over the window as it is drawn).
+    const ps = point >= 0 ? drawn[point] : null;
     this.slotPoint.classList.toggle('on', !!ps);
     if (ps) this.slotPoint.style.transform = `translate(${ps.x.toFixed(0)}px, ${ps.y.toFixed(0)}px)`;
     // Each window's target is as big as the spacing allows, never under 44 px on a spread layout

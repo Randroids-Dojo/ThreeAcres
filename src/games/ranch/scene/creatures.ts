@@ -495,6 +495,12 @@ export class CreatureView {
       } else if (d.mood === 'frazzled') {
         roll = Math.sin(t * 40 + d.id) * 0.06;
       }
+      // Puffing up to pull back (the duel's tell): it swells towards the pull, and stays a little big through it.
+      if (d.tell > 0 && d.tellLen > 0) {
+        const p = 1 - d.tell / d.tellLen;
+        const puff = 1 + 0.34 * p * (2 - p);
+        scale *= puff;
+      } else if (d.back > 0 && !d.tame) scale *= 1.12;
       const wob = d.mood === 'hungry' ? 0 : Math.sin(t * 2 + d.id) * 0.015;
       _e.set(pitch, d.yaw, roll + wob, 'YXZ');
       _q.setFromEuler(_e);

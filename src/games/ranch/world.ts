@@ -37,6 +37,13 @@ export const HOUSE = { x: -16, z: 43, w: 8, d: 6 };
 export const DOOR = { x: -16, z: 39.6 };
 export const WINDMILL = { x: -27, z: 37 };
 export const EXCHANGE = { x: -6.5, z: 36.5 };
+/**
+ * A second sell crate in the lane between the pens (round 8: selling from the far pens was a 25 m walk to the
+ * one by the house): between the middle and east columns, open to the north row as the house one is.
+ */
+export const LANE_CRATE = { x: 22.5, z: 35 };
+/** Every sell crate: the house one first (the lessons' and the board's), then the lane one. */
+export const CRATES = [EXCHANGE, LANE_CRATE];
 export const BOARD = { x: -4.2, z: 37.6 };
 export const WORKBENCH = { x: -10.6, z: 41.2 };
 export const START = { x: -15.5, z: 37.2, yaw: -0.55 };

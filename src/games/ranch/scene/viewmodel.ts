@@ -44,6 +44,8 @@ const WOOD = 0x8a5a3a;
 const LEATHER = 0x7a4a3a;
 
 const _m = new Matrix4();
+const _m2 = new Matrix4();
+const _m3 = new Matrix4();
 const _q = new Quaternion();
 const _v = new Vector3();
 const _s = new Vector3();
@@ -548,15 +550,18 @@ export class Viewmodel {
   }
 
   /** The bellows' lower body on screen (0..1 from top left): tapping it flicks the slot selector. */
-  bodyBox(out = { x0: 0, y0: 0, x1: 0, y1: 0 }): { x0: number; y0: number; x1: number; y1: number } {
+  bodyBox(out = { x0: 0, y0: 0, x1: 0, y1: 0 }, rest = false): { x0: number; y0: number; x1: number; y1: number } {
     let x0 = 1;
     let y0 = 1;
     let x1 = 0;
     let y1 = 0;
+    // At rest (for its tap target): the body under the rig placed at rest, so it holds still while you turn.
+    this.rig.updateMatrixWorld(true);
+    const m = rest ? this.atRest(this.body, _m3) : this.body.matrixWorld;
     for (const x of [-0.12, 0.12]) {
       for (const y of [-0.05, 0.03]) {
         for (const z of [-0.02, 0.2]) {
-          _v.set(x, y, z).applyMatrix4(this.body.matrixWorld).project(this.camera);
+          _v.set(x, y, z).applyMatrix4(m).project(this.camera);
           const sx = (_v.x + 1) / 2;
           const sy = (1 - _v.y) / 2;
           x0 = Math.min(x0, sx);
@@ -581,6 +586,32 @@ export class Viewmodel {
     const x0 = _v.x;
     _v.set(p.x + this.windowR, p.y, p.z).applyMatrix4(parent.matrixWorld).project(this.camera);
     return Math.abs(_v.x - x0) / 2;
+  }
+
+  /**
+   * Screen positions (0..1 from top left) of each slot window with the bellows at rest (no sway, bob, kick or
+   * pump), for the windows' tap targets: they hold still while you turn (round 8: turning left slid them onto the
+   * resting stick, and a walking thumb landed on a window). outs: one Vector3 per window, null past the last.
+   */
+  windowsAtRest(outs: (Vector3 | null)[]): void {
+    this.rig.updateMatrixWorld(true);
+    this.atRest(this.windows.parent!, _m2);
+    for (let i = 0; i < outs.length; i++) {
+      const o = outs[i];
+      const p = this.windowSpots[i];
+      if (!o || !p) continue;
+      o.copy(p).applyMatrix4(_m2).project(this.camera);
+      o.set((o.x + 1) / 2, (1 - o.y) / 2, o.z);
+    }
+  }
+
+  /** A part's world matrix with the rig placed at rest (no sway, bob or kick): the chain from the rig to it is fixed. */
+  private atRest(part: Object3D, out: Matrix4): Matrix4 {
+    _m.copy(this.rig.matrixWorld).invert().multiply(part.matrixWorld);
+    _q.identity();
+    out.compose(_v.set(this.baseX, this.baseY, this.baseZ), _q, _s.setScalar(this.scale));
+    if (this.rig.parent) out.premultiply(this.rig.parent.matrixWorld);
+    return out.multiply(_m);
   }
 
   /** Screen positions (0..1 from top left) of each slot window, for tapping. */

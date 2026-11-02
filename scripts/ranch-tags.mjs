@@ -335,7 +335,7 @@ void counted;
 await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
-check('the price board chalks up the morning\'s offers: what (by dusk, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) by dusk|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+check('the price board chalks up the morning\'s offers: what (by noon, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by noon|by dusk|after dark)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
 // The board's tags: one per offer, its note saying what it earns, fitting the tag.
 const boardTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -344,7 +344,28 @@ const boardTags = await page.evaluate(() => {
 });
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
 // Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
-check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Round 8: each with its condition first (due by noon, by dusk or after dark; the hunt's in its title).
+check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|After dark)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today, after dark)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Round 8: every condition's tag fits at its longest (big numbers, the longest kind names).
+const condTags = await page.evaluate(() => {
+  const r = window.ranch;
+  const out = [];
+  for (const kind of ['clover', 'ember', 'brook', 'thistle']) {
+    for (const [by, from] of [[12, undefined], [19, undefined], [24, 21]]) {
+      for (const live of [false, true]) {
+        const o = { kind, live, n: live ? 5 : 40, got: 0, paid: 0, mult: 3, pay: live ? 390 : 12480, state: 'offer', by, ...(from ? { from } : {}) };
+        const tg = r.sim.offerTag(o);
+        out.push({ ...tg, fit: r.tagLayout(tg.title, null, tg.note).fits });
+      }
+    }
+  }
+  for (const by of [12, 19]) {
+    const tg = r.sim.offerTag({ kind: 'brook', live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 210, state: 'offer', rare: { spot: 5 }, by });
+    out.push({ ...tg, fit: r.tagLayout(tg.title, null, tg.note).fits });
+  }
+  return out;
+});
+check("every offer's tag fits on every condition, at its longest", condTags.length === 26 && condTags.every((t) => t.fit), JSON.stringify(condTags.filter((t) => !t.fit)));
 // Every rare downy's tag fits, wherever it was seen, at the most it can pay (three quarters of a five-brook trip).
 const rareTags = await page.evaluate(() => {
   const r = window.ranch;

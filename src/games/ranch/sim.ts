@@ -24,6 +24,8 @@ import {
   KIND,
   NEGLECT_HOURS,
   ORDER_BY,
+  ORDER_NIGHT,
+  ORDER_NOON,
   ORDER_POST,
   PEN_DOZE,
   PEN_HUNGER,
@@ -58,7 +60,7 @@ import {
   type Tuft,
 } from './defs';
 import { clamp, damp } from './noise';
-import { BED_HALF, CRATE, Physics, SILO_H, SILO_R } from './physics';
+import { BED_HALF, CRATE, CRATE_BOXES, Physics, SILO_H, SILO_R } from './physics';
 import {
   freshState,
   slotCap,
@@ -99,6 +101,7 @@ import {
   type Zone,
   RIDGE_X,
   HOLLOW_X,
+  CRAG,
 } from './world';
 
 export type Ev =
@@ -124,6 +127,7 @@ export type Ev =
   | { t: 'goal'; id: GoalId }
   | { t: 'deny'; why: string }
   | { t: 'plant'; pad: number; food: Food }
+  | { t: 'stock'; pad: number; food: Food; n: number; feeder: boolean }
   | { t: 'crop'; pad: number }
   /** Something went into a feeder or silo (auto: a garden's crop, by its feed run or its full bed, not you). */
   | { t: 'store'; x: number; y: number; z: number; where: 'feeder' | 'silo'; pad: number; auto?: boolean }
@@ -140,12 +144,13 @@ export type Ev =
   | { t: 'unlured'; x: number; y: number; z: number; kind: DownyKind; near: boolean }
   /** A wild downy you are pulling at pulls back (the ring turns warm): let go of Pull until it stops. */
   | { t: 'pullback'; x: number; y: number; z: number; kind: DownyKind }
+  | { t: 'tell'; x: number; y: number; z: number; kind: DownyKind }
   /** Its pull back ended; eased: you let go while it pulled (and it holds what you had). */
   | { t: 'eased'; x: number; y: number; z: number; kind: DownyKind; eased: boolean }
   /** You held on through its pull back: it slipped free a few metres off (still there, try again). */
   | { t: 'slip'; x: number; y: number; z: number; kind: DownyKind }
   /** A wild downy broke free of the pull and got away (dove: into the water). */
-  | { t: 'escape'; x: number; y: number; z: number; kind: DownyKind; dove: boolean }
+  | { t: 'escape'; x: number; y: number; z: number; kind: DownyKind; dove: boolean; slack?: boolean }
   /** An order moved: posted (an offer on the board), taken, counted towards (got of n), filled (bonus: what filling paid, or a live order's whole sum), or missed at dusk. */
   | { t: 'order'; kind: DownyKind; live: boolean; got: number; n: number; state: 'posted' | 'taken' | 'progress' | 'filled' | 'missed'; bonus: number; x: number; z: number; rare?: boolean }
   /** A downy of yours blown into the sell crate for a live order. */
@@ -211,20 +216,39 @@ const G_ITEM = 16;
 const G_TUFT = 2.4;
 /** The sell crate draws in fluff within this many metres of its middle (flying or lying). */
 const PULL_R = 2.4;
-const CRATE_X = (CRATE.x0 + CRATE.x1) / 2;
-const CRATE_Z = (CRATE.z0 + CRATE.z1) / 2;
+/** The sell crates' middles (the house one first: events with no crate of their own happen there). */
+const CRATE_AT = CRATE_BOXES.map((c) => ({ x: (c.x0 + c.x1) / 2, z: (c.z0 + c.z1) / 2, box: c }));
+const CRATE_X = CRATE_AT[0].x;
+const CRATE_Z = CRATE_AT[0].z;
+/** The sell crate nearest a spot (its index in CRATE_AT). */
+function nearestCrate(x: number, z: number): number {
+  let best = 0;
+  let bd = 1e9;
+  for (let i = 0; i < CRATE_AT.length; i++) {
+    const d = Math.hypot(CRATE_AT[i].x - x, CRATE_AT[i].z - z);
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  }
+  return best;
+}
 
 /**
  * The sell crate's pull on a piece of fluff: towards a point just over its
  * funnel, harder the nearer it is, with a little damping so it settles in
  * rather than orbiting. Shared by the real flight and the crosshair's guess.
+ * floors: the ground under each crate. (Round 8: the nearest of the crates.)
  */
-function cratePull(b: { x: number; y: number; z: number; vx: number; vy: number; vz: number }, floor: number, dt: number): boolean {
-  const dx = CRATE_X - b.x;
-  const dz = CRATE_Z - b.z;
+function cratePull(b: { x: number; y: number; z: number; vx: number; vy: number; vz: number }, floors: number[], dt: number): boolean {
+  const ci = nearestCrate(b.x, b.z);
+  const c = CRATE_AT[ci];
+  const floor = floors[ci];
+  const dx = c.x - b.x;
+  const dz = c.z - b.z;
   const dh = Math.hypot(dx, dz);
   if (dh > PULL_R || b.y > floor + 3.4) return false;
-  const dy = floor + CRATE.h + 0.35 - b.y;
+  const dy = floor + c.box.h + 0.35 - b.y;
   const k = 1 - dh / PULL_R;
   const pull = 7 + 12 * k;
   const l = Math.hypot(dx, dy, dz) || 1;
@@ -326,33 +350,66 @@ export const RARE_WARY = { walk: 13, run: 20, smell: 12, calm: 9, nearWalk: 3, n
 /** A rare one fights the pull harder than its kind: this much longer to bring in, with this share of its kind's give. */
 export const RARE_FIGHT = { need: 2.2, give: 0.9 };
 /**
- * The tug, a small skill you read (the seventh playtest: "catch everything in under 3 s, hold Pull"). Now and
- * then a wild one you are pulling at pulls back: the ring round the crosshair turns warm and it squeaks. Hold
- * Pull through its pull for longer than its grace and it slips free a few metres off (not lost: try again); let
- * go while it pulls and press again once it stops, and what you had holds. every: seconds of pulling between its
- * pulls back; dur: how long one lasts; grace: seconds of holding on through one before it slips. Clovers rarely
- * pull back, and gently; embers more; brooks and thistles most.
+ * The tug, a duel (round 8; round 7 made it a skill you read, and the eighth playtest found one rule and no skill
+ * beyond it: a 200 to 350 ms thumb caught 4 of 4 embers and brooks, and the rare one pulled back every 1.8 s, like a
+ * metronome). Now and then a wild one you are pulling at gets ready to pull back: it puffs up (`tell`, at a time
+ * that varies by kind and from pull to pull), then pulls back: the ring round the crosshair turns warm and it
+ * squeaks. Hold Pull through its pull for longer than its grace and it slips free a few metres off (not lost: try
+ * again); let go while it pulls, then pull again within its slack once it stops, and what you had holds. Leave it
+ * slack longer than that after a pull back and it bolts (a getaway: see ESCAPE). every: seconds of pulling between
+ * its pulls back; tell: how long it puffs up first; dur: how long a pull back lasts; grace: seconds of holding on
+ * through one before it slips; slack: seconds after one before it bolts if you have not pulled again. So letting
+ * go in time is the tell plus the grace, and pulling again in time is the slack. Clovers pull back rarely and
+ * gently, with a long tell; embers more; brooks and thistles most; the rare one hardest of all (RARE_TUG).
  */
-export const TUG: Record<DownyKind, { every: [number, number]; dur: [number, number]; grace: number }> = {
-  clover: { every: [0.7, 1.3], dur: [0.75, 0.95], grace: 0.68 },
-  ember: { every: [0.8, 1.3], dur: [0.65, 0.85], grace: 0.55 },
-  brook: { every: [0.5, 0.8], dur: [0.6, 0.8], grace: 0.48 },
-  thistle: { every: [0.38, 0.6], dur: [0.55, 0.75], grace: 0.46 },
+export interface TugRule {
+  every: [number, number];
+  tell: [number, number];
+  dur: [number, number];
+  grace: number;
+  slack: number;
+}
+export const TUG: Record<DownyKind, TugRule> = {
+  clover: { every: [0.5, 1.0], tell: [0.55, 0.8], dur: [0.75, 0.95], grace: 0.45, slack: 1.3 },
+  ember: { every: [0.5, 1.1], tell: [0.38, 0.6], dur: [0.65, 0.9], grace: 0.24, slack: 0.85 },
+  brook: { every: [0.5, 1.1], tell: [0.36, 0.56], dur: [0.6, 0.85], grace: 0.22, slack: 0.75 },
+  thistle: { every: [0.4, 0.9], tell: [0.34, 0.54], dur: [0.55, 0.8], grace: 0.22, slack: 0.75 },
 };
-/** The rare one pulls back most often and fastest, whatever its kind. */
-export const RARE_TUG: { every: [number, number]; dur: [number, number]; grace: number } = { every: [0.6, 0.95], dur: [0.6, 0.8], grace: 0.5 };
-/** After a pull back, a let-go pull keeps what it has for this long (pressing again a little late costs nothing). */
+/** The rare one pulls back hardest whatever its kind: the most pulls back, the shortest slack, at the most uneven times (it was every 0.6 to 0.95 s). */
+export const RARE_TUG: TugRule = { every: [0.4, 1.5], tell: [0.4, 0.6], dur: [0.6, 0.9], grace: 0.22, slack: 0.72 };
+/** After a pull back, a let-go pull keeps what it has for this long (pressing again a little late costs nothing, within the slack). */
 export const EASE_HOLD = 0.7;
-/** Until the lesson has taught it, a pull back lasts until you let go (or this long), and holding on slips only after this. */
-export const TEACH_BACK = { dur: 3.2, grace: 2.6 };
+/**
+ * The first pull back, taught (round 8: the eighth playtest's first five catches pulled back under other lessons'
+ * lines, and holding straight through caught 6 of 6 clovers before the line showed, 0 of 4 embers after). Until
+ * the ease lesson is learned a wild one's first pull back comes `first` seconds into the fight (always, so the
+ * first wild catch pulls back early and clearly), after a long tell; the lesson's line cuts in over any other at
+ * that moment, and only while that line is up is it gentle: it lasts until you let go (or `dur`), slips only after
+ * `grace` of holding on, and never bolts. Learned, every pull back follows TUG.
+ */
+export const TEACH_BACK = { first: 0.5, tell: 0.7, dur: 3.2, grace: 2.6 };
 /** A slip: a hop this fast away from you, and the bellows leaves it be for this long. */
 export const SLIP = { speed: 3.4, up: 3.6, noPull: 0.8 };
 /** Within this many metres of it the rare one is found, and an arrow comes on over it (before that, only the clue). */
 export const RARE_SEEN = 24;
-/** Its coins: this share of the day's trip, so never more than about the trip's (the sixth playtest's paid 3.8 times it). */
-export const RARE_PAY = 0.75;
+/**
+ * Its coins today, in downies of its kind (`LIVE_EACH`): by dusk one, by noon one and a half, never more than half the
+ * day's trip (round 8: it paid three quarters of the trip, and on top of its lasting worth it won every morning it was offered: "Pays 415, then about
+ * 390 a day" against a one-off 390). Its worth is the lasting one; today it pays little.
+ */
+export const RARE_PAY = { dusk: 1, noon: 1.5 };
+/** The sack of food a new kind's first pen comes with (see stockFirst). */
+export const STOCK = 12;
+/** A trip due by noon pays this much more a downy than one due by dusk (it costs you the morning at home); one after dark more again (your night, with the pests about). */
+export const NOON_TRIP = 1.2;
+export const NIGHT_TRIP = 1.3;
 /** Meals a penned downy eats in a game day, fed (measured: 3.67 for pens of three, six and ten), for a rare one's worth. */
 export const PEN_MEALS = 3.7;
+
+/** An offer's sort, kind and deadline, for "never the same as one of yesterday's". */
+export function orderKey(o: { kind: DownyKind; live?: boolean; rare?: unknown; by?: number }): string {
+  return `${o.rare ? 'rare' : o.live ? 'live' : 'fluff'}:${o.kind}:${o.by ?? ORDER_BY}`;
+}
 
 /**
  * The pen a rare one would join: the fullest of yours with room and no rare one in it yet, so it adds the
@@ -1029,6 +1086,7 @@ export class Sim {
   private bellows(dt: number, c: Controls, aim: Aim): void {
     const s = this.s;
     this.fullWait -= dt;
+    this.nightNoteT -= dt;
     this.puffWait -= dt;
     this.drawing = c.draw;
     this.drawPower = damp(this.drawPower, c.draw ? 1 : 0, c.draw ? 8 : 5, dt);
@@ -1082,11 +1140,17 @@ export class Sim {
               // The fight starts: it starts fighting at once, in its own way (its next jink comes soon). A rare one
               // lured when it starts stays lured through it.
               d.strain = 1e-4;
+              // Its first pull back: early and clear while the lesson has yet to teach it, else after a while of pulling.
+              d.backT = this.knows('ease') ? -1 : TEACH_BACK.first;
+              d.tell = 0;
+              d.slackT = -1;
               if (d.rare && rareLured(d)) d.calm = Math.max(d.calm, need * 3);
               const j = CATCH[d.kind].jink;
               d.hopT = Math.min(d.hopT, j[0] + this.rand() * (j[1] - j[0]) * 0.5);
             }
             d.held = true;
+            // Pulling again: any slack after its pull back is taken up.
+            if (wildOne) d.slackT = -1;
             if (wildOne && d.back > 0) {
               // It is pulling back and you are holding on: no headway, and the line strains. Hold on past its
               // grace and it slips free.
@@ -1098,12 +1162,17 @@ export class Sim {
               this.pullingBack(d, aim, dt, 1.1);
               continue;
             }
+            if (wildOne && d.tell > 0) {
+              // Puffing up to pull back (the tell): it braces, and the pull makes no headway.
+              this.bracing(d, aim, dt);
+              continue;
+            }
             d.tug = Math.min(need, d.tug + dt);
             if (wildOne && d.tug < need) {
-              // Its next pull back comes after a while of pulling.
+              // Its next pull back comes after a while of pulling, with a tell first.
               if (d.backT < 0) d.backT = this.nextBack(d);
               d.backT -= dt;
-              if (d.backT <= 0) this.pullBack(d);
+              if (d.backT <= 0) this.startTell(d);
             }
             if (!d.tame) this.struggle(d, aim, dt, d.tug / need, wildOne);
             continue;
@@ -1360,25 +1429,48 @@ export class Sim {
     return CATCH[d.kind].need * (d.wary > 0 ? ESCAPE.waryNeed : 1) * (d.rare ? RARE_FIGHT.need : 1);
   }
 
-  /** Seconds of pulling until a wild one's next pull back (the rare one's come sooner). */
+  /** A wild one's duel rules: its kind's, or the rare one's (hardest). */
+  tugRule(d: Downy): TugRule {
+    return d.rare ? RARE_TUG : TUG[d.kind];
+  }
+
+  /** Seconds of pulling until a wild one's next tell. */
   private nextBack(d: Downy): number {
-    const t = d.rare ? RARE_TUG : TUG[d.kind];
+    const t = this.tugRule(d);
     return t.every[0] + this.rand() * (t.every[1] - t.every[0]);
   }
 
-  /** Seconds of holding on through its pull back before it slips free (long while the lesson is teaching it). */
+  /** Seconds of holding on through its pull back before it slips free (long while the lesson's line is up). */
   backGrace(d: Downy): number {
     if (!this.knows('ease')) return TEACH_BACK.grace;
-    return (d.rare ? RARE_TUG : TUG[d.kind]).grace;
+    return this.tugRule(d).grace;
+  }
+
+  /** It gets ready to pull back: it puffs up (the tell), for a time that varies by kind and from pull to pull. */
+  private startTell(d: Downy): void {
+    const t = this.tugRule(d);
+    d.tell = d.tellLen = this.knows('ease') ? t.tell[0] + this.rand() * (t.tell[1] - t.tell[0]) : TEACH_BACK.tell;
+    d.backT = -1;
+    d.squashV += 1.5;
+    this.emit({ t: 'tell', x: d.x, y: d.y, z: d.z, kind: d.kind });
+  }
+
+  /** Puffing up: it digs its feet in and holds still, swelling (drawn larger by the renderer). */
+  private bracing(d: Downy, aim: Aim, dt: number): void {
+    d.yaw = Math.atan2(-(aim.ex - d.x), -(aim.ez - d.z));
+    d.target = null;
+    if (this.rand() < dt * 6) d.squashV += 1.2;
   }
 
   /** It pulls back: the ring turns warm and it squeaks. While the lesson teaches it, it lasts until you let go. */
   private pullBack(d: Downy): void {
-    const t = d.rare ? RARE_TUG : TUG[d.kind];
+    const t = this.tugRule(d);
     d.back = this.knows('ease') ? t.dur[0] + this.rand() * (t.dur[1] - t.dur[0]) : TEACH_BACK.dur;
     d.backHeld = 0;
     d.eased = false;
     d.backT = -1;
+    d.tell = 0;
+    d.slackT = -1;
     d.squashV -= 4;
     this.emit({ t: 'pullback', x: d.x, y: d.y, z: d.z, kind: d.kind });
   }
@@ -1406,6 +1498,8 @@ export class Sim {
     d.backT = -1;
     d.backHeld = 0;
     d.easeT = 0;
+    d.tell = 0;
+    d.slackT = -1;
     d.noPull = SLIP.noPull;
     d.target = null;
     const a = Math.atan2(d.z - p.z, d.x - p.x) + (this.rand() - 0.5) * 1.2;
@@ -1480,7 +1574,7 @@ export class Sim {
    * for a moment. A brook by the pond leaps into the water and is gone; a
    * thistle bolts.
    */
-  private escape(d: Downy): void {
+  private escape(d: Downy, slack = false): void {
     const p = this.s.player;
     d.tug = 0;
     d.strain = 0;
@@ -1488,6 +1582,8 @@ export class Sim {
     d.back = 0;
     d.backT = -1;
     d.easeT = 0;
+    d.tell = 0;
+    d.slackT = -1;
     d.held = false;
     d.noPull = GOT_AWAY;
     d.alert = true;
@@ -1517,11 +1613,48 @@ export class Sim {
     d.hopT = 0.05;
     d.squashV += 4;
     this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
-    this.emit({ t: 'escape', x: d.x, y: d.y, z: d.z, kind: d.kind, dove });
+    this.emit({ t: 'escape', x: d.x, y: d.y, z: d.z, kind: d.kind, dove, ...(slack ? { slack } : {}) });
   }
 
   private firstDraw(): void {
     if (!this.s.journal) this.s.journal = true;
+  }
+
+  /**
+   * The first pen of a new kind comes with a sack of its food (round 8: the eighth playtest's embers were starving by
+   * their first night with no root source, and its brooks got out starving with no fruit): `STOCK` of its favourite
+   * into the pen's feeder if it has one that takes it, else lying in the pen by the gate. Clover has the starter
+   * garden; a thistle eats anything. Once a kind.
+   */
+  private stockFirst(k: DownyKind, pen: number): void {
+    const s = this.s;
+    if (k === 'clover' || k === 'thistle' || s.stocked.includes(k)) return;
+    s.stocked.push(k);
+    const food = wantedFood(k);
+    const pad = s.pads[pen];
+    const fd = pad.feeder;
+    if (pad.ups.includes('feeder') && (fd.t === null || fd.t === food || fd.n === 0) && fd.n + STOCK <= FEEDER_CAP) {
+      fd.t = food;
+      fd.n += STOCK;
+      this.emit({ t: 'stock', pad: pen, food, n: STOCK, feeder: true });
+      return;
+    }
+    for (let i = 0; i < STOCK; i++) {
+      const g = gatherSpot(pen, i);
+      const it = newItem(s, food, g.x + (this.rand() - 0.5) * 0.9, 0, g.z + (this.rand() - 0.5) * 0.9);
+      it.y = this.phys.floor(it.x, it.z) + it.r;
+      it.rest = true;
+      s.items.push(it);
+    }
+    this.emit({ t: 'stock', pad: pen, food, n: STOCK, feeder: false });
+  }
+
+  /** The foods you could sow at a garden post: the favourite of each kind you keep (clover heads for a thistle). */
+  sowable(): Food[] {
+    const kept = this.kept();
+    const out: Food[] = [];
+    for (const k of KINDS) if (kept[k] > 0 && !out.includes(wantedFood(k))) out.push(wantedFood(k));
+    return out;
   }
 
   /** Blow one of the chosen window's things out. pressed: a fresh press (not a held repeat). */
@@ -1756,9 +1889,18 @@ export class Sim {
     d.starveT = d.hunger >= 1 ? d.starveT + dt / HOUR : 0;
     d.sinceFed += dt / HOUR;
     d.fright = Math.max(0, d.fright - dt);
+    // Its tell runs its own time (it puffs up whether or not you are still pulling), then it pulls back.
+    if (d.tell > 0) {
+      d.tell -= dt;
+      if (d.tell <= 0) {
+        d.tell = 0;
+        if (wild && !d.keep && d.strain > 0 && d.drawn <= 0) this.pullBack(d);
+      }
+    }
     // Its pull back runs its time (a let-go pull holds what it had through it, and a moment after), then it pulls
     // no more until you have pulled a while again. While the lesson teaches it, it stops once you let go.
     if (d.back > 0) {
+      // (Let go as it puffed up or as it pulls: you eased off for it. A tell only starts while you pull.)
       if (!d.held) {
         if (!d.eased && !this.knows('ease')) d.back = Math.min(d.back, 0.3);
         d.eased = true;
@@ -1768,12 +1910,27 @@ export class Sim {
         d.back = 0;
         d.easeT = EASE_HOLD;
         d.backT = this.nextBack(d);
+        // Not pulling again yet: its slack runs from now.
+        d.slackT = d.held ? -1 : 0;
         this.emit({ t: 'eased', x: d.x, y: d.y, z: d.z, kind: d.kind, eased: d.eased });
       } else if (!d.held && wild && !d.keep) this.pullingBack(d, { ex: px, ez: pz } as Aim, dt, 0.5);
     }
     if (d.easeT > 0) d.easeT -= dt;
+    // Left slack too long after a pull back (round 8: the duel asks for both, letting go in time and pulling again
+    // in time), it bolts: a getaway. Not while the lesson's line is teaching the first one.
+    if (d.slackT >= 0) {
+      if (d.held || d.strain <= 0 || d.tame || d.keep) d.slackT = -1;
+      else if (d.back <= 0 && d.tell <= 0 && !this.drawing) {
+        // (Only while Pull is let go: pressed but off it, the pull fades as any lapse does.)
+        d.slackT += dt;
+        if (this.knows('ease') && d.slackT > this.tugRule(d).slack) {
+          this.escape(d, true);
+          return;
+        }
+      }
+    }
     // A pull that slips off fades (a wild one's at its kind's rate: an ember's darts give you a moment to find it again).
-    if (!d.held && d.back <= 0 && d.easeT <= 0) d.tug = Math.max(0, d.tug - dt * (wild && !d.keep ? CATCH[d.kind].fade : 1.5));
+    if (!d.held && d.back <= 0 && d.tell <= 0 && d.easeT <= 0) d.tug = Math.max(0, d.tug - dt * (wild && !d.keep ? CATCH[d.kind].fade : 1.5));
     if (d.bolt > 0) d.bolt -= dt;
     if (d.wary > 0) d.wary -= dt;
     // A wild one fighting the pull gets away if you are slow (its kind's limit), or if the pull lapses once it
@@ -1783,19 +1940,22 @@ export class Sim {
       d.peak = 0;
       d.back = 0;
       d.easeT = 0;
+      d.tell = 0;
+      d.slackT = -1;
     } else if (wild && !d.keep && d.strain > 0) {
-      // (Its time, for one that has one, waits while it pulls back.)
-      if (d.back <= 0) d.strain += dt;
+      // (Its time, for one that has one, waits while it pulls back, and while it puffs up to.)
+      if (d.back <= 0 && d.tell <= 0) d.strain += dt;
       d.peak = Math.max(d.peak, d.tug / CATCH[d.kind].need);
       // One with a time (a brook, a thistle) breaks free when its time runs out, shown on the tug ring; one
       // without (a clover, an ember) when the pull lapses once it was a third of the way in. (The fifth
       // playtest's careless thumb lost all ten brooks to a lapse, each into the pond.)
       const lim = fightLimit(d);
       if ((lim > 0 && d.strain >= lim) || (lim <= 0 && d.tug <= 0 && d.peak >= SHAKE_LOOSE)) this.escape(d);
-      else if (d.tug <= 0 && d.back <= 0) {
+      else if (d.tug <= 0 && d.back <= 0 && d.tell <= 0) {
         d.strain = 0;
         d.peak = 0;
         d.backT = -1;
+        d.slackT = -1;
       }
     }
     const crowded = d.pen >= 0 && this.penCounts[d.pen] > PEN_MAX;
@@ -1814,7 +1974,7 @@ export class Sim {
     if (wild && d.rare) {
       if (d.calm > 0) d.calm -= dt;
       // A fight begun while it was lured keeps it lured to the end (its pulls back make the fight a long one).
-      if (d.calm > 0 && (d.strain > 0 || d.back > 0 || d.easeT > 0)) d.calm = Math.max(d.calm, 0.5);
+      if (d.calm > 0 && (d.strain > 0 || d.back > 0 || d.tell > 0 || d.easeT > 0)) d.calm = Math.max(d.calm, 0.5);
       const lured = rareLured(d);
       // Its fed window ran out: say so (the seventh playtest walked up to "It heard you", the window gone unseen).
       if (d.lured && !lured && d.drawn === 0) this.emit({ t: 'unlured', x: d.x, y: d.y, z: d.z, kind: d.kind, near: pd0 < 30 });
@@ -1825,7 +1985,8 @@ export class Sim {
         if (o?.rare && !o.rare.seen) o.rare.seen = true;
       }
       const w = RARE_WARY;
-      alert = d.drawn === 0 && !d.held && pd0 < (lured ? (running ? w.nearRun : w.nearWalk) : running || d.wary > 0 ? w.run : w.walk) && Math.abs(d.y - s.player.y) < 4;
+      // (Not mid-fight: the duel's let-gos with you close by used to make it hear you and bolt.)
+      alert = d.drawn === 0 && !d.held && d.strain <= 0 && pd0 < (lured ? (running ? w.nearRun : w.nearWalk) : running || d.wary > 0 ? w.run : w.walk) && Math.abs(d.y - s.player.y) < 4;
       if (alert && d.bolt <= 0 && !d.alert) {
         d.bolt = w.bolt;
         d.calm = 0;
@@ -1877,7 +2038,7 @@ export class Sim {
     d.x += d.vx * dt;
     d.y += d.vy * dt;
     d.z += d.vz * dt;
-    if (forCrate && this.inCrate(d.x, d.y, d.z) && this.sellDowny(d.kind, d.x, this.crateFloor + CRATE.h, d.z, d.caught, d.rare) >= 0) {
+    if (forCrate && this.inCrate(d.x, d.y, d.z) && this.sellDowny(d.kind, d.x, this.crateFloors[nearestCrate(d.x, d.z)] + CRATE.h, d.z, d.caught, d.rare) >= 0) {
       d.gone = true;
       return;
     }
@@ -1899,7 +2060,7 @@ export class Sim {
           }
         }
         // Blown at the crate for an order that wants another (one caught today), or the rare one (it goes in a pen): say so.
-        if (d.flyT >= 0 && d.tame && !forCrate && Math.hypot(d.x - CRATE_X, d.z - CRATE_Z) < PULL_R + 0.8) {
+        if (d.flyT >= 0 && d.tame && !forCrate && Math.hypot(d.x - CRATE_AT[nearestCrate(d.x, d.z)].x, d.z - CRATE_AT[nearestCrate(d.x, d.z)].z) < PULL_R + 0.8) {
           const why = this.staleNote(d.kind, d.rare);
           if (why) this.emit({ t: 'deny', why });
         }
@@ -1929,6 +2090,7 @@ export class Sim {
           d.tame = true;
           d.strayFrom = -1;
           if (was < 0) this.emit({ t: 'penned', pen });
+          if (was < 0) this.stockFirst(d.kind, pen);
           this.complete('pen');
           // The board's rare one, caught today, blown into a pen: it fills the order, and stays.
           if (d.rare && was < 0) this.rarePenned(d, pen);
@@ -2034,9 +2196,10 @@ export class Sim {
    * would hit the crate's side. Shared by the real flight and the crosshair's guess.
    */
   private downyCratePull(d: { x: number; y: number; z: number; vx: number; vy: number; vz: number }, dt: number): void {
-    if (!cratePull(d, this.crateFloor, dt * 2.2)) return;
-    const dh = Math.hypot(CRATE_X - d.x, CRATE_Z - d.z);
-    const foot = d.y - this.crateFloor;
+    if (!cratePull(d, this.crateFloors, dt * 2.2)) return;
+    const ci = nearestCrate(d.x, d.z);
+    const dh = Math.hypot(CRATE_AT[ci].x - d.x, CRATE_AT[ci].z - d.z);
+    const foot = d.y - this.crateFloors[ci];
     if (dh < 1.6 && dh > 0.75 && foot < CRATE.h + 0.25) d.vy = Math.max(d.vy, Math.min(4, (CRATE.h + 0.4 - foot) * 6));
   }
 
@@ -2264,7 +2427,7 @@ export class Sim {
       if (it.rest && it.drawn === 0) continue;
       const tuft = isTuft(it.type);
       // Fluff near the sell crate is drawn in, even lying on the ground, and counts as in flight so the crate takes it.
-      if (tuft && it.drawn === 0 && cratePull(it, this.crateFloor, dt)) {
+      if (tuft && it.drawn === 0 && cratePull(it, this.crateFloors, dt)) {
         if (it.grounded || it.rest) {
           it.grounded = false;
           it.rest = false;
@@ -2327,10 +2490,10 @@ export class Sim {
   }
 
   /** The ground under the sell crate. */
-  private get crateFloor(): number {
-    return (this._crateFloor ??= this.phys.floor(CRATE_X, CRATE_Z));
+  private get crateFloors(): number[] {
+    return (this._crateFloors ??= CRATE_AT.map((c) => this.phys.floor(c.x, c.z)));
   }
-  private _crateFloor: number | undefined;
+  private _crateFloors: number[] | undefined;
   private ghost: Item | undefined;
 
   /**
@@ -2339,13 +2502,16 @@ export class Sim {
    * like it should). The front is open, facing the lane.
    */
   private inCrate(x: number, y: number, z: number): boolean {
-    const cfl = this.crateFloor;
-    const rim = cfl + CRATE.h;
+    // (Round 8: either crate, the nearer one.)
+    const ci = nearestCrate(x, z);
+    const C = CRATE_AT[ci].box;
+    const cfl = this.crateFloors[ci];
+    const rim = cfl + C.h;
     if (y <= cfl) return false;
-    if (y >= rim - 0.05 && y < rim + 0.85 && x > CRATE.x0 - 0.2 && x < CRATE.x1 + 0.2 && z > CRATE.z1 - 0.1 && z < CRATE.z1 + 0.4) return true;
+    if (y >= rim - 0.05 && y < rim + 0.85 && x > C.x0 - 0.2 && x < C.x1 + 0.2 && z > C.z1 - 0.1 && z < C.z1 + 0.4) return true;
     if (y >= rim + 0.5) return false;
     const m = y >= rim - 0.05 ? 0.35 : 0.15;
-    return x > CRATE.x0 - m && x < CRATE.x1 + m && z > CRATE.z0 - m && z < CRATE.z1 + m;
+    return x > C.x0 - m && x < C.x1 + m && z > C.z0 - m && z < C.z1 + m;
   }
 
   /**
@@ -2371,7 +2537,7 @@ export class Sim {
     b.vx = aim.dx * 14 + p.vx * 0.5;
     b.vy = aim.dy * 14 + 1.4;
     b.vz = aim.dz * 14 + p.vz * 0.5;
-    const cfl = this.crateFloor;
+    const cfl = this.crateFloors;
     // The real step, so thin things (the board's easel legs) stop it here too.
     const dt = 1 / 60;
     for (let t = 0; t < 3; t += dt) {
@@ -2389,7 +2555,10 @@ export class Sim {
       b.z += b.vz * dt;
       this.phys.collide(b, ox, oz, 'item');
       if (this.inCrate(b.x, b.y, b.z)) return true;
-      if (b.y <= this.phys.floor(b.x, b.z)) return Math.hypot(b.x - CRATE_X, b.z - CRATE_Z) < PULL_R - 0.1;
+      if (b.y <= this.phys.floor(b.x, b.z)) {
+        const c = CRATE_AT[nearestCrate(b.x, b.z)];
+        return Math.hypot(b.x - c.x, b.z - c.z) < PULL_R - 0.1;
+      }
     }
     return false;
   }
@@ -2476,7 +2645,7 @@ export class Sim {
   private catchers(it: Item): boolean {
     const s = this.s;
     // The Exchange.
-    const cfl = this.crateFloor;
+    const cfl = this.crateFloors[nearestCrate(it.x, it.z)];
     if (this.inCrate(it.x, it.y, it.z)) {
       if (isTuft(it.type)) {
         it.gone = true;
@@ -3144,12 +3313,66 @@ export class Sim {
     if (dusk) {
       let n = 0;
       for (const d of s.downies) if (!d.gone && !d.tame && d.kind === 'thistle') n++;
-      if (n < 2 && Math.hypot(RIDGE_TOP.x - p.x, RIDGE_TOP.z - p.z) > 18) this.spawnWild({ kind: 'thistle', x: RIDGE_TOP.x, z: RIDGE_TOP.z, n: 2 });
+      // They come over from behind the crest, out of your sight, and hop down to the top, however near you wait
+      // (round 8: they came only while you were over 18 m off, so waiting 16.6 m away from 17:24 to 18:20 brought none).
+      if (n < 2) this.thistleArrives();
     }
     // Seeing a thistle (the goal is to catch one: they bolt, so it takes a running approach or a quick tug).
     if (!this.thistleSeen) {
       for (const d of s.downies) if (!d.gone && d.kind === 'thistle' && Math.hypot(d.x - p.x, d.z - p.z) < 9) this.thistleSeen = true;
     }
+  }
+
+  /**
+   * Is a spot on the ground out of your sight? Off to the side of the view or behind you (over 70 degrees from
+   * where you look), behind the crag, or over a rise of the ground.
+   */
+  outOfSight(x: number, z: number): boolean {
+    const p = this.s.player;
+    const dx = x - p.x;
+    const dz = z - p.z;
+    const l = Math.hypot(dx, dz) || 1;
+    if ((dx * -Math.sin(p.yaw) + dz * -Math.cos(p.yaw)) / l < Math.cos((70 * Math.PI) / 180)) return true;
+    // Behind the crag (it stands far taller than you).
+    const t = clamp(((CRAG.x - p.x) * dx + (CRAG.z - p.z) * dz) / (l * l), 0, 1);
+    if (Math.hypot(p.x + dx * t - CRAG.x, p.z + dz * t - CRAG.z) < 3.6) return true;
+    // Over a rise: the ground between comes up above the line from your eye to its head.
+    const ey = p.y + EYE;
+    const ty = this.phys.floor(x, z) + 0.45;
+    for (let k = 1; k < 16; k++) {
+      const f = k / 16;
+      if (this.phys.floor(p.x + dx * f, p.z + dz * f) > ey + (ty - ey) * f + 0.1) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A thistle comes to the ridge top at dusk: it appears out of your sight, 9 to 15 m from the top on the ridge
+   * (behind the crest, behind the crag, or behind your back) and at least 9 m from you, and hops down to the top.
+   * Nowhere out of sight: it waits for the next look away.
+   */
+  private thistleArrives(): Downy | null {
+    const s = this.s;
+    const p = s.player;
+    const spots: { x: number; z: number }[] = [];
+    for (let k = 0; k < 18; k++) {
+      const a = (k / 18) * Math.PI * 2 + this.rand() * 0.3;
+      const r = 9 + this.rand() * 6;
+      const x = RIDGE_TOP.x + Math.cos(a) * r;
+      const z = RIDGE_TOP.z + Math.sin(a) * r;
+      if (x < MINX + 3 || z < MINZ + 3 || zoneAt(x, z) !== 'ridge' || waterAt(x, z) > this.phys.floor(x, z) - 0.05) continue;
+      if (Math.hypot(x - CRAG.x, z - CRAG.z) < 4.2 || Math.hypot(x - p.x, z - p.z) < 9) continue;
+      if (this.outOfSight(x, z)) spots.push({ x, z });
+    }
+    if (!spots.length) return null;
+    const at = spots[Math.floor(this.rand() * spots.length) % spots.length];
+    const d = this.spawnWild({ kind: 'thistle', x: at.x, z: at.z, n: 2 });
+    d.x = at.x;
+    d.z = at.z;
+    d.y = this.phys.floor(at.x, at.z) + 0.3;
+    d.homeX = RIDGE_TOP.x;
+    d.homeZ = RIDGE_TOP.z;
+    return d;
   }
 
   // ------------------------------------------------------------ the journal
@@ -3247,7 +3470,12 @@ export class Sim {
     this.emit({ t: 'sell', x, y, z, kind: k, coins, blown, cycle });
     if (s.stats.sold >= 20) this.complete('sell');
     let bonus = 0;
-    const o = s.orders.find((q) => q.state === 'open' && !q.live && q.kind === k && q.got < q.n);
+    const o = s.orders.find((q) => q.state === 'open' && !q.live && q.kind === k && q.got < q.n && this.counting(q));
+    // An order for after dark, open: say why this one went as a plain sale (once in a while).
+    if (!o && blown && this.nightNoteT <= 0 && s.orders.some((q) => q.state === 'open' && !q.live && q.kind === k && q.got < q.n)) {
+      this.nightNoteT = 4;
+      this.emit({ t: 'deny', why: 'The order takes fluff after dark.' });
+    }
     if (o) {
       o.got++;
       o.paid += coins;
@@ -3265,8 +3493,14 @@ export class Sim {
    */
   private liveFor(k: DownyKind, caught: number, _rare = false): Order | undefined {
     const s = this.s;
-    return s.orders.find((q) => q.state === 'open' && q.live && !q.rare && q.kind === k && q.got < q.n && caught === s.day);
+    return s.orders.find((q) => q.state === 'open' && q.live && !q.rare && q.kind === k && q.got < q.n && caught === s.day && this.counting(q));
   }
+
+  /** Does an order count what comes in now (a night one only from 9 pm)? */
+  counting(o: Order): boolean {
+    return o.from === undefined || this.s.hour >= o.from;
+  }
+  private nightNoteT = 0;
 
   /** Is there an open live order a downy of this kind (caught on that day) would go to at the crate? */
   wantsDowny(k: DownyKind, caught = this.s.day, rare = false): boolean {
@@ -3277,6 +3511,7 @@ export class Sim {
   staleNote(k: DownyKind, rare = false): string {
     if (rare && this.s.orders.some((q) => q.state === 'open' && q.rare && q.kind === k && q.got < q.n)) return 'Blow it into a pen. It stays.';
     const o = this.s.orders.find((q) => q.state === 'open' && q.live && !q.rare && q.kind === k && q.got < q.n);
+    if (o && !this.counting(o)) return 'The order wants them after dark.';
     return o ? 'The order wants one caught today.' : '';
   }
 
@@ -3374,8 +3609,8 @@ export class Sim {
   }
 
   /** About how much fluff of a kind the downies you keep make by dusk, from this hour (a meal every five hours or so, two fluff a meal). */
-  makes(k: DownyKind, hour = this.s.hour): number {
-    const left = Math.max(0, ORDER_BY - Math.max(hour, 6));
+  makes(k: DownyKind, hour = this.s.hour, by = ORDER_BY): number {
+    const left = Math.max(0, by - Math.max(hour, 6));
     return this.kept()[k] * 2 * (left / 5);
   }
 
@@ -3457,48 +3692,103 @@ export class Sim {
     // Yesterday's first order is asked for again less often.
     const yFirst = s.orderLog.find((o) => o.day === s.day - 1);
     const fluffW = (c: { kind: DownyKind; kept: number }) => Math.sqrt(c.kept) * (1 + this.stale(c.kind, 'fluff')) * under(c.kind) * (c.kind === 'thistle' ? 0.7 : 1) * (yFirst && !yFirst.live && yFirst.kind === c.kind ? 0.45 : 1);
-    // A prized order pays triple, and is a stretch for it: half as much fluff again (a big one), or a thistle's
-    // nearly all its downies make by dusk, so it never pays more for the same share of a day as a plain one.
-    const fluff = (c: { kind: DownyKind; n: number }, big: boolean): Order => {
+    // Round 8: every offer has a condition, due by noon or by dusk (the hunt at a set place too), and none is the
+    // same sort, kind and deadline as one of yesterday's (the eighth playtest's day 3 trip, 2 clovers for 132, was
+    // day 2's again). Noon is offered only to a morning start, with time to do it.
+    const yday = new Set(s.orderLog.filter((o) => o.day === s.day - 1).map(orderKey));
+    const noonOk = hour <= ORDER_NOON - 5;
+    const taken = new Set<string>();
+    const NIGHT = ORDER_NIGHT.by;
+    // The deadline it would have, the preferred one first: by noon (a morning start only), by dusk, or after dark
+    // (not for the hunt: the rare one goes at dusk).
+    const when = (sort: 'fluff' | 'live' | 'rare', k: DownyKind, prefer: number): number | null => {
+      const all = [ORDER_NOON, ORDER_BY, NIGHT].filter((b) => (b !== ORDER_NOON || noonOk) && (b !== NIGHT || sort !== 'rare'));
+      for (const by of [prefer, ...all.filter((b) => b !== prefer)]) {
+        if (!all.includes(by)) continue;
+        const key = orderKey({ kind: k, live: sort !== 'fluff', rare: sort === 'rare', by });
+        if (!yday.has(key) && !taken.has(key)) return by;
+      }
+      return null;
+    };
+    const coin = () => [ORDER_NOON, ORDER_BY, NIGHT][Math.floor(this.rand() * 3) % 3];
+    const night = (by: number) => (by === NIGHT ? { from: ORDER_NIGHT.from } : {});
+    // A fluff order (a day at home): by dusk about 70% of what those downies make by then, paying its price again on
+    // top; by noon (a rush) about 70% of what they make by noon, paying twice its price on top. A prized one pays
+    // triple and is a stretch for it (half as much fluff again, or a thistle's nearly all its downies make), by dusk.
+    const fluff = (c: { kind: DownyKind; n: number }, big: boolean, by: number): Order | null => {
       const prized = big || c.kind === 'thistle';
+      const mult = prized ? 3 : 2;
+      if (by === ORDER_NOON) {
+        const make = this.makes(c.kind, hour, ORDER_NOON);
+        const n = Math.max(c.kind === 'thistle' ? 2 : 4, Math.round((make * 0.7) / 2) * 2);
+        if (make < n + 0.5) return null;
+        return { kind: c.kind, n, got: 0, paid: 0, mult, pay: Math.round(n * this.price(c.kind) * 2 * (mult - 1)), state: 'offer', by };
+      }
+      if (by === NIGHT) {
+        // After dark: fluff banked in the jar through the day and sold from 9 pm (penned downies doze, and pests eat
+        // fluff left lying), about half of what they make by dusk, as much as the fluff window holds at most; it pays
+        // twice its price on top.
+        const n = Math.max(c.kind === 'thistle' ? 2 : 4, Math.min(20, Math.round((this.makes(c.kind, hour) * 0.5) / 2) * 2));
+        return { kind: c.kind, n, got: 0, paid: 0, mult, pay: Math.round(n * this.price(c.kind) * 2 * (mult - 1)), state: 'offer', by, from: ORDER_NIGHT.from };
+      }
       const most = Math.floor(this.makes(c.kind, hour) * 0.9);
       const n = big ? Math.min(40, Math.round((c.n * 1.45) / 2) * 2) : c.kind === 'thistle' ? Math.max(c.n, Math.min(most, c.n + 4)) : c.n;
-      const mult = prized ? 3 : 2;
-      return { kind: c.kind, n, got: 0, paid: 0, mult, pay: Math.round(n * this.price(c.kind) * (mult - 1)), state: 'offer' };
+      return { kind: c.kind, n, got: 0, paid: 0, mult, pay: Math.round(n * this.price(c.kind) * (mult - 1)), state: 'offer', by };
+    };
+    const add = (o: Order | null): Order | null => {
+      if (!o) return null;
+      taken.add(orderKey(o));
+      out.push(o);
+      return o;
     };
     // A thistle you keep, its fluff not asked for in two days: the morning's fluff order is its prized one (triple).
     const th = choices.find((c) => c.kind === 'thistle');
-    const first = th && this.stale('thistle', 'fluff') >= 2 ? th : this.pickWeighted(choices, fluffW);
-    if (first) out.push(fluff(first, !!s.gates.hollow && s.day % 3 === 0 && first.kind !== 'thistle'));
-    // Live downies: a trip out instead of a day at home, for about what the fluff order adds.
+    const ordered = [...choices].sort((a, b) => fluffW(b) - fluffW(a));
+    const firstPick = th && this.stale('thistle', 'fluff') >= 2 ? th : this.pickWeighted(choices, fluffW);
+    let first: Order | null = null;
+    for (const c of firstPick ? [firstPick, ...ordered.filter((q) => q !== firstPick)] : []) {
+      const big = !!s.gates.hollow && s.day % 3 === 0 && c.kind !== 'thistle';
+      // (A prized one is a stretch by dusk.)
+      const by = big || c.kind === 'thistle' ? (yday.has(orderKey({ kind: c.kind, by: ORDER_BY })) ? null : ORDER_BY) : when('fluff', c.kind, coin());
+      if (by === null) continue;
+      first = add(fluff(c, big, by));
+      if (first) break;
+    }
+    const tripPay = (k: DownyKind, by: number) => Math.round((LIVE_EACH[k] * (by === ORDER_NOON ? NOON_TRIP : by === NIGHT ? NIGHT_TRIP : 1)) / 5) * 5;
+    // What a plain fluff order of that kind by dusk would add: the trip and the hunt are sized from it.
+    const plain = first ? (choices.find((c) => c.kind === first!.kind)?.n ?? first.n) * this.price(first.kind) : 0;
+    // Live downies: a trip out instead of a day at home, for about two fifths more than the fluff order adds.
     const left = Math.max(0, ORDER_BY - Math.max(hour, 6));
+    let live: Order | null = null;
     if (left >= 6) {
-      // About what a plain fluff order adds (a prized one's pay counts once, not twice), in two to five downies:
-      // a kind whose price fits that comes up more often.
-      const worth = out[0] ? out[0].pay / (out[0].mult - 1) : 0;
-      // (A quarter more than the fluff order: the fifth playtest found the trip extra work for the same coins.)
-      const fits = (k: DownyKind) => !worth || (worth * LIVE_OVER >= LIVE_EACH[k] * 1.5 && worth * LIVE_OVER <= LIVE_EACH[k] * 5.5);
+      const fits = (k: DownyKind) => !plain || (plain * LIVE_OVER >= LIVE_EACH[k] * 1.5 && plain * LIVE_OVER <= LIVE_EACH[k] * 5.5);
       const open = this.liveKinds();
-      // None fits (a big thistle order): the dearest kind you can catch.
       const fit = open.filter(fits);
-      const lk = fit.length ? this.pickWeighted(fit, (k) => (1 + this.stale(k, 'live')) * (kept[k] < 3 ? 2 : 1) * (first && k === first.kind ? 0.35 : 1)) : open.sort((a, b) => LIVE_EACH[b] - LIVE_EACH[a])[0];
-      if (lk) {
-        const n = Math.max(2, Math.min(5, Math.round(((worth || LIVE_EACH[lk] * 2) * LIVE_OVER) / LIVE_EACH[lk])));
-        out.push({ kind: lk, live: true, n, got: 0, paid: 0, mult: 2, pay: LIVE_EACH[lk], state: 'offer' });
+      const w = (k: DownyKind) => (1 + this.stale(k, 'live')) * (kept[k] < 3 ? 2 : 1) * (first && k === first.kind ? 0.35 : 1);
+      // One that fits, by weight (none fits a big order: the dearest you can catch); then the rest, should
+      // that one repeat one of yesterday's.
+      const lk0 = fit.length ? this.pickWeighted(fit, w) : undefined;
+      const dear = [...open].sort((a, b) => LIVE_EACH[b] - LIVE_EACH[a]);
+      const tries = lk0 ? [lk0, ...fit.filter((k) => k !== lk0).sort((a, b) => w(b) - w(a)), ...dear.filter((k) => !fit.includes(k))] : dear;
+      for (const lk of tries) {
+        const by = when('live', lk, coin());
+        if (by === null) continue;
+        const n = Math.max(2, Math.min(5, Math.round(((plain || LIVE_EACH[lk] * 2) * LIVE_OVER) / LIVE_EACH[lk])));
+        live = add({ kind: lk, live: true, n, got: 0, paid: 0, mult: 2, pay: tripPay(lk, by), state: 'offer', by, ...night(by) });
+        break;
       }
     }
-    // The rare one, a hunt (the sixth playtest's top fun change): one sought-after wild downy, seen at a landmark,
-    // warier than any other and lured with its favourite food. Penned, it stays and its pen sheds more for good;
-    // its coins are three quarters of the day's trip, never more (the sixth playtest's paid 3.8 times the trip).
-    // The offers differ in kind, not size: a day at home tending, a trip for downies caught today, or a hunt.
-    // Only while one of your pens has no rare one yet (the seventh playtest was offered a second gold clover on days 3
-    // and 5, though a second in its pen added nothing).
+    // The rare one, a hunt (the sixth playtest's top fun change): one sought-after wild downy, seen at a landmark (a
+    // set place), warier than any other and lured with its favourite food. Penned, it stays and its pen sheds more
+    // for good; today it pays little (one downy of its kind by dusk, one and a half by noon: RARE_PAY). Only while
+    // one of your pens has no rare one yet (the seventh playtest was offered a second gold clover on days 3 and 5).
+    let hunt: Order | null = null;
     if (left >= 4 && rarePenOf(s) >= 0) {
       const open = this.liveKinds();
-      const live = out.find((o) => o.live);
       const rk = this.pickWeighted(open, (k) => (1 + this.stale(k, 'rare')) * (live && k === live.kind && open.length > 1 ? 0.3 : 1));
       const spots = SIGHTINGS.map((q, i) => ({ q, i })).filter((o) => o.q.kind === rk);
-      if (rk && spots.length) {
+      const by = rk ? when('rare', rk, live?.by === ORDER_NOON || first?.by === ORDER_NOON ? ORDER_BY : coin()) : null;
+      if (rk && spots.length && by !== null) {
         // Never where it was seen the morning before, and a place not seen lately more often (the sixth playtest's
         // came up at the same landmark two mornings running, twice).
         const ago = (i: number) => {
@@ -3506,10 +3796,30 @@ export class Sim {
           return 6;
         };
         const at = this.pickWeighted(spots, (o) => (ago(o.i) <= 1 ? 0 : Math.min(6, ago(o.i)))) ?? spots[Math.floor(this.rand() * spots.length) % spots.length];
-        // Three quarters of the trip's, never less than one downy of its kind would fetch, never more than the trip.
+        // (Never more than half the day's trip: a brook's worth beside a trip of two clovers paid more than the trip.)
         const trip = live ? live.n * live.pay : LIVE_EACH[rk] * 3;
-        const pay = Math.min(trip, Math.max(LIVE_EACH[rk], Math.round((trip * RARE_PAY) / 5) * 5));
-        out.push({ kind: rk, live: true, n: 1, got: 0, paid: 0, mult: 2, pay, state: 'offer', rare: { spot: at.i } });
+        const pay = Math.max(5, Math.min(Math.round((LIVE_EACH[rk] * (by === ORDER_NOON ? RARE_PAY.noon : RARE_PAY.dusk)) / 5) * 5, Math.round(trip / 2 / 5) * 5));
+        hunt = add({ kind: rk, live: true, n: 1, got: 0, paid: 0, mult: 2, pay, state: 'offer', rare: { spot: at.i }, by });
+      }
+    }
+    // Always three to choose from (the eighth playtest's day 3 had two): with no hunt, a second fluff order (another
+    // kind you keep if you keep two, else the same kind on the other deadline), or else a second trip.
+    if (!hunt && out.length < 3) {
+      let third: Order | null = null;
+      for (const c of [...ordered.filter((q) => q.kind !== first?.kind && q.kind !== 'thistle'), ...ordered.filter((q) => q.kind === first?.kind && q.kind !== 'thistle')]) {
+        const by = when('fluff', c.kind, first?.by === ORDER_NOON ? NIGHT : ORDER_NOON);
+        if (by === null) continue;
+        third = add(fluff(c, false, by));
+        if (third) break;
+      }
+      if (!third && live && left >= 6) {
+        for (const lk of [...this.liveKinds()].sort((a, b) => (a === live!.kind ? 1 : 0) - (b === live!.kind ? 1 : 0))) {
+          const by = when('live', lk, live.by === ORDER_NOON ? NIGHT : ORDER_NOON);
+          if (by === null) continue;
+          const n = Math.max(2, Math.min(5, Math.round(((plain || LIVE_EACH[lk] * 2) * LIVE_OVER) / LIVE_EACH[lk])));
+          add({ kind: lk, live: true, n, got: 0, paid: 0, mult: 2, pay: tripPay(lk, by), state: 'offer', by, ...night(by) });
+          break;
+        }
       }
     }
     return out;
@@ -3534,10 +3844,10 @@ export class Sim {
   private logOffers(list: Order[]): void {
     const s = this.s;
     for (const o of list) {
-      s.orderLog.push({ kind: o.kind, live: !!o.live, day: s.day, ...(o.rare ? { rare: true, spot: o.rare.spot } : {}) });
+      s.orderLog.push({ kind: o.kind, live: !!o.live, day: s.day, ...(o.rare ? { rare: true, spot: o.rare.spot } : {}), ...(o.by !== undefined ? { by: o.by } : {}) });
       this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: 0, n: o.n, state: 'posted', bonus: 0, x: CRATE_X, z: CRATE_Z });
     }
-    if (s.orderLog.length > 16) s.orderLog.splice(0, s.orderLog.length - 16);
+    if (s.orderLog.length > 20) s.orderLog.splice(0, s.orderLog.length - 20);
   }
 
   /**
@@ -3565,7 +3875,8 @@ export class Sim {
   takeOrder(i: number): boolean {
     const s = this.s;
     const o = this.offers()[i];
-    if (!o || (s.hour >= ORDER_BY && (o.until ?? s.day) <= s.day)) return false;
+    // (Not past its deadline on its last day: noon for a morning one.)
+    if (!o || (s.hour >= (o.by ?? ORDER_BY) && (o.until ?? s.day) <= s.day)) return false;
     o.state = 'open';
     o.until ??= s.day;
     // The others on offer are wiped off; an order still open from yesterday stays.
@@ -3630,14 +3941,17 @@ export class Sim {
    */
   offerTag(o: Order): { title: string; note: string } {
     const name = KIND[o.kind].name.replace(' downy', '');
+    // Its condition first (round 8): due by noon, by dusk or after dark; the hunt at its set place too.
+    const due = (o.by ?? ORDER_BY) === ORDER_NOON ? 'noon' : 'dusk';
+    const night = o.from !== undefined;
     if (o.rare) {
       const r = RARE_NAME[o.kind];
       // What it is worth once penned, as a number (the seventh playtest read "Its pen sheds more." and picked the biggest pay).
       const worth = this.rareWorth();
-      return { title: `${r[0].toUpperCase()}${r.slice(1)} downy`, note: worth > 0 ? `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, then about ${fmtCoins(worth)} a day` : `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
+      return { title: `${r[0].toUpperCase()}${r.slice(1)}, by ${due}`, note: worth > 0 ? `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, then about ${fmtCoins(worth)} a day` : `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
     }
-    if (o.live) return { title: `${o.n} ${name} downies`, note: `Caught today. Pays ${fmtCoins(o.n * o.pay)}` };
-    return { title: `${o.n} ${name} fluff`, note: `Pays ${fmtCoins(o.pay)} on top of sales` };
+    if (o.live) return { title: `${o.n} ${name} downies`, note: night ? `Caught today, after dark. Pays ${fmtCoins(o.n * o.pay)}` : `Caught by ${due}. Pays ${fmtCoins(o.n * o.pay)}` };
+    return { title: `${o.n} ${name} fluff`, note: `${night ? 'After dark' : `By ${due}`}. Pays ${fmtCoins(o.pay)} on top of sales` };
   }
 
   /** Each half second: the first order once the lessons bring orders in, the morning's offers, and dusk closing what is left. */
@@ -3646,20 +3960,24 @@ export class Sim {
     if (!this.knows('orders')) return;
     if (s.orderDay === 0) this.postFirst();
     this.postOrders();
-    // An order goes at dusk on its last day: the day it was posted (the first order, the next day).
+    // An order goes at its deadline on its last day (dusk, or noon for a morning one): the day it was posted (the
+    // first order, the next day).
     const over = (o: Order) => {
       const until = o.until ?? s.orderDay;
-      return s.day > until || (s.day === until && s.hour >= ORDER_BY);
+      return s.day > until || (s.day === until && s.hour >= (o.by ?? ORDER_BY));
     };
     for (const o of s.orders) {
       if (o.state !== 'open' || !over(o)) continue;
       o.state = 'missed';
       this.emit({ t: 'order', kind: o.kind, live: !!o.live, got: o.got, n: o.n, state: 'missed', bonus: 0, x: CRATE_X, z: CRATE_Z });
+      // A hunt that ran out: the rare one goes with it.
+      if (o.rare) for (const d of s.downies) if (!d.gone && d.rare && !d.tame && d.kind === o.kind) d.gone = true;
     }
+    // Offers nobody took go when their deadline passes (a noon one at noon, the rest at dusk).
+    const going = (o: Order) => o.state === 'offer' && over(o);
+    if (s.orders.some(going)) s.orders = s.orders.filter((o) => !going(o));
     if (s.hour >= ORDER_BY || s.hour < ORDER_POST[0]) {
-      // Offers nobody took go with their day, and so does the rare one, if it was not caught.
-      const going = (o: Order) => o.state === 'offer' && over(o);
-      if (s.orders.some(going)) s.orders = s.orders.filter((o) => !going(o));
+      // And so does the rare one at dusk, if it was not caught.
       for (const d of s.downies) if (!d.gone && d.rare && !d.tame) d.gone = true;
     }
   }
@@ -3752,6 +4070,9 @@ export class Sim {
         // playtest's hung beside no pen at all, a 300 coin trap).
         if (this.upKnown('garden')) for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id) && (u.id !== 'run' || (this.upKnown('run') && this.runNeighbours(i).length > 0))) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
         out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then blow in something new' : 'Blow food in to plant it' });
+        // Round 8: the food of each kind you keep, sown with a tap, so a new kind's food is a garden away the day you
+        // bring it home (the eighth playtest ran 87 s to the ridge for 9 wild sweetroots).
+        if (this.knows('lesson:plant')) for (const f of this.sowable()) if (pad.crop !== f) out.push({ id: `garden:sow:${f}`, title: `Plant ${thingName(f, 2)}`, price: null, ok: true, note: pad.crop ? `In place of the ${thingName(pad.crop, 2)}` : 'Grows from today' });
       } else if (pad.kind === 'silo') {
         if (!pad.silo.length) out.push({ id: 'info', title: 'Silo is empty', price: null, ok: false, note: 'Blow food or fluff at it' });
         pad.silo.forEach((b, k) => out.push({ id: `silo:${k}`, title: `${thingName(b.t, 2)}`, price: null, ok: true, note: `${b.n} stored${k === pad.siloSel ? ', pulling these' : ''}` }));
@@ -3769,7 +4090,7 @@ export class Sim {
       // The morning's offers: take one.
       this.offers().forEach((o, i) => {
         const tg = this.offerTag(o);
-        out.push({ id: `order:${i}`, title: tg.title, price: null, ok: s.hour < ORDER_BY, note: tg.note });
+        out.push({ id: `order:${i}`, title: tg.title, price: null, ok: s.hour < (o.by ?? ORDER_BY), note: tg.note });
       });
     } else if (it.kind === 'door') {
       out.push({ id: 'sleep', title: 'Sleep till morning', price: null, ok: true, note: 'Saves the ranch' });
@@ -3785,7 +4106,10 @@ export class Sim {
   /** Carries out a menu choice. Returns true if something changed. */
   choose(it: Interactable, id: string): boolean {
     const s = this.s;
-    const [a, b] = id.split(':');
+    // (The first colon splits: "garden:sow:sweetroot" is the garden's "sow:sweetroot".)
+    const cut = id.indexOf(':');
+    const a = cut < 0 ? id : id.slice(0, cut);
+    const b = cut < 0 ? '' : id.slice(cut + 1);
     const pay = (c: number) => {
       if (s.coins < c) {
         this.emit({ t: 'deny', why: `That needs ${fmtCoins(c)} coins.` });
@@ -3824,6 +4148,15 @@ export class Sim {
         s.pads[i].crop = null;
         s.pads[i].grow = 0;
         this.emit({ t: 'build', pad: i, what: 'clear', x: PADS[i].x, z: PADS[i].z });
+        return true;
+      }
+      if (b.startsWith('sow:')) {
+        const f = b.slice(4) as Food;
+        if (!this.sowable().includes(f)) return false;
+        s.pads[i].crop = f;
+        s.pads[i].grow = 0;
+        this.emit({ t: 'plant', pad: i, food: f });
+        this.complete('plant');
         return true;
       }
       const u = GARDEN_UPS.find((q) => q.id === b)!;

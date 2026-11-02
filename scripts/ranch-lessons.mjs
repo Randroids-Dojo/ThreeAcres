@@ -212,8 +212,9 @@ if (!process.env.EVENING) {
     return true;
   };
   /**
-   * Hold Pull, reading the tug (round 7): when the ring shows a pull back, lift the finger a moment later, and
-   * press again once it stops. Returns the pull backs seen and every lesson line that came up meanwhile.
+   * Hold Pull, reading the tug (round 7; round 8 the duel): when the ring shows the downy puffing up (or a pull back
+   * seen without it), lift the finger a moment later, and press again once its pull back stops. Returns the pull
+   * backs seen and every lesson line that came up meanwhile.
    */
   const pullReading = async (ms, id, during, until) => {
     const c = await centre('.rt-draw');
@@ -221,20 +222,22 @@ if (!process.env.EVENING) {
     let down = true;
     let backs = 0;
     let warm = false;
+    let sawBack = false;
     const lines = [];
     await touch('touchStart', [[c[0], c[1], id]]);
     const t0 = Date.now();
     while (Date.now() - t0 < ms) {
       if (during) await during();
-      const q = await page.evaluate(() => ({ back: window.ranch.hud.tugState().back, line: window.ranch.seen().line, warm: document.querySelector('.rh-cross').classList.contains('back') }));
+      const q = await page.evaluate(() => { const t = window.ranch.hud.tugState(); return { back: t.back, tell: t.tell, line: window.ranch.seen().line, warm: document.querySelector('.rh-cross').classList.contains('back') }; });
       if (q.line && !lines.includes(q.line)) lines.push(q.line);
       warm ||= q.warm;
-      if (down && q.back) {
-        backs++;
-        await page.waitForTimeout(300);
+      if (q.back && !sawBack) backs++;
+      sawBack = q.back;
+      if (down && (q.tell || q.back)) {
+        await page.waitForTimeout(q.back ? 60 : 200);
         await touch('touchEnd', [[c[0], c[1], id]]);
         down = false;
-      } else if (!down && !q.back) {
+      } else if (!down && !q.back && !q.tell) {
         await page.waitForTimeout(150);
         await touch('touchStart', [[c[0], c[1], id]]);
         down = true;
@@ -587,6 +590,15 @@ if (!process.env.EVENING) {
   const meadowPull = await pullReading(12000, 17, async () => { const q = await k.downy('wild'); if (q) await k.aim(q.x, q.y + 0.25, q.z); }, () => k.finished('meadow'));
   check('phone: the first pull back brings the tug line, in touch words: "Let go of Pull when it pulls back."', meadowPull.lines.includes('Let go of Pull when it pulls back.'), JSON.stringify(meadowPull));
   check('phone: the ring goes warm while it pulls back', meadowPull.warm, JSON.stringify(meadowPull));
+  // (Round 8: once the tug is learned a wild one can get away, a duel, so a thumb that lost it walks up to the
+  // nearest and pulls again, as a player would; the first pull back and its line are the checks above.)
+  for (let again = 0; again < 3 && !(await k.finished('meadow')); again++) {
+    const q = await k.downy('wild');
+    if (!q) break;
+    await page.waitForTimeout(1700);
+    await k.place(q.x + 4.2, q.z + 2, q.x, q.y + 0.25, q.z);
+    await pullReading(12000, 17, async () => { const w = await k.downy('wild'); if (w) await k.aim(w.x, w.y + 0.25, w.z); }, () => k.finished('meadow'));
+  }
   check('phone: letting go through its pull and pulling again catches the wild downy, ending the meadow lesson and the tug line', (await k.finished('meadow')) && (await k.finished('ease')), await k.why());
   s = await k.st();
   // Round 5: hunger runs again, but the afternoon stays at half past four through the loop lesson (the fifth
@@ -941,15 +953,17 @@ if (!process.env.EVENING) {
   // was seen, what it pays, that it stays), "Find the gold clover by the old oak." with no arrow over the landmark
   // (only the way to its part of the valley), found close by, lured with its food blown near it for real, pulled in
   // for real while it is lured, then blown into a pen, where it fills the order and stays.
-  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.hour = 8; for (const q of s.slots) { q.t = null; q.n = 0; } for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; s.orders = []; r.sim.postOrders(true); });
+  // (Round 8: each offer has a deadline; the hunt here is given dusk's, so the walk through its steps cannot run past noon.)
+  await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.hour = 8; for (const q of s.slots) { q.t = null; q.n = 0; } for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; s.orders = []; r.sim.postOrders(true); for (const o of s.orders) if (o.rare) o.by = 19; });
   await k.place(-4.2, 34.6, -4.2, 5.2, 37.6);
   await frames(page, 6);
   const actR = await centre('.rt-act.show');
   if (actR) { await tap(actR[0], actR[1], 37); await page.waitForTimeout(900); }
-  const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /downy$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
+  const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /, by (noon|dusk)$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
   const rarePay = Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
-  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds a day once penned (round 7)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /on top of sales$/.test(t)) && rareTag.all.some((t) => /Caught today\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook) downy$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/.test(rareTag.note), JSON.stringify(rareTag));
-  check("phone: the rare one's coins are no more than the trip's (the playtest's 2,680 was 3.8 times it)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
+  // (Round 8: each with its condition: the fluff order and the trip due by noon, by dusk or after dark, the hunt by noon or dusk at its set place.)
+  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds a day once penned (round 7), each with its condition (round 8)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /^(By noon|By dusk|After dark)\. Pays [\d,]+ on top of sales$/.test(t.split(': ')[1])) && rareTag.all.some((t) => /(Caught by noon|Caught by dusk|Caught today, after dark)\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/.test(rareTag.note), JSON.stringify(rareTag));
+  check("phone: the rare one's coins today are no more than the trip's (the playtest's 2,680 was 3.8 times it; round 8: a downy's worth, its worth is the lasting one)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
   await k.shot('phone-18d-rare-tags');
   if (rareTag) await takeTag(rareTag.id);
   check('phone: taking the rare one brings its lesson', await k.lessonOn('rare', 4000), await k.why());

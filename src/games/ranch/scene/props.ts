@@ -36,7 +36,7 @@ import {
   SPRING,
   DEAD_TREE,
   DOOR,
-  EXCHANGE,
+  CRATES,
   FLOWERS,
   FORK,
   GATES,
@@ -276,9 +276,10 @@ export function buildProps(boardMat: Material): Props {
   }
 
   // ------------------------------------------------------------ the Exchange
-  {
-    const x = EXCHANGE.x;
-    const z = EXCHANGE.z;
+  // (Round 8: two crates alike, the house one and one in the lane between the pens.)
+  for (const at of CRATES) {
+    const x = at.x;
+    const z = at.z;
     const y0 = heightAt(x, z);
     const w = CRATE.x1 - CRATE.x0;
     const h = CRATE.h;
@@ -313,6 +314,8 @@ export function buildProps(boardMat: Material): Props {
     }
     // A plate on the side facing the lane says what the crate is for.
     SIGN.push(quadUV(1.0, 0.25, atlas.uv['plate-sell'], x, y0 + 0.62, z - w / 2 - 0.075, Math.PI));
+  }
+  {
     // The board on its easel, facing the lane.
     const bx = BOARD.x;
     const bz = BOARD.z;
@@ -414,13 +417,22 @@ export function buildProps(boardMat: Material): Props {
     S.push(box(0.16, 3.0, 0.16, WOOD_D, x, y + 1.4, z));
     const arrows: [string][] = [['ridge'], ['hollow'], ['oak'], ['ranch']];
     arrows.forEach(([k], i) => {
-      // Each board points along the way it names; the lettering faces south.
-      const dir = k === 'ridge' || k === 'ranch' ? -1 : 1;
+      // Each board points along the way it names. The ridge's and the hollow's run west and east, lettered on the
+      // south face; the oak's and the ranch's run north and south, lettered on the west face, towards the path
+      // (round 8: "The ranch" pointed west, and the ranch is south of the fork).
       const len = 1.24;
       const h = y + 2.55 - i * 0.32;
-      const cx = x + dir * len * 0.5;
-      S.push(box(len, 0.2, 0.05, WOOD, cx, h, z - 0.04));
-      SIGN.push(quadUV(len, 0.2, atlas.uv[k], cx, h, z + 0.001, 0));
+      if (k === 'ridge' || k === 'hollow') {
+        const dir = k === 'ridge' ? -1 : 1;
+        const cx = x + dir * len * 0.5;
+        S.push(box(len, 0.2, 0.05, WOOD, cx, h, z - 0.04));
+        SIGN.push(quadUV(len, 0.2, atlas.uv[k], cx, h, z + 0.001, 0));
+      } else {
+        const dir = k === 'oak' ? -1 : 1;
+        const cz = z + dir * len * 0.5;
+        S.push(box(0.05, 0.2, len, WOOD, x + 0.04, h, cz));
+        SIGN.push(quadUV(len, 0.2, atlas.uv[k], x - 0.001, h, cz, -Math.PI / 2));
+      }
     });
   }
 

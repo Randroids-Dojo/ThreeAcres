@@ -169,6 +169,76 @@ const g1 = await S();
 const n1 = await p.evaluate(() => window.ranch.sim.s.slots[0].n);
 await p.evaluate(() => { const r = window.ranch; const pl = r.sim.s.player; pl.x = -15.5; pl.z = 37.2; pl.y = r.sim.phys.floor(pl.x, pl.z); pl.yaw = -0.55; });
 check('a drag that starts on a window walks, and tips nothing out', Math.hypot(g1.x - g0.x, g1.z - g0.z) > 0.5 && n1 === n0 && n0 > 0, `moved ${Math.hypot(g1.x - g0.x, g1.z - g0.z).toFixed(2)} m, window ${n0} -> ${n1}`);
+// Round 8: the windows moved with the bellows as you turned (turning left slid them to x 85 to 131, right where
+// the stick rests: a tap at 100,760 landed on one), and a window was chosen the moment a thumb landed, so walks to
+// the crate switched fluff to clover heads three times. Now the tap targets hold still where the windows sit at
+// rest, clear of the stick, and a window is chosen only when the finger lifts without dragging.
+await p.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (const q of s.slots) { q.t = null; q.n = 0; } for (let i = 0; i < 6; i++) sim.stow('tuft-clover'); for (let i = 0; i < 4; i++) sim.stow('cloverhead'); s.sel = 0; });
+await p.waitForTimeout(300);
+const stickBase = await p.evaluate(() => { const r = document.querySelector(".rt-base").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }; });
+// Points across the stick's resting circle, and the playtest's own spot.
+const stickPts = [[100, 760]];
+for (let a = 0; a < 12; a++) for (const f of [0.35, 0.7, 1]) stickPts.push([stickBase.x + Math.cos((a / 12) * Math.PI * 2) * stickBase.r * f, stickBase.y + Math.sin((a / 12) * Math.PI * 2) * stickBase.r * f]);
+const turnRows = [];
+for (const [label, x0, dx] of [['left', 404, -24], ['right', 214, 24]]) {
+  await touch('touchStart', [[x0, 430, 33]]);
+  const row = { turn: label, frames: 0, hits: 0, gap: 1e9, drawnIn: 0, drawnMinX: 1e9, drawnMaxX: -1e9 };
+  for (let i = 1; i <= 8; i++) {
+    await touch('touchMove', [[x0 + dx * i, 430, 33]]);
+    for (let f = 0; f < 3; f++) {
+      await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+      const q = await p.evaluate(([pts, stickBase]) => {
+        const r = window.ranch;
+        const btns = [...document.querySelectorAll('.rh-slotbtn')].filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.getBoundingClientRect());
+        // The nearest any window target comes to the stick's circle (negative: inside it).
+        let gap = 1e9;
+        for (const b of btns) {
+          const cx = Math.max(b.left, Math.min(stickBase.x, b.right));
+          const cy = Math.max(b.top, Math.min(stickBase.y, b.bottom));
+          gap = Math.min(gap, Math.hypot(cx - stickBase.x, cy - stickBase.y) - stickBase.r);
+        }
+        const hits = pts.filter(([x, y]) => document.elementFromPoint(x, y)?.classList.contains('rh-slotbtn')).length;
+        // Where the windows are drawn now (they sway with the bellows): how far into the stick's circle they come.
+        const drawn = [0, 1, 2, 3].map((i) => r.slotDrawn(i)).filter(Boolean);
+        const drawnIn = drawn.filter((w) => Math.hypot(w.x - stickBase.x, w.y - stickBase.y) < stickBase.r + 23).length;
+        return { gap, hits, drawnIn, xs: drawn.map((w) => w.x) };
+      }, [stickPts, stickBase]);
+      row.frames++;
+      row.hits += q.hits;
+      row.gap = Math.min(row.gap, q.gap);
+      row.drawnIn = Math.max(row.drawnIn, q.drawnIn);
+      row.drawnMinX = Math.min(row.drawnMinX, ...q.xs);
+      row.drawnMaxX = Math.max(row.drawnMaxX, ...q.xs);
+    }
+  }
+  await touch('touchEnd', []);
+  await p.waitForTimeout(500);
+  row.gap = Math.round(row.gap);
+  row.drawnMinX = Math.round(row.drawnMinX);
+  row.drawnMaxX = Math.round(row.drawnMaxX);
+  turnRows.push(row);
+}
+check('turning left and right, no window target comes within the stick\'s resting circle, nor takes a tap across it (the playtest\'s 100,760 among them)', turnRows.every((q) => q.frames >= 20 && q.hits === 0 && q.gap >= 4), JSON.stringify(turnRows));
+check('(the control) while turning, the windows as drawn do sway: their targets would have moved with them', turnRows.some((q) => q.drawnMaxX - q.drawnMinX > 60), JSON.stringify(turnRows.map((q) => [q.drawnMinX, q.drawnMaxX])));
+// A drag that starts on a window (the walking thumb landing on one) chooses nothing; a tap still does.
+const sel0 = (await S()).slot;
+const wd = await p.evaluate(() => window.ranch.slotScreen(1));
+await touch('touchStart', [[wd.x, wd.y, 34]]);
+for (let i = 1; i <= 12; i++) {
+  await touch('touchMove', [[wd.x - Math.min(i, 6) * 6, wd.y - Math.min(i, 6) * 5, 34]]);
+  await p.waitForTimeout(30);
+}
+await touch('touchEnd', []);
+await p.waitForTimeout(250);
+const selDrag = (await S()).slot;
+await touch('touchStart', [[wd.x, wd.y, 35]]);
+const selDown = await p.evaluate(() => window.ranch.sim.s.sel);
+await p.waitForTimeout(90);
+await touch('touchEnd', []);
+await p.waitForTimeout(250);
+const selTap = (await S()).slot;
+check('a drag that starts on a window leaves the chosen window as it was; a tap chooses it only as the finger lifts', sel0 === 0 && selDrag === 0 && selDown === 0 && selTap === 1, `chosen ${sel0}, after the drag ${selDrag}, finger down ${selDown}, after the tap ${selTap}`);
+await p.evaluate(() => { const r = window.ranch; const pl = r.sim.s.player; pl.x = -15.5; pl.z = 37.2; pl.y = r.sim.phys.floor(pl.x, pl.z); pl.yaw = -0.55; });
 // The chosen window wears a ring, and every filled window an icon of what it holds (an empty one none).
 await p.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (const q of s.slots) { q.t = null; q.n = 0; } sim.stow('clover'); sim.stow('tuft-clover'); sim.stow('dewberry'); s.sel = 0; });
 await p.waitForTimeout(300);
@@ -256,7 +326,7 @@ await p.evaluate(() => window.ranch.sim.takeOrder(window.ranch.sim.offers().find
 await p.waitForTimeout(600);
 const og = await pageNow();
 const apart = (a, c) => a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
-check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
+check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff( by noon| after dark)?, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
 check('with the order and the goal, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
 await p.evaluate(() => window.ranch.hud.showZone('Ember Ridge'));
 await p.waitForTimeout(700);
@@ -294,10 +364,15 @@ for (let i = 0; i < 9; i++) {
   tugMax = Math.max(tugMax, await p.evaluate(() => window.__wild.tug));
 }
 await touch('touchEnd', []);
-// (Round 7: a clover's let-go pull fades at 0.9 a second, so it gets away about 0.75 s later: wait for the note.)
-for (let i = 0; i < 25 && !(await p.evaluate(() => document.querySelector('.rh-say').classList.contains('on'))); i++) await p.waitForTimeout(80);
-const got = await p.evaluate(() => { const d = window.__wild; const e = document.querySelector('.rh-say'); return { noPull: d.noPull, tame: d.tame, gone: d.gone, note: e.classList.contains('on') ? e.textContent : '' }; });
-check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && got.note === 'It got away.', `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
+// (Round 7: a clover's let-go pull fades at 0.9 a second, so it gets away about 0.75 s later: wait for the note.
+// Round 8: let go as it puffs up to pull back, it pulls back first, then bolts once left slack 1.3 s after.)
+let got = null;
+for (let i = 0; i < 60; i++) {
+  got = await p.evaluate(() => { const d = window.__wild; const e = document.querySelector('.rh-say'); return { noPull: d.noPull, tame: d.tame, gone: d.gone, note: e.classList.contains('on') ? e.textContent : '' }; });
+  if (got.note) break;
+  await p.waitForTimeout(80);
+}
+check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && /^It got away\./.test(got.note), `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
 
 // Round 5: a brook digging in shows the time it has left on the tug ring (the fifth playtest's brooks dove after
 // about 3 s with nothing to say so): an outer ring, shown only for a kind with a time, that shrinks as you pull.
@@ -323,12 +398,23 @@ await touch('touchStart', [[pullBtn.x, pullBtn.y, 24]]);
 const ring = [];
 let ringGeo = null;
 let ringShot = null;
-for (let i = 0; i < 14; i++) {
+// (Round 8: the duel. Its time waits while it puffs up and pulls back, so this thumb lets go then and pulls again after.)
+let pullDown = true;
+for (let i = 0; i < 40 && ring.filter((q) => q.shown && q.left >= 0).length < 14; i++) {
   await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
   await p.waitForTimeout(60);
-  ring.push(await p.evaluate(() => { const c = document.querySelector('.rh-cross'); const l = c.querySelector('.x-left'); return { ...window.ranch.hud.tugState(), shown: c.classList.contains('timed') && getComputedStyle(l).display !== 'none', dash: parseFloat(l.style.strokeDashoffset || '0') }; }));
+  const st = await p.evaluate(() => { const c = document.querySelector('.rh-cross'); const l = c.querySelector('.x-left'); return { ...window.ranch.hud.tugState(), shown: c.classList.contains('timed') && getComputedStyle(l).display !== 'none', dash: parseFloat(l.style.strokeDashoffset || '0') }; });
+  if ((st.tell || st.back) && pullDown) {
+    await touch('touchEnd', [[pullBtn.x, pullBtn.y, 24]]);
+    pullDown = false;
+  } else if (!st.tell && !st.back && !pullDown) {
+    await touch('touchStart', [[pullBtn.x, pullBtn.y, 24]]);
+    pullDown = true;
+  }
+  if (st.tell || st.back) continue;
+  ring.push(st);
   // Mid-pull: how big the ring is, how far the count keeps from it, and a shot to read its contrast from.
-  if (i === 6 && ring[ring.length - 1].left >= 0) {
+  if (ring.length === 7 && ring[ring.length - 1].left >= 0) {
     ringGeo = await p.evaluate(() => {
       const c = document.querySelector('.rh-cross').getBoundingClientRect();
       const left = document.querySelector('.rh-cross .x-left');

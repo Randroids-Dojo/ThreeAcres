@@ -1,7 +1,7 @@
 // Thistledown: catches in the real game, with real CDP touch on the Pixel's
 // viewport, the way the fourth playtest chased downies: start 12 m off (16 m
 // from a thistle at dusk) on a dry side, walk in with the stick to 5.5 m
-// (again past 7.6 m), hold Pull within 7.6 m, and steer with a look finger
+// (again once it is out of Pull's reach, past 7 m), hold Pull within 7.6 m, and steer with a look finger
 // that moves every 40 ms, sees the downy `lag` ms late, moves `gain` of the
 // way (60 px at most) and wobbles; at the edge of the look side the finger
 // lifts and comes down in the middle again. A cross-check of
@@ -22,14 +22,15 @@ const tries = Number(process.argv[2]) || 6;
 // rare-clover, rare-ember, rare-brook: the board's rare one, lured (it has just eaten the food you blew near it,
 // so it lets you walk in to 4 m; the fight is what is measured).
 const kinds = (process.argv[3] || 'clover,ember,brook,thistle,rare-clover,rare-ember').split(',');
-// spread: reading the tug, it lets go of Pull its lag plus a wandering eye's spread (exponential, this mean in
-// ms) after the ring shows a pull back, and presses again the same way after it stops (as scripts/ranch-catch.ts).
-// The pull back is read off the HUD's ring through the hook (window.ranch.hud.tugState()), as a player sees it.
+// react: reading the tug (round 8, the duel), it lets go of Pull a reaction after the downy puffs up (the tell,
+// shown on the ring: it swells, pale gold) and pulls again a reaction after its pull back stops, each drawn evenly
+// from this range in ms (the eighth playtest's thumbs: a good one 200 to 350, a slow one 450 to 650; as
+// scripts/ranch-catch.ts). The ring is read through the hook (window.ranch.hud.tugState()), as a player sees it.
 // holds: never reads it (holds Pull all the way: the seventh playtest's way, a control).
 const THUMBS = {
-  careless: { lag: 180, gain: 0.55, wobble: 6, run: false, spread: 150 },
-  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, spread: 30 },
-  ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, spread: -1 } } : {}),
+  careless: { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650] },
+  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350] },
+  ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: null } } : {}),
 };
 const SENS = 0.0062;
 const wrap = (a) => {
@@ -128,9 +129,10 @@ async function chase(which, thumb, seed) {
   let food = 0;
   let ticks = 0;
   const f0 = await page.evaluate(() => window.ranch.frames);
-  // Reading the tug off the ring: let go a reaction after it shows a pull back, press again a reaction after it stops.
-  const react = () => thumb.lag + -Math.log(1 - Math.random() * 0.999) * thumb.spread;
+  // Reading the tug off the ring: let go a reaction after it shows the tell, press again a reaction after its pull back stops.
+  const react = () => (thumb.react ? thumb.react[0] + Math.random() * (thumb.react[1] - thumb.react[0]) : 0);
   let wasBack = false;
+  let wasTell = false;
   let letGo = false;
   let releaseAt = -1;
   let pressAt = -1;
@@ -194,16 +196,18 @@ async function chase(which, thumb, seed) {
       fid++;
     }
     if (walking && dist < (rare ? 4 : 5.5)) walking = false;
-    else if (!walking && dist > 7.6) {
+    else if (!walking && dist > 7) {
       walking = true;
       walkTicks = 0;
     } else if (walking) walkTicks++;
     // The ring shows a pull back: let go of Pull (a reaction late), and press again (a reaction after it stops).
     const back = !!o.ring.back;
+    const tell = !!o.ring.tell;
     if (back && !wasBack) backs++;
     if (fightAt < 0 && o.ring.tug > 0) fightAt = now;
-    if (thumb.spread >= 0) {
-      if (back && !wasBack) {
+    if (thumb.react) {
+      // The tell (or a pull back seen without one, a read falling between): let go a reaction later.
+      if ((tell && !wasTell) || (back && !wasBack && !wasTell && releaseAt < 0 && !letGo)) {
         releaseAt = now + react();
         pressAt = -1;
       }
@@ -221,6 +225,7 @@ async function chase(which, thumb, seed) {
       }
     }
     wasBack = back;
+    wasTell = tell;
     // A slip or a getaway ends the fight: the ring goes, and the thumb presses again when it next comes in reach.
     if (o.ring.tug <= 0 && !back) letGo = false;
     pulling = dist < 7.6 && !letGo;

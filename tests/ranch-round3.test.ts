@@ -197,6 +197,10 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     expect(sim.takeOrder(s.orders.findIndex((q) => !q.live))).toBe(true);
     const o = s.orders[0];
     expect(o.kind).toBe('clover');
+    // (Round 8: due by noon, by dusk or after dark; one for after dark counts from 9 pm, and a noon or night one
+    // pays twice its fluff's price on top.)
+    if (o.from !== undefined) s.hour = o.from + 0.2;
+    const k = o.from !== undefined || o.by === 12 ? 2 : 1;
     const evs: Ev[] = [];
     const c0 = s.coins;
     // From the lane, blow the order's fluff into the crate, one at a time.
@@ -219,9 +223,9 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     // The order's fluff sold at the board's price, and filling it paid about that again (round 4: the sum
     // set when it was posted, so the tag can say it, before each sale took its little off the price).
     const market = sellEvents(evs).slice(0, o.n).reduce((a, e) => a + e.coins, 0);
-    expect(filled.bonus).toBeGreaterThanOrEqual(market);
-    expect(filled.bonus).toBeLessThanOrEqual(market * 1.15);
-    expect(s.coins - c0).toBeGreaterThanOrEqual(market * 1.9);
+    expect(filled.bonus).toBeGreaterThanOrEqual(market * k);
+    expect(filled.bonus).toBeLessThanOrEqual(market * 1.15 * k);
+    expect(s.coins - c0).toBeGreaterThanOrEqual(market * (1 + k) * 0.95);
     expect(s.goals).toContain('order');
     // Only the order's n counted: the two extra sold at the market price only.
     expect(orderEvents(evs).filter((e) => e.state === 'progress').length).toBe(o.n - 1);
@@ -234,7 +238,8 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     fill(sim, 1, 'clover', 6);
     sim.postOrders(true);
     expect(s.orders.length).toBeGreaterThan(0);
-    sim.takeOrder(0);
+    // (Round 8: one due by noon or by dusk; one for after dark runs to midnight.)
+    sim.takeOrder(s.orders.findIndex((o) => o.from === undefined));
     s.hour = 17.5;
     const evs: Ev[] = [];
     for (let t = 0; t < 2 * HOUR; t += 1 / 20) {
@@ -437,8 +442,10 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
       // nine times in ten on the first try and every other kind far less often.)
       // (Thirty tries here; the round 7 test holds the careful thumb to 90% over 120.)
       expect(careful, `${k} careful`).toBeGreaterThanOrEqual(0.8);
-      expect(careless, `${k} careless`).toBeLessThanOrEqual(k === 'clover' ? 0.97 : 0.8);
-      if (k !== 'clover') expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.2);
+      // (Round 8: the tug a duel, clover kept the gentle one, which even a slow thumb lands; the others it fails often.)
+      if (k !== 'clover') expect(careless, `${k} careless`).toBeLessThanOrEqual(0.8);
+      // (Round 8: thirty tries; the round 8 test holds each kind to its band over 120.)
+      if (k !== 'clover') expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.15);
     }
     // (The third playtest's careless thumb caught 8 of 8.)
     expect(Object.values(out).reduce((a, [c]) => a + c, 0) / kinds.length).toBeLessThan(0.75);

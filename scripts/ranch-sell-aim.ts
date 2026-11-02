@@ -7,8 +7,8 @@
 import { Sim, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { rng } from '../src/games/ranch/noise';
-import { CRATE } from '../src/games/ranch/physics';
-import { EXCHANGE } from '../src/games/ranch/world';
+import { CRATE, CRATE_BOXES } from '../src/games/ranch/physics';
+import { EXCHANGE, LANE_CRATE } from '../src/games/ranch/world';
 
 Math.random = rng(11);
 const idle: Controls = { moveX: 0, moveZ: 0, sprint: false, jump: false, jumpPressed: false, draw: false, puff: false, puffPressed: false };
@@ -90,30 +90,44 @@ const errs: [number, number][] = [
   [0, 0.9],
 ];
 
-for (const [name, m] of Object.entries(MUZZLES)) {
-  const row: string[] = [];
-  let all = 0;
-  let hit = 0;
-  for (const d of dists) {
-    let n = 0;
-    let ok = 0;
-    for (const a of angles) {
-      const x = cx + Math.cos(a) * d;
-      const z = cz + Math.sin(a) * d;
-      // Sideways in the view: perpendicular to the line of sight.
-      const lx = -(cz - z) / d;
-      const lz = (cx - x) / d;
-      for (const [side, up] of errs) {
-        n++;
-        if (trySell(x, z, cx + lx * side, floor + 0.75 + up, cz + lz * side, m)) ok++;
-        else if (process.env.WHY) console.log(`   missed: ${name} ${d} m, crosshair ${side} m to the side, ${up} m up`);
+// Round 8: a second crate in the lane between the pens, open to the north row as the house one is to the lane;
+// measured from the north row (its open side) and from the south row (behind its backboard) as well.
+const lane = CRATE_BOXES[1];
+const lx0 = (lane.x0 + lane.x1) / 2;
+const lz0 = (lane.z0 + lane.z1) / 2;
+const sites = [
+  { name: 'house crate', x: cx, z: cz, fl: floor, toward: toLane },
+  { name: 'lane crate, from the north row', x: lx0, z: lz0, fl: probe.phys.floor(lx0, lz0), toward: -Math.PI / 2 },
+  { name: 'lane crate, from the south row', x: lx0, z: lz0, fl: probe.phys.floor(lx0, lz0), toward: Math.PI / 2 },
+];
+for (const site of sites) {
+  console.log(site.name === 'house crate' ? `${site.name} (${EXCHANGE.x}, ${EXCHANGE.z})` : `${site.name} (${LANE_CRATE.x}, ${LANE_CRATE.z})`);
+  const ang = [-50, -25, 0, 25, 50].map((a) => site.toward + (a * Math.PI) / 180);
+  for (const [name, m] of Object.entries(MUZZLES)) {
+    const row: string[] = [];
+    let all = 0;
+    let hit = 0;
+    for (const d of dists) {
+      let n = 0;
+      let ok = 0;
+      for (const a of ang) {
+        const x = site.x + Math.cos(a) * d;
+        const z = site.z + Math.sin(a) * d;
+        // Sideways in the view: perpendicular to the line of sight.
+        const lx = -(site.z - z) / d;
+        const lz = (site.x - x) / d;
+        for (const [side, up] of errs) {
+          n++;
+          if (trySell(x, z, site.x + lx * side, site.fl + 0.75 + up, site.z + lz * side, m)) ok++;
+          else if (process.env.WHY) console.log(`   missed: ${name} ${d} m, crosshair ${side} m to the side, ${up} m up`);
+        }
       }
+      all += n;
+      hit += ok;
+      row.push(`${d} m ${Math.round((ok / n) * 100)}%`);
     }
-    all += n;
-    hit += ok;
-    row.push(`${d} m ${Math.round((ok / n) * 100)}%`);
+    console.log(`${name.padEnd(5)} ${row.join('  ')}   overall ${Math.round((hit / all) * 100)}%`);
   }
-  console.log(`${name.padEnd(5)} ${row.join('  ')}   overall ${Math.round((hit / all) * 100)}%`);
 }
 console.log(`crosshair: matched ${agree}, promised a sale that missed ${liedYes}, sold unpromised ${liedNo}`);
 

@@ -34,7 +34,7 @@
 //   npx tsx scripts/ranch-orders.ts
 import { FEEDER_CAP, HOUR, LIVE_EACH, TUFT_KIND, isFood, isTuft, type DownyKind, type Food, type Order } from '../src/games/ranch/defs';
 import { rng } from '../src/games/ranch/noise';
-import { Sim, GARDEN_SRC, PEN_MEALS, type Aim, type Controls } from '../src/games/ranch/sim';
+import { Sim, GARDEN_SRC, PEN_MEALS, orderKey, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { BED_HALF } from '../src/games/ranch/physics';
 import { PADS, PEN_R } from '../src/games/ranch/world';
@@ -138,13 +138,16 @@ function rareSecs(k: DownyKind, thumb: 'careful' | 'careless' = 'careful'): numb
 
 /**
  * The rare one's lasting worth: it joins your ranch (a downy of its kind, shedding two fluff a meal), and penned,
- * everyone in its pen sheds one more fluff a meal, for good. Counted over the next three days: the downy itself
- * while a pen has room, and the pen of yours that would gain most and has no rare one yet.
+ * everyone in its pen sheds one more fluff a meal, for good. Round 8 counts what taking it today gains over taking
+ * it on a later morning, which is what passing it up costs: a day of it (it is offered every morning while a pen of
+ * yours has none; round 7 counted three days, and with that it was the best pick every morning it was offered).
+ * The downy itself while a pen has room, and the pen of yours that would gain most and has no rare one yet.
  */
+const LASTING_DAYS = 1;
 function lasting(sim: Sim, o: Order): number {
   if (!o.rare) return 0;
   const s = sim.s;
-  const best = sim.penRoom() > 0 ? 3 * 2 * sim.price(o.kind) * 3 : 0;
+  const best = sim.penRoom() > 0 ? 3 * 2 * sim.price(o.kind) * LASTING_DAYS : 0;
   let pen = 0;
   s.pads.forEach((p, i) => {
     if (p.kind !== 'pen') return;
@@ -152,7 +155,7 @@ function lasting(sim: Sim, o: Order): number {
     // (A pen of ten has no room for it: more than ten get frazzled and hop out.)
     if (!here.length || here.length >= 10 || here.some((d) => d.rare)) return;
     // (Round 7: 3.7 meals a day each, as measured for the tag's number), one more fluff each meal, at today's price.
-    const v = here.reduce((a, d) => a + PEN_MEALS * sim.price(d.kind), 0) * 3;
+    const v = here.reduce((a, d) => a + PEN_MEALS * sim.price(d.kind), 0) * LASTING_DAYS;
     pen = Math.max(pen, v);
   });
   return best + pen;
@@ -173,8 +176,20 @@ function ask(sim: Sim, o: Order, thumb: 'careful' | 'careless' = 'careful'): { s
 function pick(sim: Sim, os: Order[], thumb: 'careful' | 'careless'): Order | undefined {
   const kept = sim.kept();
   const perSec = (Object.keys(kept) as DownyKind[]).reduce((a, k) => a + kept[k] * 3.7 * 2 * sim.price(k), 0) / 720;
-  const value = (o: Order) => worth(o) + lasting(sim, o) - ask(sim, o, thumb).trip * perSec;
+  const value = (o: Order) => fills(sim, o, thumb) * (worth(o) + lasting(sim, o)) - ask(sim, o, thumb).trip * perSec;
   return [...os].sort((a, b) => value(b) - value(a))[0];
+}
+
+/**
+ * Round 8: the chance of filling an offer before its deadline. A trip or a hunt leaves at 8 am: due by noon it has
+ * 4 game hours (120 real s), by dusk 11 (330 s); one that takes longer than that, at the catcher's odds, fills that
+ * share of the time. A fluff order fills (the board asks only for what the ranch can make by then).
+ */
+function fills(sim: Sim, o: Order, thumb: 'careful' | 'careless'): number {
+  if (!o.live) return 1;
+  const window = ((o.by ?? 19) - 8) * 30;
+  const secs = ask(sim, o, thumb).trip;
+  return secs <= window ? 1 : window / secs;
 }
 /** What filling it adds to the day, over selling the fluff you would sell anyway (the rare one's coins only). */
 const worth = (o: Order) => (o.live ? o.n * o.pay : o.pay);
@@ -222,6 +237,11 @@ for (const r of RANCHES) {
   let rarePay = 0;
   let real = 0;
   let lastingDays = 0;
+  // Round 8: offers that repeat one of yesterday's (sort, kind and deadline), mornings with three to choose from, and the conditions.
+  let repeats = 0;
+  let three = 0;
+  let prevKeys = new Set<string>();
+  const conds: Record<string, number> = { noon: 0, dusk: 0, 'after dark': 0, 'set place': 0 };
   const DAYS = 30;
   for (let d = 2; d < 2 + DAYS; d++) {
     s.day = d;
@@ -234,6 +254,12 @@ for (const r of RANCHES) {
     sim.postOrders(true);
     const os = sim.offers();
     offers += os.length;
+    const keys = os.map(orderKey);
+    repeats += keys.filter((k) => prevKeys.has(k)).length;
+    prevKeys = new Set(keys);
+    if (os.length >= 3) three++;
+    for (const o of os) conds[o.from !== undefined ? 'after dark' : o.by === 12 ? 'noon' : 'dusk']++;
+    for (const o of os) if (o.rare) conds['set place']++;
     if (os.some((o) => o.live)) trips++;
     for (const k of new Set(os.map((o) => o.kind))) asked[k] = (asked[k] ?? 0) + 1;
     const first = `${os[0]?.kind}`;
@@ -279,6 +305,7 @@ for (const r of RANCHES) {
   }
   console.log(`      most coins today: fluff order ${best.fluff}, trip ${best.trip}, hunt ${best.hunt} of ${DAYS}; its pen bonus lasts (a pen with no rare one yet; every pen holds one from morning 11) on ${lastingDays}`);
   console.log(`      a real choice, every offer best at something (most coins today, a reward that lasts, no trip out): ${real} of ${DAYS}`);
+  console.log(`      round 8: three offers on ${three} of ${DAYS} mornings; offers repeating one of yesterday's (sort, kind and deadline): ${repeats}; conditions: ${Object.entries(conds).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   console.log(`      the best pick, time out charged at what the ranch makes meanwhile: careful catcher fluff order ${picks.careful.fluff}, trip ${picks.careful.trip}, hunt ${picks.careful.hunt}; careless fluff order ${picks.careless.fluff}, trip ${picks.careless.trip}, hunt ${picks.careless.hunt} of ${DAYS}`);
   allPicks.careful.fluff += picks.careful.fluff;
   allPicks.careful.trip += picks.careful.trip;
@@ -326,14 +353,22 @@ function tend(sim: Sim, r: Ranch, pool: Record<Food, number>): number {
       }
     }
   }
+  // (Round 8: an order for after dark: the hand banks that kind's fluff in the jar until 9 pm, then sells it.)
+  const night = s.orders.find((o) => o.state === 'open' && !o.live && o.from !== undefined);
   for (const it of s.items) {
     if (it.gone || !isTuft(it.type) || it.drawn > 0) continue;
     if (sim.phys.penAt(it.x, it.z) < 0 && !r.pens.some((p) => Math.hypot(it.x - PADS[p.pad].x, it.z - PADS[p.pad].z) < PEN_R + 1.5)) continue;
     it.gone = true;
-    coins += sim.sellFluff(TUFT_KIND[it.type], true);
+    const k = TUFT_KIND[it.type];
+    if (night && night.kind === k && s.hour < night.from!) bank[k]++;
+    else coins += sim.sellFluff(k, true);
+  }
+  if (night && s.hour >= night.from!) {
+    for (; bank[night.kind] > 0; bank[night.kind]--) coins += sim.sellFluff(night.kind, true);
   }
   return coins;
 }
+const bank: Record<DownyKind, number> = { clover: 0, ember: 0, brook: 0, thistle: 0 };
 
 type Way = 'fluff' | 'live' | 'most' | 'careless' | 'rare' | 'mix';
 function play(r: Ranch, way: Way, days = 5): { coins: number; filled: number; taken: number; away: number } {
@@ -352,7 +387,10 @@ function play(r: Ranch, way: Way, days = 5): { coins: number; filled: number; ta
     let next = 0;
     let t = 0;
     let trip: { kind: DownyKind; n: number; back: number; rare: boolean } | null = null;
-    while (s.hour < 21) {
+    const pendingLive: DownyKind[] = [];
+    for (const k of Object.keys(bank) as DownyKind[]) bank[k] = 0;
+    // (Up till midnight with an order for after dark open.)
+    while (s.hour < 21 || (s.hour < 23.9 && s.orders.some((o) => o.state === 'open' && o.from !== undefined))) {
       sim.update(dt, idle, aim);
       sim.events.length = 0;
       t += dt;
@@ -385,10 +423,12 @@ function play(r: Ranch, way: Way, days = 5): { coins: number; filled: number; ta
           d.pen = -1;
         } else {
           // Caught today: the crate takes them.
-          for (let k = 0; k < trip.n; k++) sim.sellDowny(trip.kind, undefined, undefined, undefined, s.day, false);
+          // (An order for after dark takes them from 9 pm: the hand waits with them in the jar.)
+          for (let k = 0; k < trip.n; k++) pendingLive.push(trip.kind);
         }
         trip = null;
       }
+      if (pendingLive.length && sim.wantsDowny(pendingLive[0], s.day)) for (const k of pendingLive.splice(0)) sim.sellDowny(k, undefined, undefined, undefined, s.day, false);
       const out = !!trip && trip.back >= 0;
       if (!out && t >= next) {
         next = t + 1.5 * HOUR;

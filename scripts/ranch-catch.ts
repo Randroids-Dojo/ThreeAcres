@@ -3,7 +3,9 @@
 // chase did: it starts 12 m off (16 m from a thistle, at dusk), from any side
 // that is dry land, with the valley's wild food lying about (the berries by
 // the brooks, the roots by the embers), walks in with the stick until it is
-// 5.5 m off (again past 7.6 m), and holds Pull while it is within 7.6 m. The
+// 5.5 m off (again once it is out of Pull's reach: past 7 m; round 8, it was
+// 7.6 m, and a pull back that edged a downy to 7.1 m left the thumb pressing
+// at nothing), and holds Pull while it is within 7.6 m. The
 // view moves the way a look finger does, once every 40 ms: it sees the downy
 // a little late (lag), moves part of the way to it (gain, at most 60 px a
 // move) and wobbles (plus or minus so many px). The sim runs at 60 frames a
@@ -46,10 +48,11 @@ export interface Thumb {
   /** Runs in (rather than walks) while out of reach. */
   run: boolean;
   /**
-   * Reading the tug: it lets go of Pull this long after a pull back shows on the ring (and presses again this
-   * long after it stops): its lag, plus a wandering eye's spread (exponential, this mean in seconds).
+   * Reading the tug (round 8, the duel): it lets go of Pull a reaction after the downy puffs up (the tell), and
+   * pulls again a reaction after its pull back stops: each reaction drawn evenly from this range, in seconds (the
+   * eighth playtest's thumbs: a good one 200 to 350 ms, a slow one 450 to 650). null: never reads it (holds on).
    */
-  spread: number;
+  react: [number, number] | null;
 }
 
 /** Radians of view per px of a look drag on touch (the game's). */
@@ -62,12 +65,20 @@ const SENS = 0.0062;
  * (90), 95 (85), 89 (90).
  */
 export const LOOP_LAG = 0.1;
-/** The fourth playtest's careless thumb: 180 ms of lag (and the loop's), 55% a move, 6 px of wobble either way; it walks. */
-export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0.55, noise: 6 * SENS, run: false, spread: 0.15 };
-/** A careful thumb: sees it in 70 ms (and the loop's), moves 80% of the way, wobbles 1.5 px; runs at a thistle. */
-export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true, spread: 0.03 };
+/**
+ * Round 8: reading the tug goes through the same loop as a look move: the ring shows the tell a frame after the sim,
+ * the page is read every 40 ms or so, the lift waits for the next read, and the game takes it the frame after. The
+ * real-touch harness (and the playtest's driver) carry that on top of the thumb's own reaction, about 75 ms in all;
+ * without it this harness caught a slow thumb's embers and brooks far more often than real touch (70% and 55%
+ * against 7 and 3 of 16).
+ */
+export const TUG_LAG = 0.075;
+/** The fourth playtest's careless thumb: 180 ms of lag (and the loop's), 55% a move, 6 px of wobble either way; it walks; it reads the tug slowly (450 to 650 ms, the eighth playtest's slow thumb). */
+export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0.55, noise: 6 * SENS, run: false, react: [0.45, 0.65] };
+/** A careful thumb: sees it in 70 ms (and the loop's), moves 80% of the way, wobbles 1.5 px; runs at a thistle; reads the tug in 200 to 350 ms (the eighth playtest's good thumb). */
+export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true, react: [0.2, 0.35] };
 /** A thumb that never reads the tug: holds Pull all the way (the seventh playtest's way, for the control). */
-export const HOLDER: Thumb = { ...CAREFUL, name: 'holds on', spread: -1 };
+export const HOLDER: Thumb = { ...CAREFUL, name: 'holds on', react: null };
 
 /** The game's frame, and how often the look finger moves. */
 const DT = 1 / 60;
@@ -175,9 +186,10 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     let t = 0;
     let tick = 0;
     let walking = true;
-    // Reading the tug: let go a reaction after the ring shows a pull back, press again a reaction after it stops.
-    const react = () => thumb.lag + -Math.log(1 - Math.random() * 0.999) * thumb.spread;
+    // Reading the tug: let go a reaction after it puffs up (the tell), press again a reaction after its pull back stops.
+    const react = () => (thumb.react ? TUG_LAG + thumb.react[0] + Math.random() * (thumb.react[1] - thumb.react[0]) : 0);
     let wasBack = false;
+    let wasTell = false;
     let letGo = false;
     let releaseAt = -1;
     let pressAt = -1;
@@ -216,12 +228,14 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       const dist = Math.hypot(d.x - p.x, d.z - p.z);
       closest = Math.min(closest, dist);
       if (d.drawn <= 0) near = Math.min(near, dist);
-      // Walk (or run) in until 5.5 m off (a lured rare one lets you nearer: 4 m), again past 7.6 m; hold Pull within 7.6 m.
+      // Walk (or run) in until 5.5 m off (a lured rare one lets you nearer: 4 m), again once out of reach (past 7 m); hold Pull within 7.6 m.
       if (walking && dist < (rare === 'lured' ? 4 : 5.5)) walking = false;
-      else if (!walking && dist > 7.6) walking = true;
+      else if (!walking && dist > 7) walking = true;
       const back = d.back > 0;
-      if (thumb.spread >= 0) {
-        if (back && !wasBack) {
+      const tell = d.tell > 0;
+      if (thumb.react) {
+        // The tell (or a pull back that came with none): let go a reaction later.
+        if ((tell && !wasTell) || (back && !wasBack && !wasTell && releaseAt < 0 && !letGo)) {
           releaseAt = t + react();
           pressAt = -1;
         }
@@ -239,6 +253,7 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
         }
       }
       wasBack = back;
+      wasTell = tell;
       if (fought < 0 && d.strain > 0) fought = t;
       // Walking into a rock or the crag, a thumb steps aside round it (the harness used to walk on into it).
       if (walking && Math.hypot(p.vx, p.vz) < 1) blockedT += DT;
@@ -256,7 +271,11 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       const aim: Aim = { ex, ey: eyY, ez, dx: ax, dy: ay, dz: az, mx: ex + ax * 0.6 + 0.15, my: eyY - 0.2, mz: ez + az * 0.6 };
       sim.update(DT, c, aim);
       for (const e of sim.events) {
-        if (e.t === 'escape') escapes++;
+        if (e.t === 'escape') {
+          escapes++;
+          letGo = false;
+          releaseAt = pressAt = -1;
+        }
         if (e.t === 'pullback') backs++;
         if (e.t === 'slip') {
           slips++;
@@ -350,7 +369,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   console.log(`Thistledown catches: ${tries} tries per kind and thumb, from 12 m on any dry side (a thistle from 16 m, at dusk), walking in to 5.5 m.`);
   console.log(`   careless: ${Math.round(CARELESS.lag * 1000)} ms lag (the loop's ${LOOP_LAG * 1000} in it), ${Math.round(CARELESS.gain * 100)}% a move, ${(CARELESS.noise / SENS).toFixed(1)} px wobble, walks`);
   console.log(`   careful:  ${Math.round(CAREFUL.lag * 1000)} ms lag, ${Math.round(CAREFUL.gain * 100)}% a move, ${(CAREFUL.noise / SENS).toFixed(1)} px wobble, runs at a thistle\n`);
-  console.log(`   reading the tug: each lets go of Pull its lag plus a spread after a pull back shows (careless mean ${CARELESS.spread * 1000} ms, careful ${CAREFUL.spread * 1000} ms), and presses again the same way after it stops`);
+  console.log(`   reading the tug: each lets go of Pull a reaction after the downy puffs up, and pulls again a reaction after its pull back stops (careless ${CARELESS.react!.map((v) => v * 1000).join(' to ')} ms, careful ${CAREFUL.react!.map((v) => v * 1000).join(' to ')} ms)`);
   console.log(`   first: caught on the first try (no slip, no getaway); in 14 s: chased again after a slip or a getaway; fight: first tug to the jar on a first try\n`);
   const pct = (v: number) => `${Math.round(v * 100)}%`.padStart(4);
   const row = (name: string, a: ReturnType<typeof catchRate>, b: ReturnType<typeof catchRate>, c: ReturnType<typeof catchRate>) =>

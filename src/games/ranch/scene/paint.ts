@@ -147,7 +147,8 @@ export function signAtlas(): { tex: CanvasTexture; uv: Record<string, [number, n
     ['ranch', 'The ranch'],
     ['oak', 'Old oak'],
   ];
-  const left = new Set(['ridge', 'ranch']);
+  // (Which way each arrowhead points as lettered: the ranch's board runs south and the oak's north, read from the west.)
+  const left = new Set(['ridge', 'oak']);
   arrows.forEach(([k, label], i) => {
     const y = 520 + i * 120;
     const l = left.has(k);

@@ -21,7 +21,7 @@ import {
 } from 'three';
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
-import { CAPS, GOALS, KIND, KINDS, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
+import { CAPS, GOALS, KIND, KINDS, ORDER_BY, ORDER_NOON, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, buzz, type Frame } from './input';
 import { Tutor, allLines, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
@@ -43,7 +43,7 @@ import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
 import { Sim, padSpots, rareFed, type Aim, type Controls, type Ev, type Interactable } from './sim';
 import { capacity, deserialize, serialize, slotCap, summary, type RanchState, type Slot } from './state';
-import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, zoneAt, type GateId } from './world';
+import { BOARD, CRATES, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, zoneAt, type GateId } from './world';
 import './ranch.css';
 
 const EYE = 1.6;
@@ -56,6 +56,8 @@ const FIRST: Record<DownyKind, [string, string]> = {
   thistle: ['A thistle downy', 'Eats anything. Hops any fence but a high one.'],
 };
 
+/** Journal lines that are news, not tasks: shown with no box to tick. */
+const NEWS = new Set(['Order filled. New ones come at dawn.']);
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
 /** The motes about the board's rare downy, by kind. */
 const RARE_GLINT: Record<DownyKind, number> = { clover: 0xffe08a, ember: 0xffb6c8, brook: 0xe8f0ff, thistle: 0xf0e0ff };
@@ -91,6 +93,8 @@ export class Ranch {
   private choice = new TagChoice();
   readonly hud = new Hud();
   readonly tutor = new Tutor();
+  /** Seconds a page of something just done ("Earned 100 coins") stays up, with no new lesson over it. */
+  static readonly PAGE_SECS = 3.4;
   private marker: Marker;
   private say: Say = { dev: 'mouse', locked: false, lockAvailable: false };
   private stuckT = 0;
@@ -136,6 +140,11 @@ export class Ranch {
   private penN = [0, 0, 0, 0, 0, 0];
   private spotObjs = [0, 1, 2, 3, 4].map(() => ({ x: 0, y: 0 }));
   private spots: ({ x: number; y: number } | null)[] = [null, null, null, null, null];
+  /** The windows' tap targets: where the windows sit with the bellows at rest, so they hold still while you turn. */
+  private restVecs = [0, 1, 2, 3, 4].map(() => new Vector3());
+  private restOuts: (Vector3 | null)[] = [null, null, null, null, null];
+  private restObjs = [0, 1, 2, 3, 4].map(() => ({ x: 0, y: 0 }));
+  private restSpots: ({ x: number; y: number } | null)[] = [null, null, null, null, null];
   private box = { x0: 0, y0: 0, x1: 0, y1: 0 };
   private tagBox = { x0: 0, y0: 0, x1: 0, y1: 0 };
   private icons: (SlotIcon | null)[] = [null, null, null, null, null];
@@ -663,8 +672,9 @@ export class Ranch {
   /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk", "gold clover downy, the old oak". */
   private boardText(o: Order): string {
     const name = KIND[o.kind].name.replace(' downy', '');
+    const due = o.from !== undefined ? 'after dark' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : 'by dusk';
     if (o.rare) return `${RARE_NAME[o.kind]} downy, ${SIGHTINGS[o.rare.spot].name}`;
-    return o.live ? `${o.n} ${name} downies by dusk` : `${o.n} ${name} fluff by dusk`;
+    return o.live ? `${o.n} ${name} downies ${due}` : `${o.n} ${name} fluff ${due}`;
   }
 
   /** For checks: the orders as the board chalks them. */
@@ -730,7 +740,7 @@ export class Ranch {
         // Once windows are known, say how to make room: tip one out.
         const dev = this.device();
         const known = this.sim.knows('slots');
-        this.hud.note(fullNote(dev === 'touch' ? 'touch' : dev === 'pad' ? 'pad' : 'mouse', none, known), known ? 3.2 : 2.2);
+        this.hud.note(fullNote(dev === 'touch' ? 'touch' : dev === 'pad' ? 'pad' : 'mouse', none, known, isTuft(e.thing) ? 'fluff' : thingName(e.thing, 1)), known ? 3.2 : 2.2);
         break;
       }
       case 'empty':
@@ -820,6 +830,11 @@ export class Ranch {
         this.hud.note(`Planted ${thingName(e.food, 2)}.`);
         break;
       }
+      case 'stock':
+        // A new kind's first pen comes with a sack of its food (the eighth playtest's embers starved the first night).
+        this.cue('ranch.build', PADS[e.pad].x, heightAt(PADS[e.pad].x, PADS[e.pad].z), PADS[e.pad].z, 0.5, 1.4);
+        this.hud.note(e.feeder ? `${e.n} ${thingName(e.food, e.n)} in the feeder, to start them.` : `${e.n} ${thingName(e.food, e.n)} by the gate, to start them.`, 3.4);
+        break;
       case 'crop': {
         const at = PADS[e.pad];
         this.cue('ranch.shed', at.x, heightAt(at.x, at.z), at.z, 0.5, 0.8);
@@ -882,8 +897,12 @@ export class Ranch {
         if (e.near) this.hud.note('It finished eating. Lure it again.', 2.8);
         break;
       case 'escape':
-        // It broke free: say so plainly (a brook into the pond, the rest off and away).
-        this.hud.note(e.dove ? 'It slipped into the water.' : 'It got away.', 1.8);
+        // It broke free: say so plainly (a brook into the pond, the rest off and away; left slack after a pull back, what to do).
+        this.hud.note(e.dove ? 'It slipped into the water.' : e.slack ? 'It got away. Pull again once it stops.' : 'It got away.', e.slack ? 2.4 : 1.8);
+        break;
+      case 'tell':
+        // It puffs up to pull back: a soft intake of breath (it swells, and the ring goes pale gold).
+        this.cue('ranch.suck', e.x, e.y, e.z, 0.35, CHIRP_PITCH[e.kind] * 1.4);
         break;
       case 'pullback':
         // It pulls back: a low squeak and, on a phone, a buzz (the ring goes warm too).
@@ -959,7 +978,9 @@ export class Ranch {
     this.pending = null;
     this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(title, lines, 3.4);
+    this.hud.showPage(title, lines, Ranch.PAGE_SECS);
+    // It stays its few seconds: no new lesson takes the page meanwhile (the first order's went to dusk at once).
+    this.tutor.hold = Ranch.PAGE_SECS;
   }
 
   private pending: { title: string; lines: PageLine[]; at: number } | null = null;
@@ -1025,9 +1046,9 @@ export class Ranch {
       if (key.replace(/\d+/g, '#') !== this.goalShown.replace(/\d+/g, '#')) this.goalHidden = false;
       this.goalShown = key;
     }
-    // The day's orders all filled: that line is ticked.
-    const allFilled = s.orders.length > 0 && s.orders.every((o) => o.state === 'filled');
-    this.hud.setGoal(this.goalHidden ? [] : [...orders.map((text) => ({ text, done: allFilled })), ...(goal ? [{ text: goal, done: false }] : [])]);
+    // The day's orders all filled, or offers waiting at the board: news, a line with no box (round 8: "Order filled.
+    // New ones come at dawn." got a box and a strike); an order's tally keeps its box.
+    this.hud.setGoal(this.goalHidden ? [] : [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : [])]);
     // The rare order (where it was seen, the downy, then the crate), or a goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
     if (!v.line && !this.goalHidden && !this.tutor.mark.on && orderSpot(s, this.tutor.mark, this.floor)) {
@@ -1435,7 +1456,8 @@ export class Ranch {
     // While tags hang, the count by the crosshair steps aside (it lay over a tag's words).
     const counted = slot.t && !this.menu;
     hud.setCount(counted ? slot.n : 0, counted ? slotName(slot) : '', slotCap(s, slot));
-    if (counted && this.crossTarget === 'sell') this.countOffSign();
+    // (Round 8: off the crate's plate whatever is chosen, not only with the sell mark up: "S1ll fluff" with clover heads chosen.)
+    if (counted) this.countOffSign();
     else hud.keepCountOff(0, 0, 0, 0);
     hud.setCoins(s.coins, dt);
     hud.setHour(s.hour);
@@ -1467,12 +1489,23 @@ export class Ranch {
         this.spots[i] = this.spotObjs[i];
       } else this.spots[i] = null;
     }
-    const bb = this.vm.bodyBox(this.box);
+    // The tap targets hold still where the windows sit at rest (round 8: turning slid them under the resting stick).
+    for (let i = 0; i < 5; i++) this.restOuts[i] = i < s.slots.length ? this.restVecs[i] : null;
+    this.vm.windowsAtRest(this.restOuts);
+    for (let i = 0; i < 5; i++) {
+      const v = this.restOuts[i];
+      if (v) {
+        this.restObjs[i].x = v.x * this.w;
+        this.restObjs[i].y = v.y * this.h;
+        this.restSpots[i] = this.restObjs[i];
+      } else this.restSpots[i] = null;
+    }
+    const bb = this.vm.bodyBox(this.box, true);
     bb.x0 *= this.w;
     bb.x1 *= this.w;
     bb.y0 *= this.h;
     bb.y1 *= this.h;
-    hud.placeSlots(this.spots, showSlots && !this.paused, bb, this.paused || this.menu ? -1 : this.tutor.mark.slot);
+    hud.placeSlots(this.restSpots, showSlots && !this.paused, bb, this.paused || this.menu ? -1 : this.tutor.mark.slot, this.spots);
     // The chosen window's ring and what each window holds, wherever the windows are on screen.
     for (let i = 0; i < 5; i++) {
       const t = s.slots[i]?.t ?? null;
@@ -1488,22 +1521,26 @@ export class Ranch {
     let left = -1;
     let back = false;
     let strain = 0;
+    let tell = false;
     for (const d of s.downies) {
-      if (d.gone || !(d.held || (!d.tame && !d.keep && (d.back > 0 || d.easeT > 0)))) continue;
+      if (d.gone || !(d.held || (!d.tame && !d.keep && (d.back > 0 || d.tell > 0 || d.easeT > 0 || d.slackT >= 0)))) continue;
       const k = d.tug / Math.max(0.01, this.sim.tugNeed(d));
       if (k >= tug) {
         tug = k;
         left = this.sim.tugLeft(d);
         back = d.back > 0;
+        tell = d.tell > 0;
         strain = back && d.held ? d.backHeld / this.sim.backGrace(d) : 0;
       }
     }
-    hud.setTug(tug, left, back, strain);
+    hud.setTug(tug, left, back, strain, tell);
     // The rare one's fed window: a ring over it, emptying as its calm runs out, while it is lured and in sight.
     const rare = this.sim.rareWild();
     const fed = rare ? rareFed(rare) : -1;
-    const fp = fed >= 0 && rare && Math.hypot(rare.x - s.player.x, rare.z - s.player.z) < 40 && !this.menu ? this.project(rare.x, rare.y + 0.8, rare.z) : null;
-    hud.setFed(fp?.x ?? 0, fp?.y ?? 0, fp ? fed : -1);
+    // Beside it at its own height (round 8: it sat over it, stacked with the arrow, about 15 px across).
+    const fp = fed >= 0 && rare && Math.hypot(rare.x - s.player.x, rare.z - s.player.z) < 40 && !this.menu ? this.project(rare.x, rare.y + 0.3, rare.z) : null;
+    const side = fp && rare ? this.project(rare.x + Math.cos(s.player.yaw) * 0.32, rare.y + 0.3, rare.z - Math.sin(s.player.yaw) * 0.32) : null;
+    hud.setFed((fp?.x ?? 0) + (side && fp ? Math.max(30, side.x - fp.x + 22) : 0), fp?.y ?? 0, fp ? fed : -1);
     hud.update(dt);
   }
 
@@ -1657,20 +1694,32 @@ export class Ranch {
     return { x: ((v.x + 1) / 2) * this.w, y: ((1 - v.y) / 2) * this.h };
   }
 
+  /** A window's tap target on screen (where it sits with the bellows at rest), CSS px. */
   slotScreen(i: number): { x: number; y: number } | null {
+    const v = this.restSpots[i];
+    return v ? { x: v.x, y: v.y } : null;
+  }
+
+  /** A window where it is drawn now (it sways with the bellows as you turn), CSS px. */
+  slotDrawn(i: number): { x: number; y: number } | null {
     const v = this.vm.windowScreen(i, this.tmp);
     return v ? { x: v.x * this.w, y: v.y * this.h } : null;
   }
 
   /** The count by the crosshair steps off the sell crate's "Sell fluff" plate (it read "Sell fl2ff"); the plate as props.ts sets it. */
   private countOffSign(): void {
-    const y = heightAt(EXCHANGE.x, EXCHANGE.z) + 0.62;
+    // The nearer crate's plate (round 8: there are two).
+    const p = this.sim.s.player;
+    let C = CRATES[0];
+    for (const c of CRATES) if (Math.hypot(c.x - p.x, c.z - p.z) < Math.hypot(C.x - p.x, C.z - p.z)) C = c;
+    if (Math.hypot(C.x - p.x, C.z - p.z) > 14) return this.hud.keepCountOff(0, 0, 0, 0);
+    const y = heightAt(C.x, C.z) + 0.62;
     let t = Infinity;
     let b = -Infinity;
     let l = Infinity;
     let r = -Infinity;
     for (let k = 0; k < 4; k++) {
-      const v = this.tmp.set(EXCHANGE.x + (k & 1 ? 0.5 : -0.5), y + (k & 2 ? 0.125 : -0.125), EXCHANGE.z - 0.775).project(this.camera);
+      const v = this.tmp.set(C.x + (k & 1 ? 0.5 : -0.5), y + (k & 2 ? 0.125 : -0.125), C.z - 0.775).project(this.camera);
       if (v.z > 1) return this.hud.keepCountOff(0, 0, 0, 0);
       const sx = (v.x * this.w) / 2;
       const sy = (-v.y * this.h) / 2;

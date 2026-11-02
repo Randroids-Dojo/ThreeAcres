@@ -148,18 +148,28 @@ function tend(sim: Sim, setup: Setup, day: Day, pool: Record<Food, number>): voi
       }
     }
   }
+  // (Round 8: an order for after dark open, the hand banks that kind's fluff in the jar until 9 pm, then sells it.)
+  const night = s.orders.find((o) => o.state === 'open' && !o.live && o.from !== undefined);
+  const sell = (k: DownyKind) => {
+    const c = sim.sellFluff(k, true);
+    day.sold++;
+    day.coins += c;
+  };
   for (const it of s.items) {
     if (it.gone || !isTuft(it.type) || it.drawn > 0) continue;
     if (sim.phys.penAt(it.x, it.z) < 0 && !setup.pens.some((p) => Math.hypot(it.x - PADS[p.pad].x, it.z - PADS[p.pad].z) < PEN_R + 1.5)) continue;
     it.gone = true;
     // The crate's own sale: today's price, and an order of its kind counts it (filling one pays the bonus).
-    const c = sim.sellFluff(TUFT_KIND[it.type], true);
-    day.sold++;
-    day.coins += c;
+    const k = TUFT_KIND[it.type];
+    if (night && night.kind === k && s.hour < night.from!) banked[k]++;
+    else sell(k);
   }
+  if (night && s.hour >= night.from!) for (; banked[night.kind] > 0; banked[night.kind]--) sell(night.kind);
   for (const e of sim.events) if (e.t === 'order' && e.state === 'filled') day.bonus += e.bonus;
   sim.events.length = 0;
 }
+
+const banked: Record<DownyKind, number> = { clover: 0, ember: 0, brook: 0, thistle: 0 };
 
 function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
   const sim = build(setup, seed);
@@ -176,10 +186,18 @@ function runSetup(setup: Setup, days = 3, seed = 5): Day[] {
     let grownAt = 0;
     let lastRound = -1;
     const fed0 = s.stats.fed;
-    while (s.hour < 21) {
+    for (const k of Object.keys(banked) as DownyKind[]) banked[k] = 0;
+    // (Up till midnight with an order for after dark open.)
+    while (s.hour < 21 || (s.hour < 23.9 && s.orders.some((o) => o.state === 'open' && o.from !== undefined))) {
       sim.update(dt, idle, aim);
       // At 7 am the hand takes the board's fluff order (the morning's offers are a choice now; see ranch-orders.ts).
-      if (s.hour >= 7 && sim.offers().length) sim.takeOrder(Math.max(0, sim.offers().findIndex((o) => !o.live)));
+      // (Round 8: offers are due by noon, by dusk or after dark; the tending hand takes the fluff order due by dusk
+      // when there is one, else the first fluff order.)
+      if (s.hour >= 7 && sim.offers().length) {
+        const os = sim.offers();
+        const dusk = os.findIndex((o) => !o.live && (o.by ?? 19) === 19 && o.from === undefined);
+        sim.takeOrder(Math.max(0, dusk >= 0 ? dusk : os.findIndex((o) => !o.live)));
+      }
       // Crops, onto the gardens' beds or straight into a feeder by a feed run.
       for (const e of sim.events) if (e.t === 'crop') grown += s.pads[e.pad].ups.includes('soil') ? GARDEN_YIELD_SOIL : GARDEN_YIELD;
       for (const e of sim.events) if (e.t === 'order' && e.state === 'filled') day.bonus += e.bonus;

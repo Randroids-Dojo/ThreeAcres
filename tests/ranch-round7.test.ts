@@ -188,37 +188,16 @@ describe('P1: the tug is a skill you read: it pulls back, holding on slips it fr
     expect(d.gone).toBe(true);
   });
 
-  it('per kind, careless and careful thumbs catch at the round 7 rates, and holding on through every pull back fails', () => {
+  it('per kind, careless and careful thumbs catch at the duel rates, and holding on through every pull back fails', () => {
+    // (Round 8 made the tug a duel, with its own bands: tests/ranch-round8.test.ts. Here the round 7 promise
+    // that holding on through every pull back fails, and that a careful thumb lands every plain kind.)
     const rate = C.catchRate as (k: DownyKind, t: unknown, n: number, seed?: number, rare?: string) => { first: number; rate: number; fight: number };
-    const CARELESS = C.CARELESS;
     const CAREFUL = C.CAREFUL;
     const HOLDER = C.HOLDER;
     expect(HOLDER, 'a thumb that never reads the tug, for the control').toBeTruthy();
-    const N = 100;
-    // Careless on the first try: clover 85% or more, ember about 65 to 80, brook and thistle about 45 to 65, rares 35 to 55.
-    const bands: Record<string, [number, number]> = { clover: [0.85, 1], ember: [0.6, 0.85], brook: [0.4, 0.7], thistle: [0.4, 0.7] };
     for (const k of ['clover', 'ember', 'brook', 'thistle'] as DownyKind[]) {
-      const a = rate(k, CARELESS, N);
-      const b = rate(k, CAREFUL, N);
-      expect(a.first, `${k} careless first try`).toBeGreaterThanOrEqual(bands[k][0]);
-      expect(a.first, `${k} careless first try`).toBeLessThanOrEqual(bands[k][1]);
-      expect(b.first, `${k} careful first try`).toBeGreaterThanOrEqual(0.9);
-      expect(rate(k, HOLDER, 30).first, `${k} holding on`).toBeLessThanOrEqual(0.2);
-      if (k === 'clover') {
-        // A careful thumb brings a clover in about 2 to 3 s.
-        expect(b.fight).toBeGreaterThanOrEqual(2);
-        expect(b.fight).toBeLessThanOrEqual(3.2);
-      }
-    }
-    for (const k of ['clover', 'ember', 'brook'] as DownyKind[]) {
-      const a = rate(k, CARELESS, N, 1, 'lured');
-      const b = rate(k, CAREFUL, N, 1, 'lured');
-      expect(a.first, `rare ${k} careless`).toBeGreaterThanOrEqual(0.3);
-      expect(a.first, `rare ${k} careless`).toBeLessThanOrEqual(0.6);
-      expect(b.first, `rare ${k} careful`).toBeGreaterThanOrEqual(0.9);
-      // The rare one fights longest: a careful thumb takes about 5 to 8 s.
-      expect(b.fight, `rare ${k} careful fight`).toBeGreaterThanOrEqual(4.5);
-      expect(b.fight, `rare ${k} careful fight`).toBeLessThanOrEqual(8.5);
+      expect(rate(k, CAREFUL, 60).first, `${k} careful first try`).toBeGreaterThanOrEqual(0.85);
+      expect(rate(k, HOLDER, 30).first, `${k} holding on`).toBeLessThanOrEqual(0.1);
     }
   });
 });

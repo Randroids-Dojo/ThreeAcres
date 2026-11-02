@@ -268,6 +268,13 @@ export interface Order {
    * at 17:38, lessons took the page, and it lapsed 40 real seconds later.
    */
   until?: number;
+  /**
+   * The hour it must be filled by on its day (round 8: every offer has a condition, and the eighth playtest's
+   * picks were rarely a real decision): noon (`ORDER_NOON`) or dusk (`ORDER_BY`, when not set).
+   */
+  by?: number;
+  /** The hour from which it counts (a night one, after dark: `ORDER_NIGHT`); fluff sold or downies blown in before then go as plain sales. */
+  from?: number;
 }
 
 /** The rare downy of each kind, by its colour: "Gold clover downy". */
@@ -275,6 +282,10 @@ export const RARE_NAME: Record<DownyKind, string> = { clover: 'gold clover', emb
 
 /** Orders close at dusk. */
 export const ORDER_BY = 19;
+/** A morning order's deadline (round 8): the board's offers are due by noon, by dusk, or after dark. */
+export const ORDER_NOON = 12;
+/** A night order (round 8: "night only"): it counts from 9 pm and runs to midnight. */
+export const ORDER_NIGHT = { from: 21, by: 24 };
 /** The board posts the day's orders in the morning (from dawn until noon; a later start waits for the next morning). */
 export const ORDER_POST: [number, number] = [5, 12];
 /**

@@ -287,8 +287,9 @@ describe('P1: clover is the gentle first catch, running is taught, a brook shows
     const d = sim.spawn('brook', bx, bz, false);
     d.hopT = 99;
     const left: number[] = [];
-    // (Round 7: letting go while it pulls back; its time waits meanwhile, and it has 4.2 s of it.)
-    for (let t = 0; t < 2; t += 1 / 30) {
+    // (Round 7: letting go while it pulls back; its time waits meanwhile, and it has 4.2 s of it. Round 8: it
+    // waits while it puffs up to pull back too, so three seconds of the fight.)
+    for (let t = 0; t < 3; t += 1 / 30) {
       sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aimAt(sim, d.x, d.y + 0.25, d.z));
       sim.events.length = 0;
       if (d.held) left.push(sim.tugLeft(d));
@@ -326,7 +327,8 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       expect(offers.filter((o) => !o.live).length).toBeLessThanOrEqual(1);
       expect(offers.filter((o) => o.live && !o.rare).length).toBeLessThanOrEqual(1);
       const tag = sim.offerTag(r);
-      expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook) downy$/);
+      // (Round 8: its deadline in the title, its set place in the note.)
+      expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/);
       // (Round 7: what it is worth a day once penned, as a number, when it has a pen to join.)
       expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/);
       places.add(tag.note.split('.')[0]);
@@ -541,8 +543,9 @@ describe('P3: the cheap fixes', () => {
     const sim = morning(3, false);
     sim.postOrders(true);
     const notes = sim.offers().map((o) => sim.offerTag(o).note);
-    expect(notes.find((n) => n.endsWith('on top of sales'))).toMatch(/^Pays [\d,]+ on top of sales$/);
-    expect(notes.find((n) => n.startsWith('Caught today'))).toMatch(/^Caught today\. Pays [\d,]+$/);
+    // (Round 8: each with its deadline first.)
+    expect(notes.find((n) => n.endsWith('on top of sales'))).toMatch(/^By (noon|dusk)\. Pays [\d,]+ on top of sales$/);
+    expect(notes.find((n) => n.startsWith('Caught by'))).toMatch(/^Caught by (noon|dusk)\. Pays [\d,]+$/);
     expect(notes.some((n) => /more by dusk/.test(n))).toBe(false);
   });
 

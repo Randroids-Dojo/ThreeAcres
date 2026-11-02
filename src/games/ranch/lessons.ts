@@ -9,10 +9,10 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
+import { FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_NOON, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
 import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
-import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
+import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, CRATES, DOOR, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
 
 export type Dev = 'touch' | 'mouse' | 'pad';
 
@@ -51,6 +51,11 @@ interface Lesson {
   then?: string[];
   /** Takes over from the lesson on screen when it becomes ready. */
   urgent?: boolean;
+  /**
+   * Cuts in at once over any lesson, urgent ones and a ticked line too, then hands back (round 8: the first pull
+   * back came under "Tap Jump to hop over bumps." and the hunt's lines, and its own line first showed at the fifth catch).
+   */
+  cut?: boolean;
   /** Comes back whenever it applies again (a downy out of its pen); never counted as learned. */
   repeat?: boolean;
   /** The hanging tag it teaches: chosen for you when that post's tags come down. */
@@ -176,8 +181,13 @@ function fullest(s: RanchState): { pad: number; n: number } {
   return { pad, n };
 }
 
-/** A wild downy pulling back against you now (back), or in a fight with you at all. */
-const fighting = (s: RanchState, back: boolean) => s.downies.some((d) => !d.gone && !d.tame && !d.keep && (d.back > 0 || (!back && (d.strain > 0 || d.easeT > 0))));
+/** A wild downy pulling back against you now, or puffing up to (back), or in a fight with you at all. */
+const fighting = (s: RanchState, back: boolean) => s.downies.some((d) => !d.gone && !d.tame && !d.keep && (d.back > 0 || d.tell > 0 || (!back && (d.strain > 0 || d.easeT > 0))));
+
+/** The sell crate to point at: the nearer of the two (round 8: one by the house, one in the lane between the pens). */
+function crateFor(s: RanchState): { x: number; z: number } {
+  return CRATES.reduce((a, c) => (dist(s, c.x, c.z) < dist(s, a.x, a.z) ? c : a), CRATES[0]);
+}
 
 /** Downies in the jar. */
 const aboard = (s: RanchState) => s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
@@ -397,6 +407,8 @@ function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
 
 const LIVE = {
   blow: 'Blow the downy into the sell crate.',
+  // (Round 8: an order for after dark takes them from 9 pm.)
+  later: 'Blow it into the crate after dark.',
   catch: (k: 'clover' | 'ember' | 'brook' | 'thistle') => `Catch ${k === 'ember' ? 'an' : 'a'} ${k} downy for the order.`,
 };
 
@@ -411,7 +423,8 @@ function wayTo(s: RanchState, m: Mark, kind: string, floor: Floor): boolean {
 }
 
 /** A downy of yours, loose (not penned, not in the canister). */
-const loose = (s: RanchState) => nearestDowny(s, (d) => (d.tame || d.keep) && d.pen < 0);
+/** One of yours out of a pen (not one on its way into one: the eighth playtest's ticked line read "Pull in the downy." after the blow). */
+const loose = (s: RanchState) => nearestDowny(s, (d) => (d.tame || d.keep) && d.pen < 0 && d.flyT < 0);
 
 const FEED = {
   pull: 'Pull clover heads from the garden.',
@@ -517,9 +530,12 @@ const FEEDER = {
 };
 
 /** The note under the crosshair when the jar refuses something, worded for the device (eight words or fewer). */
-export function fullNote(dev: Dev, noneFree: boolean, windowsKnown: boolean): string {
+export function fullNote(dev: Dev, noneFree: boolean, windowsKnown: boolean, what = ''): string {
   const how = !windowsKnown ? '' : dev === 'touch' ? ' Hold one to empty it.' : dev === 'pad' ? ' Hold LB to empty one.' : ' Hold Q to empty one.';
-  return noneFree ? `No window free.${how}` : `Window full.${how}`;
+  // Its own window is full (round 8: "Window full. Hold one to empty it." came up with three windows empty, and
+  // emptying another would not help): say which, and to blow some out.
+  if (!noneFree) return `${what ? `${what[0].toUpperCase()}${what.slice(1)} window` : 'Window'} full.${windowsKnown ? ' Blow some out.' : ''}`;
+  return `No window free.${how}`;
 }
 
 /** What a feeder costs: its lesson comes as soon as you can pay. */
@@ -657,8 +673,9 @@ const LESSONS: Lesson[] = [
     mark: (s, m, floor) => {
       const step = sellStep(s);
       if (step === 'blow') {
-        arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
-        ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+        const cr = crateFor(s);
+        arrow(m, cr.x, floor(cr.x, cr.z) + 2.3, cr.z);
+        ring(m, cr.x, cr.z, 1.2);
         return true;
       }
       if (step === 'choose') {
@@ -767,8 +784,9 @@ const LESSONS: Lesson[] = [
     mark: (s, m, floor) => {
       const step = farmStep(s);
       if (step === 'blow') {
-        arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
-        ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+        const cr = crateFor(s);
+        arrow(m, cr.x, floor(cr.x, cr.z) + 2.3, cr.z);
+        ring(m, cr.x, cr.z, 1.2);
         return true;
       }
       if (step === 'choose') {
@@ -844,8 +862,12 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     urgent: true,
     ready: (s) => !!liveOrder(s),
-    text: (_q, s) => (s && liveStep(s) === 'blow' ? LIVE.blow : LIVE.catch(s ? (liveOrder(s)?.kind ?? 'clover') : 'clover')),
-    also: () => [LIVE.blow, LIVE.catch('clover'), LIVE.catch('ember'), LIVE.catch('brook')],
+    text: (_q, s) => {
+      if (!s || liveStep(s) !== 'blow') return LIVE.catch(s ? (liveOrder(s)?.kind ?? 'clover') : 'clover');
+      const o = liveOrder(s);
+      return o && o.from !== undefined && s.hour < o.from ? LIVE.later : LIVE.blow;
+    },
+    also: () => [LIVE.blow, LIVE.later, LIVE.catch('clover'), LIVE.catch('ember'), LIVE.catch('brook')],
     done: (_s, n) => n('order:live') >= 1,
     lapse: (s) => !liveOrder(s),
     mark: (s, m, floor) => {
@@ -854,8 +876,9 @@ const LESSONS: Lesson[] = [
       if (liveStep(s) === 'blow') {
         const sel = s.slots[s.sel];
         if (sel?.t !== o.kind) m.slot = s.slots.findIndex((q) => q.t === o.kind && q.n > 0);
-        arrow(m, EXCHANGE.x, floor(EXCHANGE.x, EXCHANGE.z) + 2.3, EXCHANGE.z);
-        ring(m, EXCHANGE.x, EXCHANGE.z, 1.2);
+        const cr = crateFor(s);
+        arrow(m, cr.x, floor(cr.x, cr.z) + 2.3, cr.z);
+        ring(m, cr.x, cr.z, 1.2);
         return true;
       }
       // The nearest wild one of its kind, once you are near; else the way to it.
@@ -919,13 +942,15 @@ const LESSONS: Lesson[] = [
   },
   {
     // The tug, the first time a wild one pulls back against you (the seventh playtest held Pull through every
-    // catch: "catching is rote"). Let go while it pulls, press again once it stops. Until this is learned its
-    // pulls back last until you let go, and are slow to slip.
+    // catch: "catching is rote"). Let go while it pulls, press again once it stops. It cuts in over any line the
+    // moment a wild one puffs up to pull back (the first wild catch always does, early), and only while it is up
+    // are pulls back gentle: they last until you let go, are slow to slip and never bolt (see TEACH_BACK).
     id: 'ease',
-    after: ['penin'],
+    after: ['draw'],
     unlocks: [],
     then: ['ease'],
     urgent: true,
+    cut: true,
     ready: (s) => fighting(s, true),
     text: (q) => (q.dev === 'touch' ? 'Let go of Pull when it pulls back.' : q.dev === 'pad' ? 'Release LT when it pulls back.' : 'Release right click when it pulls back.'),
     start: (s) => {
@@ -1237,6 +1262,11 @@ export class Tutor {
   /** Seconds a stepped line's next step must last before the page changes to it. */
   static readonly STEP_HOLD = 0.25;
   /**
+   * Seconds no new lesson comes up while a page of something just done is showing (round 8: the first order's
+   * "Earned" page was replaced by the dusk line almost at once). A lesson that cuts in still does.
+   */
+  hold = 0;
+  /**
    * Real seconds between lessons coming up on the first day once the clock runs (the seventh playtest's first
    * evening put six lines up in about two real minutes, mostly in the dark).
    */
@@ -1382,8 +1412,15 @@ export class Tutor {
     this.mark.on = false;
     this.mark.slot = -1;
     this.sinceBegin += dt;
+    if (this.hold > 0) this.hold -= dt;
     const n: N = (k) => s.learnCount[k] ?? 0;
     const v = this.view;
+    // A lesson that cuts in (the first pull back) takes the page at once, over any line and a ticked one, then hands back.
+    const cut = LESSONS.find((q) => q.cut && q !== this.active && this.eligible(s, q, n));
+    if (cut) {
+      this.struck = null;
+      this.begin(s, cut);
+    }
     // A finished line stays up, ticked, for a moment.
     if (this.struck) {
       this.gap -= dt;
@@ -1426,6 +1463,8 @@ export class Tutor {
           continue;
         }
       }
+      // A page of something just done is up: nothing new comes for a few seconds.
+      if (!this.active && this.hold > 0) break;
       // Urgent lessons take over from a calm one.
       if (!this.active?.urgent) {
         const u = LESSONS.find((q) => q.urgent && q !== this.active && this.eligible(s, q, n));
@@ -1486,6 +1525,7 @@ export class Tutor {
   clear(): void {
     this.active = null;
     this.struck = null;
+    this.hold = 0;
     this.shownLine = '';
     this.pendLine = '';
     this.gap = 0;
@@ -1542,7 +1582,11 @@ const KIND_WORD: Record<string, string> = { clover: 'Clover', ember: 'Ember', br
 function openLines(s: RanchState, say: Say): string[] {
   return s.orders
     .filter((o) => o.state === 'open' && o.got < o.n)
-    .map((o) => (o.rare ? rareLine(s, o, say) : o.live ? `${KIND_WORD[o.kind]} downies, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff, ${o.got} of ${o.n}.`));
+    // (One due by noon says so: "Clover fluff by noon, 2 of 10.")
+    .map((o) => {
+      const due = o.from !== undefined ? ' after dark' : o.by === ORDER_NOON ? ' by noon' : '';
+      return o.rare ? rareLine(s, o, say) : o.live ? `${KIND_WORD[o.kind]} downies${due}, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff${due}, ${o.got} of ${o.n}.`;
+    });
 }
 
 /**

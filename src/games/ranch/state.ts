@@ -103,6 +103,14 @@ export interface Downy extends Body {
   backHeld: number;
   eased: boolean;
   easeT: number;
+  /**
+   * The duel (round 8): seconds left of the tell before its next pull back (it puffs up; 0: none) and how long
+   * that tell was, and seconds you have left it slack since a pull back ended (-1: pulling, or no pull back to
+   * answer). Not saved.
+   */
+  tell: number;
+  tellLen: number;
+  slackT: number;
 }
 
 export interface Item extends Body {
@@ -268,7 +276,9 @@ export interface RanchState {
   /** The day the board last posted orders. */
   orderDay: number;
   /** The orders the board has offered lately (kind, live, day), newest last: it asks for what it has not asked for in a while. */
-  orderLog: { kind: DownyKind; live: boolean; day: number; rare?: boolean; spot?: number }[];
+  orderLog: { kind: DownyKind; live: boolean; day: number; rare?: boolean; spot?: number; by?: number }[];
+  /** Kinds whose first pen came with a sack of their food (round 8: the eighth playtest's embers starved by their first night). */
+  stocked: DownyKind[];
   /** Last day the overnight changes ran. */
   night: number;
   nextId: number;
@@ -341,6 +351,7 @@ export function freshState(): RanchState {
     orders: [],
     orderDay: 0,
     orderLog: [],
+    stocked: [],
     night: 0,
     nextId: 1,
     learn: [],
@@ -382,7 +393,8 @@ export interface SaveV1 {
   /** Added with orders; older saves have none and get their first at the next morning. */
   orders?: Order[];
   orderDay?: number;
-  orderLog?: { kind: DownyKind; live: boolean; day: number; rare?: boolean; spot?: number }[];
+  orderLog?: { kind: DownyKind; live: boolean; day: number; rare?: boolean; spot?: number; by?: number }[];
+  stocked?: DownyKind[];
   /** Added with the lessons; older saves have neither and are credited on load. */
   learn?: string[];
   learnCount?: Record<string, number>;
@@ -416,6 +428,7 @@ export function serialize(s: RanchState): SaveV1 {
     orders: s.orders.map((o) => ({ ...o })),
     orderDay: s.orderDay,
     orderLog: s.orderLog.map((o) => ({ ...o })),
+    stocked: [...s.stocked],
     learn: [...s.learn],
     learnCount: Object.fromEntries(Object.entries(s.learnCount).map(([k, v]) => [k, r3(v)])),
   };
@@ -476,6 +489,9 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     backHeld: 0,
     eased: false,
     easeT: 0,
+    tell: 0,
+    tellLen: 0,
+    slackT: -1,
   };
 }
 
@@ -589,10 +605,14 @@ export function deserialize(raw: unknown, sources: Source[]): RanchState | null 
           state: o.state === 'filled' || o.state === 'missed' || o.state === 'offer' ? o.state : 'open',
           ...(o.rare && Number.isFinite(o.rare.spot) ? { rare: { spot: o.rare.spot, ...(o.rare.seen ? { seen: true } : {}) } } : {}),
           ...(Number.isFinite(o.until) ? { until: o.until } : {}),
+          ...(Number.isFinite(o.by) ? { by: o.by } : {}),
+          ...(Number.isFinite(o.from) ? { from: o.from } : {}),
         }))
     : [];
   s.orderDay = num(d.orderDay, 0);
-  s.orderLog = Array.isArray(d.orderLog) ? d.orderLog.filter((o) => o && KINDS.includes(o.kind)).map((o) => ({ kind: o.kind, live: !!o.live, day: num(o.day, 0), ...(o.rare ? { rare: true } : {}), ...(Number.isFinite(o.spot) ? { spot: o.spot } : {}) })) : [];
+  // (A save from before round 8: kinds already kept count as stocked, so an old ranch gets no sack.)
+  s.stocked = Array.isArray(d.stocked) ? d.stocked.filter((k) => KINDS.includes(k)) : [...new Set(s.downies.filter((q) => q.tame).map((q) => q.kind))];
+  s.orderLog = Array.isArray(d.orderLog) ? d.orderLog.filter((o) => o && KINDS.includes(o.kind)).map((o) => ({ kind: o.kind, live: !!o.live, day: num(o.day, 0), ...(o.rare ? { rare: true } : {}), ...(Number.isFinite(o.spot) ? { spot: o.spot } : {}), ...(Number.isFinite(o.by) ? { by: o.by } : {}) })) : [];
   // A save from before the lessons has no list: the director credits it (see creditLessons).
   s.learn = Array.isArray(d.learn) ? d.learn.filter((x) => typeof x === 'string') : [];
   s.learnCount = {};

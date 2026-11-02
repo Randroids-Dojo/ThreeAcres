@@ -3,7 +3,7 @@
 // with a height; walls are straight lines with gate gaps; pens are rings that
 // keep a body on the side it was on unless it clears the fence.
 
-import { PEN_R, PADS, HOUSE, WINDMILL, EXCHANGE, BOARD, WORKBENCH, GATE_SIGN, GATES, GATE_HALF, RIDGE_X, HOLLOW_X, RANCH_Z, MINX, MAXX, MINZ, MAXZ, TREES, PINES, WILLOWS, ROCKS, OAK, DEAD_TREE, CRAG, heightAt, waterAt, crossings, type GateId } from './world';
+import { PEN_R, PADS, HOUSE, WINDMILL, CRATES, BOARD, WORKBENCH, GATE_SIGN, GATES, GATE_HALF, RIDGE_X, HOLLOW_X, RANCH_Z, MINX, MAXX, MINZ, MAXZ, TREES, PINES, WILLOWS, ROCKS, OAK, DEAD_TREE, CRAG, heightAt, waterAt, crossings, type GateId } from './world';
 import type { Body, Pad } from './state';
 
 export interface Circ {
@@ -67,7 +67,9 @@ export const BED_HALF = 2.6;
 export const BED_H = 0.38;
 export const SILO_R = 1.5;
 export const SILO_H = 4.2;
-export const CRATE = { x0: EXCHANGE.x - 0.7, z0: EXCHANGE.z - 0.7, x1: EXCHANGE.x + 0.7, z1: EXCHANGE.z + 0.7, h: 1.0 };
+/** Each sell crate's box (the house one first, then the lane one): 1.4 m square, 1 m tall, its backboard on the +z side. */
+export const CRATE_BOXES = CRATES.map((c) => ({ x0: c.x - 0.7, z0: c.z - 0.7, x1: c.x + 0.7, z1: c.z + 0.7, h: 1.0 }));
+export const CRATE = CRATE_BOXES[0];
 export const PORCH = { x0: HOUSE.x - 3.6, z0: HOUSE.z - HOUSE.d / 2 - 1.5, x1: HOUSE.x + 3.6, z1: HOUSE.z - HOUSE.d / 2, y: 0.32 };
 
 export class Physics {
@@ -101,7 +103,7 @@ export class Physics {
     }
     for (const sx of [-2.6, 2.6]) this.statics.push({ x: sx, z: RANCH_Z, r: 0.3, h: INF });
     this.boxes.push({ x0: HOUSE.x - HOUSE.w / 2, z0: HOUSE.z - HOUSE.d / 2, x1: HOUSE.x + HOUSE.w / 2, z1: HOUSE.z + HOUSE.d / 2, h: INF });
-    this.boxes.push(CRATE);
+    for (const c of CRATE_BOXES) this.boxes.push(c);
     this.boxes.push({ x0: WORKBENCH.x - 0.5, z0: WORKBENCH.z - 1, x1: WORKBENCH.x + 0.5, z1: WORKBENCH.z + 1, h: 1.0 });
     this.floors.push({ ...PORCH, a: 0, cx: (PORCH.x0 + PORCH.x1) / 2, cz: (PORCH.z0 + PORCH.z1) / 2 });
     for (const c of crossings()) {
