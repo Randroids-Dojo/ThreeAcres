@@ -40,9 +40,11 @@ node scripts/ranch-tags.mjs [url]      # Thistledown: every hanging tag's title 
 node scripts/ranch-lessons.mjs         # Thistledown's lessons on phone, desktop and pad (RANCH_URL=...); nothing early, frame by frame; no ruled line through journal words
 node scripts/deck-lessons.mjs [url]    # Seedbound's guided first season: one piece of the table at a time
 node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state; no ruled line through words, no price tag over a card's name, every visible button takes a tap
+node scripts/deck-returning.mjs [url]  # Seedbound: a second run after the guided one has every table piece and the engine pick line
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
 node scripts/qa/shell-keys.mjs [url]   # the switcher on a keyboard: Escape and ` open and close it in every game, Tab stays on it, Enter plays a card
 node scripts/qa/sunup-keys.mjs [url]   # Sunup on a keyboard: a focused button never takes Space, Sleep before evening asks, Space works at the well
+node scripts/qa/sunup-queue.mjs [url]  # Sunup's tap queue with real touch: each tap keeps its seed, well trips never merge, crows go first, no question eats the queue
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth
