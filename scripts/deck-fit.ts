@@ -14,6 +14,8 @@
 // winter, for comparison), and a season the player took a hitch in asks its share less, as the rules do.
 // --hitch=frost:0.15,glut:0.15,... plays with other hitch shares (the take, and so the price, follows the play);
 // --tune=key:value,... any other number in TUNING.
+// Round 9: fit also prints each season's median take over quota (the runs that got there) and the most of them before
+// the last winter, the snowball measure.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
 import * as R from '../src/games/deck/rules';
@@ -24,7 +26,8 @@ const dir = '/tmp/deck-fit';
 mkdirSync(dir, { recursive: true });
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const flag = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
-const BOTS: Record<string, { noise: number; guided: boolean }> = { decent: { noise: 0.15, guided: false }, strict: { noise: 0, guided: false }, guided: { noise: 0.15, guided: true } };
+// Round 9: careful is the guided first run played with no noise (the careful line through the guided year).
+const BOTS: Record<string, { noise: number; guided: boolean }> = { decent: { noise: 0.15, guided: false }, strict: { noise: 0, guided: false }, guided: { noise: 0.15, guided: true }, careful: { noise: 0, guided: true } };
 
 interface Run {
   take: number[];
@@ -118,6 +121,11 @@ if (args[0] === 'play') {
   const q3 = row(args[2], TUNING.quotas3);
   const sc = row(flag('y3scale'), (TUNING as { y3scale?: number[] }).y3scale ?? [0, 0, 0, 0]);
   const gSummer = Number(flag('guidedSummer') ?? (TUNING as { guidedSummer?: number }).guidedSummer ?? 0);
+  // Round 9: --guidedQuota=n prices the guided spring, --firstYear=x the share of the usual row its autumn and winter ask.
+  const gq = flag('guidedQuota');
+  if (gq) TUNING.guidedQuota = Number(gq);
+  const fy = flag('firstYear');
+  if (fy) TUNING.firstYear = Number(fy);
   const share = Number(flag('carry') ?? (TUNING as { carryShare?: number }).carryShare ?? 0);
   const cap = (TUNING as { carryCap?: number }).carryCap ?? share;
   const nice = (q: number) => (q < 100 ? Math.round(q / 5) * 5 : Math.round(q / 10) * 10);
@@ -127,7 +135,7 @@ if (args[0] === 'play') {
   for (const f of files.sort()) {
     const who = f.replace(/\.json$/, '');
     const runs: Run[] = JSON.parse(readFileSync(`${dir}/${f}`, 'utf8'));
-    const guided = who.startsWith('guided');
+    const guided = who.startsWith('guided') || who.startsWith('careful');
     const quota = (k: number, cold: boolean, y2: number, ease: number) => {
       const y = Math.floor(k / 4);
       const sea = k % 4;
@@ -141,6 +149,8 @@ if (args[0] === 'play') {
     };
     const played = new Array(12).fill(0);
     const met = new Array(12).fill(0);
+    // Round 9: each season's take over its quota for the runs that got there, for the snowball (its median).
+    const ratio: number[][] = Array.from({ length: 12 }, () => []);
     let wins = 0;
     const years = [0, 0, 0];
     for (const r of runs) {
@@ -152,6 +162,7 @@ if (args[0] === 'play') {
         played[k]++;
         const q = quota(k, r.cold[k], y2, r.ease?.[k] ?? 0);
         const earned = r.take[k] + Math.min(carry, Math.round(cap * q));
+        ratio[k].push(earned / q);
         if (earned < q) break;
         carry = Math.round(share * (earned - q));
         met[k]++;
@@ -160,6 +171,9 @@ if (args[0] === 'play') {
       if (k >= 12) wins++;
     }
     const pct = (a: number, b: number) => `${b ? Math.round((a / b) * 100) : 0}%`.padStart(4);
-    console.log(`${who.padEnd(18)} Y1 ${pct(years[0], runs.length)}  Y2 ${pct(years[1], runs.length)}  wins ${pct(wins, runs.length)}   per season ${played.map((p, k) => pct(met[k], p)).join(' ')}`);
+    const med = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1] ?? 0;
+    // The last winter ends the night it is met, so its take stops at the quota: the snowball is read before it.
+    const top = Math.max(...ratio.slice(0, 11).map(med));
+    console.log(`${who.padEnd(18)} Y1 ${pct(years[0], runs.length)}  Y2 ${pct(years[1], runs.length)}  wins ${pct(wins, runs.length)}   per season ${played.map((p, k) => pct(met[k], p)).join(' ')}   take/quota median, the most ${top.toFixed(2)}: ${ratio.map((a) => med(a).toFixed(2)).join(' ')}`);
   }
 }

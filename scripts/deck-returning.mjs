@@ -5,10 +5,11 @@
 //     weather, the scoops, the tin, the pegboard, the purse, the lantern), as pieces and as visible elements: the
 //     eighth playtest's guided run ended after 42 days without the heap or the weather, and runs 2 to 4 never had it
 //   - the loss ledger lists each season's twist, as the won page does
-//   - the run's first stall says to pick one engine and that it is free, shows the three cards large enough to read
+//   - the run's first stall says to pick one engine and that it is free, shows the four cards large enough to read
 //     (a face 70 px wide or more on the phone, 120 on the desktop; they were about 50), lays out no tray until one is
 //     picked, and sells none of the engines' cards beside the free pick; a real tap picks one and the stall opens
 //   - a hand stuck with cards the scoops cannot pay for today brings the spent heap's lesson, in eight words or fewer
+//   - round 9: all four engines at the pick
 //   - nothing in the shell's corner at any step
 // node scripts/deck-returning.mjs [base url]
 import { chromium } from 'playwright-core';
@@ -174,7 +175,8 @@ async function session(label, viewport, touch) {
   await shot('3-engine-stall');
   check(`${label}: the second run's first stall says to pick one and that it is free`, stall.phase === 'shop' && /^Pick one to take home, free\.$/.test(stall.head) && stall.headShown, JSON.stringify({ head: stall.head, shown: stall.headShown }));
   const min = touch ? 70 : 120;
-  check(`${label}: its three engine cards are large enough to read and all on the screen (faces ${min} px wide or more)`, stall.n === 3 && stall.faces.every((w) => w >= min) && stall.onScreen, `faces ${stall.faces.join(', ')} px, on screen ${stall.onScreen}`);
+  // Round 9: all four engines on offer (three before; the ninth playtest's runs 2 and 3 were never offered the bees).
+  check(`${label}: its four engine cards are large enough to read and all on the screen (faces ${min} px wide or more)`, stall.n === 4 && stall.faces.every((w) => w >= min) && stall.onScreen, `faces ${stall.faces.join(', ')} px, on screen ${stall.onScreen}`);
   check(`${label}: no tray until one is picked, and none of the engines' cards for sale`, stall.goods === 0 && stall.engineCards.length === 0, JSON.stringify({ goods: stall.goods, engineCards: stall.engineCards }));
   await corner('the engine stall');
   await tapAt('.sb-enginecard', 1);

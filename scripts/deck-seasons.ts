@@ -10,14 +10,17 @@
 // Round 6: the quota column is the median a season asked (a hitch, Cold Frame
 // and the old year 3 scaling move it), and the share of twists the bot took
 // as the hitch.
-// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|second]
+// Round 9: the careful bot (the guided first run played with no noise: the careful line through the guided year), the
+// loose bot (a weak player: noise 0.4 and one play deep), and --upto=n to stop after n seasons (--upto=1 for a cheap
+// spring clear rate over many seeds).
+// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|careful|loose|second] [--upto=n]
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
 import { BOONS, newMeta, newRun, SEASON_NAMES } from '../src/games/deck/rules';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 200);
 const only = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1];
-const K = 12;
+const K = Number(process.argv.find((a) => a.startsWith('--upto='))?.split('=')[1] ?? 12);
 
 interface Tally {
   played: number[];
@@ -43,7 +46,7 @@ interface Tally {
   traySlots: number;
 }
 
-function play(noise: number, guided: boolean, second = false): Tally {
+function play(noise: number, guided: boolean, second = false, depth = 2): Tally {
   const t: Tally = {
     played: new Array(K).fill(0),
     cleared: new Array(K).fill(0),
@@ -66,7 +69,7 @@ function play(noise: number, guided: boolean, second = false): Tally {
   };
   for (let i = 0; i < runs; i++) {
     const seed = 1000 + i * 7919;
-    const o = { noise, seed: 77 + i, guided };
+    const o = { noise, seed: 77 + i, guided, depth };
     const meta = second ? { ...newMeta(), runs: 1 } : null;
     const { s } = newRun(seed, meta, guided);
     const dice = new Dice(o.seed ^ seed);
@@ -130,17 +133,19 @@ const med = (a: number[]) => {
   return s.length ? s[Math.floor(s.length / 2)] : 0;
 };
 
-const bots: [string, number, boolean, boolean][] = [
-  ['decent', 0.15, false, false],
-  ['strict', 0, false, false],
-  ['guided', 0.15, true, false],
-  ['second', 0.15, false, true],
+const bots: [string, number, boolean, boolean, number][] = [
+  ['decent', 0.15, false, false, 2],
+  ['strict', 0, false, false, 2],
+  ['guided', 0.15, true, false, 2],
+  ['careful', 0, true, false, 2],
+  ['loose', 0.4, false, false, 1],
+  ['second', 0.15, false, true, 2],
 ];
-for (const [name, noise, guided, second] of bots) {
-  if (only && only !== name) continue;
+for (const [name, noise, guided, second, depth] of bots) {
+  if (only ? only !== name : name === 'careful' || name === 'loose') continue;
   const t0 = performance.now();
-  const t = play(noise, guided, second);
-  console.log(`\n${name} bot (noise ${noise}${guided ? ', guided first run' : ''}${second ? ', the first run after the guided one' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
+  const t = play(noise, guided, second, depth);
+  console.log(`\n${name} bot (noise ${noise}${depth !== 2 ? `, ${depth} play deep` : ''}${guided ? ', guided first run' : ''}${second ? ', the first run after the guided one' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
   console.log('season            played  pass  quota  median take  earned/quota  crops at first dawn  night 1  night 2');
   for (let k = 0; k < K; k++) {
     if (!t.played[k]) continue;
@@ -149,7 +154,7 @@ for (const [name, noise, guided, second] of bots) {
       `${label} ${String(t.played[k]).padStart(6)}  ${((t.cleared[k] / t.played[k]) * 100).toFixed(0).padStart(3)}%  ${String(med(t.quota[k])).padStart(5)}  ${String(med(t.take[k])).padStart(11)}  ${med(t.ratio[k]).toFixed(2).padStart(12)}  ${mean(t.dawn[k]).toFixed(1).padStart(19)}  ${med(t.night1[k]).toFixed(0).padStart(7)}  ${med(t.night2[k]).toFixed(0).padStart(7)}`,
     );
   }
-  for (const y of [1, 2, 3]) {
+  for (const y of [1, 2, 3].filter((y) => y * 4 <= K)) {
     const n = t.played[y * 4 - 1] ? t.cleared[y * 4 - 1] : 0;
     console.log(`cleared year ${y}: ${((n / runs) * 100).toFixed(0)}%`);
   }

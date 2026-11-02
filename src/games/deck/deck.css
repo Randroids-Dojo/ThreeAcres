@@ -242,6 +242,16 @@
 .sb-ic { width: 17px; height: 17px; }
 .sb-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 4px; min-height: 0; max-width: 136px; white-space: nowrap; }
 .sb-steps:empty { display: none; }
+/* Round 9: a pair in hand that is one or the other: both ringed, and "or" on a paper tag at the second's left edge. */
+.sb-card.sb-pair { outline: 2px dashed rgba(58, 96, 48, 0.85); outline-offset: 2px; border-radius: 6px; }
+.sb-card.sb-pair-b::after { content: 'or'; position: absolute; left: -13px; top: 38%; z-index: 2; padding: 1px 5px 2px; background: #f8f0d8; border: 1px solid rgba(42, 30, 18, 0.7); border-radius: 3px; font: italic 700 13px/1 'Fraunces Variable', Georgia, serif; color: #2a1a0a; pointer-events: none; }
+/* Round 9: three lines under the sum: yield, bloom added, then the multipliers. */
+.sb-slip > .sb-steps { display: grid; justify-items: center; row-gap: 2px; max-width: 160px; }
+.sb-slip > .sb-steps:not(.on) { display: none; }
+.sb-slip > .sb-steps > .sb-steps.on { display: flex; min-height: 15px; }
+.sb-steps.xs .sb-chip { color: var(--bloom); }
+.sb-chipword { font-size: 11px; font-weight: 650; font-style: italic; margin: 0 1px 0 2px; }
+.sb-chipword:empty { display: none; }
 .sb-chip { display: inline-flex; align-items: center; gap: 1px; font-size: 12px; font-weight: 700; font-style: normal; }
 /* A bonus still on its way holds its place on the slip, unseen, so its arc lands there and nowhere else. */
 .sb-chip.waiting { visibility: hidden; }
@@ -437,7 +447,9 @@
 }
 .sb-sign { padding: 4px 16px 6px; }
 .sb-sign span { color: #f6e8c4; font-size: 21px; font-style: italic; font-weight: 720; letter-spacing: 0.02em; }
-.sb-closed { margin: 4px 0 0; max-width: 520px; color: #f6e8c4; font-size: 14.5px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.sb-closed { margin: 4px 0 0; max-width: 520px; color: #f6e8c4; font-size: 14.5px; font-style: italic; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); text-wrap: balance; }
+/* Round 9: a sentence of the stall's head never breaks inside itself ("Autumn starts with" then "54." alone). */
+.sb-closed span, .sb-purse-line span.sb-say { white-space: nowrap; }
 .sb-purse-line { margin: 0; color: #e8d8b0; font-size: 14px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 .sb-purse-line b { font-size: 18px; color: #fff3cc; }
 .sb-cork {
@@ -692,6 +704,10 @@
    little closer (it must fit a 412 by 838 screen without scrolling in every state). */
 .sb[data-layout='phone'] .sb-stall { gap: 4px; }
 .sb[data-layout='phone'] .sb-stall-head { gap: 0; }
+/* Round 9: the stall after winter also brings the year's stock, so the phone's head lines sit a little closer. */
+.sb[data-layout='phone'] .sb-stall-head .sb-closed { margin-top: 3px; line-height: 1.12; }
+.sb[data-layout='phone'] .sb-stall-head .sb-purse-line { line-height: 1.15; }
+.sb[data-layout='phone'] .sb-stall-head .sb-stock { font-size: 13px; }
 .sb[data-layout='phone'] .sb-cork { padding: 5px 8px 5px; }
 .sb[data-layout='phone'] .sb-pins .sb-pagesheet { padding: 9px 8px 5px; }
 .sb[data-layout='phone'] .sb-kept { margin-top: 3px; }
@@ -756,9 +772,14 @@
 .sb[data-layout='wide'] .sb-engines.big .sb-enginecard img:first-child { height: 236px; }
 .sb[data-layout='wide'] .sb-engines.big .sb-enginecard span { font-size: 16px; }
 .sb[data-layout='wide'] .sb-engines-head { font-size: 21px; }
-.sb[data-layout='phone'] .sb-engines.big { flex-direction: row; gap: 6px; padding: 4px 2px 0; }
-.sb[data-layout='phone'] .sb-engines.big .sb-enginecard { padding: 8px 5px 9px; gap: 6px; }
-.sb[data-layout='phone'] .sb-engines.big .sb-enginecard img:first-child { height: 150px; }
+/* Round 9: all four engines on offer: two by two on the phone, picked or not. */
+.sb[data-layout='phone'] .sb-engines.big { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 8px; padding: 4px 10px 0; }
+.sb[data-layout='phone'] .sb-engines.big .sb-enginecard { padding: 7px 6px 8px; gap: 5px; max-width: none; }
+.sb[data-layout='phone'] .sb-engines.big .sb-enginecard img:first-child { height: 128px; }
+.sb[data-layout='phone'] .sb-engines:not(.big) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 5px; }
+.sb[data-layout='phone'] .sb-engines:not(.big) .sb-enginecard { padding: 3px 5px 4px; gap: 5px; }
+.sb[data-layout='phone'] .sb-engines:not(.big) .sb-enginecard img:first-child { height: 34px; }
+.sb[data-layout='phone'] .sb-engines:not(.big) .sb-enginecard span { font-size: 10.5px; line-height: 1.15; }
 .sb[data-layout='phone'] .sb-engines.big .sb-enginecard span { font-size: 12.5px; line-height: 1.22; }
 .sb[data-layout='phone'] .sb-engines:not(.big) .sb-twice { font-size: 9px; right: -4px; bottom: -2px; padding: 0 3px 1px; }
 /* Round 8: what each twist would do to the season's take, in coins, the same shape on both clippings. */

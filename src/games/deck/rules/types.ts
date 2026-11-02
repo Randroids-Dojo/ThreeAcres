@@ -277,10 +277,16 @@ export interface RunState {
   levels?: Partial<Record<PageId, number>>;
   /** Round 8: the twists the last stall offered, so the next one aims at something else. */
   lastTwists?: Twist[];
+  /** Round 9: two cards in hand that are one or the other (the guided day 3's radish or carrot): play one, the other goes back. */
+  either?: [number, number];
+  /** Round 9: the twists the stall before that offered: no hitch is aimed the same way within two seasons. */
+  pastTwists?: Twist[];
   /** This season's take so far and where it came from (kept until the next season starts, for the stall's twists). */
   tally?: Tally;
   /** This year's new stock, laid on the year's first tray. */
   stock?: { card: CardId; up: boolean }[];
+  /** Round 9: the year the stock above was brought for (the stall after winter brings the next year's). */
+  stockYear?: number;
   /** Cards the merchant sells improved, once the catalogue holds every card (new stock never runs dry). */
   select?: CardId[];
   stats: RunStats;
@@ -336,6 +342,9 @@ export type Ev =
   | { t: 'object'; plot: number; obj: ObjectId }
   | { t: 'weather'; kind: WeatherId }
   | { t: 'toss'; card: Card }
+  /** Round 9: two cards in hand are one or the other; and the other of a pair going back in the tin once one is played. */
+  | { t: 'either'; uids: [number, number] }
+  | { t: 'putBack'; card: Card }
   | { t: 'dusk'; weather: WeatherId[] }
   | { t: 'rain'; plots: number[] }
   | { t: 'flatten'; plot: number; kind: SeedId; uid: number }

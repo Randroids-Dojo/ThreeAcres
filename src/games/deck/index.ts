@@ -4,7 +4,7 @@
 
 import type { GameModule } from '../../shell/types';
 import './deck.css';
-import { buyCard, buyPage, CARD_IDS, CARDS, cardText, chooseEngine, chooseTwist, leaveShop, reroll, type RunState } from './rules';
+import { buyCard, buyPage, CARD_IDS, CARDS, cardText, chooseEngine, chooseTwist, leaveShop, previewPlay, reroll, type RunState } from './rules';
 import { bestPlay, type Play } from './bot';
 import { Table, type SaveData } from './table';
 import { newLearn, Tutor, type Piece } from './lessons';
@@ -27,6 +27,8 @@ export interface DeckDebug {
   faceUrl(id: string, up?: boolean): string;
   /** What the board previews for the held card. */
   preview(): unknown;
+  /** Round 9: what the rules preview for hand card i on a plot, without taking it up (checks compare two plays). */
+  previewAt(i: number, plot: number | null): unknown;
   /** Take up hand card i and play it on a plot (and a second plot for the trowel). */
   play(i: number, plot: number | null, to?: number): boolean;
   endDay(): void;
@@ -97,6 +99,7 @@ export const game: GameModule = {
       faceText: (id, up = false) => faceText(id as never, up),
       faceUrl: (id, up = false) => faceUrl(id as never, up),
       preview: () => (t.board.preview ? JSON.parse(JSON.stringify(t.board.preview)) : null),
+      previewAt: (i, plot) => JSON.parse(JSON.stringify(previewPlay(t.run, i, plot) ?? null)),
       play: (i, plot, to) => {
         const c = t.run.hand[i];
         if (!c || t.busy) return false;

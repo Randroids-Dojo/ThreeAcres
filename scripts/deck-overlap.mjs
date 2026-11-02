@@ -368,8 +368,9 @@ async function run(label, viewport, touch) {
       for (let k = 0; k < 160 && (await p.evaluate(() => window.deck.busy())); k++) {
         const q = await p.evaluate((before) => {
           const box = (e) => e.getBoundingClientRect();
-          const chips = [...document.querySelectorAll('.sb-slip:not(.total) .sb-chip:not(.waiting)')].map((e) => ({ r: box(e), slip: box(e.closest('.sb-slip')) }));
-          const arcs = [...document.querySelectorAll('.sb-arc')].filter((e) => Number(e.style.opacity || 1) > 0.5).map(box);
+          // Round 9: bonuses of one kind share a chip that grows, so an arc landing on its own chip is fine.
+          const chips = [...document.querySelectorAll('.sb-slip:not(.total) .sb-chip:not(.waiting)')].map((e) => ({ r: box(e), slip: box(e.closest('.sb-slip')), k: e.dataset.k }));
+          const arcs = [...document.querySelectorAll('.sb-arc')].filter((e) => Number(e.style.opacity || 1) > 0.5).map((e) => Object.assign(box(e).toJSON(), { k: e.dataset.k }));
           const out = [];
           const over = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
           for (let i = 0; i < chips.length; i++) {
@@ -377,7 +378,7 @@ async function run(label, viewport, touch) {
             if (c.r.left < c.slip.left - 1 || c.r.right > c.slip.right + 1 || c.r.bottom > c.slip.bottom + 1) out.push('a chip runs off its slip');
             for (let j = i + 1; j < chips.length; j++) if (over(c.r, chips[j].r)) out.push('two chips overlap');
             // A bonus passing over the slip in flight is fine; one that settles on a chip already there hides it.
-            for (const a of arcs) if (over(c.r, a) && before.some((b) => Math.abs(b.x - a.left) < 4 && Math.abs(b.y - a.top) < 4)) out.push('a landing bonus settles over a chip already on the slip');
+            for (const a of arcs) if (a.k !== c.k && over(c.r, a) && before.some((b) => Math.abs(b.x - a.left) < 4 && Math.abs(b.y - a.top) < 4)) out.push(`a landing bonus settles over a chip already on the slip (${a.k} over ${c.k})`);
           }
           // Lines of chips, allowing for the slip's slight tilt.
           const tops = chips.map((c) => c.r.top).sort((a, b) => a - b);
@@ -934,12 +935,14 @@ async function run(label, viewport, touch) {
       console.log(`       ${label} the hand's lowest point ${Math.round(q.lowest)} of ${q.H}; the side panel's longest bare stretch ${q.gap} px (the round 4 build: about 320 between the pegboard and the scoops)`);
     }],
     ['round 5: the year\'s first stall: new stock, the twists and a full almanac on one screen', async () => {
+      // Round 9: the year's first stall is the one after winter (it opens the year and brings its stock).
       await toStall(98, 4000, (s) => {
-        s.year = 2;
-        s.season = 0;
+        s.year = 1;
+        s.season = 3;
         s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
         s.stock = [{ card: 'corn', up: true }, { card: 'chili', up: true }];
         s.select = ['corn', 'chili'];
+        s.stockYear = 2;
       });
       const q = await p.evaluate(() => ({
         stock: document.querySelector('.sb-stock')?.textContent ?? '',
@@ -1101,6 +1104,16 @@ async function run(label, viewport, touch) {
         s.year = 2;
         s.pages = [];
       });
+      // Round 9: days after the quota is met leave nothing idle, and this season met it on its first night: three a day
+      // sat unused, as a season of no plays before the quota would leave them.
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        s.stats.log[s.stats.log.length - 1].idle = 3;
+        window.deck.table.sheets.stall();
+      });
+      await settle(200);
+      const refused = await p.evaluate(() => [...document.querySelectorAll('.sb-thing')].find((e) => /scoop/i.test(e.textContent))?.querySelector('em')?.textContent ?? '');
+      if (refused !== 'Not now') extra.push(`a refused scoop's strip says "${refused}", not "Not now"`);
       const at = await p.evaluate(() => [...document.querySelectorAll('.sb-thing')].findIndex((e) => /scoop/i.test(e.textContent)));
       await tapAt('.sb-thing', at);
       const before = await purse();
@@ -1235,10 +1248,10 @@ async function run(label, viewport, touch) {
     }],
     // Round 7: the engine at a run's first stall; the reason line clear of the chips it explains; coin totals and the
     // can's; what is still to go; the hand closing its gaps; tall crops inside their plot; one-line kept pages.
-    ['round 7: the first stall offers three engines, and a tap picks one', async () => {
+    ['round 7: the first stall offers its engines (round 9: all four), and a tap picks one', async () => {
       await toStall(97, 120, null, true);
       const q = await p.evaluate(() => ({ n: document.querySelectorAll('.sb-enginecard').length, rules: window.deck.state().shop.engines?.length ?? 0, text: [...document.querySelectorAll('.sb-enginecard')].map((e) => e.textContent.trim()) }));
-      if (q.n !== 3 || q.rules !== 3) extra.push(`the first stall shows ${q.n} engines (rules ${q.rules})`);
+      if (q.n !== 4 || q.rules !== 4) extra.push(`the first stall shows ${q.n} engines (rules ${q.rules})`);
       // The way on asks for one first, then a real tap picks one: pinned, the others faded.
       await tapAt('.sb-signpost');
       const ask = await p.evaluate(() => ({ phase: window.deck.state().phase, slip: document.querySelector('.sb-read')?.textContent ?? '' }));
@@ -1608,8 +1621,99 @@ async function run(label, viewport, touch) {
         cork: document.querySelectorAll('.sb-cork').length,
       }));
       const min = label === 'phone' ? 70 : 120;
-      if (q.head !== 'Pick one to take home, free.' || q.faces.length !== 3 || Math.min(...q.faces) < min || q.goods || q.cork) extra.push(`the engine pick: ${JSON.stringify(q)}`);
+      if (q.head !== 'Pick one to take home, free.' || q.faces.length !== 4 || Math.min(...q.faces) < min || q.goods || q.cork) extra.push(`the engine pick: ${JSON.stringify(q)}`);
       console.log(`       ${label} engine pick: "${q.head}", faces ${q.faces.join('/')} px`);
+    }],
+    // Round 9 (ONLY="round 9"): a crow about shows the scarecrow's ground and greys a bonus it may take, with the reason
+    // off the caption; the harvest slip in three lines with the page named; the desktop bench clear of the screen's foot.
+    ['round 9: a crow about: the kept ground washed, a bonus the crow may take greyed, the reason off the caption', async () => {
+      await fresh(4343);
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        s.twist = null;
+        s.pages = [];
+        s.day = 3;
+        s.crow = true;
+        for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+        s.plots[0].obj = 'scarecrow';
+        s.plots[15].crop = { uid: 9501, kind: 'carrot', age: 1, days: 2, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.energy = 5;
+        window.deck.hand(['radish']);
+      });
+      await settle(400);
+      const guard = await p.evaluate(() => [...window.deck.table.board.guard].sort((a, b) => a - b));
+      if (JSON.stringify(guard) !== '[0,1,4,5]') extra.push(`the scarecrow's ground washed: ${JSON.stringify(guard)}`);
+      const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (b) => [b.left + b.width / 2, b.top + b.height / 2]; return { card: c(x.cards[0]), plot: c(x.plots[14]) }; });
+      const go = async ([x, y]) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 13 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(250);
+      };
+      await go(r.card);
+      if (touch) await go(r.plot);
+      else {
+        await p.mouse.move(...r.plot, { steps: 4 });
+        await settle(300);
+      }
+      const q = await p.evaluate(() => {
+        const b = window.deck.table.board;
+        return { reason: b.reasonBox, chips: b.chips, cap: b.captionBox() };
+      });
+      const risk = q.chips.filter((c) => c.kind === 'risk').map((c) => `${c.text} on ${c.plot}`);
+      if (!q.chips.some((c) => c.kind === 'risk' && c.plot === 15) || !q.chips.some((c) => c.kind === 'risk' && c.plot === 14)) extra.push(`no greyed bonus from the crop the crow may take: ${JSON.stringify(q.chips)}`);
+      if (q.reason?.text !== 'The crow may take the carrot first.') extra.push(`the reason with a crow about: "${q.reason?.text}"`);
+      const cross = (a, c) => a && Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 0.5 && Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 0.5;
+      if (cross(q.reason, q.cap)) extra.push('the reason line sits over the plate\'s caption');
+      console.log(`       ${label} crow about: kept ground ${guard.join(',')}; greyed ${risk.join(', ')}; reason "${q.reason?.text}" at y ${Math.round(q.reason?.y ?? 0)}, caption at y ${Math.round(q.cap.y)}`);
+      await p.evaluate(() => window.deck.table.putDown(true));
+    }],
+    ['round 9: a big harvest\'s slip in three lines, its page named', async () => {
+      await fresh(77);
+      await p.evaluate(() => {
+        const d = window.deck;
+        const s = d.state();
+        for (const q of s.plots) { q.crop = null; q.obj = null; }
+        const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        s.plots[5].crop = crop(9701, 'corn', 4, 4);
+        s.plots[4].crop = crop(9702, 'beans', 0, 3);
+        s.plots[6].crop = crop(9703, 'beans', 0, 3);
+        s.plots[1].crop = crop(9704, 'sunflower', 0, 3);
+        s.plots[9].crop = crop(9705, 'radish', 0, 1);
+        s.plots[0].obj = 'beehive';
+        s.pages = ['bees', 'tall'];
+        s.levels = { bees: 1, tall: 1 };
+        d.fast(false);
+        d.table.syncAll();
+        d.endDay();
+      });
+      let best = { lines: 0, words: [], chips: 0 };
+      for (let k = 0; k < 160 && (await p.evaluate(() => window.deck.busy())); k++) {
+        const q = await p.evaluate(() => {
+          const slip = [...document.querySelectorAll('.sb-slip:not(.total)')].find((e) => e.querySelector('.sb-chipword'));
+          if (!slip) return null;
+          const rows = ['ys', 'as', 'xs'].filter((c) => slip.querySelector(`.sb-steps.${c} .sb-chip:not(.waiting)`));
+          return { lines: rows.length, words: [...slip.querySelectorAll('.sb-chip:not(.waiting) .sb-chipword')].map((e) => e.textContent.trim()).filter(Boolean), chips: slip.querySelectorAll('.sb-chip:not(.waiting)').length };
+        });
+        if (q && q.lines >= best.lines && q.chips >= best.chips) best = q;
+        await p.waitForTimeout(25);
+      }
+      if (best.lines < 3) extra.push(`the corn's slip shows ${best.lines} lines of bonuses`);
+      if (!best.words.includes('Busy Bees') || !best.words.includes('Tall Rows')) extra.push(`the pages on the slip are not named: ${best.words.join(', ')}`);
+      // Tall Rows from each of its four neighbours is one chip whose number grows.
+      if (best.chips > 7) extra.push(`${best.chips} chips on the corn's slip`);
+      console.log(`       ${label} corn slip: ${best.lines} lines, ${best.chips} chips, pages named ${best.words.join(', ')}`);
+    }],
+    ['round 9: the bench clear of the screen\'s foot', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const l = document.querySelector('.sb-lantern .sb-label').getBoundingClientRect();
+        return { bottom: l.bottom, h: innerHeight };
+      });
+      if (q.bottom > q.h - 12) extra.push(`the "End day" label ends ${Math.round(q.h - q.bottom)} px above the screen's foot`);
+      console.log(`       ${label} "End day" label ends at y ${Math.round(q.bottom)} of ${q.h}`);
     }],
     ['stall', async () => {
       await toStall(91, 400);

@@ -170,16 +170,14 @@ describe('round 8: engine pages level up at the stall', () => {
       expect(X.levelName?.(R.PAGES[id].name, 3)).toBe(`${R.PAGES[id].name} III`);
     }
     expect(X.levelChange?.('bees', 2)).toBe(`Crops near a beehive get x${(TUNING as unknown as { levelUp?: Record<string, number[]> }).levelUp?.bees[0]} bloom, not x${TUNING.beesTimes}.`);
-    // Hot Beds II: a chili picks one night more.
+    // Hot Beds II: round 9, a chili's neighbours get more bloom (round 8: it picked one night more).
     const hot = table(['radish'], { year: 2 });
     hot.pages = ['hot'];
     (hot as RunState & { levels?: Record<string, number> }).levels = { hot: 2 };
-    hot.plots[0].crop = crop(1, 'chili', 2, 2);
-    let picks = 0;
-    for (let n = 0; n < 8 && hot.plots[0].crop?.kind === 'chili'; n++) {
-      if (harvests(endDay(hot)).some((h) => h.kind === 'chili')) picks++;
-    }
-    expect(picks).toBe(TUNING.hotPicks + 1);
+    hot.plots[0].crop = crop(1, 'chili', 0, 2);
+    hot.plots[1].crop = crop(2, 'carrot', 2, 2);
+    const hc = harvests(endDay(hot)).find((h) => h.kind === 'carrot')!;
+    expect(hc.mult.find((st) => st.icon === 'chili')?.v).toBeGreaterThan(TUNING.hotTimes[0]);
     // Trellis II and Tall Rows II: more bloom.
     const vines = table(['radish'], { year: 2 });
     vines.pages = ['vines'];

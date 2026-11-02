@@ -489,11 +489,13 @@ export class Sheets {
     // The season just closed, and the share of its surplus that carries into the next one.
     const carry = nextCarry(s);
     // What carries over is said as where the next season starts: "Summer starts with 8." ("8 carries over" was never explained.)
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}: ${last.earned} of ${last.quota}.${carry ? ` ${cap(SEASON_NAMES[nextSeason(s).season])} starts with ${carry}.` : ''}`));
+    // Round 9: each sentence keeps to one line, so the head never wraps "54." onto a line of its own.
+    if (last) head.append(el('p', 'sb-closed', `<span>${cap(SEASON_NAMES[last.season])}: ${last.earned} of ${last.quota}.</span>${carry ? ` <span>${cap(SEASON_NAMES[nextSeason(s).season])} starts with ${carry}.</span>` : ''}`));
     const coming = nextSeason(s);
-    head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins. ${cap(SEASON_NAMES[coming.season])} asks ${nextQuota(s)}.`));
-    // Each new year the merchant brings new stock for this run, laid on the year's first tray: said at that stall.
-    if (s.season === 0 && s.year >= 2 && s.stock?.length) {
+    head.append(el('p', 'sb-purse-line', `<span class="sb-say">You have <b>${s.coins}</b> coins.</span> <span class="sb-say">${cap(SEASON_NAMES[coming.season])} asks ${nextQuota(s)}.</span>`));
+    // Each new year the merchant brings new stock for this run, laid on the year's first tray: said at that stall (round
+    // 9: the one after winter, which opens the year; it was said a stall late).
+    if (s.season === 3 && s.stockYear === s.year + 1 && s.stock?.length) {
       const plain = s.stock.filter((o) => !o.up).map((o) => lower(o.card));
       const up = s.stock.filter((o) => o.up).map((o) => lower(o.card));
       const words = plain.length && up.length ? `${listOf(plain)}, and improved ${listOf(up)}` : up.length ? `improved ${listOf(up)}` : listOf(plain);
@@ -690,7 +692,8 @@ export class Sheets {
     // Services on the tray's lip: throw a card out, improve one, fresh stock, and a scoop from year 2.
     const lip = el('div', 'sb-lip');
     const thing = (key: string, url: string, label: string, price: number, ok: boolean, words: string, verb: string, why: string, go: () => void, stop = '') => {
-      const b = btn(`sb-thing${this.picked === key ? ' lifted' : ''}`, `<img src="${url}" alt=""><span>${label}</span><em>${price} coins</em>`, () =>
+      // Round 9: a thing not sold today says so where its price would be (the scoop showed "300 coins" when refused).
+      const b = btn(`sb-thing${this.picked === key ? ' lifted' : ''}${stop ? ' refused' : ''}`, `<img src="${url}" alt=""><span>${label}</span><em>${stop ? 'Not now' : `${price} coins`}</em>`, () =>
         this.lift(key, () => {
           if (!ok) {
             this.ctx.audio.cue('deck.deny');

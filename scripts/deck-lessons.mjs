@@ -363,10 +363,34 @@ async function session(label, viewport, touch) {
 
   // ---------------------------------------------------------------- day 3: bloom; quick crops never run the bench short
   t = await step('day 3, dawn');
-  check(`${label}: day 3 deals two radishes, a carrot and the lettuce`, t.hand.join() === 'radish,radish,carrot,lettuce', t.hand.join());
-  check(`${label}: the bloom lesson teaches the timing: the carrot ripens tonight`, /ripens tonight/i.test(t.line), t.line);
+  // Round 9: day 3 deals a radish, the lettuce, and a radish or a carrot, one of the two: the spring's first real choice
+  // (the ninth playtest: "spring is set hands, so there are no real decisions until summer").
+  check(`${label}: day 3 deals a radish, the lettuce, and a radish or a carrot`, t.hand.join() === 'radish,lettuce,radish,carrot', t.hand.join());
+  const pairShown = await p.evaluate(() => {
+    const s = window.deck.state();
+    const els = [...document.querySelectorAll('.sb-hand .sb-card.sb-pair')].map((e) => Number(e.dataset.uid)).sort();
+    const or = document.querySelector('.sb-hand .sb-card.sb-pair-b');
+    const after = or ? getComputedStyle(or, '::after').content : '';
+    return { pair: [...(s.either ?? [])].sort(), els, or: after };
+  });
+  check(`${label}: the pair is ringed in the hand, with "or" between them`, pairShown.pair.length === 2 && JSON.stringify(pairShown.pair) === JSON.stringify(pairShown.els) && /or/.test(pairShown.or), JSON.stringify(pairShown));
+  check(`${label}: the choice comes first, in plain words: "Plant a radish or a carrot, not both."`, t.lesson === 'either' && t.line === 'Plant a radish or a carrot, not both.', `${t.lesson}: "${t.line}"`);
   check(`${label}: still no scoops`, !t.pieces.scoops && t.cost === 0);
-  await shot('8-bloom');
+  await shot('8-either');
+  // The previews show the trade: the pair's carrot pays in two nights; the pair's radish beside the ripening carrot pays tonight.
+  {
+    const trade = await p.evaluate(() => {
+      const d = window.deck;
+      const s = d.state();
+      const [r, k] = s.either;
+      const at = (uid) => s.hand.findIndex((c) => c.uid === uid);
+      const free = s.plots.findIndex((q, i) => i > 8 && !q.crop && !q.obj);
+      const later = d.previewAt(at(k), free);
+      const now = d.previewAt(at(r), 4);
+      return { later: later?.harvest ?? null, now: now?.marks?.find((m) => m.plot === 5) ?? null };
+    });
+    check(`${label}: the carrot's preview says what it pays later; the radish's raises the ripening carrot's pay tonight`, trade.later?.score >= 5 && trade.now?.bloom === 1 && trade.now?.total > 5, JSON.stringify(trade));
+  }
   // Drag a radish beside the carrot: the carrot's +1 bloom shows while it is over the plot.
   {
     const cp = await cardPoint(await handIndex('radish'));
@@ -390,6 +414,8 @@ async function session(label, viewport, touch) {
   }
   await wait(600);
   t = await step('day 3, two radishes round the carrot');
+  // The second radish was the pair's: the carrot of the pair went back in the tin, and the choice is done.
+  check(`${label}: planting one of the pair sends the other back to the tin`, !t.hand.includes('carrot') && t.done.includes('either'), `${t.hand.join()}; ${t.done.join()}`);
   check(`${label}: the bloom lesson ends`, t.done.includes('bloom'), t.done.join());
   // The radishes are free and the carrot and lettuce a scoop each: the bench never runs short, so the scoops stay off the table.
   check(`${label}: no scoops while nothing costs more than the bench holds`, !t.pieces.scoops && t.cost === 0 && !/scoop/i.test(t.line), t.line);
@@ -518,7 +544,8 @@ async function session(label, viewport, touch) {
   const saved = await p.evaluate(() => ({ bench: window.deck.state().bench, refill: document.querySelectorAll('.sb-scoops img.refill').length, shown: document.querySelectorAll('.sb-scoops img').length }));
   check(`${label}: at night a pulled crop's scoop flies to the bench`, flew > 0, `${flew} in flight at once`);
   t = await step('day 5, dawn');
-  check(`${label}: dawn refills the bench one scoop after another, the two put back too`, saved.refill === saved.bench && saved.shown === saved.bench && saved.bench === 5, JSON.stringify(saved));
+  // Round 9: one or two put back (the day 3 pair's carrot went back in the tin, so only the lettuce may be pulled).
+  check(`${label}: dawn refills the bench one scoop after another, the ones put back too`, saved.refill === saved.bench && saved.shown === saved.bench && saved.bench >= 4, JSON.stringify(saved));
   check(`${label}: and the next lesson says why: "Crops pulled last night put scoops back."`, t.lesson === 'saved' && t.line === 'Crops pulled last night put scoops back.', `${t.lesson}: "${t.line}"`);
   await shot('12c-saved');
 
@@ -657,7 +684,8 @@ async function session(label, viewport, touch) {
     await shot('19-stall');
     // Round 7: the run's first stall offers an engine to take home, free. Its lesson comes first; then the purse's.
     const offer = await p.evaluate(() => ({ n: document.querySelectorAll('.sb-enginecard').length, rules: window.deck.state().shop.engines?.length ?? 0, words: [...document.querySelectorAll('.sb-enginecard')].map((e) => e.textContent.trim()) }));
-    check(`${label}: the first stall offers three engines, a card and its page each, with one line to pick`, offer.n === 3 && offer.rules === 3 && t.lesson === 'engine' && /^Pick one to take home, free\.$/.test(t.line), `${offer.n} clippings, lesson ${t.lesson}: ${t.line}; ${offer.words.join(' | ')}`);
+    // Round 9: all four engines (three before).
+    check(`${label}: the first stall offers all four engines, a card and its page each, with one line to pick`, offer.n === 4 && offer.rules === 4 && t.lesson === 'engine' && /^Pick one to take home, free\.$/.test(t.line), `${offer.n} clippings, lesson ${t.lesson}: ${t.line}; ${offer.words.join(' | ')}`);
     // The way on asks for a pick first.
     await p.evaluate(() => document.querySelector('.sb-signpost').scrollIntoView({ block: 'center' }));
     if (touch) await tap(...(await center('.sb-signpost')));
@@ -677,13 +705,14 @@ async function session(label, viewport, touch) {
     t = await step('the stall, engine picked');
     const took = await p.evaluate(() => ({ engine: window.deck.state().shop.engine, pinned: document.querySelectorAll('.sb-enginecard.picked').length, faded: document.querySelectorAll('.sb-enginecard.other').length }));
     await shot('19a-stall-engine');
-    check(`${label}: a ${touch ? 'tap' : 'key'} picks the engine, pinned, the others faded`, took.engine === 1 && took.pinned === 1 && took.faded === 2, JSON.stringify(took));
+    check(`${label}: a ${touch ? 'tap' : 'key'} picks the engine, pinned, the others faded`, took.engine === 1 && took.pinned === 1 && took.faded === 3, JSON.stringify(took));
     check(`${label}: then the stall's lesson: buy a seed`, /coins/i.test(t.line), t.line);
     check(`${label}: the first stall shows only the goods`, !t.pieces.pages && !t.pieces.services);
     // Round 6: the guided run's summer, its first season on its own, asks 180 (it asked 230 and the playtest missed by 5);
-    // round 7: 240, since the guided run now takes an engine at this stall.
+    // round 7: 240, since the guided run now takes an engine at this stall; round 9: 330 (the ninth playtest met 240 on
+    // night 3, and the careful line took a median 1.82 times it).
     const head = await p.evaluate(() => document.querySelector('.sb-purse-line')?.textContent ?? '');
-    check(`${label}: the guided run's first stall says summer asks 240`, /Summer asks 240\./.test(head), head);
+    check(`${label}: the guided run's first stall says summer asks 330`, /Summer asks 330\./.test(head), head);
     const before = await p.evaluate(() => window.deck.state().coins);
     const idx = await p.evaluate(() => window.deck.state().shop.cards.findIndex((c) => c.price <= window.deck.state().coins));
     check(`${label}: the first stall stocks a seed`, await p.evaluate(() => window.deck.state().shop.cards.some((c) => ['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili'].includes(c.card))));

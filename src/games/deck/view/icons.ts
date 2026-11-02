@@ -364,7 +364,7 @@ const map = (k: Diagram): Bit => ({ t: 'map', k });
 const prod = (k: SeedId): Bit => ({ t: 'produce', k });
 
 /** What a card does, as a line of pictures: "carrot +2 basket" for the radish. `bees`: Busy Bees is kept. */
-export function pictogram(id: CardId, up: boolean, bees = 0): Bit[] {
+export function pictogram(id: CardId, up: boolean, bees = 0, hot?: number): Bit[] {
   switch (id) {
     case 'radish':
       return [prod('carrot'), Y('+2'), BASKET];
@@ -392,7 +392,8 @@ export function pictogram(id: CardId, up: boolean, bees = 0): Bit[] {
     case 'wheat':
       return [prod('wheat'), Y('+2'), BASKET];
     case 'chili':
-      return [map('next'), B('×1.5'), BLOOMB];
+      // Round 9: Hot Beds sets its bloom at the page's level.
+      return [map('next'), B(`×${hot ?? 1.5}`), BLOOMB];
     case 'can':
       return [map('row'), MOON, I('+1')];
     case 'compost':

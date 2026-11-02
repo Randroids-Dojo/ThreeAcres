@@ -25,6 +25,9 @@
 // --tune=key:value plays any TUNING number; a value in brackets or braces is
 // read as JSON (--tune=quotas2:[700,900,1080,1220]).
 //
+// Round 9 adds the snowball measures: the most any season's median take over quota reached, the median single
+// harvest of year 2 (set it against the other engines'), and the coins a won run ends with.
+//
 // It uses only the bot and the rules' public calls, so the same file runs
 // against an older build (copy it into a `git archive` of the commit).
 // npx tsx scripts/deck-strategies.ts [runs] [policy...] [--seasons] [--noTwists] [--first=n]
@@ -119,11 +122,12 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
   const unspent: number[] = [];
   // Round 8: take over quota by season, and the engine page's level when the run ends (runs at II or more, at III).
   const byK: number[][] = Array.from({ length: 12 }, () => []);
-  const levels = [0, 0];
+  const levels = [0, 0, 0];
   // Of the runs that reached year 3: the engine page at II or more, at III, and the coins left at the end of those lost.
   const late = { runs: 0, two: 0, three: 0, lost: [] as number[] };
   // Round 8: hitches aimed the same way as the stall before offered (the same twist on the same crop, row or page).
   let aimRepeats = 0;
+  let aimRepeats2 = 0;
   let aimStalls = 0;
   let maxAim = 0;
   const ratio: number[][] = [[], [], []];
@@ -148,6 +152,11 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
   // Round 7: seasons after a hitch and after a help, [played, met]; hitches offered that miss the build, by hitch.
   const after = { hitch: [0, 0], boon: [0, 0] };
   const miss = new Map<string, [number, number]>();
+  // Round 9: every single harvest of year 2 (its median, set against the other engines: does one snowball?), and the
+  // coins a won run ends with.
+  const y2h: number[] = [];
+  const bestY2: number[] = [];
+  const wonCoins: number[] = [];
   const t0 = performance.now();
   for (let i = first; i < first + runs; i++) {
     const meta = newMeta();
@@ -162,7 +171,9 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     let season: Harvest[] = [];
     let lastSeason: Harvest[] = [];
     let prevOffer: { id: string; crop?: string; row?: number; page?: string }[] = [];
+    let prevOffer2: { id: string; crop?: string; row?: number; page?: string }[] = [];
     const aimCount = new Map<string, number>();
+    let seasonBest = 0;
     const aimKey = (t: { id: string; crop?: string; row?: number; page?: string }) => `${t.id}:${t.crop ?? ''}:${t.row ?? ''}:${t.page ?? ''}`;
     const tally = (ev: Ev[]) => {
       for (const e of ev) {
@@ -206,7 +217,11 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
           const now = s.shop.twists;
           const crop = (t: { id: string; crop?: string }) => (t.id === 'glut' || t.id === 'buyer' ? t.crop : undefined);
           if (now.some((t) => prevOffer.some((b) => aimKey(b) === aimKey(t) || (!!crop(t) && crop(t) === crop(b))))) aimRepeats++;
+          // Round 9: a hitch aimed as the one two stalls back (frost on the same crop's row counts, whichever row).
+          const same = (a: { id: string; crop?: string }, b: { id: string; crop?: string }) => aimKey(a) === aimKey(b) || (a.id === 'frost' && b.id === 'frost' && !!a.crop && a.crop === b.crop);
+          if (now.some((t) => !(R.BOONS as readonly string[]).includes(t.id) && prevOffer2.some((b) => !(R.BOONS as readonly string[]).includes(b.id) && same(b, t)))) aimRepeats2++;
           for (const t of now) if (!(R.BOONS as readonly string[]).includes(t.id)) aimCount.set(aimKey(t), (aimCount.get(aimKey(t)) ?? 0) + 1);
+          prevOffer2 = prevOffer;
           prevOffer = now.map((t) => ({ ...t }));
         }
         if (hitchOn && lastSeason.length) {
@@ -236,7 +251,20 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
         const held = s.hand.length;
         // Scoops above the usual three each morning: Green Thumb, the Long Furrow and scoops bought for good.
         const extra = energyMax(s) - R.TUNING.energy;
+        const kNow = (s.year - 1) * 4 + s.season;
         const ev = botDay(s, o, dice);
+        if (kNow >= 4 && kNow < 8) {
+          for (const e of ev) {
+            if (e.t === 'harvest') {
+              y2h.push(e.h.score);
+              seasonBest = Math.max(seasonBest, e.h.score);
+            }
+            if (e.t === 'seasonEnd') {
+              bestY2.push(seasonBest);
+              seasonBest = 0;
+            }
+          }
+        }
         // Up to dusk: scoops spent on plays (the shears put theirs back at once), cards played, drawn and tossed.
         let spent = 0;
         let left = held;
@@ -276,11 +304,13 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     }
     cleared.push(s.stats.seasonsCleared);
     unspent.push(s.coins);
+    if (s.end?.won) wonCoins.push(s.coins);
     maxAim = Math.max(maxAim, ...aimCount.values(), 0);
     const st = s as R.RunState & { levels?: Record<string, number>; engine?: string | null };
     const lv = Math.max(0, ...Object.values(st.levels ?? {}));
     if (lv >= 2) levels[0]++;
     if (lv >= 3) levels[1]++;
+    if (lv >= 4) levels[2]++;
     if (s.stats.seasonsCleared >= 8) {
       late.runs++;
       if (lv >= 2) late.two++;
@@ -309,7 +339,13 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     console.log(`${''.padEnd(17)} at dusk, by scoops above the usual three a morning: none ${days(idle, 0)}; one ${days(idle, 1)}; two ${days(idle, 2)}; three or more ${days(idle, 3)}`);
   }
   console.log(`${''.padEnd(17)} round 8: of the runs that reached year 3 (${late.runs}), the engine page at II or more ${pct(late.two, late.runs)}, at III ${pct(late.three, late.runs)}; coins left when one of those was lost: median ${med(late.lost)} (${late.lost.length} runs)`);
-  console.log(`${''.padEnd(17)} round 8: the engine page at II or more when the run ends ${pct(levels[0], runs)}, at III ${pct(levels[1], runs)}; coins left at the end median ${med(unspent)}, p90 ${[...unspent].sort((a, b) => a - b)[Math.floor(runs * 0.9)] ?? 0}; stalls offering a twist aimed as the stall before ${pct(aimRepeats, aimStalls)} of ${aimStalls}; the most one hitch was offered in a run ${maxAim}`);
+  console.log(`${''.padEnd(17)} round 8: the engine page at II or more when the run ends ${pct(levels[0], runs)}, at III ${pct(levels[1], runs)}, at IV ${pct(levels[2], runs)}; coins left at the end median ${med(unspent)}, p90 ${[...unspent].sort((a, b) => a - b)[Math.floor(runs * 0.9)] ?? 0}; stalls offering a twist aimed as the stall before ${pct(aimRepeats, aimStalls)} of ${aimStalls}, a hitch aimed as the one two stalls back ${pct(aimRepeats2, aimStalls)}; the most one hitch was offered in a run ${maxAim}`);
+  {
+    const meds = byK.map((a) => (a.length ? med(a) : 0));
+    const top = Math.max(...meds);
+    const p90 = [...y2h].sort((a, b) => a - b)[Math.floor(y2h.length * 0.9)] ?? 0;
+    console.log(`${''.padEnd(17)} round 9: the most a season's median take over quota reached ${top.toFixed(2)} (season ${meds.indexOf(top) + 1}); a single harvest in year 2: median ${med(y2h)}, p90 ${p90} (${y2h.length} harvests), a season's best median ${med(bestY2)}; coins at the end of a won run: median ${med(wonCoins)} (${wonCoins.length} runs), of every run ${med(unspent)}`);
+  }
   if (perSeason) {
     console.log(`${''.padEnd(17)} per season: ${played.map((p, k) => (p ? `${Math.round((met[k] / p) * 100)}%` : '-')).join(' ')}`);
     console.log(`${''.padEnd(17)} take/quota median by season: ${byK.map((a) => (a.length ? med(a).toFixed(2) : '-')).join(' ')}`);

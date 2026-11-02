@@ -49,7 +49,7 @@ function toStall(s: RunState): void {
 }
 
 describe('round 7: an engine at every run\'s first stall', () => {
-  it('a run\'s first stall offers three engines, each a card and the page that multiplies it; later stalls offer none', () => {
+  it('a run\'s first stall offers engines (round 9: all four), each a card and the page that multiplies it; later stalls offer none', () => {
     const seen = new Set<string>();
     for (let seed = 1; seed <= 24; seed++) {
       for (const guided of [false, true]) {
@@ -57,8 +57,8 @@ describe('round 7: an engine at every run\'s first stall', () => {
         toStall(s);
         const offer = (s.shop as R.Shop & { engines?: string[] }).engines;
         expect(offer, 'the first stall offers engines').toBeDefined();
-        expect(offer).toHaveLength(3);
-        expect(new Set(offer).size).toBe(3);
+        expect(offer).toHaveLength(TUNING.engineChoices);
+        expect(new Set(offer).size).toBe(TUNING.engineChoices);
         for (const id of offer!) seen.add(id);
         // Pick the second: it goes home with the run, free.
         const coins = s.coins;
@@ -187,26 +187,31 @@ describe('round 7: twists aimed at the run', () => {
       const hitch = s.shop!.twists!.find((t) => HITCHES.includes(t.id))!;
       offered++;
       // What it would cost this run, from the season just played: at least the floor, and its quota cut is that.
-      const aim = X.hitchAims?.(s).find((a) => a.t.id === hitch.id);
+      // Round 9: glut and frost can aim at the second crop or row too, so the aim is the one on the same crop and row.
+      const aim = X.hitchAims?.(s).find((a) => a.t.id === hitch.id && a.t.crop === hitch.crop && (a.t.row ?? -1) === (hitch.row ?? -1) && a.t.page === hitch.page);
       expect(aim, `${hitch.id} is aimed`).toBeDefined();
       expect(aim!.v).toBeGreaterThanOrEqual(TUNING.minHit);
       // Round 8: the cut is what it still costs a careful player and the worth of the help beside it.
       const help = s.shop!.twists!.find((t) => !HITCHES.includes(t.id)) as R.Twist & { worth?: number };
       const cut = R.hitchCut({ t: hitch, v: aim!.v }, help.worth ?? 0);
-      expect(R.twistEase(hitch)).toBeCloseTo(Math.min(TUNING.easeMax, Math.max(TUNING.easeMin, Math.round(cut * 100) / 100)), 5);
+      // Round 9: never clipped at the usual most when a pair fits it; a pair that cannot be weighed within it is cut in
+      // full, up to `easeHard`.
+      const hard = (TUNING as typeof TUNING & { easeHard?: number }).easeHard ?? TUNING.easeMax;
+      expect(R.twistEase(hitch)).toBeCloseTo(Math.min(hard, Math.max(TUNING.easeMin, Math.round(cut * 100) / 100)), 5);
       // Crows never come while a scarecrow stands; sunflowers facing up never come (played ahead they cost nothing).
       if (hitch.id === 'crows' && s.plots.some((p) => p.obj === 'scarecrow')) crowsGuarded++;
       expect(hitch.id).not.toBe('sunup');
-      // A glut is of the crop that took the most last season, and says so: "Your carrots sell for half."
+      // A glut is of the crop that took the most last season (round 9: or the next, a lighter hitch), and says so:
+      // "Your carrots sell for half."
       const t = s.tally!;
       if (hitch.id === 'glut') {
-        const top = (Object.keys(t.kinds) as R.SeedId[]).sort((a, b) => (t.kinds[b] ?? 0) - (t.kinds[a] ?? 0))[0];
-        expect(hitch.crop).toBe(top);
-        expect(R.twistText(hitch).toLowerCase()).toContain(`your ${R.PLURALS[top]} sell`);
+        const top = (Object.keys(t.kinds) as R.SeedId[]).sort((a, b) => (t.kinds[b] ?? 0) - (t.kinds[a] ?? 0)).slice(0, 3);
+        expect(top).toContain(hitch.crop);
+        expect(R.twistText(hitch).toLowerCase()).toContain(`your ${R.PLURALS[hitch.crop!]} sell`);
       }
-      // Frost falls on the row the run's sown crops paid most from, and names the crop sown there.
+      // Frost falls on the row the run's sown crops paid most from (round 9: or the next), and names the crop sown there.
       if (hitch.id === 'frost') {
-        expect(t.rows[hitch.row!]).toBe(Math.max(...t.rows));
+        expect([...t.rows].sort((a, b) => b - a).slice(0, 3)).toContain(t.rows[hitch.row!]);
         expect(R.twistText(hitch)).toBe(`Frost on your ${R.PLURALS[hitch.crop!]}${R.PLURALS[hitch.crop!].endsWith('s') ? "'" : "'s"} row.`);
       }
     });
@@ -249,9 +254,11 @@ describe('round 7: the guided run sets no traps', () => {
     for (let seed = 1; seed <= 60; seed++) {
       for (const left of [3, 0]) {
         const { s } = newRun(seed, null);
+        // Round 9: days played after the quota is met do not count, so the quota is met only on the last night.
         for (let g = 0; g < 10 && s.phase === 'day'; g++) {
           s.energy = left;
-          s.earned = Math.max(s.earned, s.quota);
+          if (s.day === TUNING.days) s.earned = Math.max(s.earned, s.quota);
+          if (s.day === TUNING.days) s.idle = { scoops: (s.idle?.scoops ?? 0) + left, days: (s.idle?.days ?? 0) + 1 };
           endDay(s);
         }
         const thumb = s.shop!.pages.some((p) => p.page === 'thumb');
@@ -291,7 +298,8 @@ describe('round 7: the guided run sets no traps', () => {
   });
 
   it('the guided spring asks for its last night, and day 6 brings radishes to ring the carrot', () => {
-    expect(newRun(1, null, true).s.quota).toBeGreaterThanOrEqual(90);
+    // Round 9: 75, since day 3 deals a radish or a carrot, not both (the careful line takes 84 with the radish).
+    expect(newRun(1, null, true).s.quota).toBeGreaterThanOrEqual(75);
     expect(R.GUIDED_DEALS[5].filter((c) => c === 'radish').length).toBe(2);
   });
 });
@@ -316,6 +324,7 @@ describe('round 7: the engines said plainly', () => {
     expect(say?.('bees')).toBe('A beehive and Busy Bees.');
     expect(say?.('hot')).toBe('Four chilies and Hot Beds.');
     expect(say?.('vines')).toBe('Beans and Trellis.');
-    expect(say?.('tall')).toBe('Corn and Tall Rows.');
+    // Round 9: the tall engine brings two corn again.
+    expect(say?.('tall')).toBe('Two corn and Tall Rows.');
   });
 });

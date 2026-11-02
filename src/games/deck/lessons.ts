@@ -7,7 +7,7 @@
 // so a run that strays from the guided deals still gets each one when it
 // first matters.
 
-import { CARDS, costOf, energyMax, extraGrowth, isRipe, neighbours, nextSeason, ripeTonight, SEASON_NAMES, targetsFor, TUNING, type Card, type CardId, type RunState } from './rules';
+import { CARDS, costOf, crowReach, energyMax, extraGrowth, isRipe, MASS, neighbours, nextSeason, PLURALS, ripeTonight, SEASON_NAMES, targetsFor, TUNING, type Card, type CardId, type RunState, type SeedId } from './rules';
 
 /** Pieces of the table that arrive with a lesson. The plot, the hand and the almanac are always there. */
 export type Piece = 'lantern' | 'peg' | 'scoops' | 'bloom' | 'coins' | 'tin' | 'spent' | 'tonight' | 'pages' | 'services';
@@ -95,6 +95,31 @@ export function dearCard(s: RunState): Card | undefined {
   return s.hand.find((c, i) => costOf(c.id, c.up) > s.energy && (CARDS[c.id].target === 'board' || targetsFor(s, i).length > 0));
 }
 const standing = (s: RunState, obj: 'scarecrow' | 'beehive') => s.plots.some((p) => p.obj === obj);
+/** The pair in hand that is one or the other (round 9), if any. */
+export const pairCards = (s: RunState): [Card, Card] | null => {
+  const e = s.either;
+  if (!e) return null;
+  const a = s.hand.find((c) => c.uid === e[0]);
+  const b = s.hand.find((c) => c.uid === e[1]);
+  return a && b ? [a, b] : null;
+};
+
+/**
+ * Round 9: what a crow about tonight means for this plot, in one line. With a scarecrow standing it names the ripe
+ * crops outside its 3 by 3 ("The crow can reach your carrot."), and says it keeps watch only when none are; the ninth
+ * playtest was told "Your scarecrow keeps watch." while the carrot on D4 sat outside it, and the crow took it.
+ */
+export function crowLine(s: RunState): string {
+  if (toHand(s, 'scarecrow')) return 'A crow is about. Set out the scarecrow.';
+  if (!standing(s, 'scarecrow')) return 'A crow will take a ripe crop tonight.';
+  const reach = crowReach(s);
+  if (!reach.length) return 'A crow is about. Your scarecrow keeps watch.';
+  const kinds = [...new Set(reach.map((i) => s.plots[i].crop!.kind))];
+  const one = (k: SeedId) => (MASS.includes(k) || k === 'beans' ? `your ${CARDS[k].name.toLowerCase()}` : reach.filter((i) => s.plots[i].crop!.kind === k).length > 1 ? `your ${PLURALS[k]}` : `your ${CARDS[k].name.toLowerCase()}`);
+  if (kinds.length === 1) return `The crow can reach ${one(kinds[0])}.`;
+  if (kinds.length === 2) return `The crow can reach ${one(kinds[0])} and ${one(kinds[1]).replace(/^your /, '')}.`;
+  return `The crow can reach ${WORDS[reach.length] ?? reach.length} ripe crops.`;
+}
 /** A dear card in hand the scoops can pay for: two scoops or more. */
 const dear = (v: View) => v.s.hand.find((c) => costOf(c.id, c.up) >= 2 && affordable(v, c));
 const morning = (s: RunState) => s.energy === s.bench;
@@ -174,18 +199,37 @@ const LESSONS: Lesson[] = [
     done: (v) => carrots(v.s).some((i) => radishesBy(v.s, i) > 0) || inHand(v, 'radish') < 0 || v.s.energy === 0 || nightPassed(v, 'companion'),
   },
   {
+    // Round 9: the guided day 3 deals a radish or a carrot, one of the two, and the previews show what each pays: the
+    // spring's first real choice (the ninth playtest: "spring is set hands, so there are no real decisions").
+    id: 'either',
+    after: ['companion'],
+    unlocks: [],
+    where: 'table',
+    ready: (v) => v.s.phase === 'day' && !!pairCards(v.s),
+    text: (v) => {
+      const [a, b] = pairCards(v.s) ?? [];
+      return a && b ? `Plant a ${name(a.id)} or a ${name(b.id)}, not both.` : 'Plant one of the two.';
+    },
+    point: (v) => (v.held ? 'board' : 'hand'),
+    done: (v) => !v.s.either || nightPassed(v, 'either'),
+  },
+  {
     id: 'bloom',
     after: ['companion'],
     unlocks: ['bloom'],
     where: 'table',
+    // Round 9: also once its day has gone by, or once a radish rings the carrot that ripens tonight: the day 3 pair can
+    // take the radish it waits for (then it is done at once, never shown), and the lessons after it must still come.
     ready: (v) =>
       v.s.phase === 'day' &&
-      v.s.energy > 0 &&
-      inHand(v, 'radish') >= 0 &&
-      carrots(v.s).some((i) => ripeTonight(v.s, i) && neighbours(v.s, i).some((j) => !v.s.plots[j].crop && !v.s.plots[j].obj)),
+      ((v.s.energy > 0 && inHand(v, 'radish') >= 0 && carrots(v.s).some((i) => ripeTonight(v.s, i) && neighbours(v.s, i).some((j) => !v.s.plots[j].crop && !v.s.plots[j].obj))) ||
+        carrots(v.s).some((i) => ripeTonight(v.s, i) && radishesBy(v.s, i) > 0) ||
+        v.s.day > 3 ||
+        v.s.season > 0 ||
+        v.s.year > 1),
     text: () => 'The carrot ripens tonight. Ring it with radishes.',
     point: (v) => (v.held ? 'board' : 'hand'),
-    done: (v) => carrots(v.s).some((i) => radishesBy(v.s, i) >= 2) || inHand(v, 'radish') < 0 || v.s.energy === 0 || nightPassed(v, 'bloom'),
+    done: (v) => carrots(v.s).some((i) => radishesBy(v.s, i) >= 2) || inHand(v, 'radish') < 0 || v.s.energy === 0 || !carrots(v.s).some((i) => ripeTonight(v.s, i)) || nightPassed(v, 'bloom'),
   },
   {
     // Cost, one piece at a time: the scoops and the cost printed on every card arrive with the first
@@ -315,7 +359,7 @@ const LESSONS: Lesson[] = [
     where: 'table',
     // At dawn, while there is still a day to answer it.
     ready: (v) => v.s.phase === 'day' && v.s.crow,
-    text: (v) => (toHand(v.s, 'scarecrow') ? 'A crow is about. Set out the scarecrow.' : standing(v.s, 'scarecrow') ? 'A crow is about. Your scarecrow keeps watch.' : 'A crow will take a ripe crop tonight.'),
+    text: (v) => crowLine(v.s),
     point: () => 'board',
     done: (v) => nightPassed(v, 'crows'),
     passive: 6,
@@ -454,15 +498,19 @@ export class Tutor {
    * Once a frame (and after every action): finish the lesson on screen if it is
    * done, start the next ready one, and return the line to show (or null).
    * `quiet` is true while the night runs or a sheet covers the table: nothing
-   * starts and passive lessons do not count down.
+   * starts and passive lessons do not count down. `hidden` (round 9) is true
+   * while a note stands in the lesson strip in front of the lesson: it waits
+   * behind the note and its time starts when it shows (the ninth playtest's
+   * pest lesson came up behind "54 carried over from summer." and was gone
+   * three seconds after the note).
    */
-  update(s: RunState, dev: Dev, held: Card | null, dt: number, quiet: boolean, aimed = false): { line: Line | null; unlocked: Piece[] } {
+  update(s: RunState, dev: Dev, held: Card | null, dt: number, quiet: boolean, aimed = false, hidden = false): { line: Line | null; unlocked: Piece[] } {
     const unlocked: Piece[] = [];
     const view: View = { s, dev, held, aimed, learn: this.learn, n: (k) => this.n(k), shown: this.shown };
     if (this.active) {
       const l = this.active;
       const onStall = l.where === 'stall';
-      if (!quiet || onStall) this.shown += dt;
+      if (onStall || (!quiet && !hidden)) this.shown += dt;
       view.shown = this.shown;
       const over = l.done(view) || (l.passive !== undefined && this.shown >= l.passive);
       if (over) {
@@ -481,6 +529,12 @@ export class Tutor {
         for (const k of ['pick', 'leave', 'detail', 'dear']) this.learn.n[`at:${next.id}:${k}`] = this.n(k);
         for (const p of next.unlocks) if (this.unlock(p)) unlocked.push(p);
         view.shown = 0;
+        // Round 9: a lesson already done as it comes (the player did it unasked) is marked done and never shown.
+        if (next.done(view)) {
+          this.learn.done.push(next.id);
+          if (next.id === 'newcard') this.meet(s);
+          this.active = null;
+        }
       }
     }
     // Cards in hand when no new-card lesson is pending are simply known: the guided days 1 to 3, and after it.

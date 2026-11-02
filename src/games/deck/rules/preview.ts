@@ -7,10 +7,10 @@
 // will be gone by then. Nothing here touches the real run or its rng.
 
 import { CARDS, isSeed } from './cards';
-import { forecast, isFinal, isRipe, pageOn, type Fate } from './board';
+import { crowReach, forecast, isFinal, isRipe, pageOn, type Fate } from './board';
 import { scoreHarvest, snapshot, type Snapshot } from './night';
 import { cloneRun, playCard } from './run';
-import type { Harvest, RunState } from './types';
+import type { CardId, Harvest, RunState, SeedId } from './types';
 
 /** Bonuses the board would seem to give but the night will not pay. */
 export interface Lost {
@@ -21,6 +21,19 @@ export interface Lost {
   why: 'gone';
   /** The plot of the crop that will be gone, for the reason. */
   from: number | null;
+}
+
+/**
+ * Round 9: bonuses tonight's pay counts that come from a ripe crop no scarecrow guards, while a crow is about: the crow
+ * takes one such crop before the harvest, so they may not come. The ninth playtest's corn previewed 252; the crow took
+ * the sunflower beside it first and the night paid about 50 less.
+ */
+export interface Risk {
+  yield: number;
+  bloom: number;
+  times: number;
+  /** The plot of the crop the crow may take, for the reason. */
+  from: number;
 }
 
 export interface Mark {
@@ -35,6 +48,8 @@ export interface Mark {
   nights: number;
   /** What the plot would seem to give but won't pay, greyed on the board with its reason. */
   lost?: Lost;
+  /** Round 9: what it gains from a crop a crow about tonight may take first (part of the gains above). */
+  risk?: Risk;
   /**
    * A crop already standing whose pay the play changes: what its next pick pays after the play, on the night it is
    * pulled. The sixth playtest saw a held radish's own "4" and only "+1" on the carrot beside it; the carrot's new
@@ -119,11 +134,22 @@ function parts(h: Harvest): { add: number; times: number } {
   return { add, times };
 }
 
-/** The first bonus the plot seems to give that the timed plot does not: where it comes from. */
-function missingFrom(seen: Harvest, paid: Harvest): number | null {
+/**
+ * The first bonus the plot seems to give that the timed plot does not: where it comes from. Round 9: one from the
+ * plot the card is aimed at first, so a reason names the crop the play is about (the ninth playtest's radish over B4
+ * said "The other corn is pulled before this one ripens.", a corn's bonus lost long before the radish came).
+ */
+function missingFrom(seen: Harvest, paid: Harvest, prefer: number | null = null): number | null {
   const has = (st: { icon: string; from?: number }) => [...paid.chips, ...paid.mult].some((p) => p.icon === st.icon && p.from === st.from);
-  const st = [...seen.chips, ...seen.mult].find((x) => x.from !== undefined && !has(x));
-  return st?.from ?? null;
+  const gone = [...seen.chips, ...seen.mult].filter((x) => x.from !== undefined && !has(x));
+  return (gone.find((x) => x.from === prefer) ?? gone[0])?.from ?? null;
+}
+
+/** The harvest again with these plots' crops gone from the plot (a crow may take one of them first). */
+function without(s: RunState, i: number, fates: readonly (Fate | null)[], gone: readonly number[]): Harvest {
+  const snap = plotOnNight(s, fates, 0);
+  for (const j of gone) snap.crops[j] = null;
+  return scoreHarvest(s, i, snap, { suns: suns(s), shears: false, roll: false, night: 0, n: harvestIndex(s, fates, i, 0) });
 }
 
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
@@ -152,6 +178,9 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
   };
   const tonight: number[] = [];
   const totals = (h: Harvest) => ({ chips: h.chipsTotal, ...parts(h) });
+  // A crow about tonight takes one ripe crop no scarecrow guards before the harvest, as the plot stands after the play.
+  const reach0 = s.crow ? crowReach(s) : [];
+  const reach1 = c.crow ? crowReach(c) : [];
   c.plots.forEach((p, i) => {
     const crop = p.crop;
     if (!crop) return;
@@ -182,10 +211,60 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     const comes = f1[i]!.ripeIn === 0 && j >= 0 && f0[j]!.ripeIn !== 0;
     if (j >= 0 && (pay.yield || pay.bloom || !near(pay.times, 1) || comes)) m.total = paid1.score;
     const lost = { yield: shown.yield - pay.yield, bloom: shown.bloom - pay.bloom, times: shown.times / pay.times };
-    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1) };
+    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1, plot) };
+    // Pulled tonight with a crow about: the part of what the play adds that comes from a crop the crow may take first.
+    if (f1[i]!.pull === 0 && reach1.length) {
+      const givers = (h: Harvest, reach: readonly number[]) => [...new Set([...h.chips, ...h.mult].map((st) => st.from).filter((f): f is number => f !== undefined && f !== i && reach.includes(f)))];
+      const g1 = givers(paid1, reach1);
+      if (g1.length) {
+        const safe1 = totals(without(c, i, f1, g1));
+        const g0 = j < 0 ? [] : givers(scoreFor(s, j, f0, true), reach0);
+        const safe0 = j < 0 ? bare : f0[j]!.pull === 0 ? totals(without(s, j, f0, g0)) : paid0;
+        const safe = { yield: safe1.chips - safe0.chips, bloom: safe1.add - safe0.add, times: safe1.times / safe0.times };
+        const risk = { yield: pay.yield - safe.yield, bloom: pay.bloom - safe.bloom, times: pay.times / safe.times };
+        if (risk.yield > 1e-6 || risk.bloom > 1e-6 || risk.times > 1 + 1e-6) m.risk = { ...risk, from: g1.find((g) => g === plot) ?? g1[0] };
+      }
+    }
     if (m.yield || m.bloom || !near(m.times, 1) || m.nights || m.lost) marks.push(m);
   });
   return { plot, harvest: isSeed(card.id) || pulled ? harvest : null, marks, tonight, market: marketTonight(c, f1) };
+}
+
+/** Crops said as many in a reason line ("The beans are pulled..."). */
+const MANY: readonly CardId[] = ['beans'];
+
+/**
+ * Why a greyed bonus won't pay, in one plain line under the aimed plot, or null: "The radish is pulled before the
+ * carrot ripens." Round 9: only from a mark that involves the aimed plot (its own bonus, or one it gives); otherwise no
+ * line. The ninth playtest's radish over B4 said "The other corn is pulled before this one ripens." and a carrot over B4
+ * "The radish is pulled before the sunflower ripens.", from the first lost mark found anywhere on the plot. With a crow
+ * about, a bonus from a crop it may take says so: "The crow may take the sunflower first." `seed` stands in for the
+ * held seed, not on the plot yet.
+ */
+export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId | null): string | null {
+  if (p.harvest?.never) return 'Too late to ripen before the end.';
+  const kind = (i: number | null) => (i === null ? null : (s.plots[i]?.crop?.kind ?? (i === aim ? seed : null)));
+  const name = (k: SeedId) => CARDS[k].name.toLowerCase();
+  const many = (k: SeedId) => MANY.includes(k);
+  // The aimed plot's own bonus first, then one it gives.
+  const mine = <T>(f: (m: Mark) => T | undefined) => p.marks.filter((m) => m.plot === aim && f(m)).concat(p.marks.filter((m) => m.plot !== aim && f(m)));
+  const l = mine((m) => (m.lost && (m.plot === aim || m.lost.from === aim) ? m : undefined))[0];
+  if (l?.lost) {
+    const taker = kind(l.plot);
+    const giver = kind(l.lost.from);
+    if (!taker || !giver) return 'Its neighbour is pulled first.';
+    // Two of a kind side by side: "The other beans are pulled before these ripen." (it said "the beans ... the beans").
+    if (taker === giver) return many(giver) ? `The other ${name(giver)} are pulled before these ripen.` : `The other ${name(giver)} is pulled before this one ripens.`;
+    return `The ${name(giver)} ${many(giver) ? 'are' : 'is'} pulled before the ${name(taker)} ${many(taker) ? 'ripen' : 'ripens'}.`;
+  }
+  const r = mine((m) => (m.risk && (m.plot === aim || m.risk.from === aim) ? m : undefined))[0];
+  if (r?.risk) {
+    const giver = kind(r.risk.from);
+    if (r.risk.from === aim) return 'The crow may take it before the harvest.';
+    return giver ? `The crow may take the ${name(giver)} first.` : 'The crow may take its neighbour first.';
+  }
+  if (p.harvest?.late) return 'Ripens next season.';
+  return null;
 }
 
 /**

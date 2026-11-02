@@ -652,9 +652,11 @@ describe('the guided first season', () => {
     // Three scoops, and two more for the two radishes pulled last night.
     expect(s.energy).toBe(5);
     expect(s.bench).toBe(5);
-    // Ring the carrot (ripe tonight) with two radishes: 5 yield x 3 bloom.
-    playCard(s, 0, 4);
-    playCard(s, 0, 1);
+    // Ring the carrot (ripe tonight) with two radishes: 5 yield x 3 bloom. Round 9: the second is one of a pair (a
+    // radish or a carrot): the carrot goes back in the tin.
+    playCard(s, s.hand.findIndex((c) => c.id === 'radish'), 4);
+    playCard(s, s.hand.findIndex((c) => c.id === 'radish'), 1);
+    expect(s.hand.map((c) => c.id)).toEqual(['lettuce']);
     const h = harvests(endDay(s));
     expect(h.find((x) => x.kind === 'carrot')!.score).toBe(15);
     // Days 4 to 6 bring one new card each, so each is met on its own: the beans, the can, the sunflower.
@@ -971,12 +973,15 @@ describe('quotas after the playtest', () => {
     expect(quotaFor(1, 1, [])).toBeGreaterThanOrEqual(Math.round(165 * 1.15));
     expect(quotaFor(1, 2, [])).toBeGreaterThanOrEqual(Math.round(185 * 1.15));
     expect(quotaFor(1, 3, [])).toBeGreaterThanOrEqual(Math.round(220 * 1.15));
-    // Spring of year 1 stays close to where the first round left it: the real puzzle.
-    expect(quotaFor(1, 0, [])).toBe(170);
+    // Spring of year 1 stays close to where the first round left it: the real puzzle (round 9: 160, with a dealt first hand).
+    expect(quotaFor(1, 0, [])).toBeGreaterThanOrEqual(150);
+    expect(quotaFor(1, 0, [])).toBeLessThanOrEqual(170);
     for (let year = 1; year <= 4; year++) {
       const winter = quotaFor(year, 3, []);
       const spring = quotaFor(year + 1, 0, []);
-      expect(spring / winter).toBeLessThan(1.25);
+      // Round 9: up to a third more (a quarter before): the stall before year 2 spring brings the engine's level II and
+      // the first twist, and every bot took 1.55 to 1.76 times year 2 spring at a quarter more (deck-fit).
+      expect(spring / winter).toBeLessThan(1.35);
       for (let season = 1; season < 4; season++) expect(quotaFor(year, season as 1 | 2 | 3, [])).toBeGreaterThan(quotaFor(year, (season - 1) as 0 | 1 | 2, []));
     }
   });
@@ -1629,15 +1634,19 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     }
     expect(offers).toBe(40);
     // A buyer is for a crop the run has not leaned on; a glut hits the one that has taken the most (round 7: in the
-    // season just played).
+    // season just played), or (round 9) the next when a glut of the first would cost more than a quota can be cut;
+    // never a buyer and a glut of one crop in the same pair.
     for (let seed = 1; seed <= 30; seed++) {
       const t = newRun(seed, null).s;
       t.season = 3;
       toStallWith(t, { ...rich(), kinds: { carrot: 900, beans: 200, radish: 50 }, take: 1150 });
-      for (const x of t.shop!.twists!) {
+      const tw = t.shop!.twists!;
+      for (const x of tw) {
         if (x.id === 'buyer') expect(x.crop).not.toBe('carrot');
-        if (x.id === 'glut') expect(x.crop).toBe('carrot');
+        if (x.id === 'glut') expect(['carrot', 'beans']).toContain(x.crop);
       }
+      const crops = tw.filter((x) => x.id === 'buyer' || x.id === 'glut').map((x) => x.crop);
+      expect(new Set(crops).size).toBe(crops.length);
     }
     // Across 40 runs every twist shows up, but sunflowers facing up (round 7: played ahead they cost nothing).
     expect(seen.size).toBe(BOONS.length + HITCHES.length - 1);
@@ -1757,15 +1766,12 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     const { s } = newRun(6, meta);
     s.season = 3;
     toStall(s);
-    const ev = leaveShop(s)!;
-    const stock = ev.find((e): e is Extract<Ev, { t: 'stock' }> => e.t === 'stock')!;
-    expect(stock).toBeTruthy();
-    expect(stock.cards).toHaveLength(0);
-    expect(stock.select).toHaveLength(TUNING.newStock);
-    for (const c of stock.select) expect(c).not.toBe('radish');
-    // The stall after year 2 spring lays them out, improved, at a little more.
-    toStall(s);
-    for (const c of stock.select) {
+    // Round 9: the stall that opens the year (after winter) brings the new stock and lays it on its own tray, improved,
+    // at a little more (it used to come on leaving it, so the year's second stall was the first to show it).
+    const select = (s.stock ?? []).filter((o) => o.up).map((o) => o.card);
+    expect(select).toHaveLength(TUNING.newStock);
+    for (const c of select) {
+      expect(c).not.toBe('radish');
       const o = s.shop!.cards.find((x) => x.card === c)!;
       expect(o).toBeTruthy();
       expect(o.up).toBe(true);
@@ -1776,6 +1782,14 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     const i = s.shop!.cards.findIndex((x) => x.up);
     buyCard(s, i);
     expect(s.draw.at(-1)).toMatchObject({ id: s.shop!.cards[i].card, up: true });
+    const ev = leaveShop(s)!;
+    const stock = ev.find((e): e is Extract<Ev, { t: 'stock' }> => e.t === 'stock')!;
+    expect(stock).toBeTruthy();
+    expect(stock.cards).toHaveLength(0);
+    expect(stock.select).toEqual(select);
+    // The next stall (after year 2 spring) does not bring more.
+    toStall(s);
+    expect(s.stock?.filter((o) => o.up).map((o) => o.card)).toEqual(select);
     // The next year brings two more, again.
     s.season = 3;
     leaveShop(s);
@@ -1787,11 +1801,12 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     const t = newRun(6, null).s;
     t.season = 3;
     toStall(t);
+    const fresh = (t.stock ?? []).map((o) => o.card);
+    expect(fresh).toHaveLength(TUNING.newStock);
+    for (const c of fresh) expect(t.shop!.cards.some((x) => x.card === c)).toBe(true);
     const ev2 = leaveShop(t)!;
     const st2 = ev2.find((e): e is Extract<Ev, { t: 'stock' }> => e.t === 'stock')!;
-    expect(st2.cards).toHaveLength(TUNING.newStock);
-    toStall(t);
-    for (const c of st2.cards) expect(t.shop!.cards.some((x) => x.card === c)).toBe(true);
+    expect(st2.cards).toEqual(fresh);
   });
 
   it('the spent lesson waits for a card with no use today and goes away once there is none; the crow names only a scarecrow in hand', () => {
@@ -2007,10 +2022,14 @@ describe('round 6: twists that trade, a gentler guided summer, fixed year 3 rows
   it('a scoop for good is sold only when last season\'s bench had few to spare', () => {
     calm();
     /** A season of six days, leaving this many scoops on the bench at each dusk, then the stall. */
+    // Round 9: the quota is met only on the last night, since days played after it is met do not count.
     const season = (s: RunState, left: number) => {
       for (let g = 0; g < 10 && s.phase === 'day'; g++) {
         s.energy = left;
-        s.earned = Math.max(s.earned, s.quota);
+        if (s.day === TUNING.days) {
+          s.earned = Math.max(s.earned, s.quota);
+          s.idle = { scoops: (s.idle?.scoops ?? 0) + left, days: (s.idle?.days ?? 0) + 1 };
+        }
         endDay(s);
       }
     };

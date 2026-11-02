@@ -138,6 +138,8 @@ export class Board {
   preview: Preview | null = null;
   /** A crow sits on the bed's corner: one comes tonight. */
   crow = false;
+  /** Round 9: with a crow about, the plots a scarecrow keeps: washed, so a ripe crop outside them shows. */
+  guard: number[] = [];
   /** This season's twist: frost paints the bottom row; a buyer or a glut stamps a coin by each crop of its kind. */
   twist: Twist | null = null;
   /** Coin stamps painted this frame, for checks. */
@@ -498,6 +500,7 @@ export class Board {
 
     // Frost on a row (a twist): an icy wash and rime on its bare plots; nothing can be sown there.
     if (this.twist?.id === 'frost') this.drawFrost(plots);
+    if (this.crow && this.night < 0.05 && this.guard.length) this.drawGuard();
     // The soil's washes first: a passing splash, and the sickly wash of pests.
     for (let i = 0; i < plots.length; i++) {
       const c = this.centre(i);
@@ -688,6 +691,45 @@ export class Board {
     ctx.restore();
   }
 
+  /**
+   * Round 9: the plots a scarecrow keeps while a crow is about, a warm straw wash with a dashed edge round the kept
+   * ground, so a ripe crop outside it reads at a glance (the ninth playtest's carrot on D4 sat outside it unseen).
+   */
+  private drawGuard(): void {
+    const { ctx, T } = this;
+    const kept = new Set(this.guard);
+    ctx.save();
+    ctx.fillStyle = 'rgba(232, 204, 120, 0.2)';
+    for (const i of kept) {
+      const x = this.bx + (i % this.cols) * T;
+      const y = this.by + Math.floor(i / this.cols) * T;
+      ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+    }
+    // The edge of the kept ground: a dashed line wherever a kept plot meets one that is not.
+    ctx.strokeStyle = 'rgba(122, 88, 30, 0.75)';
+    ctx.lineWidth = Math.max(1.2, T * 0.018);
+    ctx.setLineDash([T * 0.08, T * 0.06]);
+    ctx.beginPath();
+    for (const i of kept) {
+      const c = i % this.cols;
+      const r = Math.floor(i / this.cols);
+      const x = this.bx + c * T + 2;
+      const y = this.by + r * T + 2;
+      const w = T - 4;
+      const out = (dc: number, dr: number) => {
+        const cc = c + dc;
+        const rr = r + dr;
+        return cc < 0 || rr < 0 || cc >= this.cols || rr >= this.rows || !kept.has(rr * this.cols + cc);
+      };
+      if (out(0, -1)) (ctx.moveTo(x, y), ctx.lineTo(x + w, y));
+      if (out(0, 1)) (ctx.moveTo(x, y + w), ctx.lineTo(x + w, y + w));
+      if (out(-1, 0)) (ctx.moveTo(x, y), ctx.lineTo(x, y + w));
+      if (out(1, 0)) (ctx.moveTo(x + w, y), ctx.lineTo(x + w, y + w));
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   /** The frosted row (the one the run sowed most): a pale icy wash and a few rime stars, so it reads as no place to sow. */
   private drawFrost(plots: readonly Plot[]): void {
     const { ctx, T } = this;
@@ -778,22 +820,26 @@ export class Board {
     const { ctx, T } = this;
     const size = Math.max(11, Math.round(T * 0.15));
     let at = -1;
-    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void, lost = false, dark = false): number => {
+    // A chip: a gain; greyed, dashed and struck (lost: the night won't pay it); greyed and dashed, not struck (risk:
+    // round 9, from a crop a crow about tonight may take first); or a neighbour's new total on a dark chip.
+    const chip = (x: number, y: number, text: string, col: string, icon: (cx: number, cy: number) => void, kind: 'lost' | 'risk' | false = false, dark = false): number => {
+      const lost = kind === 'lost';
+      const grey = !!kind;
       const tw = numWidth(ctx, text, size);
       const w = tw + size * 1.25 + 6;
       const h = size + 6;
-      this.chips.push({ plot: at, text, kind: dark ? 'total' : lost ? 'lost' : 'gain', x: x - w, y, w, h });
+      this.chips.push({ plot: at, text, kind: dark ? 'total' : kind || 'gain', x: x - w, y, w, h });
       ctx.beginPath();
       ctx.roundRect(x - w, y, w, h, 4);
-      ctx.fillStyle = dark ? 'rgba(42, 30, 18, 0.92)' : lost ? 'rgba(226, 220, 204, 0.94)' : 'rgba(251, 244, 222, 0.96)';
+      ctx.fillStyle = dark ? 'rgba(42, 30, 18, 0.92)' : grey ? 'rgba(226, 220, 204, 0.94)' : 'rgba(251, 244, 222, 0.96)';
       ctx.fill();
-      ctx.strokeStyle = dark ? 'rgba(42, 30, 18, 0.92)' : lost ? '#8c8676' : col;
+      ctx.strokeStyle = dark ? 'rgba(42, 30, 18, 0.92)' : grey ? '#8c8676' : col;
       ctx.lineWidth = 1.2;
-      if (lost) ctx.setLineDash([3, 2]);
+      if (grey) ctx.setLineDash([3, 2]);
       ctx.stroke();
       ctx.setLineDash([]);
-      if (lost) ctx.globalAlpha = 0.55;
-      num(ctx, text, x - w + 3, y + h / 2, size, dark ? '#f6ecd0' : lost ? '#5a5448' : col);
+      if (grey) ctx.globalAlpha = lost ? 0.55 : 0.75;
+      num(ctx, text, x - w + 3, y + h / 2, size, dark ? '#f6ecd0' : grey ? '#5a5448' : col);
       icon(x - size * 0.62 - 2, y + h / 2);
       ctx.globalAlpha = 1;
       if (lost) {
@@ -813,15 +859,24 @@ export class Board {
       const x = c.x + T / 2 - 3;
       let y = c.y - T / 2 + 3;
       at = m.plot;
-      if (m.yield) y += chip(x, y, sign(m.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05));
-      if (m.bloom) y += chip(x, y, sign(m.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
-      if (Math.abs(m.times - 1) > 1e-6) y += chip(x, y, `×${fmt(m.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
+      // Round 9: what comes from a crop the crow may take first is shown apart, greyed, not struck.
+      const r = m.risk;
+      const sure = r ? { yield: m.yield - r.yield, bloom: m.bloom - r.bloom, times: m.times / r.times } : m;
+      const tiny = (v: number) => Math.abs(v) < 1e-6;
+      if (!tiny(sure.yield)) y += chip(x, y, sign(sure.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05));
+      if (!tiny(sure.bloom)) y += chip(x, y, sign(sure.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
+      if (Math.abs(sure.times - 1) > 1e-6) y += chip(x, y, `×${fmt(sure.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05));
+      if (r) {
+        if (!tiny(r.yield)) y += chip(x, y, sign(r.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05), 'risk');
+        if (!tiny(r.bloom)) y += chip(x, y, sign(r.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), 'risk');
+        if (r.times > 1 + 1e-6) y += chip(x, y, `×${fmt(r.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), 'risk');
+      }
       if (m.nights) y += chip(x, y, `+${m.nights}`, '#3a4a78', (cx, cy) => moon(ctx, cx, cy, size * 0.42));
       const l = m.lost;
       if (l) {
-        if (l.yield) y += chip(x, y, sign(l.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05), true);
-        if (l.bloom) y += chip(x, y, sign(l.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
-        if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
+        if (l.yield) y += chip(x, y, sign(l.yield), '#2e2418', (cx, cy) => basket(ctx, cx, cy, size * 1.05), 'lost');
+        if (l.bloom) y += chip(x, y, sign(l.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), 'lost');
+        if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), 'lost');
       }
       // A neighbour the play changes shows what it will pay now, on a dark chip like the aimed seed's own slip, by a
       // coin: the basket means yield everywhere else (the seventh playtest read "14 basket" as yield).
@@ -885,7 +940,9 @@ export class Board {
       const bedTop = this.by;
       const bedFoot = this.by + this.rows * T;
       const tries = [under >= 0 ? under : at.y + T / 2 + 2, at.y - T / 2 - h - 2, bedFoot + 2, bedTop - h - 2, at.y - h / 2].map(clampY);
-      const hits = (y: number) => [...this.chips, ...(slip ? [slip] : [])].some((r) => x0 < r.x + r.w && x0 + w > r.x && y < r.y + r.h && y + h > r.y);
+      // Round 9: never over the plate's caption either (the ninth playtest's reason line sat on it).
+      const cap = this.captionBox();
+      const hits = (y: number) => [...this.chips, ...(slip ? [slip] : []), cap].some((r) => x0 < r.x + r.w && x0 + w > r.x && y < r.y + r.h && y + h > r.y);
       const y0 = tries.find((y) => !hits(y)) ?? tries[0];
       ctx.beginPath();
       ctx.roundRect(x0, y0, w, h, 3);
@@ -996,7 +1053,7 @@ export class Board {
   reasonBox: { x: number; y: number; w: number; h: number; text: string } | null = null;
 
   /** Preview chips painted this frame, for checks: a gain, a greyed bonus, or a neighbour's new total (canvas px). */
-  chips: { plot: number; text: string; kind: 'gain' | 'lost' | 'total'; x: number; y: number; w: number; h: number }[] = [];
+  chips: { plot: number; text: string; kind: 'gain' | 'lost' | 'risk' | 'total'; x: number; y: number; w: number; h: number }[] = [];
 
   /** Market Day's stamp: a red-ringed x2 to the left of the crop's moon, on the harvest it doubles tonight. */
   private marketStamp(x: number, y: number): void {

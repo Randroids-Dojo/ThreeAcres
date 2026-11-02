@@ -16,6 +16,7 @@ import {
   endDay,
   energyMax,
   giveUp,
+  guarded,
   isFinal,
   marketTonight,
   maxPages,
@@ -29,6 +30,7 @@ import {
   pageLevel,
   playCard,
   previewPlay,
+  previewReason,
   recordRun,
   RETIRED,
   ripeTonight,
@@ -45,11 +47,13 @@ import {
   type Ev,
   type Harvest,
   type Meta,
+  type PageId,
   type Plot,
   type RunState,
+  type SeedId,
   type Step,
 } from './rules';
-import { earnTable, learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, type Piece } from './lessons';
+import { crowLine, earnTable, learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, type Piece } from './lessons';
 import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
 import { Board, type PreviewMark } from './view/board';
@@ -103,9 +107,10 @@ const PENTA = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3];
 const SHOWN = 0.87;
 
 /** What the second tap does, said on the first: "Tap again to water." */
+/** A tap within this long after the night ends was meant to skip it (round 9). */
+const WAKE_MS = 450;
 const AIM_VERB: Partial<Record<CardId, string>> = { can: 'water', compost: 'lay it', fertiliser: 'feed it', shears: 'cut it', scarecrow: 'set it up', beehive: 'set it up' };
 /** Seeds whose name is a plural: "The beans are pulled before the sunflower ripens." */
-const PLURAL: readonly CardId[] = ['beans'];
 /** "Tap again to plant it." shows for this many aims, then the player knows. */
 const AIM_NOTES = 3;
 /** The hand closes its gaps this long after the last play, once it rests. */
@@ -425,6 +430,12 @@ export class Table {
     return !!this.seq && !this.seq.done;
   }
 
+  /** When the last night ended (performance.now()), and whether that was a moment ago: a late skip tap reads nothing. */
+  private nightEnd = -1e9;
+  private justWoke(): boolean {
+    return performance.now() - this.nightEnd < WAKE_MS;
+  }
+
   get speed(): number {
     return this.prefs.fast ? 2.2 : 1;
   }
@@ -491,7 +502,9 @@ export class Table {
     const sheet = this.sheets.open && this.sheets.kind !== 'stall';
     const quiet = this.busy || sheet || this.sheets.detailOpen || (this.sheets.open && this.sheets.kind === 'stall');
     const held = this.held ? (this.cardOf(this.held.uid) ?? null) : null;
-    const { line, unlocked } = this.tutor.update(this.run, this.device(), held, dt, quiet, this.aimed !== null);
+    // A note in the lesson strip stands in front of the lesson: the lesson's time waits until it shows (round 9).
+    const hidden = this.note.classList.contains('on') && this.hint.classList.contains('hush');
+    const { line, unlocked } = this.tutor.update(this.run, this.device(), held, dt, quiet, this.aimed !== null, hidden);
     if (unlocked.length) {
       this.applyPieces(unlocked);
       this.renderAll();
@@ -565,6 +578,8 @@ export class Table {
         return s.plots.some((p) => p.crop?.kind === 'carrot') ? pick((c) => c.id === 'radish') : pick((c) => c.id === 'carrot');
       case 'bloom':
         return pick((c) => c.id === 'radish');
+      case 'either':
+        return pick((c) => !!s.either?.includes(c.uid));
       case 'can':
         return pick((c) => c.id === 'can');
       case 'weather':
@@ -644,8 +659,9 @@ export class Table {
       place(this.peg, sx, 116, P - 66, 32);
       // The bench is the desktop's controls: it takes the side panel's lower half at a size a mouse
       // finds at once (it was 200 px tall, its labels 11.5 px, with 500 px of bare table above it).
-      const benchH = Math.round(Math.max(260, Math.min(380, H * 0.45)));
-      const benchY = H - benchH - 10;
+      // Round 9: clear of the screen's foot (the ninth playtest's "End day" label sat at y 785 of 800).
+      const benchH = Math.round(Math.max(260, Math.min(380, H * 0.43)));
+      const benchY = H - benchH - 24;
       // The lesson strip (and the season's twist) right under the pegboard, the pages kept under it, the bench at the
       // foot: the fifth playtest found about 330 px of bare table between the pegboard and the scoops.
       this.hintBox = { x: sx, y: 158, w: P, h: 52 };
@@ -943,7 +959,7 @@ export class Table {
     hand.forEach((card, i) => {
       let c = this.cards.get(card.uid);
       const bonus = faceBonus(card.id, this.run.pages, this.run.levels);
-      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}` : ''}`;
+      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}${bonus.hot ? `h${bonus.hot}` : ''}` : ''}`;
       if (!c) {
         const d = el('div', 'sb-card');
         const img = el('img');
@@ -1024,6 +1040,10 @@ export class Table {
       c.el.style.zIndex = String(held ? 50 : hov ? 40 : 10 + slot);
       c.el.classList.toggle('held', held);
       c.el.classList.toggle('dear', !afford && showCost);
+      // Round 9: a pair that is one or the other: both outlined, and "or" between them on the second.
+      const pair = this.run.either;
+      c.el.classList.toggle('sb-pair', day && !!pair?.includes(card.uid));
+      c.el.classList.toggle('sb-pair-b', day && pair?.[1] === card.uid);
       c.el.dataset.key = String(i + 1);
     });
     this.cue();
@@ -1078,6 +1098,8 @@ export class Table {
     this.board.market = this.busy || this.run.phase !== 'day' ? [] : marketTonight(this.run);
     this.board.boost = this.busy ? [] : this.run.plots.map((p) => p.boost);
     this.board.crow = !this.busy && this.run.phase === 'day' && this.run.crow;
+    // Round 9: while a crow is about, the plots a scarecrow keeps (its 3 by 3) are washed, so the ones outside show.
+    this.board.guard = this.board.crow && this.run.plots.some((p) => p.obj === 'scarecrow') ? this.run.plots.map((_, i) => i).filter((i) => guarded(this.run, i)) : [];
     this.board.twist = this.run.phase === 'day' || this.busy ? (this.run.twist ?? null) : null;
     const nk = this.board.night.toFixed(3);
     if (this.dark.dataset.k !== nk) {
@@ -1120,6 +1142,9 @@ export class Table {
         this.skip();
         return;
       }
+      // Round 9: a tap meant to skip the night that lands as it ends reads nothing (the ninth playtest's skips read
+      // "Bare soil." or "Beehive." on most nights).
+      if (this.justWoke()) return;
       const p = pos(e);
       const i = this.board.pick(p.x, p.y);
       if (this.held) {
@@ -1262,12 +1287,12 @@ export class Table {
     }
     const valid = def.target === 'board' || (aim !== null && (def.target === 'move' ? this.held!.from !== null && moveTargets(s, idx, this.held!.from).includes(aim) : targetsFor(s, idx).includes(aim)));
     // Why a greyed bonus won't pay, said only under a plot the card can go on; and a plain word when a card would do nothing.
+    // Round 9: only a greyed bonus the aimed plot takes or gives has a reason (the ninth playtest's radish over B4 said
+    // "The other corn is pulled before this one ripens."), and a bonus a crow about tonight may take says so.
     let reason: { plot: number; text: string } | null = null;
     if (aim !== null && valid) {
-      const l = marks.find((m) => m.lost);
-      if (total?.never) reason = { plot: aim, text: 'Too late to ripen before the end.' };
-      else if (l?.lost) reason = { plot: aim, text: this.lostWhy(l.plot, l.lost.why, l.lost.from) };
-      else if (total?.late) reason = { plot: aim, text: 'Ripens next season.' };
+      const text = previewReason(s, { plot: aim, harvest: total ? { ...total, late: !!total.late } : null, marks, tonight: [], market: [] }, aim, def.type === 'seed' ? (card.id as SeedId) : null);
+      if (text) reason = { plot: aim, text };
     }
     let none: { plot: number | null; text: string } | null = null;
     // An object stands for the rest of the run: a scarecrow set out before the crows come is not wasted.
@@ -1276,20 +1301,6 @@ export class Table {
     // What the play would change about tonight: crops it brings in get tonight's moon, and Market Day's stamp moves.
     const after = def.target === 'board' ? previewPlay(s, idx, null) : valid && aim !== null ? (def.target === 'move' ? previewPlay(s, idx, this.held!.from!, aim) : previewPlay(s, idx, aim)) : null;
     b.preview = { marks, total, bloom: this.seen('bloom'), reason, none, tonight: after?.tonight ?? [], market: after ? after.market : marketTonight(s) };
-  }
-
-  /** "The radish is pulled before the carrot ripens." The held seed stands in for whichever of the two is not on the plot yet. */
-  private lostWhy(plot: number, _why: 'gone', from: number | null): string {
-    const s = this.run;
-    const held = this.held ? this.cardOf(this.held.uid) : undefined;
-    const seed = held && CARDS[held.id].type === 'seed' ? held.id : null;
-    const kind = (i: number | null) => (i === null ? null : (s.plots[i].crop?.kind ?? seed));
-    const taker = kind(plot);
-    const giver = kind(from);
-    if (!taker || !giver) return 'Its neighbour is pulled first.';
-    // Two of a kind side by side: "The other beans are pulled before these ripen." (it said "the beans ... the beans").
-    if (taker === giver) return PLURAL.includes(giver) ? `The other ${CARDS[giver].name.toLowerCase()} are pulled before these ripen.` : `The other ${CARDS[giver].name.toLowerCase()} is pulled before this one ripens.`;
-    return `The ${CARDS[giver].name.toLowerCase()} ${PLURAL.includes(giver) ? 'are' : 'is'} pulled before the ${CARDS[taker].name.toLowerCase()} ${PLURAL.includes(taker) ? 'ripen' : 'ripens'}.`;
   }
 
   private areaOf(card: Card, i: number): number[] {
@@ -1561,6 +1572,8 @@ export class Table {
     if (CARDS[card.id].type === 'weather') this.tutor.count('weather');
     this.shownEnergy = this.run.energy;
     this.shownBench = this.run.bench;
+    // Round 9: one of a pair is played: the other goes back to the tin, in sight.
+    for (const e of ev) if (e.t === 'putBack') this.flyToTin(e.card);
     this.flyCard(card, cEl, from, plot ?? null, () => this.landPlay(ev, before));
     this.save();
     this.updateHighlight();
@@ -1602,6 +1615,37 @@ export class Table {
     s.at(dur, () => {
       d.remove();
       land();
+    });
+    this.small.push(s);
+  }
+
+  /** A card in hand going back into the tin (the other of a pair, round 9). */
+  private flyToTin(card: Card): void {
+    const c = this.cards.get(card.uid);
+    if (!c) return;
+    this.cards.delete(card.uid);
+    const d = c.el;
+    d.classList.add('flying');
+    d.classList.remove('held', 'dragging', 'sb-cue', 'sb-pair', 'sb-pair-b');
+    const hr = this.handEl.getBoundingClientRect();
+    const r = d.getBoundingClientRect();
+    const tr = this.tin.getBoundingClientRect();
+    const x0 = r.left - hr.left;
+    const y0 = r.top - hr.top;
+    const x1 = tr.left - hr.left + tr.width / 2 - this.cardW * 0.5;
+    const y1 = tr.top - hr.top + tr.height / 2 - this.cardH * 0.5;
+    d.style.transition = 'none';
+    const reduced = this.ctx.settings().reducedMotion;
+    const s = new Seq();
+    const dur = reduced ? 0.12 : 0.4;
+    s.tween(0, dur, (k) => {
+      const e = ease.inOut(k);
+      d.style.transform = `translate(${x0 + (x1 - x0) * e}px, ${y0 + (y1 - y0) * e - Math.sin(Math.PI * e) * (reduced ? 0 : 40)}px) rotate(${e * -20}deg) scale(${1 - e * 0.7})`;
+      d.style.opacity = String(k > 0.75 ? 1 - (k - 0.75) * 4 : 1);
+    });
+    s.at(dur, () => {
+      d.remove();
+      this.ctx.audio.cue('deck.draw', { gain: 0.4, pitch: 0.9 });
     });
     this.small.push(s);
   }
@@ -1904,7 +1948,8 @@ export class Table {
     // A crow on the bed's corner at dawn: once its lesson has had its say, a short note each time.
     if (this.run.phase === 'day' && this.run.crow) {
       this.ctx.audio.cue('deck.crow', { gain: 0.45, pitch: 1.1 });
-      if (this.tutor.learn.done.includes('crows')) this.say('A crow is about tonight.', null);
+      // Round 9: with a scarecrow standing, the note says which ripe crops it cannot keep (or that it keeps them all).
+      if (this.tutor.learn.done.includes('crows')) this.say(this.run.plots.some((p) => p.obj === 'scarecrow') ? crowLine(this.run) : 'A crow is about tonight.', null);
     }
   }
 
@@ -2081,6 +2126,7 @@ export class Table {
       this.flame.classList.remove('out');
       this.fx.querySelectorAll('.sb-slip, .sb-arc, .sb-flyscoop').forEach((x) => x.remove());
       this.seq = null;
+      this.nightEnd = performance.now();
       if (seasonEnd) {
         this.sheets.close();
         // A season met opens the stall; the last winter met, or a season missed, ends the run with its entry.
@@ -2137,6 +2183,7 @@ export class Table {
     let yv: HTMLElement;
     let bv: HTMLElement;
     let row: HTMLElement;
+    let rows: { y: HTMLElement; a: HTMLElement; x: HTMLElement };
     const at = (plot: number) => {
       const br = b.canvas.getBoundingClientRect();
       const tr = this.tableEl.getBoundingClientRect();
@@ -2153,7 +2200,16 @@ export class Table {
       sum.append(yv, iconImg('basket', 'sb-ic'));
       bv = el('b', 'm', '1');
       if (showBloom) sum.append(el('span', 'x', '×'), bv, iconImg('bloom', 'sb-ic'));
+      // Round 9: three lines under the sum, yield, then bloom added, then the multipliers, and a page's bonus says the
+      // page's name (a big corn's slip had nine bonus icons and an unnamed "x1.2" beside a bloom of 7.2).
       row = el('span', 'sb-steps');
+      rows = { y: el('span', 'sb-steps ys'), a: el('span', 'sb-steps as'), x: el('span', 'sb-steps xs') };
+      // Each line the harvest will use holds its place from the start, so the slip does not grow under a landing bonus.
+      rows.y.classList.toggle('on', h.chips.length > 0);
+      rows.a.classList.toggle('on', h.mult.some((st) => st.op === '+'));
+      rows.x.classList.toggle('on', h.mult.some((st) => st.op === 'x'));
+      row.classList.toggle('on', h.chips.length + h.mult.length > 0);
+      row.append(rows.y, rows.a, rows.x);
       slip.append(sum, row);
       const p = at(h.plot);
       slip.style.left = `${p.x}px`;
@@ -2176,10 +2232,21 @@ export class Table {
       // The bonus's picture takes its place on the slip as it sets off (hidden until it lands), so the
       // arc flies to its own place and never lands on a bonus already there; chips wrap to a second line.
       let chip: HTMLElement | null = null;
+      // Bonuses of one kind from one source (Tall Rows from each neighbour, two beans) share a chip whose number grows.
+      const line = kind === 'y' ? 'y' : st.op === '+' ? 'a' : 'x';
+      const key = `${st.icon}${st.op}`;
       s.at(go, () => {
+        chip = rows[line].querySelector<HTMLElement>(`[data-k="${key}"]`);
+        if (chip) return;
         chip = el('span', `sb-chip ${kind} waiting`);
-        chip.append(iconImg(st.icon, ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
-        row.append(chip);
+        chip.dataset.k = key;
+        chip.dataset.v = String(st.op === '+' ? 0 : 1);
+        const page = (PAGES as Record<string, { name: string } | undefined>)[st.icon];
+        const label = page ? `${levelName(page.name, pageLevel(this.run, st.icon as PageId))} ` : '';
+        const word = el('span', 'sb-chipword');
+        word.textContent = label;
+        chip.append(iconImg(st.icon, ''), word, el('span', 'sb-chipnum', `${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
+        rows[line].append(chip);
       });
       if (st.from !== undefined) this.arc(s, go, fly, st, kind, h.plot, () => chip);
       s.at(lands, () => {
@@ -2199,8 +2266,14 @@ export class Table {
           bv.classList.add('tick');
           this.ctx.audio.cue('deck.mult', { pitch: Math.min(2, 0.9 + mAdd * mX * 0.08), gain: Math.min(1, 0.5 + mAdd * mX * 0.08) });
         }
-        // The bonus leaves its picture on the slip: a carrot and +2, a radish and +1.
-        chip?.classList.remove('waiting');
+        // The bonus leaves its picture on the slip: a carrot and +2, a radish and +1 (a shared chip's number grows).
+        if (chip) {
+          const v = st.op === '+' ? Number(chip.dataset.v) + st.v : Number(chip.dataset.v) * st.v;
+          chip.dataset.v = String(v);
+          const n = chip.querySelector('.sb-chipnum');
+          if (n) n.textContent = `${st.op === '+' ? '+' : '×'}${fmtNum(v)}`;
+          chip.classList.remove('waiting');
+        }
       });
     });
     // The total.
@@ -2344,6 +2417,9 @@ export class Table {
       p0 = { x: ox + a.x, y: oy + a.y - b.T * 0.45 };
       p1 = { x: ox + c.x, y: oy + c.y - b.T * 1.0 };
       badge = el('span', `sb-arc ${kind}`);
+      // Round 9: the chip it lands on, which a bonus of the same kind may already have shown (a shared chip grows).
+      const target = slot();
+      if (target?.dataset.k) badge.dataset.k = target.dataset.k;
       badge.append(iconImg(kind === 'y' ? 'basket' : 'bloom', ''), document.createTextNode(`${st.op === '+' ? '+' : '×'}${fmtNum(st.v)}`));
       badge.style.left = `${p0.x}px`;
       badge.style.top = `${p0.y}px`;
@@ -2452,7 +2528,7 @@ export class Table {
       case 'NumpadEnter':
         e.preventDefault();
         if (this.held) this.tryPlay(this.cursor);
-        else this.inspect(this.cursor);
+        else if (!this.justWoke()) this.inspect(this.cursor);
         return;
       case 'KeyE':
         if (!this.seen('lantern')) return;

@@ -153,7 +153,7 @@ export interface PageDef {
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
   cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.2 bloom.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.3 bloom.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Plant a different crop where one was just pulled: +4 yield.' },
@@ -162,8 +162,9 @@ export const PAGES: Record<PageId, PageDef> = {
   furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column, and one more scoop a day.' },
   coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
   // Round 7: the pages that multiply the engines a run's first stall offers (Busy Bees is the beehive's).
-  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies stay and pick for 3 nights.' },
-  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'Beans and strawberries give the other crops beside them +2 bloom.' },
+  // Round 9: its bloom levels up (x1.6 at level I, TUNING.hotTimes), not its picks.
+  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies stay and pick for 3 nights. Their neighbours get x1.6 bloom.' },
+  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'Beans and strawberries give the other crops beside them +2.5 bloom.' },
   tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'Corn ripens two nights sooner. Tall crops get +1 bloom for each neighbour.' },
 };
 
@@ -186,7 +187,8 @@ export const ENGINES: Record<EngineId, EngineDef> = {
   bees: { id: 'bees', page: 'bees', gift: ['beehive'], cards: ['beehive', 'sunflower'] },
   hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili', 'chili', 'chili'], cards: ['chili'] },
   vines: { id: 'vines', page: 'vines', gift: ['beans'], cards: ['beans', 'strawberry'] },
-  tall: { id: 'tall', page: 'tall', gift: ['corn'], cards: ['corn', 'sunflower'] },
+  // Round 9: two corn again (one in round 8): with one, the tall engine cleared year 1 69% of the time, the least of the four.
+  tall: { id: 'tall', page: 'tall', gift: ['corn', 'corn'], cards: ['corn', 'sunflower'] },
 };
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[];
 
