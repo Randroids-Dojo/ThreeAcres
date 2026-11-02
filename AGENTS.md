@@ -42,6 +42,7 @@ node scripts/deck-lessons.mjs [url]    # Seedbound's guided first season: one pi
 node scripts/deck-overlap.mjs [url]    # Seedbound: no two table pieces overlap in any state; no ruled line through words, no price tag over a card's name, every visible button takes a tap
 node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of random switches
 node scripts/qa/shell-keys.mjs [url]   # the switcher on a keyboard: Escape and ` open and close it in every game, Tab stays on it, Enter plays a card
+node scripts/qa/sunup-keys.mjs [url]   # Sunup on a keyboard: a focused button never takes Space, Sleep before evening asks, Space works at the well
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth
@@ -49,6 +50,7 @@ npx tsx scripts/ranch-balance.ts       # Thistledown: coins a game day for typic
 node scripts/deck-board.mjs            # Seedbound: how the board persists (crops standing at dawn, bare dawns, sowings beside standing crops)
 npx tsx scripts/deck-seasons.ts        # Seedbound: per-season clear rates for years 1 to 3 with the decent, strict and guided bots
 npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates for each stall strategy (is one dominant?)
+npx tsx scripts/deck-twists.ts         # Seedbound: what each twist really costs or pays a run, against the quota it moves
 npx tsx scripts/ranch-orders.ts        # Thistledown: how varied each morning's orders are and whether they compete
 npx tsx scripts/ranch-catch.ts         # Thistledown: catch success per kind for a careless thumb against a careful one
 node scripts/ranch-catch-real.mjs      # the same with real touch in the browser (RANCH_URL=...)
