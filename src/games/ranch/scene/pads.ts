@@ -197,6 +197,7 @@ export class PadView {
   private pop: number[] = PADS.map(() => 0);
   private crops: Record<Food, InstancedMesh>;
   private plates: Mesh;
+  private plateMat: MeshLambertMaterial;
   private mat = matte();
   /** A pen post's count tag ("8 of 10"), once the pen limit has been taught: the limit, in the world. */
   private counts: { mesh: Mesh; ctx: CanvasRenderingContext2D; tex: CanvasTexture; key: string; mat: MeshLambertMaterial }[] = [];
@@ -213,7 +214,9 @@ export class PadView {
       this.group.add(m);
     }
     // Plates on the posts saying what each pad is; rebuilt with the pads.
-    this.plates = new Mesh(new PlaneGeometry(1, 1), new MeshLambertMaterial({ map: signAtlas().tex }));
+    // (Round 9: lit from within at night like the other painted signs: the pen's "Pen" plate was unlit and dark.)
+    this.plateMat = new MeshLambertMaterial({ map: signAtlas().tex, emissiveMap: signAtlas().tex, emissive: new Color(0xffffff), emissiveIntensity: 0.06 });
+    this.plates = new Mesh(new PlaneGeometry(1, 1), this.plateMat);
     this.plates.name = 'plates';
     this.group.add(this.plates);
     PADS.forEach((_, i) => {
@@ -233,6 +236,7 @@ export class PadView {
 
   /** Each pen post's count tag: how many are in the pen, of ten (on: the pen limit has been taught; night lights it to read in the dark). */
   setCounts(pads: Pad[], counts: number[], on: boolean, night: number): void {
+    this.plateMat.emissiveIntensity = 0.06 + night * 0.42;
     this.counts.forEach((c, i) => {
       const show = on && pads[i]?.kind === 'pen';
       c.mesh.visible = show;

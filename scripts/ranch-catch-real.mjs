@@ -23,14 +23,16 @@ const tries = Number(process.argv[2]) || 6;
 // so it lets you walk in to 4 m; the fight is what is measured).
 const kinds = (process.argv[3] || 'clover,ember,brook,thistle,rare-clover,rare-ember').split(',');
 // react: reading the tug (round 8, the duel), it lets go of Pull a reaction after the downy puffs up (the tell,
-// shown on the ring: it swells, pale gold) and pulls again a reaction after its pull back stops, each drawn evenly
+// shown on the ring: it swells, gold on its dark track) and pulls again a reaction after its pull back stops, each drawn evenly
 // from this range in ms (the eighth playtest's thumbs: a good one 200 to 350, a slow one 450 to 650; as
 // scripts/ranch-catch.ts). The ring is read through the hook (window.ranch.hud.tugState()), as a player sees it.
 // holds: never reads it (holds Pull all the way: the seventh playtest's way, a control).
+// fooled (round 9, fake puffs): the share of fake puffs it takes for a real tell and lets go on, pressing again a
+// reaction after (the ring stays pale on a fake one and shivers; a real tell turns it gold): as ranch-catch.ts.
 const THUMBS = {
-  careless: { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650] },
-  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350] },
-  ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: null } } : {}),
+  careless: { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650], fooled: 0.6 },
+  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350], fooled: 0.2 },
+  ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: null, fooled: 0 } } : {}),
 };
 const SENS = 0.0062;
 const wrap = (a) => {
@@ -133,6 +135,8 @@ async function chase(which, thumb, seed) {
   const react = () => (thumb.react ? thumb.react[0] + Math.random() * (thumb.react[1] - thumb.react[0]) : 0);
   let wasBack = false;
   let wasTell = false;
+  let wasFeint = false;
+  let feints = 0;
   let letGo = false;
   let releaseAt = -1;
   let pressAt = -1;
@@ -142,7 +146,8 @@ async function chase(which, thumb, seed) {
   let fightAt = -1;
   let lastSay = '';
   let caughtAt = 0;
-  while (Date.now() - t0 < 14000) {
+  // (Round 9: a fight is two to five beats, 4 to 10 s, so a try runs to 20 s; it was 14.)
+  while (Date.now() - t0 < 20000) {
     const now = Date.now() - t0;
     const tick0 = Date.now();
     const o = await page.evaluate((id) => {
@@ -203,6 +208,7 @@ async function chase(which, thumb, seed) {
     // The ring shows a pull back: let go of Pull (a reaction late), and press again (a reaction after it stops).
     const back = !!o.ring.back;
     const tell = !!o.ring.tell;
+    const feint = !!o.ring.feint;
     if (back && !wasBack) backs++;
     if (fightAt < 0 && o.ring.tug > 0) fightAt = now;
     if (thumb.react) {
@@ -215,6 +221,15 @@ async function chase(which, thumb, seed) {
         releaseAt = -1;
         if (letGo) pressAt = now + react();
       }
+      // A fake puff (the ring shivers, stays pale): now and then taken for a tell, let go on, and pulled again after.
+      if (feint && !wasFeint) {
+        feints++;
+        if (!letGo && releaseAt < 0 && Math.random() < thumb.fooled) {
+          releaseAt = now + react();
+          pressAt = releaseAt + react();
+        }
+      }
+      if (letGo && back && pressAt >= 0 && !wasBack) pressAt = -1;
       if (releaseAt >= 0 && now >= releaseAt) {
         letGo = true;
         releaseAt = -1;
@@ -226,6 +241,7 @@ async function chase(which, thumb, seed) {
     }
     wasBack = back;
     wasTell = tell;
+    wasFeint = feint;
     // A slip or a getaway ends the fight: the ring goes, and the thumb presses again when it next comes in reach.
     if (o.ring.tug <= 0 && !back) letGo = false;
     pulling = dist < 7.6 && !letGo;
@@ -248,7 +264,7 @@ async function chase(which, thumb, seed) {
   await t.send('touchEnd', []);
   await page.waitForTimeout(250);
   const first = result === 'caught' && slips === 0 && escapes === 0;
-  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips };
+  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips, feints };
 }
 
 console.log(`Real-touch catches on the Pixel viewport, ${tries} tries per kind and thumb (${process.env.RANCH_URL || 'default url'})`);
@@ -262,6 +278,8 @@ for (const kind of kinds) {
     let food = 0;
     let tick = 0;
     let fps = 0;
+    let feints = 0;
+    const fights = [];
     const out = [];
     for (let k = 0; k < tries; k++) {
       const r = await chase(kind, thumb, k + 1);
@@ -269,7 +287,9 @@ for (const kind of kinds) {
       if (r.first) {
         first++;
         fight += r.fight;
+        fights.push(r.fight);
       }
+      feints += r.feints;
       backs += r.backs;
       if (r.slips) slipped++;
       if (r.food > 0) food++;
@@ -277,7 +297,9 @@ for (const kind of kinds) {
       fps += r.fps / tries;
       out.push(`${r.first ? 'F' : r.result[0]}${r.secs.toFixed(0)}`);
     }
-    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 14 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s; ${(backs / tries).toFixed(1)} pull backs a try, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)`);
+    fights.sort((a, b) => a - b);
+    const mid = fights.length ? fights[Math.floor(fights.length / 2)].toFixed(1) : '-';
+    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 20 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s (middle ${mid}); ${(backs / tries).toFixed(1)} pull backs a try, ${(feints / tries).toFixed(1)} fake puffs, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)`);
   }
 }
 await browser.close();

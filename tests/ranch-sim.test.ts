@@ -676,11 +676,14 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     };
     pullFor(0.55);
     expect(d.gone).toBe(false);
-    expect(d.tug).toBeGreaterThan(0.4);
+    // (Round 9: a clover's pull is 0.9 s, and its first pull back may come within it.)
+    expect(d.tug).toBeGreaterThan(0.3);
     // Let go once it was well on its way: it gets away (the bellows cannot take it for a moment). Close in on it
     // again once it can be pulled (it has seen you: it is out of reach by now, or nearly).
     sim.events.length = 0;
-    run(sim, 1.2, idle);
+    // (Round 9: let go while it puffed up, it pulls back, then bolts once its slack runs out: away either way.)
+    for (let t = 0; t < 4 && !sim.events.some((e) => e.t === 'escape'); t += 1 / 30) run(sim, 1 / 30, idle);
+    run(sim, 0.2, idle);
     expect(d.tug).toBe(0);
     expect(d.noPull).toBeGreaterThan(0);
     run(sim, 0.6, idle);
@@ -745,9 +748,10 @@ describe('selling: what you blew in, and whole turns of the loop', () => {
 
   it('fluff the crate draws in from beside it is sold but is not a blow of yours', () => {
     const sim = quiet();
-    const d = sim.spawn('clover', CX + 1.6, CZ - 1.4);
+    // (Round 9: a little nearer the crate, so its fluff falls within the crate's pull whichever way it hops off.)
+    const d = sim.spawn('clover', CX + 1.1, CZ - 1.0);
     d.hunger = 0.8;
-    sim.drop('cloverhead', CX + 1.9, CZ - 1.4);
+    sim.drop('cloverhead', CX + 1.3, CZ - 1.0);
     const evs: Ev[] = [];
     for (let t = 0; t < 10; t += 1 / 30) {
       sim.update(1 / 30, idle, aimAt(sim, sim.s.player.x, sim.s.player.y + 1.6, sim.s.player.z - 5));

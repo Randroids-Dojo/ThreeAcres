@@ -299,7 +299,9 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
 // ---------------------------------------------------------------- P1: the pen limit
 
 describe('P1: the pen limit is taught before it bites, and the first ember pen is affordable', () => {
-  it('at eight in a pen: "Keep ten or fewer downies in a pen." with an arrow at the post, whose tag counts them', () => {
+  // (Round 9: the line comes only once a pen is crowded, over ten; at eight the post's count tag comes in quietly. The
+  // ninth playtest's "Keep ten or fewer downies in a pen." stayed up all day with six in the pen and five embers aboard.)
+  it('at eight in a pen the post\'s count tag comes in quietly; over ten, "Keep ten or fewer downies in a pen." with an arrow at the post', () => {
     const { sim, s, tutor, run, view } = ranch(PAST_ORDER, PAST_FARM_F);
     s.hour = 10;
     s.night = s.day;
@@ -310,18 +312,17 @@ describe('P1: the pen limit is taught before it bites, and the first ember pen i
     expect(sim.knows('crowd')).toBe(false);
     fill(sim, 1, 'clover', 1, 0.1);
     run(0.5);
+    // The count tag on the post comes with eight (the limit, in the world), with no line.
+    expect(sim.knows('crowd')).toBe(true);
+    expect(tutor.current).not.toBe('crowd');
+    fill(sim, 1, 'clover', 3, 0.1);
+    run(0.5);
     expect(tutor.current).toBe('crowd');
     expect(view().line).toBe('Keep ten or fewer downies in a pen.');
-    // The count tag on the post comes with it (the limit, in the world).
-    expect(sim.knows('crowd')).toBe(true);
     const post = padSpots(1).post;
     expect(Math.hypot(tutor.mark.x - post.x, tutor.mark.z - post.z)).toBeLessThan(1.2);
-    // (Round 4: it stays up until you have seen the count on the post: the playtest's 3.5 s went by unread.)
     run(4.5);
     expect(Tutor.finished(s, 'crowd')).toBe(false);
-    stand(sim, post.x + 1, post.z + 1);
-    run(2);
-    expect(Tutor.finished(s, 'crowd')).toBe(true);
   });
 
   it('with more than ten in a pen the line stays until one is taken out', () => {
@@ -447,8 +448,9 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
       // (Round 8: thirty tries; the round 8 test holds each kind to its band over 120.)
       if (k !== 'clover') expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.15);
     }
-    // (The third playtest's careless thumb caught 8 of 8.)
-    expect(Object.values(out).reduce((a, [c]) => a + c, 0) / kinds.length).toBeLessThan(0.75);
+    // (The third playtest's careless thumb caught 8 of 8. Round 9: clover the gentle first catch, the others' mean.)
+    const others = kinds.filter((k) => k !== 'clover');
+    expect(others.reduce((a, k) => a + out[k][0], 0) / others.length).toBeLessThan(0.72);
   });
 
   it('a thistle bolts: walking at it on open ground you never get in reach; running, you do', () => {

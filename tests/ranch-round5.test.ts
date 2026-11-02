@@ -330,7 +330,7 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       // (Round 8: its deadline in the title, its set place in the note.)
       expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/);
       // (Round 7: what it is worth a day once penned, as a number, when it has a pen to join.)
-      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/);
+      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/);
       places.add(tag.note.split('.')[0]);
     }
     expect(seen).toBe(20);

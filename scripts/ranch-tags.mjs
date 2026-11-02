@@ -300,6 +300,39 @@ const readSign = async (hour, which, off) => {
   await page.evaluate(() => window.ranch.scene.getObjectByName('signs').material.emissive.setRGB(1, 1, 1));
   return px;
 };
+// Round 9: a pen post's plate ("Pen"), lit from within at night like the other painted signs (it was unlit).
+const readPlate = async (hour, off) => {
+  const corners = await page.evaluate(([hour, off]) => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.hour = hour;
+    s.nettles = [];
+    if (s.pads[1].kind !== 'pen') {
+      s.pads[1].kind = 'pen';
+      r.sim.phys.setPads(s.pads);
+      r.pads.sync(s.pads, 1);
+    }
+    const plates = r.scene.getObjectByName('plates');
+    plates.material.emissive.setRGB(off ? 0 : 1, off ? 0 : 1, off ? 0 : 1);
+    const f = r.sim.phys.floor;
+    const x = 14.8;
+    const z = 31.8 + 0.12;
+    const y = f.call(r.sim.phys, x, z) + 1.35;
+    const p = s.player;
+    p.x = x + 0.3;
+    p.z = z + 2.2;
+    p.y = f.call(r.sim.phys, p.x, p.z);
+    r.aimAt(x, y, z);
+    const hw = 0.28;
+    const hh = 0.06;
+    return [[x - hw, y - hh, z], [x + hw, y - hh, z], [x + hw, y + hh, z], [x - hw, y + hh, z]];
+  }, [hour, off]);
+  await frames(page, 30);
+  const px = await readRect(corners);
+  await page.evaluate(() => window.ranch.scene.getObjectByName('plates').material.emissive.setRGB(1, 1, 1));
+  return px;
+};
 // Read at night about as by day: a plank lit to most of its daytime brightness, with its ink as plain against it
 // (the signpost's light letters on dark boards have less contrast by day too).
 const lit = (q, dayQ) => !!q && !!dayQ && q.p90 >= 60 && q.p90 >= dayQ.p90 * 0.6 && ratio(q) >= Math.max(1.5, ratio(dayQ) * 0.85);
@@ -309,6 +342,7 @@ for (const [name, read, dayH, nightH] of [
   ['the sleep tag at 11:55 pm', (h, off) => readTag(h, 'door', off), 12, 23 + 55 / 60],
   ["the meadow's signpost at 11 pm", (h, off) => readSign(h, 'signpost', off), 12, 23],
   ["the ranch gate's sign at 11 pm", (h, off) => readSign(h, 'teach', off), 12, 23],
+  ["a pen post's plate at 10 pm", (h, off) => readPlate(h, off), 12, 22],
 ]) {
   const qd = await read(dayH, false);
   const qn = await read(nightH, false);
@@ -335,7 +369,7 @@ void counted;
 await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
-check('the price board chalks up the morning\'s offers: what (by noon, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by noon|by dusk|after dark)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+check('the price board chalks up the morning\'s offers: what (by noon, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by noon|by dusk|after 9 pm)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
 // The board's tags: one per offer, its note saying what it earns, fitting the tag.
 const boardTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -345,7 +379,7 @@ const boardTags = await page.evaluate(() => {
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
 // Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
 // Round 8: each with its condition first (due by noon, by dusk or after dark; the hunt's in its title).
-check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|After dark)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today, after dark)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|By dusk tomorrow|Sell after 9 pm)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today)))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
 // Round 8: every condition's tag fits at its longest (big numbers, the longest kind names).
 const condTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -371,11 +405,15 @@ const rareTags = await page.evaluate(() => {
   const r = window.ranch;
   const out = [];
   r.sim.s.gates.ridge = r.sim.s.gates.hollow = true;
+  // (Round 9: its worth over the rest of the week, at its longest: day 8, six days to day 14, a full pen of brooks.)
+  const day0 = r.sim.s.day;
+  r.sim.s.day = 8;
   for (let spot = 0; spot < 7; spot++) {
     const kind = ['clover', 'clover', 'clover', 'ember', 'ember', 'brook', 'brook'][spot];
     const tg = r.sim.offerTag({ kind, live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 525, state: 'offer', rare: { spot } });
     out.push({ ...tg, fit: r.tagLayout(tg.title, null, tg.note).fits });
   }
+  r.sim.s.day = day0;
   return out;
 });
 check("every rare downy's tag fits: its name, where it was seen, its pay and that it stays", rareTags.length === 7 && rareTags.every((t) => t.fit), JSON.stringify(rareTags.filter((t) => !t.fit)));
@@ -415,7 +453,11 @@ await b.close();
     const a = document.querySelector('.rt-act').getBoundingClientRect();
     const lb = document.querySelector('.rt-act .lb')?.getBoundingClientRect();
     const box = r.tags.screenBox(r.camera, innerWidth, innerHeight, { x0: 0, y0: 0, x1: 0, y1: 0 });
-    return { rects, act: { l: a.left, t: a.top, r: a.right, b: Math.max(a.bottom, lb?.bottom ?? 0) }, box, w: innerWidth, h: innerHeight, label: document.querySelector('.rt-act').textContent, choice: r.tagChoice(), coins: r.sim.s.coins };
+    // The bar they hang from, on its own (round 9: the Use button keeps off each tag and the bar, not the box round them all).
+    const rs = [];
+    const nr = r.tags.screenRects ? r.tags.screenRects(r.camera, innerWidth, innerHeight, rs) : 0;
+    const barR = nr > rects.length ? rs[nr - 1] : null;
+    return { rects, act: { l: a.left, t: a.top, r: a.right, b: Math.max(a.bottom, lb?.bottom ?? 0) }, box, bar: barR, w: innerWidth, h: innerHeight, label: document.querySelector('.rt-act').textContent, choice: r.tagChoice(), coins: r.sim.s.coins };
   });
   const hit = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0;
   await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.coins = 3000; s.pads[1].kind = 'pen'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); r.closeMenu(); });
@@ -425,8 +467,8 @@ await b.close();
   check('phone: all five of a pen post\'s tags hang on screen (a row of five ran off both edges)', L.rects.length === 5 && L.rects.every((q) => q.l >= 0 && q.r <= L.w && q.t >= 60 && q.b <= L.h), L.rects.map((q) => `${q.id}@${Math.round(q.l)}-${Math.round(q.r)}`).join(' '));
   check('phone: every tag note reads at 12 px or more', L.rects.every((q) => q.note >= 12), L.rects.map((q) => q.note.toFixed(1)).join(' '));
   check('phone: nothing is chosen as the tags come down, and Use says "Tap a tag"', L.choice.hot === -1 && L.label === 'Tap a tag', JSON.stringify(L.choice));
-  const bar = L.box ? { l: L.box.x0, t: L.box.y0, r: L.box.x1, b: L.box.y1 } : null;
-  check('phone: the Use button (and its word) sits clear of every tag and the bar they hang from', !L.rects.some((q) => hit(L.act, q)) && !(bar && hit(L.act, bar)), JSON.stringify(L.act));
+  const bar = L.bar ? { l: L.bar.x0, t: L.bar.y0, r: L.bar.x1, b: L.bar.y1 } : L.box ? { l: L.box.x0, t: L.box.y0, r: L.box.x1, b: L.box.y1 } : null;
+  check('phone: the Use button (and its word) sits clear of every tag and the bar they hang from', !L.rects.some((q) => hit(L.act, q)) && !(bar && hit(L.act, bar)), JSON.stringify({ act: L.act, bar }));
   const c0 = L.coins;
   const act = await centre('.rt-act');
   await tap(act[0], act[1], 5);
@@ -587,6 +629,97 @@ await b.close();
   console.log(`   board price rows against its offer tags: ${bq.map((q) => `${q.dist}m rows ${q.rows.join('..')} tags ${q.tags.map((t) => t.join('..')).join(',')} over ${q.over}`).join('; ')}; the old way ${bqOld.map((q) => `${q.dist}m over ${q.over}`).join(', ')}`);
   check("phone: the board's offer tags hang clear of its price rows, all on screen", bq.length === 3 && bq.every((q) => q.n >= 2 && q.over === 0 && q.onScreen), JSON.stringify(bq));
   check("phone: the check finds the price rows covered when the tags hang the old way (control)", bqOld.some((q) => q.over > 0), JSON.stringify(bqOld));
+  // Round 9: while the board's tags hang, the journal page tucks away, so it never covers the board's "Fluff prices,
+  // day N" row (the view turns to face the tags and put that row under the page).
+  const tuck = await ph.evaluate(async () => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.hour = 8;
+    r.sim.postOrders(true);
+    r.hud.setGoal([{ text: 'Orders wait on the price board.', done: false }]);
+    const board = r.scene.getObjectByName('board');
+    board.updateWorldMatrix(true, false);
+    const e = board.matrixWorld.elements;
+    const p = s.player;
+    const nl = Math.hypot(e[8], e[10]);
+    p.x = e[12] + (e[8] / nl) * 2.6; p.z = e[14] + (e[10] / nl) * 2.6; p.y = r.sim.phys.floor(p.x, p.z);
+    r.aimAt(e[12], e[13], e[14]);
+    const pg = document.querySelector('.rh-page');
+    const before = pg.classList.contains('up') && getComputedStyle(pg).visibility !== 'hidden';
+    const near = r.sim.interactable(r.aim);
+    if (!near || near.kind !== 'board') return { before, open: false };
+    r.openMenu(near);
+    await new Promise((res) => setTimeout(res, 900));
+    // The board's title row (chalk y 0 to 64 of 384 on its 1.08 m face) against the page.
+    const v0 = (0.5 - 64 / 384) * 1.08;
+    const v1 = 0.5 * 1.08;
+    const pts = [[-0.68, v0], [0.68, v0], [0.68, v1], [-0.68, v1]].map(([u, v]) => r.project(e[0] * u + e[4] * v + e[12], e[1] * u + e[5] * v + e[13], e[2] * u + e[6] * v + e[14])).filter(Boolean);
+    const row = { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
+    const pr = pg.getBoundingClientRect();
+    const shown = getComputedStyle(pg).visibility !== 'hidden' && parseFloat(getComputedStyle(pg).opacity) > 0.05;
+    const covers = shown && Math.min(pr.right, row.x1) - Math.max(pr.left, row.x0) > 2 && Math.min(pr.bottom, row.y1) - Math.max(pr.top, row.y0) > 2;
+    r.closeMenu();
+    await new Promise((res) => setTimeout(res, 400));
+    const after = getComputedStyle(pg).visibility !== 'hidden';
+    return { before, open: true, shown, covers, row: [Math.round(row.y0), Math.round(row.y1)], page: [Math.round(pr.top), Math.round(pr.bottom)], after };
+  });
+  check('phone (round 9): while the board\'s tags hang the journal page tucks away, off the board\'s "Fluff prices, day N" row, and comes back after', tuck.open && !tuck.covers && !tuck.shown && tuck.after, JSON.stringify(tuck));
+  // Round 9: the gate's painted board steps aside while the gate's own tag hangs in front of it ("500" showed twice).
+  const gateB = await ph.evaluate(async () => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.gates.ridge = false;
+    r.sim.phys.gates = { ...s.gates };
+    s.learn.includes('gates') || s.learn.push('gates');
+    s.coins = 900;
+    const p = s.player;
+    p.x = -33.4; p.z = -10; p.y = r.sim.phys.floor(p.x, p.z);
+    r.aimAt(-35.4, r.sim.phys.floor(-35.4, -10) + 1.6, -10);
+    await new Promise((res) => setTimeout(res, 300));
+    const shut = r.props.gates.ridge.tag.visible;
+    const near = r.sim.interactable(r.aim);
+    if (!near || near.kind !== 'gate') return { shut, open: false };
+    r.openMenu(near);
+    await new Promise((res) => setTimeout(res, 500));
+    const during = r.props.gates.ridge.tag.visible;
+    const tags = r.tags.tags.filter((t) => t.opt && t.gone === 0).length;
+    r.closeMenu();
+    await new Promise((res) => setTimeout(res, 300));
+    return { shut, open: true, tags, during, after: r.props.gates.ridge.tag.visible };
+  });
+  check('phone (round 9): the gate\'s painted board steps aside while its tag hangs, and is back after (so its price shows once)', gateB.open && gateB.shut && gateB.tags === 1 && !gateB.during && gateB.after, JSON.stringify(gateB));
+  // Round 9 (shot 110): a garden post's five tags, a lone one in the bottom row: the Use button stays by the thumb
+  // buttons, clear of every tag (it jumped to the top middle, as the box round all the tags covered its place).
+  const g5 = await ph.evaluate(() => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.closeMenu();
+    s.hour = 10;
+    for (const w of ['lesson:plant', 'up:garden', 'garden']) s.learn.includes(w) || s.learn.push(w);
+    s.pads[0].kind = 'garden';
+    s.pads[0].crop = null;
+    s.pads[0].ups = [];
+    s.pads[4].kind = 'pen';
+    r.sim.phys.setPads(s.pads);
+    if (!s.downies.some((d) => !d.gone && d.tame && d.kind === 'ember')) r.sim.spawn('ember', 6, 43.5, true).g5 = true;
+    if (!s.downies.some((d) => !d.gone && d.tame && d.kind === 'clover')) r.sim.spawn('clover', 17, 26.5, true).g5 = true;
+    const p = s.player;
+    p.x = 4.6; p.z = 34; p.y = r.sim.phys.floor(4.6, 34);
+    r.aimAt(3.8 + 0.6, r.sim.phys.floor(3.8, 31.8) + 1.6, 31.8);
+    return r.sim.menu({ kind: 'pad', id: 0, label: '', x: 0, y: 0, z: 0 }).length;
+  });
+  await frames(ph, 6);
+  const actG = await centre('.rt-act.show');
+  if (actG) await tap(actG[0], actG[1], 4);
+  await ph.waitForTimeout(900);
+  const LG = await layout();
+  const homeish = LG.act.l > LG.w * 0.55 && LG.act.t > LG.h * 0.5;
+  check('phone (round 9): a garden post\'s five tags hang, and the Use button stays by the thumb buttons (right, low), clear of every tag', g5 === 5 && LG.rects.length === 5 && homeish && !LG.rects.some((q) => hit(LG.act, q)), JSON.stringify({ g5, act: LG.act, rects: LG.rects.map((q) => [Math.round(q.l), Math.round(q.t), Math.round(q.r), Math.round(q.b)]) }));
+  await ph.screenshot({ path: '/tmp/ranch-tags-garden5.png' });
+  // (Put back as it was: the downies it spawned go with the pen, so none is left loose as a stray.)
+  await ph.evaluate(() => { const r = window.ranch; r.closeMenu(); const s = r.sim.s; for (const d of s.downies) if (d.g5) d.gone = true; s.pads[0].crop = 'cloverhead'; s.pads[4].kind = 'empty'; r.sim.phys.setPads(s.pads); });
   // A lesson chooses the tag it teaches: the garden lesson, at an empty plot. (Round 7: it comes from the second morning.)
   await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w)); s.coins = 400; s.day = Math.max(2, s.day); s.night = s.day; s.hour = 10; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
   await ph.waitForFunction(() => window.ranch.seen().lesson === 'garden' && window.ranch.seen().line !== '', null, { timeout: 8000 });

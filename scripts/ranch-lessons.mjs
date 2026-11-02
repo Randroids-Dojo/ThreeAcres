@@ -554,7 +554,8 @@ if (!process.env.EVENING) {
   await press('.rt-jump', 120, 16);
   const y1 = (await page.evaluate(() => window.ranch.sim.s.player.y));
   check('phone: tapping Jump jumps and ends the lesson', (await k.finished('jump')) && y1 > y0, `rose ${(y1 - y0).toFixed(2)}`);
-  check('phone: then the meadow lesson comes back', await k.lessonOn('meadow'));
+  // (Round 9: wild clovers wait just past the gate now, so one may have seen you already: the running line first.)
+  check('phone: then the meadow lesson comes back (or the running line, a wild downy by the gate having seen you)', await k.waitFor(() => { const v = window.ranch.seen(); return (v.lesson === 'meadow' || v.lesson === 'run') && v.line !== ''; }, null, 6000));
   await page.waitForTimeout(500);
   // Round 5: a wild downy that has seen you brings the running line (the fifth playtest never learned to sprint:
   // walking stayed 8 m off a fleeing clover). Push the stick to its rim and you run; the line ticks.
@@ -828,19 +829,26 @@ if (!process.env.EVENING) {
   check('phone: puffing at a nettleback ends the night lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:night'), null, 4000));
 
   // ---- 12. garden, plant, upgrades, bench, gates: each when the coins allow
-  await page.evaluate(() => { const s = window.ranch.sim.s; s.hour = 10; s.coins = 150; for (const d of s.downies) d.hunger = 0; });
-  // ---- the pen limit, taught before it bites: eight in a pen bring a line, an arrow at its post, and the post's count tag.
+  // (Round 9: five downies in one pen is a goal, and the crowded pen below holds eleven clovers, a goal too; both marked
+  // done here so their rewards leave the coins at 150.)
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.hour = 10; s.coins = 150; for (const g of ['herd', 'fullclover']) if (!s.goals.includes(g)) s.goals.push(g); for (const d of s.downies) d.hunger = 0; });
+  // ---- the pen limit: eight in a pen bring the post's count tag, quietly; only a crowded pen (over ten) brings the line,
+  // with an arrow at its post (round 9: the line stayed up all day with six in the pen and five embers aboard).
   await page.evaluate(() => { const r = window.ranch; const n = r.sim.s.downies.filter((d) => !d.gone && d.pen === 1).length; for (let k = n; k < 8; k++) { const d = r.sim.spawn('clover', 17 + Math.cos(k) * 2, 26.5 + Math.sin(k) * 2, true); d.hunger = 0.1; d.extra = true; } });
-  check('phone: eight in a pen bring the pen limit lesson', await k.lessonOn('crowd', 4000));
+  await page.waitForTimeout(1500);
+  const count8 = await page.evaluate(() => window.ranch.pads.countTag(1));
+  check('phone: eight in a pen bring the post\'s count tag (8 of 10), with no line', (await k.seen()).lesson !== 'crowd' && count8 === '8', `${(await k.seen()).lesson} ${count8}`);
+  await page.evaluate(() => { const r = window.ranch; for (let k = 8; k < 11; k++) { const d = r.sim.spawn('clover', 17 + Math.cos(k) * 1.5, 26.5 + Math.sin(k) * 1.5, true); d.hunger = 0.1; d.extra = true; } });
+  check('phone: eleven in a pen bring the pen limit lesson', await k.lessonOn('crowd', 4000));
   u = await k.ui();
   const atPost = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on && Math.hypot(m.x - (14.8 + 0.9), m.z - 31.8) < 0.3; });
   const count = await page.evaluate(() => window.ranch.pads.countTag(1));
-  check('phone: "Keep ten or fewer downies in a pen.", the arrow at the post, whose count tag reads 8 of 10', u.page === 'Keep ten or fewer downies in a pen.' && atPost && count === '8', `${u.page} ${atPost} ${count}`);
+  check('phone: "Keep ten or fewer downies in a pen.", the arrow at the post, whose count tag reads 11 of 10', u.page === 'Keep ten or fewer downies in a pen.' && atPost && count === '11', `${u.page} ${atPost} ${count}`);
   await k.place(15.2, 34.2, 15.0, 5.0, 31.8);
   await frames(page, 4);
   await k.shot('phone-14d-crowd');
-  check('phone: by the post a moment (its count tag read), with no pen over ten, the pen limit line ticks', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:crowd'), null, 6000));
   await page.evaluate(() => { for (const d of window.ranch.sim.s.downies) if (d.extra) d.gone = true; });
+  check('phone: back to ten or fewer, the pen limit line ticks', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:crowd'), null, 6000));
   // No lesson can come yet (150 coins): the journal shows the next goal, calmly, never a blank page.
   await page.waitForTimeout(2200);
   const calm = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.sim.openGoals(1)[0]?.text }));
@@ -868,11 +876,12 @@ if (!process.env.EVENING) {
   await press('.rt-puff', 90, 21);
   check('phone: puffing food onto the bed ends the plant lesson', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:plant'), null, 4000));
   // ---- a gate goal counts the coins and points at the gate (it was a dead end)
-  await page.evaluate(() => { const s = window.ranch.sim.s; for (const g of ['sell', 'plant', 'order']) if (!s.goals.includes(g)) s.goals.push(g); s.coins = 288; });
+  await page.evaluate(() => { const s = window.ranch.sim.s; for (const g of ['herd', 'sell', 'plant', 'order']) if (!s.goals.includes(g)) s.goals.push(g); s.coins = 288; });
   // (A goal just done shows its "Earned" page first, once the feeder's line has ticked and gone.)
   await k.waitFor(() => [...document.querySelectorAll('.rh-page.up li span')].some((e) => e.textContent.startsWith('Open the Ember Ridge gate')), null, 7000);
   const gg = await page.evaluate(() => { const r = window.ranch; const m = r.tutor.mark; const pg = document.querySelector('.rh-page'); return { page: pg.classList.contains('up') ? [...pg.querySelectorAll('li span')].map((e) => e.textContent) : [], spot: r.seen().goalSpot, at: m.on ? Math.hypot(m.x - -35.4, m.z - -10) : -1 }; });
-  check('phone: the gate goal reads "Open the Ember Ridge gate, 288 of 500." with an arrow on the gate', gg.page.includes('Open the Ember Ridge gate, 288 of 500.') && gg.spot && gg.at >= 0 && gg.at < 0.5, JSON.stringify(gg));
+  // (Round 9: no arrow to a gate you cannot pay for yet; the line counts the coins.)
+  check('phone: the gate goal reads "Open the Ember Ridge gate, 288 of 500.", with no arrow while the gate cannot be paid for', gg.page.includes('Open the Ember Ridge gate, 288 of 500.') && !gg.spot, JSON.stringify(gg));
   // Round 5: 450 coins with the gate shut bring no workbench lesson (the fifth playtest's jar at 400 spent the gate's
   // savings while the journal counted towards 500): the journal keeps counting towards the gate.
   await page.evaluate(() => (window.ranch.sim.s.coins = 450));
@@ -889,6 +898,17 @@ if (!process.env.EVENING) {
   await k.shot('phone-18-gates');
   const act6 = await centre('.rt-act');
   if (act6) { await tap(act6[0], act6[1], 24); await page.waitForTimeout(700); }
+  // (Every frame from here: is the journal page up, and what does it say. Round 9: as the "Earned" page's seconds ran
+  // out it went down for a frame on a stale, empty goal list before the next goal came up.)
+  await page.evaluate(() => {
+    const log = (window.__pageLog = []);
+    const tick = () => {
+      const pg = document.querySelector('.rh-page');
+      log.push({ up: pg.classList.contains('up') && !pg.classList.contains('tucked'), h4: pg.querySelector('h4')?.textContent ?? '', text: pg.textContent.trim() });
+      if (log.length < 1200) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
   await tapTag('gate:ridge');
   check('phone: opening the gate ends the gates lesson', await k.finished('gates'));
   // The gate's goal shows done ("Earned 200 coins", struck) once the gates line has ticked, then the next goal takes the page.
@@ -897,6 +917,16 @@ if (!process.env.EVENING) {
   await k.waitFor(() => !document.querySelector('.rh-page.up h4'), null, 5000);
   const after = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.sim.openGoals(1)[0]?.text }));
   check('phone: every lesson done, the journal goes on with the next goal (never blank)', after.lesson === '' && !after.page.includes('Open the gate to Ember') && !!after.goal && after.page.includes(after.goal), JSON.stringify(after));
+  // Frame by frame: from the "Earned" page to the next goal, the page never went down and never showed the gate's goal undone.
+  await page.waitForTimeout(600);
+  const hand = await page.evaluate(() => {
+    const log = window.__pageLog;
+    const first = log.findIndex((f) => f.h4 === 'Earned 200 coins');
+    const last = log.findLastIndex((f) => f.h4 === 'Earned 200 coins');
+    const span = first < 0 ? [] : log.slice(first, Math.min(log.length, last + 30));
+    return { frames: span.length, down: span.filter((f) => !f.up).length, stale: span.filter((f) => !f.h4 && f.text.includes('Open the Ember Ridge gate')).length };
+  });
+  check('phone: the "Earned" page hands straight to the next goal, up every frame, never the gate\'s goal again', hand.frames > 30 && hand.down === 0 && hand.stale === 0, JSON.stringify(hand));
 
   // The workbench lesson comes once the gate is open (and 400 coins are there).
   await page.evaluate(() => (window.ranch.sim.s.coins = 450));
@@ -962,7 +992,7 @@ if (!process.env.EVENING) {
   const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /, by (noon|dusk)$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
   const rarePay = Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
   // (Round 8: each with its condition: the fluff order and the trip due by noon, by dusk or after dark, the hunt by noon or dusk at its set place.)
-  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds a day once penned (round 7), each with its condition (round 8)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /^(By noon|By dusk|After dark)\. Pays [\d,]+ on top of sales$/.test(t.split(': ')[1])) && rareTag.all.some((t) => /(Caught by noon|Caught by dusk|Caught today, after dark)\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/.test(rareTag.note), JSON.stringify(rareTag));
+  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds by the week's end once penned (round 9), each with its condition (round 8)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /^(By noon|By dusk|Sell after 9 pm)\. Pays [\d,]+ on top of sales$/.test(t.split(': ')[1])) && rareTag.all.some((t) => /(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/.test(rareTag.note), JSON.stringify(rareTag));
   check("phone: the rare one's coins today are no more than the trip's (the playtest's 2,680 was 3.8 times it; round 8: a downy's worth, its worth is the lasting one)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
   await k.shot('phone-18d-rare-tags');
   if (rareTag) await takeTag(rareTag.id);

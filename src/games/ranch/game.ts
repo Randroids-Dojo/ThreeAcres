@@ -24,7 +24,7 @@ import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, ORDER_BY, ORDER_NOON, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, buzz, type Frame } from './input';
-import { Tutor, allLines, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
+import { Pages, Tutor, allLines, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
 import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
@@ -93,8 +93,8 @@ export class Ranch {
   private choice = new TagChoice();
   readonly hud = new Hud();
   readonly tutor = new Tutor();
-  /** Seconds a page of something just done ("Earned 100 coins") stays up, with no new lesson over it. */
-  static readonly PAGE_SECS = 3.4;
+  /** Seconds a page of something just done ("Earned 100 coins") stays up, with no new lesson over it (Pages.SECS). */
+  static readonly PAGE_SECS = Pages.SECS;
   private marker: Marker;
   private say: Say = { dev: 'mouse', locked: false, lockAvailable: false };
   private stuckT = 0;
@@ -320,6 +320,7 @@ export class Ranch {
     this.sim = new Sim(null);
     this.sim.teaching = true;
     this.tutor.clear();
+    this.pages.clear();
     this.hud.setLesson('', false);
     this.syncGrass();
     this.pads.sync(this.sim.s.pads);
@@ -616,8 +617,9 @@ export class Ranch {
       const side = g === 'ridge' ? 1 : -1;
       o.left.rotation.y = damp(o.left.rotation.y, -want * side, 2.2, dt || 1);
       o.right.rotation.y = damp(o.right.rotation.y, want * side, 2.2, dt || 1);
-      // Prices hang on the gates once their lesson has come.
-      o.tag.visible = !s.gates[g] && this.sim.knows('gates');
+      // Prices hang on the gates once their lesson has come; while the gate's own tag hangs in front of its board, the
+      // board steps aside (round 9: the tag sat over the painted board, and "500" showed twice).
+      o.tag.visible = !s.gates[g] && this.sim.knows('gates') && !(this.menu?.it.kind === 'gate' && this.menu.it.id === g);
     }
     this.paintBoard();
     // The bellows.
@@ -672,7 +674,7 @@ export class Ranch {
   /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk", "gold clover downy, the old oak". */
   private boardText(o: Order): string {
     const name = KIND[o.kind].name.replace(' downy', '');
-    const due = o.from !== undefined ? 'after dark' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : 'by dusk';
+    const due = o.from !== undefined ? 'after 9 pm' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : 'by dusk';
     if (o.rare) return `${RARE_NAME[o.kind]} downy, ${SIGHTINGS[o.rare.spot].name}`;
     return o.live ? `${o.n} ${name} downies ${due}` : `${o.n} ${name} fluff ${due}`;
   }
@@ -833,7 +835,9 @@ export class Ranch {
       case 'stock':
         // A new kind's first pen comes with a sack of its food (the eighth playtest's embers starved the first night).
         this.cue('ranch.build', PADS[e.pad].x, heightAt(PADS[e.pad].x, PADS[e.pad].z), PADS[e.pad].z, 0.5, 1.4);
-        this.hud.note(e.feeder ? `${e.n} ${thingName(e.food, e.n)} in the feeder, to start them.` : `${e.n} ${thingName(e.food, e.n)} by the gate, to start them.`, 3.4);
+        // (Round 9: a pen without a feeder gets one with the sack in it, out of a pull at the fluff by the gate.)
+        if (e.gave) this.pads.sync(s.pads, e.pad);
+        this.hud.note(e.gave ? `A feeder of ${e.n} ${thingName(e.food, e.n)}, to start them.` : e.feeder ? `${e.n} ${thingName(e.food, e.n)} in the feeder, to start them.` : `${e.n} ${thingName(e.food, e.n)} in the pen, to start them.`, 3.6);
         break;
       case 'crop': {
         const at = PADS[e.pad];
@@ -961,29 +965,34 @@ export class Ranch {
 
   /**
    * A page of something just done ("Earned 100 coins" over the struck goal or
-   * the filled order). While a lesson has the page it waits until the lesson
-   * has ticked and gone (only the latest waits), then shows for a few seconds.
+   * the filled order), queued for the journal (see pageTick).
    */
   private queuePage(title: string, lines: PageLine[]): void {
-    this.pending = { title, lines, at: this.t };
-    this.flushPage();
+    this.pages.add({ title, lines });
   }
 
-  private flushPage(): void {
-    if (!this.pending) return;
-    // A page that waited too long behind a lesson is old news (the pause page keeps the tally).
-    if (this.t - this.pending.at > 6) this.pending = null;
-    if (!this.pending || this.tutor.busy || this.paused) return;
-    const { title, lines } = this.pending;
-    this.pending = null;
+  /**
+   * Round 9: a page of something done goes up between one lesson and the next (the next waits for it), or over a line
+   * that has stayed up 6 s (see Pages), and has the journal for its few seconds; the lesson's line comes back after.
+   * It used to wait for the lesson line to go and was dropped after 6 s (the ninth playtest's first order, gold
+   * clover and trip all filled under lines that stayed up, with only the coins to say so).
+   */
+  private pageTick(dt: number, v: { line: string; done: boolean }): void {
+    const page = this.pages.update(dt, v, this.tutor.lineAge, this.tutor.cutting, this.paused);
+    if (!page) return;
     this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(title, lines, Ranch.PAGE_SECS);
+    this.hud.showPage(page.title, page.lines, Pages.SECS);
     // It stays its few seconds: no new lesson takes the page meanwhile (the first order's went to dusk at once).
-    this.tutor.hold = Ranch.PAGE_SECS;
+    this.tutor.hold = Pages.SECS;
   }
 
-  private pending: { title: string; lines: PageLine[]; at: number } | null = null;
+  private readonly pages = new Pages();
+
+  /** The calm page with no lesson up: the day's orders (news with no box), then the next goal. */
+  private goalRows(goal: string, orders: string[]): { text: string; done: boolean; plain?: boolean }[] {
+    return [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : [])];
+  }
 
   /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do (a gate's goal counts the coins towards it). */
   private goalLine(): string {
@@ -1010,6 +1019,8 @@ export class Ranch {
     say.dev = dev === 'touch' ? 'touch' : dev === 'pad' ? 'pad' : 'mouse';
     say.locked = this.input.locked;
     say.lockAvailable = this.input.lockAvailable;
+    // (A page of something done waiting: the next lesson waits for it, so it goes between the two.)
+    this.tutor.pageWaiting = this.pages.waiting > 0 && !this.paused;
     const v = this.tutor.update(s, dt, say, this.floor);
     for (const w of this.tutor.fresh) {
       // Coins arrive with the first sale, counting up from before it.
@@ -1018,6 +1029,14 @@ export class Ranch {
     if (v.done && this.prevLessonDone !== v.id) {
       this.prevLessonDone = v.id;
       this.cue('ranch.slot', undefined, undefined, undefined, 0.7, 1.3);
+    }
+    // A page of something just done has the journal for its few seconds (over a lesson line too), then hands back.
+    this.pageTick(dt, v);
+    if (this.pages.showing) {
+      // The lesson's arrow stays in the world meanwhile; the page has the journal. What takes the page after it is kept
+      // fresh, so it hands straight over (it went down for a frame on a stale goal, and once showed the goal just done).
+      this.hud.setGoal(v.line || this.goalHidden ? [] : this.goalRows(this.goalLine(), orderLines(s, say)));
+      return;
     }
     // An open order's tally stays on the page under any lesson line (the sixth playtest's first order lost the page
     // to the garden and dusk lessons within a second of being taken). The stray line goes under an order or hunt in
@@ -1029,8 +1048,6 @@ export class Ranch {
       if (orderSpot(s, this.tutor.mark, this.floor)) this.tutor.mark.on = true;
       else if (zoneAt(s.player.x, s.player.z) !== 'ranch') this.tutor.mark.on = false;
     }
-    // A page of something just done that waited for the lesson to go.
-    if (!v.line) this.flushPage();
     // No lesson up: the day's orders with their tally, then the next journal goal, calmly, on the same page
     // (J hides them until something changes).
     const goal = v.line ? '' : this.goalLine();
@@ -1048,9 +1065,12 @@ export class Ranch {
     }
     // The day's orders all filled, or offers waiting at the board: news, a line with no box (round 8: "Order filled.
     // New ones come at dawn." got a box and a strike); an order's tally keeps its box.
-    this.hud.setGoal(this.goalHidden ? [] : [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : [])]);
+    this.hud.setGoal(this.goalHidden ? [] : this.goalRows(goal, orders));
     // The rare order (where it was seen, the downy, then the crate), or a goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
+    // (Round 9: a goal on the page that can be done brings in what it needs, the gate's price board or the Feeder tag,
+    // whatever the hour: the ninth playtest's "Open the gate to Ember Ridge." sent it to a gate with no Gate button.)
+    if (g) this.tutor.goalShown(s, g.id);
     if (!v.line && !this.goalHidden && !this.tutor.mark.on && orderSpot(s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
@@ -1513,6 +1533,7 @@ export class Ranch {
     }
     hud.markSlots(this.spots, knows('slots') && this.vm.windowsShown && this.vm.raised > 0.9 && !this.paused, s.sel, this.vm.windowRadius() * this.w, this.icons);
     this.placeAct(touch);
+    hud.tuckPage(!!this.menu && this.menu.it.kind === 'board');
     // J puts the goal line away (or back), unless a lesson has the page.
     if (f.journal && !hud.lessonUp) this.goalHidden = !this.goalHidden;
     // A wild downy digging in: the crosshair fills as it tires, and for a brook (or a thistle) an outer ring shows the time left.
@@ -1522,18 +1543,20 @@ export class Ranch {
     let back = false;
     let strain = 0;
     let tell = false;
+    let feint = false;
     for (const d of s.downies) {
-      if (d.gone || !(d.held || (!d.tame && !d.keep && (d.back > 0 || d.tell > 0 || d.easeT > 0 || d.slackT >= 0)))) continue;
+      if (d.gone || !(d.held || (!d.tame && !d.keep && (d.back > 0 || d.tell > 0 || d.feint > 0 || d.easeT > 0 || d.slackT >= 0)))) continue;
       const k = d.tug / Math.max(0.01, this.sim.tugNeed(d));
       if (k >= tug) {
         tug = k;
         left = this.sim.tugLeft(d);
         back = d.back > 0;
         tell = d.tell > 0;
+        feint = d.feint > 0;
         strain = back && d.held ? d.backHeld / this.sim.backGrace(d) : 0;
       }
     }
-    hud.setTug(tug, left, back, strain, tell);
+    hud.setTug(tug, left, back, strain, tell, feint);
     // The rare one's fed window: a ring over it, emptying as its calm runs out, while it is lured and in sight.
     const rare = this.sim.rareWild();
     const fed = rare ? rareFed(rare) : -1;
@@ -1554,12 +1577,56 @@ export class Ranch {
     const deskBox = !touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
     this.hud.placePrompt(!deskBox ? null : deskBox.y1 + 34 <= this.h - 40 ? deskBox.y1 + 12 : Math.max(70, deskBox.y0 - 34));
     const box = touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
-    // At home by the thumb buttons, above Jump, unless the tags hang over that spot (with its word under it, and
+    // At home by the thumb buttons, above Jump, unless a tag hangs over that spot (with its word under it, and
     // room for a phone's home bar): the seventh playtest's "Tap a tag" sat in the view's middle, on the board's chalk.
     const R = 32;
     const home = { x0: this.w - 22 - 2 * R - 10, x1: this.w - 12, y0: this.h - 214 - 2 * R - 44, y1: this.h - 214 + 26 };
-    if (!box || box.x1 < home.x0 || box.x0 > home.x1 || box.y1 < home.y0 || box.y0 > home.y1) {
+    if (!box) {
       this.input.placeAct(null);
+      return;
+    }
+    // Round 9: against each tag, not the box round them all (shot 110: a lone tag in the bottom row put the box over
+    // the Use button's place, and it jumped to the top middle, far from the thumb). Covered, it moves to the nearest
+    // free spot up or to the left of its place, by the thumb, before trying round the tags.
+    const n = this.tags.screenRects(this.camera, this.w, this.h, this.tagRects);
+    // (And never over the bellows, whose body takes taps.)
+    const bb = this.vm.bodyBox(this.actBox, true);
+    const bx0 = bb.x0 * this.w;
+    const bx1 = bb.x1 * this.w;
+    const by0 = bb.y0 * this.h;
+    const by1 = bb.y1 * this.h;
+    const hits = (x0: number, y0: number, x1: number, y1: number) => {
+      for (let i = 0; i < n; i++) {
+        const t = this.tagRects[i];
+        if (!(t.x1 + 6 < x0 || t.x0 - 6 > x1 || t.y1 + 6 < y0 || t.y0 - 6 > y1)) return true;
+      }
+      return x1 > bx0 && x0 < bx1 && y1 > by0 && y0 < by1;
+    };
+    if (!hits(home.x0, home.y0, home.x1, home.y1)) {
+      this.input.placeAct(null);
+      return;
+    }
+    const hx = (home.x0 + home.x1) / 2;
+    const hy = this.h - 214 - R;
+    let bestX = -1;
+    let bestY = -1;
+    let bd = 1e9;
+    for (const dy of [0, -64, -128, -192, -256, -320]) {
+      for (const dx of [0, -76, -152]) {
+        const x = hx + dx;
+        const y = hy + dy;
+        if (y - R < 130) continue;
+        if (hits(x - R - 5, y - R - 5, x + R + 5, y + R + 22)) continue;
+        const d = Math.hypot(dx, dy * 0.8);
+        if (d < bd) {
+          bd = d;
+          bestX = x;
+          bestY = y;
+        }
+      }
+    }
+    if (bestX >= 0) {
+      this.input.placeAct(bestX, bestY);
       return;
     }
     // The button with its word under it: 32 px up, 32 + 22 px down from its centre.
@@ -1583,6 +1650,8 @@ export class Ranch {
     else this.hud.setEdge(e.x, e.y, e.angle);
   }
   private edgeOut: EdgeSpot = { x: 0, y: 0, angle: 0 };
+  private tagRects: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  private actBox = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
   // ------------------------------------------------------------ audio
 

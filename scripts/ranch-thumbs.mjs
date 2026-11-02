@@ -326,7 +326,7 @@ await p.evaluate(() => window.ranch.sim.takeOrder(window.ranch.sim.offers().find
 await p.waitForTimeout(600);
 const og = await pageNow();
 const apart = (a, c) => a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
-check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff( by noon| after dark)?, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
+check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff( by noon| after 9 pm)?, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
 check('with the order and the goal, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
 await p.evaluate(() => window.ranch.hud.showZone('Ember Ridge'));
 await p.waitForTimeout(700);
@@ -372,7 +372,8 @@ for (let i = 0; i < 60; i++) {
   if (got.note) break;
   await p.waitForTimeout(80);
 }
-check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && /^It got away\./.test(got.note), `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
+// (Round 9: its first pull back may come early in a fight of beats, so it is let go a little nearer a third of the way in.)
+check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.3 && got.noPull > 0 && !got.tame && /^It got away\./.test(got.note), `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
 
 // Round 5: a brook digging in shows the time it has left on the tug ring (the fifth playtest's brooks dove after
 // about 3 s with nothing to say so): an outer ring, shown only for a kind with a time, that shrinks as you pull.
@@ -400,7 +401,8 @@ let ringGeo = null;
 let ringShot = null;
 // (Round 8: the duel. Its time waits while it puffs up and pulls back, so this thumb lets go then and pulls again after.)
 let pullDown = true;
-for (let i = 0; i < 40 && ring.filter((q) => q.shown && q.left >= 0).length < 14; i++) {
+// (Round 9: a brook's time is 5 s now and its fight two to four beats, so the thumb reads it for longer.)
+for (let i = 0; i < 100 && ring.filter((q) => q.shown && q.left >= 0).length < 14; i++) {
   await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
   await p.waitForTimeout(60);
   const st = await p.evaluate(() => { const c = document.querySelector('.rh-cross'); const l = c.querySelector('.x-left'); return { ...window.ranch.hud.tugState(), shown: c.classList.contains('timed') && getComputedStyle(l).display !== 'none', dash: parseFloat(l.style.strokeDashoffset || '0') }; });
@@ -411,7 +413,8 @@ for (let i = 0; i < 40 && ring.filter((q) => q.shown && q.left >= 0).length < 14
     await touch('touchStart', [[pullBtn.x, pullBtn.y, 24]]);
     pullDown = true;
   }
-  if (st.tell || st.back) continue;
+  // (Nor while it shivers on a fake puff: the crosshair is drawn a little bigger then.)
+  if (st.tell || st.back || st.feint) continue;
   ring.push(st);
   // Mid-pull: how big the ring is, how far the count keeps from it, and a shot to read its contrast from.
   if (ring.length === 7 && ring[ring.length - 1].left >= 0) {
@@ -434,7 +437,8 @@ for (let i = 0; i < 40 && ring.filter((q) => q.shown && q.left >= 0).length < 14
     ringShot = await p.screenshot();
   }
 }
-await touch('touchEnd', []);
+// (Round 9: a fight of beats may end this loop with the finger already up; CDP refuses a touchEnd with none down.)
+if (pullDown) await touch('touchEnd', []);
 await p.waitForTimeout(400);
 const timed = ring.filter((q) => q.shown && q.left >= 0);
 check("a brook digging in shows its time left on the tug ring, shrinking as you pull", timed.length >= 5 && timed[timed.length - 1].left < timed[0].left - 0.1 && timed[timed.length - 1].dash > timed[0].dash, JSON.stringify(timed.map((q) => q.left.toFixed(2))));
@@ -500,6 +504,147 @@ await touch('touchEnd', []);
 await p.waitForTimeout(400);
 check('a clover digging in fills the tug ring with no time ring (it has no time)', !!cloverRing && cloverRing.left === -1 && !cloverRing.timed, JSON.stringify(cloverRing));
 await p.evaluate(() => { const s = window.ranch.sim.s; for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; for (const q of s.slots) { q.t = null; q.n = 0; } });
+
+// Round 9: the tell reads by day. The ninth playtest found its gold clear at night but faint against the cream arc
+// by day. Now the whole ring turns a deep gold on a dark track: an ember pulled at noon on bright meadow grass, the
+// game held the moment it puffs up (and again while it only pulls, for the plain arc), read back from the frame
+// along the ring: the gold against its track (WCAG contrast), against the grass beyond, and its colour against the
+// plain arc's (CIELAB distance). A control puts back round 8's tell (pale gold, no track) and must read worse.
+const tellShots = {};
+await p.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  s.hour = 12;
+  s.gates.ridge = true;
+  r.sim.phys.gates = { ...s.gates };
+  for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true;
+  for (const q of s.slots) { q.t = null; q.n = 0; }
+  const pl = s.player; pl.x = -16; pl.z = -2; pl.y = r.sim.phys.floor(-16, -2);
+  const d = r.sim.spawn('ember', -16, -7.4, false);
+  d.hunger = 0.2;
+  d.hopT = 9;
+  window.__wild = d;
+  r.aimAt(d.x, d.y + 0.25, d.z);
+});
+await p.waitForTimeout(250);
+const tellGeo = async () => p.evaluate(() => {
+  const c = document.querySelector('.rh-cross').getBoundingClientRect();
+  const k = c.width / 48;
+  return { cx: c.left + c.width / 2, cy: c.top + c.height / 2, k, tug: window.ranch.hud.tugState().tug };
+});
+for (const control of [false, true]) {
+  if (control) await p.evaluate(() => { const st = document.createElement('style'); st.dataset.ctl = '1'; st.textContent = '.rh-cross .x-tugink { display: none !important; } .rh-cross.tug.tell .x-tug { stroke: #ffe7a0 !important; stroke-width: 3.6px !important; } .rh-cross.tug.tell { color: #fff0c4 !important; }'; document.head.append(st); });
+  await p.evaluate(() => { const r = window.ranch; const d = window.__wild; d.tug = 0; d.strain = 0; d.back = 0; d.tell = 0; d.feint = 0; d.noPull = 0; d.x = -16; d.z = -7.4; r.frozen = false; });
+  await touch('touchStart', [[pullBtn.x, pullBtn.y, 26]]);
+  let gotTell = false;
+  let gotPlain = false;
+  for (let i = 0; i < 320 && !(gotTell && gotPlain); i++) {
+    await p.evaluate(() => {
+      const r = window.ranch;
+      // (Caught, or off out of reach: another in its place.)
+      let d = window.__wild;
+      if (d.gone || Math.hypot(d.x + 16, d.z + 7.4) > 4) {
+        d.gone = true;
+        for (const q of r.sim.s.slots) { q.t = null; q.n = 0; }
+        d = r.sim.spawn('ember', -16, -7.4, false);
+        d.hunger = 0.2;
+        d.hopT = 9;
+        window.__wild = d;
+      }
+      d.noPull = 0;
+      r.aimAt(d.x, d.y + 0.25, d.z);
+    });
+    await p.waitForTimeout(20);
+    const st = await p.evaluate(() => window.ranch.hud.tugState());
+    const want = !gotTell && st.tell ? 'tell' : !gotPlain && st.tug > 0.15 && !st.tell && !st.back && !st.feint ? 'plain' : '';
+    if (!want || (control && want === 'plain')) continue;
+    // Hold the game there, read the ring.
+    await p.evaluate(() => { window.ranch.frozen = true; });
+    await p.waitForTimeout(140);
+    tellShots[`${control ? 'old ' : ''}${want}`] = { geo: await tellGeo(), shot: (await p.screenshot()).toString('base64') };
+    await p.evaluate(() => { window.ranch.frozen = false; });
+    if (want === 'tell') gotTell = true;
+    else gotPlain = true;
+    if (control) gotPlain = true;
+  }
+  await touch('touchEnd', []);
+  await p.waitForTimeout(500);
+}
+const ringRead9 = {};
+for (const [name, v] of Object.entries(tellShots)) {
+  ringRead9[name] = await p.evaluate(async ([b64, g, dpr, plain]) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const x2 = c.getContext('2d');
+    x2.drawImage(img, 0, 0);
+    const d = x2.getImageData(0, 0, c.width, c.height).data;
+    const lin = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    // Along the ring (a plain arc only as far as it is filled), the median pixel by luminance.
+    const at = (r, share) => {
+      const px = [];
+      for (let a = 0; a < 360 * share; a += 3) {
+        const t = ((a - 90) * Math.PI) / 180;
+        const x = Math.round((g.cx + Math.cos(t) * r) * dpr);
+        const y = Math.round((g.cy + Math.sin(t) * r) * dpr);
+        const i = (y * c.width + x) * 4;
+        px.push([d[i], d[i + 1], d[i + 2]]);
+      }
+      const L = (q) => 0.2126 * lin(q[0]) + 0.7152 * lin(q[1]) + 0.0722 * lin(q[2]);
+      px.sort((p1, p2) => L(p1) - L(p2));
+      const m = px[Math.floor(px.length / 2)];
+      return { rgb: m, L: L(m) };
+    };
+    const share = plain ? Math.max(0.2, Math.min(0.9, g.tug * 0.9)) : 0.95;
+    const ring = at(13 * g.k, share);
+    const track = at(16 * g.k, share);
+    const grass = at(23 * g.k, 0.95);
+    const ct = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    return { ring: ring.rgb, track: ring && +ct(ring.L, track.L).toFixed(2), grass: +ct(ring.L, grass.L).toFixed(2) };
+  }, [v.shot, v.geo, 2.625, name.endsWith('plain')]);
+}
+// CIELAB distance between two sRGB colours.
+const lab = ([r, g, b]) => {
+  const f = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const [R, G, B] = [f(r), f(g), f(b)];
+  const X = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047;
+  const Y = R * 0.2126 + G * 0.7152 + B * 0.0722;
+  const Z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+  const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * h(Y) - 16, 500 * (h(X) - h(Y)), 200 * (h(Y) - h(Z))];
+};
+const dE = (a, b) => { const p1 = lab(a); const p2 = lab(b); return +Math.hypot(p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]).toFixed(1); };
+const T9 = ringRead9.tell;
+const P9 = ringRead9.plain;
+const O9 = ringRead9['old tell'];
+const tellArc = T9 && P9 ? dE(T9.ring, P9.ring) : 0;
+const oldArc = O9 && P9 ? dE(O9.ring, P9.ring) : 0;
+check('round 9: by day the tell reads: the gold ring 4.5:1 or more against its track, and 30 or more (CIELAB) from the plain arc\'s colour', !!T9 && !!P9 && T9.track >= 4.5 && tellArc >= 30, JSON.stringify({ tell: T9, plain: P9, tellVsArc: tellArc }));
+check('round 9: control, round 8\'s pale gold tell with no track, reads worse on the same grass (it must fail the bar)', !!O9 && (O9.track < 4.5 || oldArc < 30) && (oldArc < tellArc || O9.track < T9.track), JSON.stringify({ old: O9, oldVsArc: oldArc }));
+await p.evaluate(() => { const s = window.ranch.sim.s; for (const d of s.downies) if (!d.tame && !d.keep) d.gone = true; window.ranch.frozen = false; document.querySelectorAll('style[data-ctl]').forEach((e) => e.remove()); });
+
+// Round 9: the note under the crosshair sits on an ink backing ("12 sweetroots by the gate, to start them." was pale
+// italic over bright grass). Its words against the backing laid over white (the worst grass): WCAG contrast.
+const note9 = await p.evaluate(() => {
+  const r = window.ranch;
+  r.hud.note('A feeder of 12 sweetroots, to start them.', 4);
+  const e = document.querySelector('.rh-say');
+  const cs = getComputedStyle(e);
+  const num = (v) => v.match(/[\d.]+/g).map(Number);
+  const [fr, fg, fb] = num(cs.color);
+  const bg = num(cs.backgroundColor);
+  const a = bg[3] ?? 1;
+  const over = [0, 1, 2].map((i) => bg[i] * a + 255 * (1 - a));
+  const lin = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const L = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  const l1 = L([fr, fg, fb]);
+  const l2 = L(over);
+  return { text: e.textContent, alpha: a, italic: cs.fontStyle, contrast: +((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2) };
+});
+check('round 9: the note under the crosshair sits on an ink backing, upright, its words 4.5:1 or more over the brightest grass', note9.alpha >= 0.6 && note9.italic !== 'italic' && note9.contrast >= 4.5, JSON.stringify(note9));
 
 // Food chosen and aimed so a blow lands in a feeder's hopper: the crosshair marks the feeder.
 const fm = await p.evaluate(() => {

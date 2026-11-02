@@ -24,7 +24,7 @@ export class Marker {
   private foods: Record<Food, Mesh>;
   private iconMat: MeshLambertMaterial;
   private shown = 0;
-  private last = { x: NaN, z: NaN, r: 0 };
+  private last = { x: NaN, z: NaN, r: 0, y: 0 };
   private at = new Vector3();
   private icon: Mark['icon'] = 'arrow';
 
@@ -60,13 +60,16 @@ export class Marker {
     this.group.visible = false;
   }
 
-  private drape(x: number, z: number, r: number, floor: (x: number, z: number) => number): void {
+  /** The ring draped over the ground, or (y over 0) flat at that height over the ground at its middle: round a feeder's hopper. */
+  private drape(x: number, z: number, r: number, floor: (x: number, z: number) => number, y = 0): void {
     const l = this.last;
-    if (Math.abs(l.x - x) < 0.03 && Math.abs(l.z - z) < 0.03 && Math.abs(l.r - r) < 0.01) return;
+    if (Math.abs(l.x - x) < 0.03 && Math.abs(l.z - z) < 0.03 && Math.abs(l.r - r) < 0.01 && Math.abs(l.y - y) < 0.01) return;
     l.x = x;
     l.z = z;
     l.r = r;
-    const w = clamp(r * 0.07, 0.07, 0.26);
+    l.y = y;
+    const up = y > 0 ? floor(x, z) + y : NaN;
+    const w = y > 0 ? 0.12 : clamp(r * 0.07, 0.07, 0.26);
     const p = this.ringPos;
     for (let i = 0; i <= SEG; i++) {
       const a = (i / SEG) * Math.PI * 2;
@@ -76,8 +79,8 @@ export class Marker {
       const iz = z + s * (r - w);
       const ox = x + c * r;
       const oz = z + s * r;
-      p.setXYZ(i * 2, ix, floor(ix, iz) + 0.07, iz);
-      p.setXYZ(i * 2 + 1, ox, floor(ox, oz) + 0.07, oz);
+      p.setXYZ(i * 2, ix, y > 0 ? up : floor(ix, iz) + 0.07, iz);
+      p.setXYZ(i * 2 + 1, ox, y > 0 ? up : floor(ox, oz) + 0.07, oz);
     }
     p.needsUpdate = true;
   }
@@ -98,7 +101,7 @@ export class Marker {
     if (m.on) {
       this.at.set(m.x, m.y, m.z);
       this.icon = m.icon;
-      if (m.r > 0) this.drape(m.rx, m.rz, m.r, floor);
+      if (m.r > 0) this.drape(m.rx, m.rz, m.r, floor, m.ry ?? 0);
       this.ring.visible = m.r > 0;
     }
     const d = Math.hypot(this.at.x - eye.x, this.at.y - eye.y, this.at.z - eye.z);

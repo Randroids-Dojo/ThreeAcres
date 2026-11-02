@@ -141,6 +141,8 @@ export class Hud {
   private lessonDone = false;
   /** With no lesson up, the day's orders and the next goal sit on the page instead; what they are, and what is showing. */
   private goalWant: { text: string; done: boolean; plain?: boolean }[] = [];
+  /** A timed page whose seconds are up, still showing until the next lesson or goal takes the journal. */
+  private pageOver = false;
   private goalShown = '';
   /** A window held down: which, since when (a long press tips it out). */
   private slotHold: { i: number; id: number; t: number; fired: boolean; x: number; y: number } | null = null;
@@ -154,7 +156,7 @@ export class Hud {
   onCycle: () => void = () => {};
 
   constructor() {
-    this.cross.innerHTML = `<svg viewBox="-24 -24 48 48"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/><circle class="x-ink" r="20" fill="none" stroke-width="5.4"/><circle class="x-left" r="20" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="125.7" stroke-dashoffset="0" transform="rotate(-90)"/></svg>`;
+    this.cross.innerHTML = `<svg viewBox="-24 -24 48 48"><g class="x-idle"><circle r="2.2" fill="currentColor"/></g><g class="x-target" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-12 -6 L-7 0 L-12 6"/><path d="M12 -6 L7 0 L12 6"/><circle r="2" fill="currentColor" stroke="none"/></g><g class="x-prickly" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M-6 -6 L6 6 M6 -6 L-6 6"/></g><g class="x-tag" fill="none" stroke="currentColor" stroke-width="1.1"><circle r="1.7"/></g><g class="x-sell" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M-12 -2 L-5 8 L5 8 L12 -2"/><circle cy="-6" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-pen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M-12 9 L-12 1 M-4 9 L-4 -1 M4 9 L4 -1 M12 9 L12 1 M-13 4 Q0 -1 13 4"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><g class="x-feeder" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-10 -2 L10 -2 L3 7 L-3 7 Z"/><path d="M0 7 L0 12"/><circle cy="-8" r="2.4" fill="currentColor" stroke="none"/></g><circle class="x-tugink" r="13" fill="none" stroke-width="7.5"/><circle class="x-tug" r="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="81.7" stroke-dashoffset="81.7" transform="rotate(-90)"/><circle class="x-ink" r="20" fill="none" stroke-width="5.4"/><circle class="x-left" r="20" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="125.7" stroke-dashoffset="0" transform="rotate(-90)"/></svg>`;
     this.tugRing = this.cross.querySelector('.x-tug')!;
     this.leftRing = this.cross.querySelector('.x-left')!;
     this.arc.innerHTML = `<svg viewBox="0 0 84 30"><path d="M4 27 A38 24 0 0 1 80 27" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 3" opacity="0.7"/><line x1="2" y1="27" x2="82" y2="27" stroke="currentColor" stroke-width="1.4" opacity="0.7"/><circle class="sun" r="3.6" fill="currentColor"/><path class="moon" d="M0 -4 A4 4 0 1 0 0 4 A3 3 0 1 1 0 -4 Z" fill="currentColor"/></svg>`;
@@ -391,6 +393,7 @@ export class Hud {
       this.page.classList.add('up');
       this.pageUp = true;
       this.pageT = 0;
+      this.pageOver = false;
       return;
     }
     if (done !== this.lessonDone) {
@@ -429,12 +432,13 @@ export class Hud {
     const lines = this.goalWant;
     if (this.lessonLine || this.pageT > 0) return;
     if (!lines.length) {
-      if (this.goalShown) {
+      if (this.goalShown || this.pageOver) {
         this.goalShown = '';
         this.hidePage();
       }
       return;
     }
+    this.pageOver = false;
     const line = lines.map((l) => `${l.done ? '+' : ''}${l.plain ? '~' : ''}${l.text}`).join('|');
     if (line === this.goalShown && this.pageUp) return;
     const fresh = !this.pageUp;
@@ -460,29 +464,35 @@ export class Hud {
    * pulling back now (the ring warm and pulsing: let go); strain: you are
    * holding on through it (the ring shakes: it is about to slip free).
    */
-  setTug(k: number, left = -1, back = false, strain = 0, tell = false): void {
+  setTug(k: number, left = -1, back = false, strain = 0, tell = false, feint = false): void {
     const v = k > 0.02 || back || tell ? Math.max(0.03, Math.min(1, k)) : 0;
     const l = v > 0 && left >= 0 ? Math.min(1, left) : -1;
     const b = v > 0 && back;
     const st = b && strain > 0.02;
     const tl = v > 0 && tell && !b;
-    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01 && b === this.backShown && st === this.strainShown && tl === this.tellShown) return;
+    const fk = v > 0 && feint && !tl && !b;
+    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01 && b === this.backShown && st === this.strainShown && tl === this.tellShown && fk === this.feintShown) return;
     this.tugShown = v;
     this.leftShown = l;
     this.backShown = b;
     this.strainShown = st;
     this.tellShown = tl;
-    // It puffs up to pull back (the tell): the ring swells, pale gold, just before it turns warm.
+    this.feintShown = fk;
+    // It puffs up to pull back (the tell): the whole ring goes gold on its dark track, just before it turns warm
+    // (round 9: it was pale gold on the cream arc, faint by day). A fake puff only shivers the crosshair: the ring stays pale.
     this.cross.classList.toggle('tell', tl);
+    this.cross.classList.toggle('feint', fk);
     this.cross.classList.toggle('tug', v > 0);
     this.cross.classList.toggle('timed', l >= 0);
     this.cross.classList.toggle('late', l >= 0 && l < 0.35);
     // It pulls back: the ring turns warm and pulses; held on through it, it shakes.
     this.cross.classList.toggle('back', b);
     this.cross.classList.toggle('strain', st);
-    this.tugRing.style.strokeDashoffset = `${(1 - v) * 81.7}`;
+    // (The tell fills the whole ring, so it reads as one gold circle, not a longer arc.)
+    this.tugRing.style.strokeDashoffset = `${tl ? 0 : (1 - v) * 81.7}`;
     if (l >= 0) this.leftRing.style.strokeDashoffset = `${(1 - l) * 125.7}`;
   }
+  private feintShown = false;
   private tugShown = 0;
   private leftShown = -1;
   private backShown = false;
@@ -491,8 +501,8 @@ export class Hud {
   private tugRing!: SVGCircleElement;
   private leftRing!: SVGCircleElement;
   /** For checks: the tug ring's fill, the time-left ring's share (-1 hidden), and whether it shows a pull back (and you straining against it). */
-  tugState(): { tug: number; left: number; back: boolean; strain: boolean; tell: boolean } {
-    return { tug: this.tugShown, left: this.leftShown, back: this.backShown, strain: this.strainShown, tell: this.tellShown };
+  tugState(): { tug: number; left: number; back: boolean; strain: boolean; tell: boolean; feint: boolean } {
+    return { tug: this.tugShown, left: this.leftShown, back: this.backShown, strain: this.strainShown, tell: this.tellShown, feint: this.feintShown };
   }
 
   /** The rare one's fed window over it at (x, y) CSS px, its share left 0..1; share < 0 hides it. */
@@ -544,7 +554,19 @@ export class Hud {
     this.pageT = secs;
   }
 
+  /**
+   * Tuck the journal page away while the price board's tags hang (round 9: the view turns to face them, and the page
+   * sat over the board's "Fluff prices, day N" row; the tags carry the offers, so the page has nothing to add there).
+   */
+  tuckPage(on: boolean): void {
+    if (on === this.tucked) return;
+    this.tucked = on;
+    this.page.classList.toggle('tucked', on);
+  }
+  private tucked = false;
+
   hidePage(): void {
+    this.pageOver = false;
     this.page.classList.remove('up');
     this.pageUp = false;
     this.pageT = 0;
@@ -680,12 +702,12 @@ export class Hud {
     if (this.pageT > 0 && !this.lessonLine) {
       this.pageT -= dt;
       if (this.pageT <= 0) {
-        // A goal waiting takes the page straight over; otherwise it goes down.
+        // A goal waiting takes the page straight over; otherwise it stays until the game says what comes next (a lesson
+        // line slides in, or an empty goal list puts it away), so it never drops for a frame in between.
         this.pageT = 0;
-        if (this.goalWant.length) {
-          this.goalShown = '';
-          this.showGoal();
-        } else this.hidePage();
+        this.goalShown = '';
+        if (this.goalWant.length) this.showGoal();
+        else this.pageOver = true;
       }
     }
     if (this.zoneT > 0) {

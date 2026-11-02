@@ -111,6 +111,18 @@ export interface Downy extends Body {
   tell: number;
   tellLen: number;
   slackT: number;
+  /**
+   * Round 9, a fight of beats: pull backs still to come this fight, fake puffs still to come, seconds left of a fake
+   * puff now (it puffs up a little and shivers, and does not pull; 0: none) and how long it was, and seconds since
+   * the last fake puff ended (-1: none lately), for letting go just after one. Not saved.
+   */
+  /** A loose downy of yours, never penned: the pen it is making for (-1: none). Not saved. */
+  homePen?: number;
+  beats: number;
+  feints: number;
+  feint: number;
+  feintLen: number;
+  sinceFeint: number;
 }
 
 export interface Item extends Body {
@@ -492,6 +504,11 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     tell: 0,
     tellLen: 0,
     slackT: -1,
+    beats: 0,
+    feints: 0,
+    feint: 0,
+    feintLen: 0,
+    sinceFeint: -1,
   };
 }
 

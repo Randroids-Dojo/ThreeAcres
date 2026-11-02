@@ -9,7 +9,8 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_NOON, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
+import { BUILD_COST, FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_NOON, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
+import { BED_HALF } from './physics';
 import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
 import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, CRATES, DOOR, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
@@ -34,6 +35,8 @@ export interface Mark {
   rx: number;
   rz: number;
   r: number;
+  /** The ring's height above the ground: 0 drapes it on the ground; more rings a thing up there (round 9: the feeder's hopper, not the post's foot). */
+  ry?: number;
   /** A slot window on the bellows to point at, or -1. */
   slot: number;
 }
@@ -130,13 +133,23 @@ function noStarving(s: RanchState): void {
   for (const d of s.downies) if (!d.gone && (d.tame || d.keep) && d.pen < 0) d.hunger = Math.min(d.hunger, 0.8);
 }
 
-/** A lesson sending you to the garden never sends you to an empty bed: the nearest clover bed ripens. */
+/**
+ * A lesson sending you to the garden never sends you to an empty bed: the nearest clover bed ripens. (Round 9: only
+ * crops still on a bed count as lying there; a head that rolled off into the lane kept the bed from ripening, and the
+ * first-fifteen-minutes player stood by a bare bed for 45 s at a time while the feeder lesson said to pull from it.)
+ */
 function ripen(s: RanchState, food: Food = 'cloverhead'): void {
-  const lying = s.items.some((it) => !it.gone && it.type === food && it.src >= 1000);
+  const lying = s.items.some((it) => !it.gone && it.type === food && it.src >= 1000 && onBed(it));
   if (lying) return;
   const g = s.pads.findIndex((p) => p.kind === 'garden' && p.crop === food);
   if (g >= 0) s.pads[g].grow = Math.max(s.pads[g].grow, 1 - 0.05 / GARDEN_HOURS);
 }
+
+/** A garden's crop still lying on its bed. */
+const onBed = (it: Item) => {
+  const p = PADS[it.src - 1000];
+  return !!p && Math.abs(it.x - p.x) < BED_HALF + 0.3 && Math.abs(it.z - p.z) < BED_HALF + 0.3;
+};
 
 /** Is a plot on the same row as one of this kind, next to it (where a feed run reaches)? */
 const besideA = (s: RanchState, i: number, kind: string) => [i - 1, i + 1].some((j) => j >= 0 && j < s.pads.length && Math.floor(j / 3) === Math.floor(i / 3) && s.pads[j].kind === kind);
@@ -189,14 +202,17 @@ function crateFor(s: RanchState): { x: number; z: number } {
   return CRATES.reduce((a, c) => (dist(s, c.x, c.z) < dist(s, a.x, a.z) ? c : a), CRATES[0]);
 }
 
-/** Downies in the jar. */
-const aboard = (s: RanchState) => s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
 
-/** A pen near the limit: eight in it, or five and the jar would take it past ten. */
+/**
+ * A pen actually crowded: more than ten in it (round 9: "Keep ten or fewer downies in a pen." stayed up all day while
+ * the jar carried five embers for an after-dark order, the pen at six). The posts' counts ("8 of 10") come in quietly
+ * from eight, so the world says it before it bites.
+ */
 function crowding(s: RanchState): boolean {
-  const f = fullest(s);
-  return f.n > PEN_MAX || f.n >= 8 || (f.n >= 5 && f.n + aboard(s) > PEN_MAX);
+  return fullest(s).n > PEN_MAX;
 }
+/** A pen near the limit (eight in it): the posts' count tags hang, with no line. */
+const nearLimit = (s: RanchState) => fullest(s).n >= 8;
 
 /** A thistle of yours behind a low fence (in the pen, or loose having hopped out of it): the pen, or -1. */
 function lowThistlePen(s: RanchState): number {
@@ -313,6 +329,8 @@ function liveStep(s: RanchState): 'catch' | 'blow' {
 
 /** The board's rare one, wild and out where it was seen. */
 const rareWild = (s: RanchState) => s.downies.find((q) => !q.gone && q.rare && !q.tame) ?? null;
+/** The board's rare one caught today and out of the jar, not yet in a pen (flying from a blow, or loose). */
+const rareCaught = (s: RanchState) => s.downies.find((q) => !q.gone && q.rare && q.tame && q.pen < 0 && q.caught === s.day) ?? null;
 
 /**
  * The rare hunt, where it stands: find it from the clue (no arrow until you are
@@ -322,6 +340,10 @@ const rareWild = (s: RanchState) => s.downies.find((q) => !q.gone && q.rare && !
 export function rareStep(s: RanchState): 'find' | 'fetch' | 'lure' | 'pull' | 'pen' {
   const o = rareOrder(s);
   if (o && wantedAboard(s, o)) return 'pen';
+  // Caught today and blown out of the jar: on its way into a pen (round 9: "Find the rose ember by the crag." showed
+  // while it flew into the pen), or loose on the ground, to pull in again.
+  const mine = rareCaught(s);
+  if (o && mine) return mine.flyT >= 0 ? 'pen' : 'pull';
   const d = rareWild(s);
   if (!d || (!o?.rare?.seen && dist(s, d.x, d.z) > RARE_SEEN)) return 'find';
   if (rareLured(d)) return 'pull';
@@ -385,7 +407,7 @@ function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
     ring(m, p.x, p.z, PEN_R);
     return true;
   }
-  const d = rareWild(s);
+  const d = rareWild(s) ?? rareCaught(s);
   if (step === 'find') {
     const sp = SIGHTINGS[o.rare.spot];
     const here = zoneAt(s.player.x, s.player.z);
@@ -408,7 +430,7 @@ function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
 const LIVE = {
   blow: 'Blow the downy into the sell crate.',
   // (Round 8: an order for after dark takes them from 9 pm.)
-  later: 'Blow it into the crate after dark.',
+  later: 'Blow it into the crate after 9 pm.',
   catch: (k: 'clover' | 'ember' | 'brook' | 'thistle') => `Catch ${k === 'ember' ? 'an' : 'a'} ${k} downy for the order.`,
 };
 
@@ -447,7 +469,7 @@ function feedStep(s: RanchState): 'pull' | 'choose' | 'out' | 'feed' {
 
 /** The garden to send you to for food: the nearest with that food lying on it, else the nearest growing it, else the first. */
 function gardenFor(s: RanchState, food: Food): number {
-  const lying = nearestPad(s, (i) => s.pads[i].kind === 'garden' && s.items.some((it) => !it.gone && it.type === food && it.src === 1000 + i));
+  const lying = nearestPad(s, (i) => s.pads[i].kind === 'garden' && s.items.some((it) => !it.gone && it.type === food && it.src === 1000 + i && onBed(it)));
   if (lying >= 0) return lying;
   const growing = nearestPad(s, (i) => s.pads[i].kind === 'garden' && s.pads[i].crop === food);
   return growing >= 0 ? growing : 0;
@@ -538,6 +560,9 @@ export function fullNote(dev: Dev, noneFree: boolean, windowsKnown: boolean, wha
   return `No window free.${how}`;
 }
 
+/** The ring round a feeder's hopper (m), at the hopper's own height. */
+export const HOPPER_RING = 0.62;
+
 /** What a feeder costs: its lesson comes as soon as you can pay. */
 const FEEDER_COST = PEN_UPS.find((u) => u.id === 'feeder')!.cost;
 
@@ -553,10 +578,11 @@ function arrow(m: Mark, x: number, y: number, z: number): boolean {
   return true;
 }
 
-function ring(m: Mark, x: number, z: number, r: number): void {
+function ring(m: Mark, x: number, z: number, r: number, y = 0): void {
   m.rx = x;
   m.rz = z;
   m.r = r;
+  m.ry = y;
 }
 
 function onDowny(m: Mark, d: Downy | null): boolean {
@@ -600,9 +626,10 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     ready: () => true,
     text: (q) => (q.dev === 'touch' ? 'Walk to the downy with your left thumb.' : q.dev === 'pad' ? 'Walk to the downy with the left stick.' : 'Walk to the downy with WASD.'),
+    // (Round 9: walking from 3.5 m to 2.2 m did not tick it, as it wanted 0.6 s of walking: any walk that ends by it does.)
     done: (s, n) => {
       const d = porch(s);
-      return n('walk') >= 0.6 && (!d || dist(s, d.x, d.z) < 3.4);
+      return n('walk') >= 0.15 && (!d || dist(s, d.x, d.z) < 3.4);
     },
     each: rested,
     mark: (s, m) => onDowny(m, porch(s)),
@@ -1053,9 +1080,11 @@ const LESSONS: Lesson[] = [
         ring(m, PADS[g].x, PADS[g].z, 3.1);
         return true;
       }
+      // The hopper itself, ringed up where it is (round 9: the ring lay round the post's foot, and the ninth
+      // playtest blew 10 clover heads at the post before finding the hopper higher up).
       const h = padSpots(i).hopper;
       arrow(m, h.x, floor(h.x, h.z) + h.y + 1.0, h.z);
-      ring(m, h.x, h.z, 0.9);
+      ring(m, h.x, h.z, HOPPER_RING, h.y + 0.12);
       return true;
     },
     note: 'A feeder drops food when its downies are hungry.',
@@ -1079,6 +1108,10 @@ const LESSONS: Lesson[] = [
     ready: () => true,
     text: () => 'Blow some food onto the bare soil.',
     done: (_s, n) => n('plant') >= 1,
+    // (Round 9: with no food aboard, the starter bed ripens, so planting is never a wait for a crop.)
+    each: (s) => {
+      if (!carrying(s, isFood)) ripen(s);
+    },
     mark: (s, m, floor) => {
       const i = nearestPad(s, (k) => s.pads[k].kind === 'garden' && !s.pads[k].crop);
       if (i < 0) return false;
@@ -1211,6 +1244,8 @@ const QUIET: { what: string; after: string[]; when(s: RanchState, n: N): boolean
   { what: 'silo', after: ['ups'], when: (s, n) => kinds(s) >= s.slots.length || n('full') >= 1 },
   { what: 'up:slots', after: ['bench'], when: (s) => kinds(s) >= 4 },
   { what: 'up:glide', after: ['bench'], when: (s) => s.gates.ridge || s.gates.hollow },
+  // (Round 9: the pen limit's counts hang from eight in a pen; its line comes only once a pen is over ten.)
+  { what: 'crowd', after: ['penin'], when: (s) => nearLimit(s) },
 ];
 
 export const LESSON_IDS = LESSONS.map((l) => l.id);
@@ -1252,6 +1287,8 @@ export class Tutor {
   private struckLine = '';
   /** The line on the page now. A stepped line moving on waits a moment first, so a step that lasts a frame never shows. */
   private shownLine = '';
+  /** Seconds the line on the page has been up as it reads now (a step moving on starts it again). */
+  private lineT = 0;
   private pendLine = '';
   private pendT = 0;
   private lastDev = '';
@@ -1266,6 +1303,8 @@ export class Tutor {
    * "Earned" page was replaced by the dusk line almost at once). A lesson that cuts in still does.
    */
   hold = 0;
+  /** A page of something done is waiting (round 9): no new lesson comes up, so the page goes between them. */
+  pageWaiting = false;
   /**
    * Real seconds between lessons coming up on the first day once the clock runs (the seventh playtest's first
    * evening put six lines up in about two real minutes, mostly in the dark).
@@ -1292,6 +1331,16 @@ export class Tutor {
   /** Is a lesson line up (or just ticked)? */
   get busy(): boolean {
     return !!this.struck || (!!this.active && this.shownFor > 0);
+  }
+
+  /** Seconds the lesson line on the page has read as it does now (for a page of something done to wait until it has been read). */
+  get lineAge(): number {
+    return this.active && !this.struck ? this.lineT : 0;
+  }
+
+  /** The lesson up is one that cuts in (the first pull back): nothing covers it. */
+  get cutting(): boolean {
+    return !!this.active?.cut && !this.struck;
   }
 
   static finished(s: RanchState, id: string): boolean {
@@ -1463,8 +1512,8 @@ export class Tutor {
           continue;
         }
       }
-      // A page of something just done is up: nothing new comes for a few seconds.
-      if (!this.active && this.hold > 0) break;
+      // A page of something just done is up (or waiting to go up): nothing new comes for a few seconds.
+      if (!this.active && (this.hold > 0 || this.pageWaiting)) break;
       // Urgent lessons take over from a calm one.
       if (!this.active?.urgent) {
         const u = LESSONS.find((q) => q.urgent && q !== this.active && this.eligible(s, q, n));
@@ -1496,6 +1545,7 @@ export class Tutor {
       return v;
     }
     this.shownFor += dt;
+    this.lineT += dt;
     l.each?.(s, dt);
     const want = l.text(say, s);
     if (want !== this.shownLine) {
@@ -1505,7 +1555,10 @@ export class Tutor {
       }
       this.pendT += dt;
       // A new lesson, or another device's words, show at once; a step moving on waits a moment.
-      if (!this.shownLine || say.dev !== this.lastDev || this.pendT >= Tutor.STEP_HOLD) this.shownLine = want;
+      if (!this.shownLine || say.dev !== this.lastDev || this.pendT >= Tutor.STEP_HOLD) {
+        if (!this.shownLine || say.dev === this.lastDev) this.lineT = 0;
+        this.shownLine = want;
+      }
     }
     this.lastDev = say.dev;
     v.line = this.shownLine;
@@ -1519,6 +1572,15 @@ export class Tutor {
   notes(s: RanchState, max = 3): string[] {
     const order = s.learn.filter((w) => w.startsWith('lesson:')).map((w) => byId.get(w.slice(7)));
     return order.filter((l): l is Lesson => !!l?.note).slice(-max).map((l) => l.note!);
+  }
+
+  /**
+   * The journal goal on the page now (round 9): one that can be done brings in what it needs (the gate's price
+   * board, the Feeder tag) at any hour, so the page never sends you to something you cannot use.
+   */
+  goalShown(s: RanchState, id: GoalId): void {
+    const f = goalBrings(id, s);
+    if (f) this.unlock(s, f);
   }
 
   /** Start over (a reset ranch). */
@@ -1535,15 +1597,118 @@ export class Tutor {
   }
 }
 
+/** A line on a page of something done: struck (done) and just now (fresh), or plain news with no box. */
+export interface PageLine {
+  text: string;
+  done: boolean;
+  fresh: boolean;
+  plain?: boolean;
+}
+export interface Page {
+  title: string;
+  lines: PageLine[];
+}
+
+/**
+ * Pages of something done ("Earned 140 coins" over the struck order or goal), round 9. The ninth playtest's first
+ * order filled under "Sleep at the front door till morning.", its gold clover was penned under the same line (so
+ * "It stays. Its pen sheds more.", the only place the hunt's reward is said, never showed) and its trip filled under
+ * "Open the gate to Ember Ridge.": a page waited for the lesson line to go and was dropped after 6 s, and each time
+ * the only sign was the coins jumping. Now a page goes up between one lesson and the next (the tutor holds the next
+ * back while one waits), or over a line that has stayed up 6 s (not while it ticks, nor over the first pull back's
+ * line), and has the journal for its few seconds; the lesson's line comes back after. None is dropped (the newest
+ * four are kept, in turn).
+ */
+export class Pages {
+  /** Seconds a page stays up. */
+  static readonly SECS = 3.4;
+  /**
+   * Seconds a lesson line has read as it does before a page may step in over it: a line that stays up (the dusk
+   * line, a gate's). A quick step ticks before then, and the page goes between it and the next lesson (the tutor
+   * holds the next one back while a page waits: `Tutor.pageWaiting`).
+   */
+  static readonly READ = 6;
+  private queue: Page[] = [];
+  /** The page up now, if any, and its seconds left. */
+  showing: Page | null = null;
+  left = 0;
+
+  add(p: Page): void {
+    this.queue.push(p);
+    while (this.queue.length > 4) this.queue.shift();
+  }
+
+  get waiting(): number {
+    return this.queue.length;
+  }
+
+  /**
+   * Once a frame: the page to put up now (returned once, as it goes up), else null. v: the tutor's view; age: how
+   * long its line has read as it does (Tutor.lineAge); cut: a line that cuts in is up (Tutor.cutting).
+   */
+  update(dt: number, v: { line: string; done: boolean }, age: number, cut: boolean, paused = false): Page | null {
+    if (this.showing) {
+      this.left -= dt;
+      if (this.left > 0) return null;
+      this.showing = null;
+    }
+    if (!this.queue.length || paused) return null;
+    if (v.line && (v.done || cut || age < Pages.READ)) return null;
+    this.showing = this.queue.shift()!;
+    this.left = Pages.SECS;
+    return this.showing;
+  }
+
+  clear(): void {
+    this.queue.length = 0;
+    this.showing = null;
+    this.left = 0;
+  }
+}
+
+/**
+ * Round 9 (the ninth playtest's P1: at 21:00 on day 2 with 574 coins the journal said "Open the gate to Ember Ridge."
+ * with an arrow over the gate, and at the gate there was no Gate button, as the gates lesson rests until morning and
+ * the gate waited for it): what a journal goal that you do at something needs brought in, and what it costs. Shown
+ * with the coins for it, the goal brings its thing in itself (the gate's price board, the Feeder tag), whatever the
+ * hour, so a goal on the page can always be done; short of coins, it counts them, with no arrow.
+ */
+const GOAL_NEEDS: Partial<Record<GoalId, { feature: string; cost: number; after: string }>> = {
+  pen: { feature: 'pads', cost: BUILD_COST.pen, after: 'sell' },
+  feeder: { feature: 'up:feeder', cost: PEN_UPS.find((u) => u.id === 'feeder')!.cost, after: 'farm' },
+  ridge: { feature: 'gates', cost: GATES.ridge.cost, after: 'meadow' },
+  hollow: { feature: 'gates', cost: GATES.hollow.cost, after: 'meadow' },
+};
+
+/** Can this goal be done right now, with what is in play (coins, and its thing brought in or about to be)? */
+export function goalDoable(id: GoalId, s: RanchState): boolean {
+  const need = GOAL_NEEDS[id];
+  if (id === 'ridge' || id === 'hollow') return !s.gates[id] && s.coins >= GATES[id].cost;
+  if (id === 'feeder') return s.coins >= need!.cost && s.pads.some((p) => p.kind === 'pen' && !p.ups.includes('feeder'));
+  if (id === 'pen') return s.coins >= need!.cost || s.pads.some((p) => p.kind === 'pen');
+  if (id === 'ember') return s.gates.ridge;
+  if (id === 'thistle') return s.gates.ridge;
+  return true;
+}
+
+/** The thing a goal on the page brings in now (it can be done and its lesson has not brought it in yet), or null. */
+export function goalBrings(id: GoalId, s: RanchState): string | null {
+  const need = GOAL_NEEDS[id];
+  if (!need || s.learn.includes(need.feature) || !Tutor.finished(s, need.after) || !goalDoable(id, s)) return null;
+  return need.feature;
+}
+
 /**
  * A journal goal's line. A gate's counts the coins towards it ("Open the Ember
  * Ridge gate, 288 of 500."), so the page is never a dead end while you save up,
- * and the big total counts what you have earned.
+ * and the big total counts what you have earned. Round 9: so does a feeder's or
+ * a pen's, short of its price.
  */
 export function goalText(id: GoalId, s: RanchState): string {
   const g = GOALS.find((q) => q.id === id);
   if (!g) return '';
   if ((id === 'ridge' || id === 'hollow') && !s.gates[id] && s.coins < GATES[id].cost) return `Open the ${GATES[id].name} gate, ${fmtCoins(s.coins)} of ${fmtCoins(GATES[id].cost)}.`;
+  if ((id === 'feeder' || id === 'pen') && !goalDoable(id, s) && s.coins < GOAL_NEEDS[id]!.cost) return `${g.text.slice(0, -1)}, ${fmtCoins(s.coins)} of ${fmtCoins(GOAL_NEEDS[id]!.cost)}.`;
   if (id === 'rich') return `${g.text.slice(0, -1)}, ${fmtCoins(s.earned)} so far.`;
   // The thistle hunt has a clue (it had none): by day, when they come; at dusk, where, with an arrow.
   if (id === 'thistle') return thistleTime(s) ? 'Catch a thistle on the ridge top.' : 'Thistles visit the ridge top at dusk.';
@@ -1565,7 +1730,8 @@ export function goalSpot(id: GoalId, s: RanchState, m: Mark, floor: Floor): bool
     if (d) return onDowny(m, d);
     return arrow(m, RIDGE_TOP.x, floor(RIDGE_TOP.x, RIDGE_TOP.z) + 3, RIDGE_TOP.z);
   }
-  if ((id !== 'ridge' && id !== 'hollow') || s.gates[id]) return false;
+  // (Round 9: only a gate you can open now: short of its price the line counts the coins, with no arrow.)
+  if ((id !== 'ridge' && id !== 'hollow') || s.gates[id] || !goalDoable(id, s)) return false;
   const g = GATES[id];
   const x = g.x + (id === 'ridge' ? 0.6 : -0.6);
   return arrow(m, x, floor(x, g.z) + 3.6, g.z);
@@ -1584,7 +1750,7 @@ function openLines(s: RanchState, say: Say): string[] {
     .filter((o) => o.state === 'open' && o.got < o.n)
     // (One due by noon says so: "Clover fluff by noon, 2 of 10.")
     .map((o) => {
-      const due = o.from !== undefined ? ' after dark' : o.by === ORDER_NOON ? ' by noon' : '';
+      const due = o.from !== undefined ? ' after 9 pm' : o.by === ORDER_NOON ? ' by noon' : '';
       return o.rare ? rareLine(s, o, say) : o.live ? `${KIND_WORD[o.kind]} downies${due}, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff${due}, ${o.got} of ${o.n}.`;
     });
 }

@@ -242,6 +242,14 @@ for (const r of RANCHES) {
   let three = 0;
   let prevKeys = new Set<string>();
   const conds: Record<string, number> = { noon: 0, dusk: 0, 'after dark': 0, 'set place': 0 };
+  // Round 9: a prized order's pay against the day's plain fluff order by dusk, and offers of a sort and kind back within
+  // two mornings (and of those, how many the board could have avoided with another kind of that sort).
+  let prized = 0;
+  let prizedMost = 0;
+  let back2 = 0;
+  let avoidable = 0;
+  const seen2: Set<string>[] = [];
+  let rareNote = '';
   const DAYS = 30;
   for (let d = 2; d < 2 + DAYS; d++) {
     s.day = d;
@@ -285,6 +293,24 @@ for (const r of RANCHES) {
       if (p) picks[th][p.rare ? 'hunt' : p.live ? 'trip' : 'fluff']++;
     }
     if (rr && bonusPen(sim)) lastingDays++;
+    const plains = sim.orderChoices(6).filter((c) => c.kind !== 'thistle');
+    const plainDay = Math.max(0, ...plains.map((c) => c.n * sim.price(c.kind)));
+    for (const o of os) {
+      if (o.mult > 2 && plainDay > 0) {
+        prized++;
+        prizedMost = Math.max(prizedMost, o.pay / plainDay);
+      }
+    }
+    const sortOf = (o: Order) => (o.rare ? 'rare' : o.live ? 'live' : 'fluff');
+    for (const o of os) {
+      const k = `${sortOf(o)}:${o.kind}`;
+      if (!seen2.slice(-2).some((q) => q.has(k))) continue;
+      back2++;
+      const pool = sortOf(o) === 'fluff' ? sim.orderChoices(6).map((c) => c.kind) : sim.liveKinds();
+      if (pool.some((q) => !seen2.slice(-2).some((z) => z.has(`${sortOf(o)}:${q}`)) && !os.some((z) => sortOf(z) === sortOf(o) && z.kind === q))) avoidable++;
+    }
+    seen2.push(new Set(os.map((o) => `${sortOf(o)}:${o.kind}`)));
+    if (rr && !rareNote) rareNote = `day ${d}: "${sim.offerTag(rr).note}"`;
   }
   const kinds = Object.entries(asked)
     .sort((a, b) => b[1] - a[1])
@@ -306,6 +332,7 @@ for (const r of RANCHES) {
   console.log(`      most coins today: fluff order ${best.fluff}, trip ${best.trip}, hunt ${best.hunt} of ${DAYS}; its pen bonus lasts (a pen with no rare one yet; every pen holds one from morning 11) on ${lastingDays}`);
   console.log(`      a real choice, every offer best at something (most coins today, a reward that lasts, no trip out): ${real} of ${DAYS}`);
   console.log(`      round 8: three offers on ${three} of ${DAYS} mornings; offers repeating one of yesterday's (sort, kind and deadline): ${repeats}; conditions: ${Object.entries(conds).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  console.log(`      round 9: prized offers ${prized}, the most one paid ${prizedMost.toFixed(2)} times the day's plain fluff order (capped at 1.5); a sort and kind back within two mornings ${back2} times, ${avoidable} of them avoidable; the rare one's tag, ${rareNote || 'none offered'}`);
   console.log(`      the best pick, time out charged at what the ranch makes meanwhile: careful catcher fluff order ${picks.careful.fluff}, trip ${picks.careful.trip}, hunt ${picks.careful.hunt}; careless fluff order ${picks.careless.fluff}, trip ${picks.careless.trip}, hunt ${picks.careless.hunt} of ${DAYS}`);
   allPicks.careful.fluff += picks.careful.fluff;
   allPicks.careful.trip += picks.careful.trip;

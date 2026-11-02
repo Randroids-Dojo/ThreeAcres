@@ -12,7 +12,8 @@
 // second, as the game does. A careful thumb sees sooner, moves truer and
 // wobbles less, and runs at a thistle; a careless one walks. As in real play
 // a downy that gets away can be chased again: a try succeeds if the downy is
-// in the jar within 14 s (a brook that slips into the pond is gone for good).
+// in the jar within 20 s (14 s before round 9 made each fight two to five
+// beats long; a brook that slips into the pond is gone for good).
 //
 // The third playtest's harness (standing 6.5 m off, the view moved every
 // frame, no food about, a getaway the end of a try) said a careless thumb
@@ -53,6 +54,11 @@ export interface Thumb {
    * eighth playtest's thumbs: a good one 200 to 350 ms, a slow one 450 to 650). null: never reads it (holds on).
    */
   react: [number, number] | null;
+  /**
+   * Round 9, fake puffs: the share of them it takes for a real tell and lets go on (the gold ring is the sign to read;
+   * a fake one only shivers, the ring pale). It presses again a reaction after it lets go, having seen it was fake.
+   */
+  fooled: number;
 }
 
 /** Radians of view per px of a look drag on touch (the game's). */
@@ -74,9 +80,9 @@ export const LOOP_LAG = 0.1;
  */
 export const TUG_LAG = 0.075;
 /** The fourth playtest's careless thumb: 180 ms of lag (and the loop's), 55% a move, 6 px of wobble either way; it walks; it reads the tug slowly (450 to 650 ms, the eighth playtest's slow thumb). */
-export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0.55, noise: 6 * SENS, run: false, react: [0.45, 0.65] };
+export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0.55, noise: 6 * SENS, run: false, react: [0.45, 0.65], fooled: 0.6 };
 /** A careful thumb: sees it in 70 ms (and the loop's), moves 80% of the way, wobbles 1.5 px; runs at a thistle; reads the tug in 200 to 350 ms (the eighth playtest's good thumb). */
-export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true, react: [0.2, 0.35] };
+export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true, react: [0.2, 0.35], fooled: 0.2 };
 /** A thumb that never reads the tug: holds Pull all the way (the seventh playtest's way, for the control). */
 export const HOLDER: Thumb = { ...CAREFUL, name: 'holds on', react: null };
 
@@ -129,6 +135,9 @@ export interface Try {
   /** Times it pulled back, and slipped free. */
   backs: number;
   slips: number;
+  /** Round 9: fake puffs it made, and how many the thumb let go on. */
+  feints: number;
+  fooled: number;
 }
 
 /**
@@ -190,6 +199,9 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     const react = () => (thumb.react ? TUG_LAG + thumb.react[0] + Math.random() * (thumb.react[1] - thumb.react[0]) : 0);
     let wasBack = false;
     let wasTell = false;
+    let wasFeint = false;
+    let feints = 0;
+    let fooledN = 0;
     let letGo = false;
     let releaseAt = -1;
     let pressAt = -1;
@@ -202,7 +214,9 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     const side = seed % 2 ? 1 : -1;
     const aboard = () => s.slots.reduce((a, q) => a + (q.t && !isDowny(q.t) ? q.n : 0), 0);
     const kept0 = () => s.slots.reduce((a, q) => a + (q.t === kind ? q.n : 0), 0);
-    for (; t < 14 && !caught && !gone; t += DT) {
+    // (Round 9: a fight is two to five beats now, 4 to 10 s, so a try runs to 20 s; it was 14.)
+    const limit = 20;
+    for (; t < limit && !caught && !gone; t += DT) {
       hist.push({ t, x: d.x, y: d.y, z: d.z });
       if (t >= tick) {
         tick += TICK;
@@ -233,11 +247,21 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       else if (!walking && dist > 7) walking = true;
       const back = d.back > 0;
       const tell = d.tell > 0;
+      const feint = d.feint > 0;
       if (thumb.react) {
         // The tell (or a pull back that came with none): let go a reaction later.
         if ((tell && !wasTell) || (back && !wasBack && !wasTell && releaseAt < 0 && !letGo)) {
           releaseAt = t + react();
           pressAt = -1;
+        }
+        // A fake puff: taken for a tell now and then (its share), let go on, and pulled again a reaction after.
+        if (feint && !wasFeint) {
+          feints++;
+          if (!letGo && releaseAt < 0 && Math.random() < thumb.fooled) {
+            fooledN++;
+            releaseAt = t + react();
+            pressAt = releaseAt + react();
+          }
         }
         if (!back && wasBack) {
           releaseAt = -1;
@@ -247,6 +271,8 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
           letGo = true;
           releaseAt = -1;
         }
+        // (A pull back that comes while it is let go on a fake puff: it waits for that to stop, as ever.)
+        if (letGo && back && pressAt >= 0) pressAt = -1;
         if (pressAt >= 0 && t >= pressAt) {
           letGo = false;
           pressAt = -1;
@@ -254,6 +280,7 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       }
       wasBack = back;
       wasTell = tell;
+      wasFeint = feint;
       if (fought < 0 && d.strain > 0) fought = t;
       // Walking into a rock or the crag, a thumb steps aside round it (the harness used to walk on into it).
       if (walking && Math.hypot(p.vx, p.vz) < 1) blockedT += DT;
@@ -289,14 +316,14 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
         caughtAt = t;
       } else if (d.gone) gone = true;
     }
-    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips };
+    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips, feints, fooled: fooledN };
   } finally {
     Math.random = realRandom;
   }
 }
 
 /** Share of tries caught, for a kind and a thumb. */
-export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1, rare: '' | 'lured' | 'wary' = ''): { rate: number; first: number; secs: number; fight: number; escaped: number; slipped: number; backs: number; food: number; under: number } {
+export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1, rare: '' | 'lured' | 'wary' = ''): { rate: number; first: number; secs: number; fight: number; escaped: number; slipped: number; backs: number; food: number; under: number; fights: number[]; firstBacks: number; feints: number; fooled: number } {
   let n = 0;
   let first = 0;
   let secs = 0;
@@ -306,6 +333,10 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
   let backs = 0;
   let food = 0;
   let under = 0;
+  const fights: number[] = [];
+  let firstBacks = 0;
+  let feints = 0;
+  let fooled = 0;
   for (let k = 0; k < tries; k++) {
     const r = rare ? tryCatch(kind, thumb, seed0 + k * 7919, rare === 'lured' ? 8 : 12, rare) : tryCatch(kind, thumb, seed0 + k * 7919);
     if (r.caught) {
@@ -315,14 +346,19 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
     if (r.first) {
       first++;
       fight += r.fight;
+      fights.push(r.fight);
+      firstBacks += r.backs;
     }
+    feints += r.feints;
+    fooled += r.fooled;
     if (r.escaped) esc++;
     if (r.slips > 0) slipped++;
     backs += r.backs;
     if (r.food > 0) food++;
     if (r.near < 1) under++;
   }
-  return { rate: n / tries, first: first / tries, secs: n ? secs / n : 0, fight: first ? fight / first : 0, escaped: esc / tries, slipped: slipped / tries, backs: backs / tries, food: food / tries, under: under / tries };
+  fights.sort((a, b) => a - b);
+  return { rate: n / tries, first: first / tries, secs: n ? secs / n : 0, fight: first ? fight / first : 0, escaped: esc / tries, slipped: slipped / tries, backs: backs / tries, food: food / tries, under: under / tries, fights, firstBacks: first ? firstBacks / first : 0, feints: feints / tries, fooled: fooled / tries };
 }
 
 /**
@@ -370,16 +406,26 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   console.log(`   careless: ${Math.round(CARELESS.lag * 1000)} ms lag (the loop's ${LOOP_LAG * 1000} in it), ${Math.round(CARELESS.gain * 100)}% a move, ${(CARELESS.noise / SENS).toFixed(1)} px wobble, walks`);
   console.log(`   careful:  ${Math.round(CAREFUL.lag * 1000)} ms lag, ${Math.round(CAREFUL.gain * 100)}% a move, ${(CAREFUL.noise / SENS).toFixed(1)} px wobble, runs at a thistle\n`);
   console.log(`   reading the tug: each lets go of Pull a reaction after the downy puffs up, and pulls again a reaction after its pull back stops (careless ${CARELESS.react!.map((v) => v * 1000).join(' to ')} ms, careful ${CAREFUL.react!.map((v) => v * 1000).join(' to ')} ms)`);
-  console.log(`   first: caught on the first try (no slip, no getaway); in 14 s: chased again after a slip or a getaway; fight: first tug to the jar on a first try\n`);
+  console.log(`   first: caught on the first try (no slip, no getaway); in 20 s: chased again after a slip or a getaway; fight: first tug to the jar on a first try\n`);
   const pct = (v: number) => `${Math.round(v * 100)}%`.padStart(4);
   const row = (name: string, a: ReturnType<typeof catchRate>, b: ReturnType<typeof catchRate>, c: ReturnType<typeof catchRate>) =>
     console.log(`   ${name.padEnd(13)} ${pct(a.first)} ${pct(a.rate)}  ${a.fight.toFixed(1)} s  ${a.backs.toFixed(1)} backs ${pct(a.slipped)} slipped ${pct(a.escaped)} away   |  ${pct(b.first)} ${pct(b.rate)}  ${b.fight.toFixed(1)} s  ${b.backs.toFixed(1)} backs ${pct(b.slipped)} slipped ${pct(b.escaped)} away   |  ${pct(c.first)}`);
-  console.log('   kind          careless: first, in 14 s, fight, pull backs, slipped, got away  |  careful: the same                                 |  holding on (control): first');
+  console.log('   kind          careless: first, in 20 s, fight, pull backs, slipped, got away  |  careful: the same                                 |  holding on (control): first');
   for (const kind of ['clover', 'ember', 'brook', 'thistle'] as DownyKind[]) row(kind, catchRate(kind, CARELESS, tries), catchRate(kind, CAREFUL, tries), catchRate(kind, HOLDER, Math.max(10, tries >> 1)));
   // The board's rare one (round 6: a hunt). Lured (it has just eaten the food you blew near it), from 8 m: it
   // fights harder than its kind, and pulls back most often and fastest. Not lured, walking in from 12 m: it hears you and bolts.
   for (const kind of ['clover', 'ember', 'brook'] as DownyKind[]) row(`rare ${kind}`, catchRate(kind, CARELESS, tries, 1, 'lured'), catchRate(kind, CAREFUL, tries, 1, 'lured'), catchRate(kind, HOLDER, Math.max(10, tries >> 1), 1, 'lured'));
   for (const kind of ['clover', 'ember', 'brook'] as DownyKind[]) console.log(`   rare ${kind} not lured, careful, walking in from 12 m: ${pct(catchRate(kind, CAREFUL, Math.max(10, tries >> 2), 1, 'wary').rate)}`);
+  // Round 9: how long a fight lasts, by kind (first tug to the jar on a first try), and its beats: the ninth playtest's
+  // 18 plain catches each pulled back exactly once in 3.2 to 4.1 s. Target: clover 2 to 3 s, the others 4 to 7, rares 7 to 10.
+  console.log('\n   fight lengths on a first try (round 9), the good thumb then the slow one: middle and the middle half, s; pull backs a fight; fake puffs a try and the share let go on');
+  const q = (a: number[], f: number) => (a.length ? a[Math.min(a.length - 1, Math.floor(a.length * f))] : 0);
+  for (const [name, kind, rare] of [['clover', 'clover', ''], ['ember', 'ember', ''], ['brook', 'brook', ''], ['thistle', 'thistle', ''], ['rare clover', 'clover', 'lured'], ['rare ember', 'ember', 'lured'], ['rare brook', 'brook', 'lured']] as [string, DownyKind, '' | 'lured'][]) {
+    const g = catchRate(kind, CAREFUL, tries, 1, rare);
+    const sl = catchRate(kind, CARELESS, tries, 1, rare);
+    const f = (r: ReturnType<typeof catchRate>) => `${q(r.fights, 0.5).toFixed(1)} s (${q(r.fights, 0.25).toFixed(1)} to ${q(r.fights, 0.75).toFixed(1)}), ${r.firstBacks.toFixed(1)} backs, ${r.feints.toFixed(2)} fakes, ${r.feints ? Math.round((r.fooled / r.feints) * 100) : 0}% let go`;
+    console.log(`   ${name.padEnd(13)} good ${f(g)}   |   slow ${f(sl)}`);
+  }
   // Closing on a clover that has seen you, walking against running (taught now: the running lesson in the meadow).
   for (const run of [false, true]) {
     const rows = Array.from({ length: 12 }, (_, k) => chaseGap(run, 31 + k * 7919));

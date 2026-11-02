@@ -175,6 +175,8 @@ describe('P1: orders for live downies, blown into the sell crate', () => {
   it('without a live order the crate takes no downy, and the crosshair does not say it would', () => {
     const sim = morning(['clover'], 3, false);
     const s = sim.s;
+    // (Round 9: five in a pen is a goal now, with its own reward; done already here.)
+    s.goals.push('herd');
     sim.stow('clover');
     s.sel = s.slots.findIndex((q) => q.t === 'clover');
     stand(sim, EXCHANGE.x, EXCHANGE.z - 4.2);
@@ -245,7 +247,8 @@ describe('P1: each morning the board offers a choice, with trade-offs', () => {
 
   it('a trip for live downies is worth about what the fluff order adds, so neither always wins', () => {
     const ratios: number[] = [];
-    for (let day = 2; day < 32; day++) {
+    // (Round 9: sixty mornings, as only some have both due by dusk.)
+    for (let day = 2; day < 62; day++) {
       const sim = morning(['clover', 'ember', 'brook'], day);
       sim.postOrders(true);
       // (Round 8: each offer is due by noon or by dusk; a noon one pays more for less. Compared here on the days
@@ -325,7 +328,7 @@ describe("P2: the first order comes as soon as the loop lesson ends", () => {
   it('with no order on the board the journal says when they come, not to fill one', () => {
     const sim = quiet(20);
     sim.s.learn.push('orders');
-    sim.s.goals = ['catch', 'pen', 'feed', 'sell', 'plant'];
+    sim.s.goals = ['catch', 'pen', 'feed', 'herd', 'sell', 'plant'];
     expect(sim.openGoals(1)[0].id).toBe('order');
     expect(orderLines(sim.s)).toEqual([]);
     expect(goalLine(sim)).toBe('New orders come to the board at dawn.');
@@ -521,18 +524,22 @@ describe('P2: the lines follow the steps', () => {
     expect(view().line).toBe('Blow the downy into the pen.');
   });
 
-  it('the pen limit line stays up until you have seen the count on the post', () => {
+  // (Round 9: the line comes only once a pen is over ten, and stays until it is back to ten.)
+  it('the pen limit line stays up while the pen is over ten, and goes once it is back to ten', () => {
     const { sim, s, tutor, go } = ranch(PAST_ORDER, PAST_ORDER_F);
     s.hour = 10;
     s.night = s.day;
     pen(sim, 1);
-    fill(sim, 1, 'clover', 8, 0.1);
-    go(12);
+    fill(sim, 1, 'clover', 11, 0.1);
+    go(0.6);
     expect(tutor.current).toBe('crowd');
     expect(Tutor.finished(s, 'crowd')).toBe(false);
     const post = padSpots(1).post;
     stand(sim, post.x + 1.5, post.z + 1.5);
-    go(2);
+    go(0.6);
+    expect(Tutor.finished(s, 'crowd')).toBe(false);
+    s.downies.find((d) => d.pen === 1)!.gone = true;
+    go(1);
     expect(Tutor.finished(s, 'crowd')).toBe(true);
   });
 });
@@ -562,8 +569,9 @@ describe('P3: the cheap fixes', () => {
 
   it('the pause journal shows the goals done in the order you did them, then the one you are on, last', () => {
     // The ridge gate opened before the board's first order was filled.
-    const rows = journalGoals(['catch', 'pen', 'feed', 'sell', 'plant', 'ridge', 'ember']);
-    expect(rows.map((r) => r.done)).toEqual([true, true, true, true, true, true, true, false]);
+    // (Round 9: five downies in one pen is a goal, after feeding.)
+    const rows = journalGoals(['catch', 'pen', 'feed', 'herd', 'sell', 'plant', 'ridge', 'ember']);
+    expect(rows.map((r) => r.done)).toEqual([true, true, true, true, true, true, true, true, false]);
     expect(rows[rows.length - 1].text).toBe('Fill an order from the price board.');
   });
 });

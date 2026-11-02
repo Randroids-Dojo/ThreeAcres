@@ -500,6 +500,11 @@ export class CreatureView {
         const p = 1 - d.tell / d.tellLen;
         const puff = 1 + 0.34 * p * (2 - p);
         scale *= puff;
+      } else if (d.feint > 0 && d.feintLen > 0) {
+        // A fake puff (round 9): it puffs up only a little, shivers and sags, and does not pull.
+        const p = 1 - d.feint / d.feintLen;
+        scale *= 1 + 0.16 * Math.sin(Math.PI * p);
+        roll += Math.sin(t * 46 + d.id) * 0.09;
       } else if (d.back > 0 && !d.tame) scale *= 1.12;
       const wob = d.mood === 'hungry' ? 0 : Math.sin(t * 2 + d.id) * 0.015;
       _e.set(pitch, d.yaw, roll + wob, 'YXZ');

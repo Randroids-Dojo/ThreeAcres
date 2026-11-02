@@ -481,7 +481,7 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
           deadlines.add(o.from !== undefined ? 'after dark' : o.by === 12 ? 'noon' : 'dusk');
           // Its tag says its condition.
           const tag = sim.offerTag(o);
-          expect(`${tag.title} ${tag.note}`).toMatch(/by noon|by dusk|By noon|By dusk|After dark|after dark/);
+          expect(`${tag.title} ${tag.note}`).toMatch(/by noon|by dusk|By noon|By dusk|Sell after 9 pm/);
           if (o.rare) expect(tag.note).toMatch(/^By the /);
         }
         prev = new Set(os.map((o) => key!(o)));
@@ -514,7 +514,8 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
     s.hour = 15;
     sim.sellFluff('clover', true);
     expect(s.orders[0].got, 'not before dark').toBe(0);
-    expect(sim.events.some((e) => e.t === 'deny' && /after dark/.test((e as { why: string }).why))).toBe(true);
+    // (Round 9: "after 9 pm": "after dark" read as when to catch them.)
+    expect(sim.events.some((e) => e.t === 'deny' && /after 9 pm/.test((e as { why: string }).why))).toBe(true);
     s.hour = 21.2;
     for (let k = 0; k < 4; k++) sim.sellFluff('clover', true);
     expect(s.orders[0].state).toBe('filled');
@@ -533,7 +534,7 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
 // ---------------------------------------------------------------- P2: a new kind's food, and the lane crate
 
 describe('P2: a new kind\'s food is easy to get the day you bring it home', () => {
-  it('the first ember penned comes with a sack of sweetroots by the gate (once); with a feeder, in the feeder', () => {
+  it('the first ember penned comes with a sack of sweetroots in its feeder (once; a pen with none gets one)', () => {
     for (const feeder of [false, true]) {
       const sim = quiet(10);
       const s = sim.s;
@@ -555,8 +556,10 @@ describe('P2: a new kind\'s food is easy to get the day you bring it home', () =
       const roots = s.items.filter((i) => !i.gone && i.type === 'sweetroot' && sim.phys.penAt(i.x, i.z) === 4).length;
       const stocked = evs.filter((e) => (e.t as string) === 'stock');
       expect(stocked.length, 'once').toBe(1);
-      if (feeder) expect(s.pads[4].feeder).toEqual({ t: 'sweetroot', n: 12 });
-      else expect(roots).toBe(12);
+      // (Round 9: a pen with no feeder gets one, the sack in it: lying by the gate, a pull at the fluff took 9 of 12.)
+      expect(s.pads[4].feeder).toEqual({ t: 'sweetroot', n: 12 });
+      expect(s.pads[4].ups).toContain('feeder');
+      expect(roots).toBe(0);
     }
   });
 

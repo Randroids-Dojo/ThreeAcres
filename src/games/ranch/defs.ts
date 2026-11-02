@@ -167,6 +167,7 @@ export type GoalId =
   | 'sell'
   | 'plant'
   | 'order'
+  | 'herd'
   | 'ridge'
   | 'ember'
   | 'feeder'
@@ -190,6 +191,9 @@ export const GOALS: { id: GoalId; text: string; reward: number }[] = [
   { id: 'catch', text: 'Catch a clover downy.', reward: 20 },
   { id: 'pen', text: 'Build a pen and blow a downy in.', reward: 40 },
   { id: 'feed', text: 'Feed a downy its favourite.', reward: 40 },
+  // (Round 9: something to do with the time once the loop is taught: the first-fifteen-minutes player stood about for
+  // two minutes at a time with nothing on the page it could act on. More downies, more fluff, the gate sooner.)
+  { id: 'herd', text: 'Keep five downies in one pen.', reward: 60 },
   { id: 'sell', text: 'Sell 20 fluff at the sell crate.', reward: 60 },
   { id: 'plant', text: 'Plant something in a garden.', reward: 40 },
   { id: 'order', text: 'Fill an order from the price board.', reward: 60 },

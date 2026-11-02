@@ -195,7 +195,7 @@ describe('P1: the rare downy is a hunt', () => {
     const s = sim.s;
     const sp = SIGHTINGS[0];
     // (Round 7: and what it is worth a day once penned.)
-    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/);
+    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/);
     const floor = (x: number, z: number) => sim.phys.floor(x, z);
     const mark = { on: false, icon: 'arrow' as const, x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0, slot: -1 };
     // In the meadow, 40 m off: the clue only.
@@ -218,12 +218,13 @@ describe('P1: the rare downy is a hunt', () => {
     const { sim, d } = huntTaken();
     const plain = sim.spawn('clover', d.x + 30, d.z, false);
     plain.hopT = 99;
+    // (Round 9: it hears you only while you move: walking across 11 m off.)
     stand(sim, d.x, d.z + 11);
-    run(sim, 0.3, idle, () => aimAt(sim, d.x, d.y, d.z));
+    run(sim, 0.3, { ...idle, moveX: 1 }, () => aimAt(sim, d.x, d.y, d.z));
     expect(d.alert).toBe(true);
     expect(d.bolt).toBeGreaterThan(0);
     stand(sim, plain.x, plain.z + 11);
-    run(sim, 0.3, idle, () => aimAt(sim, plain.x, plain.y, plain.z));
+    run(sim, 0.3, { ...idle, moveX: 1 }, () => aimAt(sim, plain.x, plain.y, plain.z));
     expect(plain.alert).toBe(false);
     // (The playtest's "shy of running" one let a walker within 5 m.)
     expect((M.RARE_WARY as { walk: number }).walk).toBeGreaterThan(simMod.NOTICE);

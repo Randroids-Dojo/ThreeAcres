@@ -224,6 +224,54 @@ export class TagMenu {
     return any ? out : null;
   }
 
+  /**
+   * Each tag on screen (CSS px), one box a tag, and the grid's bar: round 9 keeps the Use button off the tags
+   * themselves, not off the box round them all (with a lone tag in the bottom row, the box covered the Use button's
+   * place by the thumb, and it jumped to the top middle). Returns how many boxes it wrote.
+   */
+  screenRects(camera: Camera, w: number, h: number, out: { x0: number; y0: number; x1: number; y1: number }[]): number {
+    let n = 0;
+    const box = () => (out[n] ??= { x0: 0, y0: 0, x1: 0, y1: 0 });
+    for (const tg of this.tags) {
+      if (!tg.opt || tg.gone > 0 || !tg.pivot.visible) continue;
+      tg.face.updateWorldMatrix(true, false);
+      const b = box();
+      b.x0 = b.y0 = 1e9;
+      b.x1 = b.y1 = -1e9;
+      let any = false;
+      for (const [u, v] of CORNERS) {
+        _a.set(u * TW * 0.5, v * TH * 0.5, 0).applyMatrix4(tg.face.matrixWorld).project(camera);
+        if (_a.z > 1) continue;
+        const x = ((_a.x + 1) / 2) * w;
+        const y = ((1 - _a.y) / 2) * h;
+        b.x0 = Math.min(b.x0, x);
+        b.x1 = Math.max(b.x1, x);
+        b.y0 = Math.min(b.y0, y);
+        b.y1 = Math.max(b.y1, y);
+        any = true;
+      }
+      if (any) n++;
+    }
+    if (n && this.grid && this.dowel.visible) {
+      this.dowel.updateWorldMatrix(true, false);
+      const b = box();
+      b.x0 = b.y0 = 1e9;
+      b.x1 = b.y1 = -1e9;
+      for (const u of [-0.5, 0.5]) {
+        for (const dy of [-0.03, 0.06]) {
+          _a.set(u, dy, 0).applyMatrix4(this.dowel.matrixWorld).project(camera);
+          if (_a.z > 1) continue;
+          b.x0 = Math.min(b.x0, ((_a.x + 1) / 2) * w);
+          b.x1 = Math.max(b.x1, ((_a.x + 1) / 2) * w);
+          b.y0 = Math.min(b.y0, ((1 - _a.y) / 2) * h);
+          b.y1 = Math.max(b.y1, ((1 - _a.y) / 2) * h);
+        }
+      }
+      if (b.x1 > b.x0) n++;
+    }
+    return n;
+  }
+
   centre(out: Vector3): Vector3 | null {
     if (!this.rail) return null;
     const vis = this.tags.filter((t) => t.opt);

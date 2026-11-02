@@ -31,28 +31,36 @@
 .rh-cross[data-s='feeder'] .x-feeder { display: inline; }
 .rh-cross[data-s='feeder'] { color: #f3e2b4; animation: rh-breathe 0.9s ease-in-out infinite; }
 @keyframes rh-breathe { 50% { transform: scale(1.12); } }
-/* A wild downy digging in: a ring round the crosshair fills as it tires. */
+/* A wild downy digging in: a ring round the crosshair fills as it tires, on a dark ink track (round 9) so the ring
+   and its gold tell read on bright grass by day. */
 .rh-cross .x-tug { display: none; transition: stroke-dashoffset 0.08s linear; }
-.rh-cross.tug .x-tug { display: inline; }
+.rh-cross .x-tugink { display: none; stroke: rgba(22, 18, 38, 0.66); }
+.rh-cross.tug .x-tug, .rh-cross.tug .x-tugink { display: inline; }
 .rh-cross.tug { animation: none; }
 /* One that breaks free if you are slow (a brook diving for the pond): an outer ring of the time left, shrinking, warmer near the end. */
 /* The time ring sits on a dark ink track the whole way round, so the pale arc reads on grass and the
    track shows how much time it started with (the sixth playtest's pale ring was lost on green). */
-.rh-cross .x-ink { display: none; stroke: rgba(22, 18, 38, 0.6); }
+/* (Round 9: a darker, wider track, so the arc's 6:1 holds on the brightest grass: production read 5.92 once.) */
+.rh-cross .x-ink { display: none; stroke: rgba(22, 18, 38, 0.74); stroke-width: 7px; }
 .rh-cross.tug.timed .x-ink { display: inline; }
 .rh-cross .x-left { display: none; stroke: #b9d4f6; transition: stroke-dashoffset 0.08s linear; }
 .rh-cross.tug.timed .x-left { display: inline; }
 .rh-cross.tug.timed.late .x-left { stroke: #ffc49a; }
-/* It puffs up to pull back (the tell, round 8): the ring swells and goes pale gold, a beat before it turns warm. */
-.rh-cross.tug.tell .x-tug { stroke: #ffe7a0; stroke-width: 3.6; }
-.rh-cross.tug.tell { color: #fff0c4; transform: scale(1.22); transition: transform 0.12s ease-out; }
+/* It puffs up to pull back (the tell, round 8): the whole ring goes a deep gold on its track and swells, a beat
+   before it turns warm (round 9: it was pale gold over the cream arc, faint by day). A fake puff only shivers: the
+   ring stays its pale cream, so the gold is the sign to read. */
+.rh-cross.tug.tell .x-tug { stroke: #ffb627; stroke-width: 4.6; transition: none; }
+.rh-cross.tug.tell .x-tugink { stroke: rgba(22, 18, 38, 0.82); stroke-width: 8.5; }
+.rh-cross.tug.tell { color: #ffd36a; transform: scale(1.22); transition: transform 0.12s ease-out; }
+.rh-cross.tug.feint { animation: rh-shiver 0.09s linear infinite; }
+@keyframes rh-shiver { 0% { transform: translate(-1.5px, 0) scale(1.06); } 50% { transform: translate(1.5px, 0) scale(1.06); } 100% { transform: translate(-1.5px, 0) scale(1.06); } }
 /* It pulls back: the ring goes warm and thick and pulses (let go of Pull); held on through it, the crosshair shakes. */
 .rh-cross.tug.back .x-tug { stroke: #ff8f5e; stroke-width: 4.2; transition: none; }
 .rh-cross.tug.back { color: #ffb08a; animation: rh-pull 0.32s ease-in-out infinite alternate; }
 .rh-cross.tug.back.strain { animation: rh-strain 0.07s linear infinite; }
 @keyframes rh-pull { from { transform: scale(1); } to { transform: scale(1.2); } }
 @keyframes rh-strain { 0% { transform: translate(-2px, 1px) scale(1.15); } 50% { transform: translate(2px, -1px) scale(1.15); } 100% { transform: translate(-2px, 1px) scale(1.15); } }
-@media (prefers-reduced-motion: reduce) { .rh-cross.tug.back, .rh-cross.tug.back.strain { animation: none; transform: scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .rh-cross.tug.back, .rh-cross.tug.back.strain, .rh-cross.tug.feint { animation: none; transform: scale(1.15); } }
 /* The rare one's fed window: a small ring over it on a dark track, emptying as its calm runs out, warm near the end. */
 /* (Round 8: 36 px, beside the downy rather than stacked over it with the arrow; it was about 15 px and hard to read at 10 m.) */
 .rh-fed { position: absolute; left: -18px; top: -18px; width: 36px; height: 36px; display: none; opacity: 0.95; filter: drop-shadow(0 1px 1.5px rgba(28, 22, 44, 0.6)); }
@@ -66,7 +74,8 @@
 .rh-count { position: absolute; left: calc(50% + 16px); top: calc(50% + 10px); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 14px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 9px; background: rgba(36, 30, 52, 0.62); text-shadow: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rh-count:empty { display: none; }
 /* Clear of the time ring while one shows (it touched the ring), and moved off the sell crate's sign. */
-.rh-cross.tug.timed + .rh-count { left: calc(50% + 22px); top: calc(50% + 17px); }
+/* (Round 9: a step further, as the time ring's track is wider and the crosshair shivers a little bigger on a fake puff.) */
+.rh-cross.tug.timed + .rh-count { left: calc(50% + 24px); top: calc(50% + 19px); }
 .rh-count.named { font-style: italic; font-weight: 500; }
 .rh-count.full { color: #ffd9a8; }
 
@@ -80,7 +89,9 @@
 .rh-prompt { position: absolute; left: 50%; top: calc(50% + 46px); transform: translateX(-50%); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 16px; font-weight: 550; text-shadow: var(--ink-shadow); white-space: nowrap; opacity: 0; transition: opacity 0.15s; display: flex; align-items: center; gap: 8px; }
 .rh-prompt.on { opacity: 1; }
 .rh-prompt kbd { font-family: var(--sans); font-size: 12px; font-weight: 700; min-width: 20px; height: 20px; padding: 0 5px; display: inline-grid; place-items: center; border: 1.5px solid currentColor; border-radius: 4px; text-shadow: none; box-shadow: 0 1px 2px rgba(28, 22, 44, 0.5); }
-.rh-say { position: absolute; left: 50%; top: calc(50% + 72px); transform: translateX(-50%); font-family: var(--serif); font-style: italic; font-size: 15px; text-shadow: var(--ink-shadow); white-space: nowrap; opacity: 0; transition: opacity 0.2s; color: #ffe2c4; }
+/* The note under the crosshair sits on an ink backing, upright (round 9: "12 sweetroots by the gate, to start them."
+   was pale italic over bright grass, unreadable). */
+.rh-say { position: absolute; left: 50%; top: calc(50% + 72px); transform: translateX(-50%); font-family: var(--serif); font-variation-settings: 'SOFT' 100; font-size: 15px; font-weight: 560; line-height: 21px; padding: 2px 10px; border-radius: 11px; background: rgba(36, 30, 52, 0.72); text-shadow: none; white-space: nowrap; opacity: 0; transition: opacity 0.2s; color: #fff1dc; }
 .rh-say.on { opacity: 1; }
 .rh-zone { position: absolute; left: 50%; top: calc(64px + var(--safe-t)); transform: translateX(-50%); font-family: var(--serif); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-style: italic; font-size: 26px; font-weight: 500; text-shadow: var(--ink-shadow); opacity: 0; transition: opacity 0.8s; white-space: nowrap; letter-spacing: 0.02em; }
 .rh-zone.on { opacity: 1; }
@@ -235,3 +246,5 @@
 /* A plain line of news on the journal page (no box: a fact is not a task), its words under the lines above. */
 .rh-page li.plain { padding-left: 26px; }
 @media (max-aspect-ratio: 4/5) { .rh-page li.plain { padding-left: 20px; } }
+/* Round 9: tucked away while the price board's tags hang, so the board's "Fluff prices, day N" row shows. */
+.rh-page.tucked { opacity: 0 !important; visibility: hidden; transition: opacity 0.15s, visibility 0s 0.15s; }
