@@ -61,6 +61,8 @@ const CELL = 8;
 const NO_RINGS: Ring[] = [];
 const INF = 1e9;
 
+/** How far a hedge keeps a pest's edge from the rails (its leaves reach about 1.2 m out; the plot's post stands inside it). */
+export const PEST_HEDGE = 1.1;
 export const BED_HALF = 2.6;
 export const BED_H = 0.38;
 export const SILO_R = 1.5;
@@ -275,7 +277,9 @@ export class Physics {
       const dx = b.x - ring.x;
       const dz = b.z - ring.z;
       const d = Math.hypot(dx, dz);
-      const band = ring.hedge ? (kind === 'nettle' ? 2.2 : 0.55) : 0.1;
+      // A hedge keeps a pest off its leaves (about 1.2 m out from the rails), no further: a wider band (2.2 m) closed
+      // the 2.2 m lane to the next pen on the row and left dead-end pockets a pest could not find its way out of.
+      const band = ring.hedge ? (kind === 'nettle' ? PEST_HEDGE : 0.55) : 0.1;
       if (Math.abs(d - PEN_R) > b.r + band + 0.6) continue;
       const top = kind === 'nettle' && ring.hedge ? INF : ring.top;
       if (foot > top) continue;

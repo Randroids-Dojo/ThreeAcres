@@ -10,7 +10,7 @@
 // and filling one pays its bonus.
 //   npx tsx scripts/ranch-balance.ts
 import { BUILD_COST, FEEDER_CAP, PEN_UPS, GARDEN_YIELD, GARDEN_YIELD_SOIL, GOALS, HOUR, KIND, ORDER_BY, TUFT_KIND, isFood, isTuft, type DownyKind, type Food } from '../src/games/ranch/defs';
-import { Sim, GARDEN_SRC, SATURATION, SAT_FLOOR, type Aim, type Controls } from '../src/games/ranch/sim';
+import { Sim, GARDEN_SRC, GARDEN_TIP, SATURATION, SAT_FLOOR, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { rng } from '../src/games/ranch/noise';
 import { BED_HALF } from '../src/games/ranch/physics';
@@ -316,9 +316,9 @@ console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close 
       s.pads[0].crop = null;
       sim.phys.setPads(s.pads);
     }
-    // No pests (this is about food: a hedge keeps them off); the clock runs.
+    // No pests (this is about food: a hedge keeps them off); the clock runs (and the first day's 6 pm wait is past).
     sim.teaching = true;
-    s.learn = ['time'];
+    s.learn = ['time', 'evening'];
     const aim: Aim = { ex: s.player.x, ey: s.player.y + 1.6, ez: s.player.z, dx: 0, dy: 0, dz: -1, mx: s.player.x, my: s.player.y + 1.4, mz: s.player.z - 0.6 };
     let empty: number | null = null;
     let first: number | null = null;
@@ -350,6 +350,69 @@ console.log(`   (The hand takes the morning's fluff order at 7 am. Orders close 
   const c0 = leave({ name: 'Trip, no runs', pens: [{ pad: 1, kind: 'clover', n: 8, ups: ['feeder'] }, { pad: 4, kind: 'ember', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }, { pad: 3, crop: 'sweetroot', ups: ['sprinkler'] }], every: 0 }, 10, 4);
   console.log(`   a ten-minute trip from a clover pen of 8 and an ember pen of 6 with sprinkler gardens: with feed runs, first out ${m(c.first)}, most frazzled ${c.fraz}, hungriest ${c.peak.toFixed(2)};`);
   console.log(`      without them (feeders empty, as the playtest left them), first out ${m(c0.first)}, most frazzled ${c0.fraz}, hungriest ${c0.peak.toFixed(2)}\n`);
+}
+
+// Round 7: feeders beside a garden, nobody topping them up or picking the garden. The seventh playtest's clover
+// feeder read 58 to 60 every day from day 2 to day 7 untouched: a full bed tipped all its crop into it. Now it
+// tips a third (GARDEN_TIP), so a feeder still wants a top-up every day or two; the feed run (an upgrade) still
+// sends it all. The control replays the old share (all of it).
+{
+  const untended = (setup: Setup, start: number, share: number, days = 5, seed = 9) => {
+    const was = GARDEN_TIP.share;
+    GARDEN_TIP.share = share;
+    try {
+      const sim = build(setup, seed);
+      const s = sim.s;
+      for (const p of setup.pens) s.pads[p.pad].feeder = { t: FAV[p.kind], n: start };
+      // A full bed from the start (the garden has stood unpicked a while), no pests, the clock running.
+      for (const g of setup.gardens) {
+        const at = PADS[g.pad];
+        for (let k = 0; k < 12; k++) {
+          const it = newItem(s, g.crop, at.x + (k % 4) - 1.5, 0, at.z + Math.floor(k / 4) - 1, GARDEN_SRC + g.pad);
+          it.y = sim.phys.floor(it.x, it.z) + it.r;
+          it.rest = true;
+          s.items.push(it);
+        }
+      }
+      sim.teaching = true;
+      s.learn = ['time', 'evening'];
+      const aim: Aim = { ex: s.player.x, ey: s.player.y + 1.6, ez: s.player.z, dx: 0, dy: 0, dz: -1, mx: s.player.x, my: s.player.y + 1.4, mz: s.player.z - 0.6 };
+      const dawn: number[] = [];
+      let dry: number | null = null;
+      let out: number | null = null;
+      let tipped = 0;
+      let lastDay = s.day;
+      const pad = setup.pens[0].pad;
+      for (let t = 0; t < days * 24 * HOUR; t += 1 / 20) {
+        sim.update(1 / 20, idle, aim);
+        for (const e of sim.events) if (e.t === 'store' && e.auto) tipped++;
+        sim.events.length = 0;
+        if (s.day !== lastDay) lastDay = s.day;
+        if (dawn.length < days && s.hour >= 6 && s.hour < 6.1 && dawn.length < s.day - 1 + 1 && t > 1) dawn.push(s.pads[pad].feeder.n);
+        if (dry === null && s.pads[pad].feeder.n === 0) dry = t / (24 * HOUR);
+        if (out === null && s.downies.some((d) => !d.gone && d.pen < 0)) out = t / (24 * HOUR);
+      }
+      return { dawn, dry, out, tipped };
+    } finally {
+      GARDEN_TIP.share = was;
+    }
+  };
+  const d = (v: number | null) => (v === null ? 'never' : `day ${(1 + v).toFixed(1)}`);
+  console.log(`Feeders beside a garden, nobody topping them up or picking it (round 7: a full bed tips ${Math.round(GARDEN_TIP.share * 100)}% of its crop into the feeder next door; it tipped all of it)`);
+  console.log('   ranch                                                 tip    feeder at each 6 am (from 6 am, day 1)   runs dry   first out');
+  const rows: [string, Setup, number][] = [
+    ['pen of 6 clover, the bare starter garden, feeder full', { name: '', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 0 }, FEEDER_CAP],
+    ['the same, a jar\'s worth (12) in the feeder', { name: '', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: [] }], every: 0 }, 12],
+    ['pen of 6 clover, a sprinkler garden, feeder full', { name: '', pens: [{ pad: 1, kind: 'clover', n: 6, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }], every: 0 }, FEEDER_CAP],
+    ['pen of 10 clover, sprinkler and rich soil, feeder full', { name: '', pens: [{ pad: 1, kind: 'clover', n: 10, ups: ['feeder'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler', 'soil'] }], every: 0 }, FEEDER_CAP],
+  ];
+  for (const [name, setup, start] of rows) {
+    for (const share of [GARDEN_TIP.share, 1]) {
+      const r = untended(setup, start, share);
+      console.log(`   ${name.padEnd(54)} ${share === 1 ? 'all ' : `${Math.round(share * 100)}% `}   ${r.dawn.map((v) => String(v).padStart(3)).join(' ').padEnd(40)} ${d(r.dry).padEnd(10)} ${d(r.out)}${share === 1 ? '   (the control: round 6)' : ''}`);
+    }
+  }
+  console.log('');
 }
 
 // From the end of the lessons to the gates, on the starter income, then the next step up.

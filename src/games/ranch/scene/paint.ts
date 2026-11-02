@@ -227,7 +227,7 @@ function chalkText(g: CanvasRenderingContext2D, text: string, x: number, y: numb
   g.globalAlpha = 1;
 }
 
-export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, day: number, rows: BoardRow[], orders: BoardOrder[] = []): void {
+export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, day: number, rows: BoardRow[], orders: BoardOrder[] = [], tagsDown = false): void {
   g.fillStyle = '#2c3a33';
   g.fillRect(0, 0, w, h);
   // Old chalk ghosts.
@@ -299,8 +299,9 @@ export function paintBoard(g: CanvasRenderingContext2D, w: number, h: number, da
   g.lineTo(w - 30, 246);
   g.stroke();
   g.globalAlpha = 1;
-  // Up to three offers in the morning; once one is taken, it alone, with its tally.
-  const shown = orders.slice(0, 3);
+  // Up to three offers in the morning; once one is taken, it alone, with its tally. (Not while the offers' tags
+  // hang in front: they carry them, and a line half behind their bar read as broken.)
+  const shown = tagsDown ? [] : orders.slice(0, 3);
   shown.forEach((o, i) => {
     const y = shown.length === 1 ? 300 : shown.length === 2 ? 282 + i * 52 : 276 + i * 41;
     g.fillStyle = o.state === 'filled' ? '#bfe3a8' : '#f2eee2';

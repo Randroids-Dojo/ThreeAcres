@@ -344,7 +344,7 @@ const boardTags = await page.evaluate(() => {
 });
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
 // Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
-check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, and stays)$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+check("the board's tags: one per offer, saying what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^(Pays [\d,]+ on top of sales|Caught today\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
 // Every rare downy's tag fits, wherever it was seen, at the most it can pay (three quarters of a five-brook trip).
 const rareTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -566,8 +566,8 @@ await b.close();
   console.log(`   board price rows against its offer tags: ${bq.map((q) => `${q.dist}m rows ${q.rows.join('..')} tags ${q.tags.map((t) => t.join('..')).join(',')} over ${q.over}`).join('; ')}; the old way ${bqOld.map((q) => `${q.dist}m over ${q.over}`).join(', ')}`);
   check("phone: the board's offer tags hang clear of its price rows, all on screen", bq.length === 3 && bq.every((q) => q.n >= 2 && q.over === 0 && q.onScreen), JSON.stringify(bq));
   check("phone: the check finds the price rows covered when the tags hang the old way (control)", bqOld.some((q) => q.over > 0), JSON.stringify(bqOld));
-  // A lesson chooses the tag it teaches: the garden lesson, at an empty plot.
-  await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w)); s.coins = 400; s.hour = 10; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
+  // A lesson chooses the tag it teaches: the garden lesson, at an empty plot. (Round 7: it comes from the second morning.)
+  await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w)); s.coins = 400; s.day = Math.max(2, s.day); s.night = s.day; s.hour = 10; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
   await ph.waitForFunction(() => window.ranch.seen().lesson === 'garden' && window.ranch.seen().line !== '', null, { timeout: 8000 });
   await openPost();
   L = await layout();

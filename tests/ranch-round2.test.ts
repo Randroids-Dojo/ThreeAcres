@@ -187,6 +187,9 @@ describe('P1: a Buy never spends coins on a tag you did not choose', () => {
     teachAll(s);
     s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w));
     s.coins = 260;
+    // (Round 7: the garden lesson comes from the second morning.)
+    s.day = 2;
+    s.night = 2;
     s.hour = 10;
     run(0.5);
     expect(tutor.current).toBe('garden');
@@ -235,6 +238,9 @@ describe('P1: the feeder is taught, strays are called out, and a fright keeps a 
     const { sim, s, tutor, run, view } = ranch();
     teachAll(s);
     s.learn = s.learn.filter((w) => !w.startsWith('up:') && w !== 'silo' && !['lesson:ups', 'lesson:feeder', 'lesson:bench', 'lesson:gates', 'bench', 'gates'].includes(w));
+    // (Day 2: round 7 spaces the first day's lessons 30 s apart once the clock runs.)
+    s.day = 2;
+    s.night = 2;
     s.hour = 10;
     pen(sim, 1);
     sim.spawn('clover', PADS[1].x, PADS[1].z, true).hunger = 0.2;

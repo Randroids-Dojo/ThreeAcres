@@ -142,7 +142,8 @@ function catchIt(sim: Sim, id: number, from = 3): boolean {
     const p = s.player;
     const dist = Math.hypot(d.x - p.x, d.z - p.z);
     if (dist > from + 0.5) stand(sim, d.x + ((p.x - d.x) / dist) * from, d.z + ((p.z - d.z) / dist) * from);
-    sim.update(1 / 30, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
+    // (Round 7: letting go of Pull while it pulls back.)
+    sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aimAt(sim, d.x, d.y + 0.25, d.z));
     sim.events.length = 0;
   }
   return false;
@@ -286,8 +287,9 @@ describe('P1: clover is the gentle first catch, running is taught, a brook shows
     const d = sim.spawn('brook', bx, bz, false);
     d.hopT = 99;
     const left: number[] = [];
-    for (let t = 0; t < 1.2; t += 1 / 30) {
-      sim.update(1 / 30, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
+    // (Round 7: letting go while it pulls back; its time waits meanwhile, and it has 4.2 s of it.)
+    for (let t = 0; t < 2; t += 1 / 30) {
+      sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aimAt(sim, d.x, d.y + 0.25, d.z));
       sim.events.length = 0;
       if (d.held) left.push(sim.tugLeft(d));
     }
@@ -325,7 +327,8 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       expect(offers.filter((o) => o.live && !o.rare).length).toBeLessThanOrEqual(1);
       const tag = sim.offerTag(r);
       expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook) downy$/);
-      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, and stays$/);
+      // (Round 7: what it is worth a day once penned, as a number, when it has a pen to join.)
+      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/);
       places.add(tag.note.split('.')[0]);
     }
     expect(seen).toBe(20);
@@ -517,6 +520,9 @@ describe('P3: the cheap fixes', () => {
   it('the workbench lesson waits for the ridge gate, so the jar does not spend the gate\'s savings', () => {
     const ids = LESSON_IDS.filter((id) => !['bench', 'gates'].includes(id));
     const { s, tutor, go } = ranch(ids, ['bellows', 'draw', 'puff', 'pause', 'coins', 'pads', 'slots', 'jump', 'appetite', 'time', 'orders', 'garden', 'up:feeder']);
+    // (Day 2: round 7 spaces the first day's lessons 30 s apart once the clock runs.)
+    s.day = 2;
+    s.night = 2;
     s.hour = 10;
     s.coins = 450;
     go(1);

@@ -34,7 +34,7 @@
 //   npx tsx scripts/ranch-orders.ts
 import { FEEDER_CAP, HOUR, LIVE_EACH, TUFT_KIND, isFood, isTuft, type DownyKind, type Food, type Order } from '../src/games/ranch/defs';
 import { rng } from '../src/games/ranch/noise';
-import { Sim, GARDEN_SRC, type Aim, type Controls } from '../src/games/ranch/sim';
+import { Sim, GARDEN_SRC, PEN_MEALS, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
 import { BED_HALF } from '../src/games/ranch/physics';
 import { PADS, PEN_R } from '../src/games/ranch/world';
@@ -151,18 +151,30 @@ function lasting(sim: Sim, o: Order): number {
     const here = inPen(sim, i);
     // (A pen of ten has no room for it: more than ten get frazzled and hop out.)
     if (!here.length || here.length >= 10 || here.some((d) => d.rare)) return;
-    // A meal every five hours or so from 6 am to 9 pm: three a day each, one more fluff each meal, at today's price.
-    const v = here.reduce((a, d) => a + 3 * sim.price(d.kind), 0) * 3;
+    // (Round 7: 3.7 meals a day each, as measured for the tag's number), one more fluff each meal, at today's price.
+    const v = here.reduce((a, d) => a + PEN_MEALS * sim.price(d.kind), 0) * 3;
     pen = Math.max(pen, v);
   });
   return best + pen;
 }
 
 /** What an offer asks of you: a fluff order the share of those downies' fluff by dusk it needs; live downies a trip (real seconds). */
-function ask(sim: Sim, o: Order): { share: number; trip: number } {
-  if (o.rare) return { share: 0, trip: rareSecs(o.kind) };
-  if (o.live) return { share: 0, trip: tripSecs(o.kind, o.n) };
+function ask(sim: Sim, o: Order, thumb: 'careful' | 'careless' = 'careful'): { share: number; trip: number } {
+  if (o.rare) return { share: 0, trip: rareSecs(o.kind, thumb) };
+  if (o.live) return { share: 0, trip: tripSecs(o.kind, o.n, thumb) };
   return { share: o.n / Math.max(1, sim.makes(o.kind, 6) * 0.9), trip: 0 };
+}
+
+/**
+ * Round 7: the best pick for a catcher, now that catching takes skill (the seventh playtest took the biggest
+ * number every morning). Each offer's coins today and lasting worth, less its time out at what the ranch makes
+ * meanwhile (its downies' fluff, 3.7 meals a day each, two fluff a meal, over a game day of 720 real seconds).
+ */
+function pick(sim: Sim, os: Order[], thumb: 'careful' | 'careless'): Order | undefined {
+  const kept = sim.kept();
+  const perSec = (Object.keys(kept) as DownyKind[]).reduce((a, k) => a + kept[k] * 3.7 * 2 * sim.price(k), 0) / 720;
+  const value = (o: Order) => worth(o) + lasting(sim, o) - ask(sim, o, thumb).trip * perSec;
+  return [...os].sort((a, b) => value(b) - value(a))[0];
 }
 /** What filling it adds to the day, over selling the fluff you would sell anyway (the rare one's coins only). */
 const worth = (o: Order) => (o.live ? o.n * o.pay : o.pay);
@@ -192,6 +204,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 console.log('Thistledown price board: the morning offers, and what choosing earns\n');
 console.log('1 and 2. Thirty mornings of offers per ranch (6 am, the board choosing as in the game)');
 console.log('   ranch                                                     offers  a trip  kinds asked (share of mornings)                 same first   compete');
+const allPicks = { careful: { fluff: 0, trip: 0, hunt: 0 }, careless: { fluff: 0, trip: 0, hunt: 0 } };
 for (const r of RANCHES) {
   const sim = build(r, 3);
   const s = sim.s;
@@ -205,6 +218,7 @@ for (const r of RANCHES) {
   const rares: number[] = [];
   const rareTrip: number[] = [];
   const best = { fluff: 0, trip: 0, hunt: 0 };
+  const picks = { careful: { fluff: 0, trip: 0, hunt: 0 }, careless: { fluff: 0, trip: 0, hunt: 0 } };
   let rarePay = 0;
   let real = 0;
   let lastingDays = 0;
@@ -240,6 +254,10 @@ for (const r of RANCHES) {
     const lastBest = [...os].sort((a, b) => lasting(sim, b) - lasting(sim, a))[0];
     const stay = [...os].sort((a, b) => ask(sim, a).trip - ask(sim, b).trip)[0];
     if (os.every((o) => o === most || (o === lastBest && lasting(sim, o) > 0) || (o === stay && ask(sim, o).trip === 0))) real++;
+    for (const th of ['careful', 'careless'] as const) {
+      const p = pick(sim, os, th);
+      if (p) picks[th][p.rare ? 'hunt' : p.live ? 'trip' : 'fluff']++;
+    }
     if (rr && bonusPen(sim)) lastingDays++;
   }
   const kinds = Object.entries(asked)
@@ -261,8 +279,16 @@ for (const r of RANCHES) {
   }
   console.log(`      most coins today: fluff order ${best.fluff}, trip ${best.trip}, hunt ${best.hunt} of ${DAYS}; its pen bonus lasts (a pen with no rare one yet; every pen holds one from morning 11) on ${lastingDays}`);
   console.log(`      a real choice, every offer best at something (most coins today, a reward that lasts, no trip out): ${real} of ${DAYS}`);
+  console.log(`      the best pick, time out charged at what the ranch makes meanwhile: careful catcher fluff order ${picks.careful.fluff}, trip ${picks.careful.trip}, hunt ${picks.careful.hunt}; careless fluff order ${picks.careless.fluff}, trip ${picks.careless.trip}, hunt ${picks.careless.hunt} of ${DAYS}`);
+  allPicks.careful.fluff += picks.careful.fluff;
+  allPicks.careful.trip += picks.careful.trip;
+  allPicks.careful.hunt += picks.careful.hunt;
+  allPicks.careless.fluff += picks.careless.fluff;
+  allPicks.careless.trip += picks.careless.trip;
+  allPicks.careless.hunt += picks.careless.hunt;
 }
-console.log(`   (A trip costs a careful catcher, running: clover ${Math.round(tripSecs('clover', 3))} s for 3, ember ${Math.round(tripSecs('ember', 3))} s for 3, brook ${Math.round(tripSecs('brook', 3))} s for 3. Live downies pay ${Object.entries(LIVE_EACH).map(([k, v]) => `${k} ${v}`).join(', ')} each.)\n`);
+console.log(`   Over all four ranches, the best pick: careful fluff order ${allPicks.careful.fluff}, trip ${allPicks.careful.trip}, hunt ${allPicks.careful.hunt}; careless fluff order ${allPicks.careless.fluff}, trip ${allPicks.careless.trip}, hunt ${allPicks.careless.hunt} (each kind of offer the best pick on some mornings: ${(['fluff', 'trip', 'hunt'] as const).every((k) => allPicks.careful[k] + allPicks.careless[k] > 0) ? 'yes' : 'no'})`);
+console.log(`   (A trip costs a careful catcher, running: clover ${Math.round(tripSecs('clover', 3))} s for 3, careless ${Math.round(tripSecs('clover', 3, 'careless'))} s; ember ${Math.round(tripSecs('ember', 3))} s for 3, brook ${Math.round(tripSecs('brook', 3))} s for 3. Live downies pay ${Object.entries(LIVE_EACH).map(([k, v]) => `${k} ${v}`).join(', ')} each.)\n`);
 
 // ---------------------------------------------------------------- 3: three ways of choosing
 

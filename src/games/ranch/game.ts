@@ -23,8 +23,8 @@ import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
-import { Input, type Frame } from './input';
-import { Tutor, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
+import { Input, buzz, type Frame } from './input';
+import { Tutor, allLines, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
 import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
@@ -41,7 +41,7 @@ import { Sky } from './scene/sky';
 import { TagMenu, type Rail } from './scene/tags';
 import { buildHills, buildTerrain, buildWater } from './scene/terrain';
 import { Viewmodel } from './scene/viewmodel';
-import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from './sim';
+import { Sim, padSpots, rareFed, type Aim, type Controls, type Ev, type Interactable } from './sim';
 import { capacity, deserialize, serialize, slotCap, summary, type RanchState, type Slot } from './state';
 import { BOARD, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, SIGHTINGS, STREAM, VENTS, WORKBENCH, ZONE_NAMES, heightAt, polyDist, setGrassDisc, zoneAt, type GateId } from './world';
 import './ranch.css';
@@ -650,10 +650,13 @@ export class Ranch {
     });
     // Today's orders, chalked under the prices.
     const orders: BoardOrder[] = s.orderDay === s.day ? s.orders.map((o) => ({ text: this.boardText(o), pay: o.state === 'offer' ? `pays ${fmtCoins(o.live ? o.n * o.pay : o.pay)}` : `${o.got} of ${o.n}`, state: o.state })) : [];
-    const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}|${orders.map((o) => `${o.text}:${o.state}`).join(',')}`;
+    // While the board's offer tags hang, they carry the offers: the chalk leaves those lines bare (the seventh
+    // playtest's third chalked line sat half hidden behind the tags' bar, "pay: 150"), and chalks them again after.
+    const tagsDown = this.menu?.it.kind === 'board';
+    const key = `${s.day}|${rows.map((r) => `${r.price}:${r.trend}`).join(',')}|${orders.map((o) => `${o.text}:${o.state}`).join(',')}|${tagsDown}`;
     if (key === this.board.key) return;
     this.board.key = key;
-    paintBoard(this.board.ctx, 512, 384, s.day, rows.map((r) => ({ ...r, name: r.name[0].toUpperCase() + r.name.slice(1) })), orders);
+    paintBoard(this.board.ctx, 512, 384, s.day, rows.map((r) => ({ ...r, name: r.name[0].toUpperCase() + r.name.slice(1) })), orders, tagsDown);
     this.board.tex.needsUpdate = true;
   }
 
@@ -865,9 +868,36 @@ export class Ranch {
         // The rare one heard you coming, unlured, and bolted.
         this.hud.note('It heard you. Lure it from further off.', 2.6);
         break;
+      case 'hungrynight':
+        // Dusk, and a pen with downies has nothing for the night: say so while there is light to fill it.
+        {
+          const why = e.feeder ? 'A feeder is empty. Fill it before night.' : 'A pen has no food for the night.';
+          this.hud.note(why, 4);
+          this.queuePage('Dusk', [{ text: why, done: false, fresh: false, plain: true }]);
+        }
+        this.cue('ranch.deny', undefined, undefined, undefined, 0.5);
+        break;
+      case 'unlured':
+        // Its fed window ran out (the ring over it empties first): say so, so the next step is plain.
+        if (e.near) this.hud.note('It finished eating. Lure it again.', 2.8);
+        break;
       case 'escape':
         // It broke free: say so plainly (a brook into the pond, the rest off and away).
         this.hud.note(e.dove ? 'It slipped into the water.' : 'It got away.', 1.8);
+        break;
+      case 'pullback':
+        // It pulls back: a low squeak and, on a phone, a buzz (the ring goes warm too).
+        this.cue('ranch.squeak', e.x, e.y, e.z, 1, CHIRP_PITCH[e.kind] * 0.7);
+        if (this.isTouch()) buzz(18);
+        break;
+      case 'eased':
+        // You let go through its pull: a soft chirp, it is still yours to bring in.
+        if (e.eased) this.cue('ranch.chirp', e.x, e.y, e.z, 0.45, CHIRP_PITCH[e.kind] * 1.15);
+        break;
+      case 'slip':
+        // Held on through its pull: it slipped free, a few metres off. Not lost.
+        this.cue('ranch.boing', e.x, e.y, e.z, 0.8, CHIRP_PITCH[e.kind]);
+        this.hud.note('It slipped free. Let go when it pulls.', 2.4);
         break;
       case 'order': {
         if (e.state === 'filled') {
@@ -1453,17 +1483,27 @@ export class Ranch {
     // J puts the goal line away (or back), unless a lesson has the page.
     if (f.journal && !hud.lessonUp) this.goalHidden = !this.goalHidden;
     // A wild downy digging in: the crosshair fills as it tires, and for a brook (or a thistle) an outer ring shows the time left.
+    // It pulls back now and then: the ring goes warm (and stays up while you let go through it), shaking if you hold on.
     let tug = 0;
     let left = -1;
+    let back = false;
+    let strain = 0;
     for (const d of s.downies) {
-      if (!d.held) continue;
+      if (d.gone || !(d.held || (!d.tame && !d.keep && (d.back > 0 || d.easeT > 0)))) continue;
       const k = d.tug / Math.max(0.01, this.sim.tugNeed(d));
       if (k >= tug) {
         tug = k;
         left = this.sim.tugLeft(d);
+        back = d.back > 0;
+        strain = back && d.held ? d.backHeld / this.sim.backGrace(d) : 0;
       }
     }
-    hud.setTug(tug, left);
+    hud.setTug(tug, left, back, strain);
+    // The rare one's fed window: a ring over it, emptying as its calm runs out, while it is lured and in sight.
+    const rare = this.sim.rareWild();
+    const fed = rare ? rareFed(rare) : -1;
+    const fp = fed >= 0 && rare && Math.hypot(rare.x - s.player.x, rare.z - s.player.z) < 40 && !this.menu ? this.project(rare.x, rare.y + 0.8, rare.z) : null;
+    hud.setFed(fp?.x ?? 0, fp?.y ?? 0, fp ? fed : -1);
     hud.update(dt);
   }
 
@@ -1477,11 +1517,14 @@ export class Ranch {
     const deskBox = !touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
     this.hud.placePrompt(!deskBox ? null : deskBox.y1 + 34 <= this.h - 40 ? deskBox.y1 + 12 : Math.max(70, deskBox.y0 - 34));
     const box = touch && this.menu ? this.tags.screenBox(this.camera, this.w, this.h, this.tagBox) : null;
-    if (!box) {
+    // At home by the thumb buttons, above Jump, unless the tags hang over that spot (with its word under it, and
+    // room for a phone's home bar): the seventh playtest's "Tap a tag" sat in the view's middle, on the board's chalk.
+    const R = 32;
+    const home = { x0: this.w - 22 - 2 * R - 10, x1: this.w - 12, y0: this.h - 214 - 2 * R - 44, y1: this.h - 214 + 26 };
+    if (!box || box.x1 < home.x0 || box.x0 > home.x1 || box.y1 < home.y0 || box.y0 > home.y1) {
       this.input.placeAct(null);
       return;
     }
-    const R = 32;
     // The button with its word under it: 32 px up, 32 + 22 px down from its centre.
     const floor = this.h * 0.7;
     const top = 120;
@@ -1664,6 +1707,44 @@ export class Ranch {
       gateTags: this.props.gates.ridge.tag.visible || this.props.gates.hollow.tag.visible,
       goalSpot: this.goalMarked,
     };
+  }
+
+  /**
+   * For checks: every lesson line for this device, each set on the journal page as it would show (a lesson's
+   * page, at this screen's size), with how many lines it takes and how wide its last line is against its first.
+   */
+  lessonFit(): { line: string; lines: number; last: number }[] {
+    const say = this.say;
+    const page = document.createElement('div');
+    page.className = 'rh-page lesson up';
+    page.style.visibility = 'hidden';
+    page.style.transform = 'none';
+    const ul = document.createElement('ul');
+    page.append(ul);
+    this.hud.el.append(page);
+    const out: { line: string; lines: number; last: number }[] = [];
+    const seen = new Set<string>();
+    for (const { line } of allLines()) {
+      if (seen.has(line) || !this.forDevice(line, say.dev)) continue;
+      seen.add(line);
+      ul.innerHTML = `<li><svg class="box" viewBox="0 0 18 18"></svg><span>${line}</span></li>`;
+      const span = ul.querySelector('span')!;
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      const rows = new Map<number, number>();
+      for (const r of range.getClientRects()) rows.set(Math.round(r.top), (rows.get(Math.round(r.top)) ?? 0) + r.width);
+      const widths = [...rows.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
+      out.push({ line, lines: widths.length, last: widths.length > 1 ? widths[widths.length - 1] / widths[0] : 1 });
+    }
+    page.remove();
+    return out;
+  }
+
+  /** Is a lesson line worded for this device (no key names on touch, no touch words on keys or a pad)? */
+  private forDevice(line: string, dev: string): boolean {
+    const touchy = /\b(Tap|tap|thumb|stick|Drag)\b/.test(line) || /\bPull\b|\bBlow\b/.test(line);
+    const keys = /\b(WASD|Space|Shift|right click|Click|click|Press|wheel|Q\b|E\b|LT|RT|LB|RB|A to)\b/.test(line);
+    return dev === 'touch' ? !keys : !touchy;
   }
 
   /** For checks: the tag chosen now (-1 for none) and what the act button says. */

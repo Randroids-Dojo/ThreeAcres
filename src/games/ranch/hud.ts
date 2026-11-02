@@ -79,6 +79,9 @@ export class Hud {
   private pauseBody = el('div', 'rh-pause-body');
   private click = el('div', 'rh-click');
   private fade = el('div', 'rh-fade');
+  /** The rare one's fed window: a small ring over it that empties as its calm runs out (the seventh playtest's ran out unseen). */
+  private fed = el('div', 'rh-fed', `<svg viewBox="-12 -12 24 24"><circle r="8" fill="none" stroke-width="4.4" class="f-ink"/><circle r="8" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="50.3" stroke-dashoffset="0" transform="rotate(-90)" class="f-arc"/></svg>`);
+  private fedShown = -1;
   readonly slotBtns: HTMLButtonElement[] = [];
   private bellowsBtn = el('button', 'rh-bellows');
   /** A cream chevron over the slot window a lesson points at, like the markers in the world. */
@@ -170,7 +173,7 @@ export class Hud {
       e.stopPropagation();
       this.onCycle();
     });
-    this.el.append(this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, ...this.slotIcons.map((q) => q.el), this.slotSel, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
+    this.el.append(this.fed, this.cross, this.count, this.coins, this.arc, this.prompt, this.say, this.zone, this.edge, this.page, this.click, ...this.slotIcons.map((q) => q.el), this.slotSel, this.bellowsBtn, ...this.slotBtns, this.slotPoint, this.pause, this.fade);
     this.pause.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t) return;
@@ -394,27 +397,58 @@ export class Hud {
    * as it tires (0 hides it). left: for one that breaks free if you are slow (a
    * brook diving for the pond, a thistle), the share of its time left, shown
    * as an outer ring that shrinks (-1: no limit, no outer ring). The fifth
-   * playtest's brooks dove after about 3 s with nothing to say so.
+   * playtest's brooks dove after about 3 s with nothing to say so. back: it is
+   * pulling back now (the ring warm and pulsing: let go); strain: you are
+   * holding on through it (the ring shakes: it is about to slip free).
    */
-  setTug(k: number, left = -1): void {
-    const v = k > 0.02 ? Math.min(1, k) : 0;
+  setTug(k: number, left = -1, back = false, strain = 0): void {
+    const v = k > 0.02 || back ? Math.max(0.03, Math.min(1, k)) : 0;
     const l = v > 0 && left >= 0 ? Math.min(1, left) : -1;
-    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01) return;
+    const b = v > 0 && back;
+    const st = b && strain > 0.02;
+    if (Math.abs(v - this.tugShown) < 0.01 && Math.abs(l - this.leftShown) < 0.01 && b === this.backShown && st === this.strainShown) return;
     this.tugShown = v;
     this.leftShown = l;
+    this.backShown = b;
+    this.strainShown = st;
     this.cross.classList.toggle('tug', v > 0);
     this.cross.classList.toggle('timed', l >= 0);
     this.cross.classList.toggle('late', l >= 0 && l < 0.35);
+    // It pulls back: the ring turns warm and pulses; held on through it, it shakes.
+    this.cross.classList.toggle('back', b);
+    this.cross.classList.toggle('strain', st);
     this.tugRing.style.strokeDashoffset = `${(1 - v) * 81.7}`;
     if (l >= 0) this.leftRing.style.strokeDashoffset = `${(1 - l) * 125.7}`;
   }
   private tugShown = 0;
   private leftShown = -1;
+  private backShown = false;
+  private strainShown = false;
   private tugRing!: SVGCircleElement;
   private leftRing!: SVGCircleElement;
-  /** For checks: the tug ring's fill and the time-left ring's share (-1 hidden). */
-  tugState(): { tug: number; left: number } {
-    return { tug: this.tugShown, left: this.leftShown };
+  /** For checks: the tug ring's fill, the time-left ring's share (-1 hidden), and whether it shows a pull back (and you straining against it). */
+  tugState(): { tug: number; left: number; back: boolean; strain: boolean } {
+    return { tug: this.tugShown, left: this.leftShown, back: this.backShown, strain: this.strainShown };
+  }
+
+  /** The rare one's fed window over it at (x, y) CSS px, its share left 0..1; share < 0 hides it. */
+  setFed(x: number, y: number, share: number): void {
+    const on = share >= 0;
+    this.fed.classList.toggle('on', on);
+    if (!on) {
+      this.fedShown = -1;
+      return;
+    }
+    this.fed.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    if (Math.abs(share - this.fedShown) < 0.01) return;
+    this.fedShown = share;
+    (this.fed.querySelector('.f-arc') as SVGCircleElement).style.strokeDashoffset = `${((1 - share) * 50.3).toFixed(2)}`;
+    this.fed.classList.toggle('low', share < 0.3);
+  }
+
+  /** For checks: the fed window's share left (-1 hidden). */
+  fedState(): number {
+    return this.fedShown;
   }
 
   showZone(name: string): void {

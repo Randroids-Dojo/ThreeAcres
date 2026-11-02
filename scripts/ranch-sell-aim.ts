@@ -153,7 +153,8 @@ import { PADS, PEN_R } from '../src/games/ranch/world';
 let penAgree = 0;
 let penLiedYes = 0;
 let penLiedNo = 0;
-function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r: number; u: number }, assist: boolean): boolean {
+let highSaid = 0;
+function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r: number; u: number }, assist: boolean, high = false): boolean {
   const sim = new Sim(null);
   const s = sim.s;
   sim.wild = false;
@@ -161,16 +162,18 @@ function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r:
   s.items = [];
   sim.penAssist = assist;
   s.pads[1].kind = 'pen';
+  if (high) s.pads[1].ups = ['high'];
   sim.phys.setPads(s.pads);
   const p = s.player;
   p.x = x;
   p.z = z;
   p.y = sim.phys.floor(x, z);
   p.vx = p.vy = p.vz = 0;
-  s.slots[0] = { t: 'clover', n: 1 };
+  s.slots[0] = { t: high ? 'thistle' : 'clover', n: 1 };
   s.sel = 0;
   const aim = aimFrom(sim, tx, sim.phys.floor(tx, tz), tz, m);
   const said = sim.aimTarget(aim) === 'pen';
+  if (high) highSaid += said ? 1 : 0;
   sim.puff(aim);
   const d = s.downies[s.downies.length - 1];
   for (let t = 0; t < 3 && !(d.grounded && d.flyT < 0); t += 1 / 60) sim.update(1 / 60, idle, aim);
@@ -217,6 +220,30 @@ function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r:
     console.log(`pen, ${assist ? 'with the pen’s help'.replace('’', "'") : 'without help'}: ${row.join('  ')}   overall ${Math.round((hit / all) * 100)}% (back from the fence)`);
   }
   console.log(`pen mark: matched ${penAgree}, promised a landing that missed ${penLiedYes}, landed unpromised ${penLiedNo}`);
+  // Round 7: a thistle blown at a high-fence pen's floor (the seventh playtest's showed no pen mark and landed
+  // outside; the mark came up only aiming 2 m higher). The same spread, with the pen's help.
+  penAgree = penLiedYes = penLiedNo = 0;
+  const row: string[] = [];
+  let all = 0;
+  let hit = 0;
+  for (const back of backs) {
+    let n = 0;
+    let ok = 0;
+    for (const a of across) {
+      const r = PEN_R + back;
+      const x = at.x + Math.sin(a) * r;
+      const z = at.z + Math.cos(a) * r;
+      for (const [sx, sz] of spots) {
+        n++;
+        if (tryPen(x, z, at.x + sx, at.z + sz, MUZZLES.phone, true, true)) ok++;
+      }
+    }
+    all += n;
+    hit += ok;
+    row.push(`${back} m ${Math.round((ok / n) * 100)}%`);
+  }
+  console.log(`high-fence pen, a thistle aimed at its floor: ${row.join('  ')}   overall ${Math.round((hit / all) * 100)}%; the pen mark up from the floor aim on ${highSaid} of ${all}`);
+  console.log(`high-fence pen mark: matched ${penAgree}, promised a landing that missed ${penLiedYes}, landed unpromised ${penLiedNo}`);
 }
 
 // Blown downies into the crate for a live order (round 4): the same spread of

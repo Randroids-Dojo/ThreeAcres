@@ -182,15 +182,18 @@ export function crossings(): { x: number; z: number; angle: number }[] {
 
 /**
  * Where the morning board's rare downy was seen: a landmark you can find
- * (the old oak, a footbridge, the crag, the dead tree), by kind. It is there,
- * a few metres from the spot, from when you take the order until dusk.
+ * (the old oak, the spring, the crag, the dead tree), by kind, each name the
+ * only one of its kind in the valley. It is there, a few metres from the
+ * spot, from when you take the order until dusk. (The seventh playtest's "by
+ * the footbridge" had two footbridges in the meadow to choose from, and the
+ * first one reached was 25 m from the downy: the spring, ringed with stones
+ * where the stream rises, took its place.)
  */
 export const SIGHTINGS: { kind: 'clover' | 'ember' | 'brook'; name: string; x: number; z: number }[] = (() => {
-  const meadowBridge = crossings().find((c) => c.x > RIDGE_X + 4 && c.x < HOLLOW_X - 4 && c.z < RANCH_Z - 10 && Math.abs(c.x - FORK.x) + Math.abs(c.z - FORK.z) > 12) ?? { x: -3, z: -28 };
   return [
     { kind: 'clover', name: 'the old oak', x: OAK.x + 4.2, z: OAK.z + 3.2 },
     { kind: 'clover', name: 'the signpost', x: FORK.x + 4.5, z: FORK.z - 5 },
-    { kind: 'clover', name: 'the footbridge', x: meadowBridge.x + 3.5, z: meadowBridge.z + 3 },
+    { kind: 'clover', name: 'the spring', x: SPRING.x - 3.5, z: SPRING.z + 2 },
     { kind: 'ember', name: 'the crag', x: CRAG.x + 4.5, z: CRAG.z + 3.5 },
     { kind: 'ember', name: 'the steam vents', x: VENTS[2][0] + 3.5, z: VENTS[2][1] + 3 },
     { kind: 'brook', name: 'the dead tree', x: DEAD_TREE.x + 3, z: DEAD_TREE.z + 2.5 },

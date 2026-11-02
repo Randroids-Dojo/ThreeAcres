@@ -10,7 +10,7 @@
 // longer notes live on the pause page.
 
 import { FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type Food, type GoalId, type Order } from './defs';
-import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, type Ev } from './sim';
+import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev } from './sim';
 import type { Downy, Item, RanchState } from './state';
 import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, DOOR, EXCHANGE, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
 
@@ -175,6 +175,9 @@ function fullest(s: RanchState): { pad: number; n: number } {
   });
   return { pad, n };
 }
+
+/** A wild downy pulling back against you now (back), or in a fight with you at all. */
+const fighting = (s: RanchState, back: boolean) => s.downies.some((d) => !d.gone && !d.tame && !d.keep && (d.back > 0 || (!back && (d.strain > 0 || d.easeT > 0))));
 
 /** Downies in the jar. */
 const aboard = (s: RanchState) => s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
@@ -363,7 +366,9 @@ function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
   const step = rareStep(s);
   if (step === 'pen') {
     if (s.slots[s.sel]?.t !== o.kind) m.slot = s.slots.findIndex((q) => q.t === o.kind && q.n > 0);
-    const i = penWithRoom(s);
+    // The pen it adds most to: the fullest with room and no rare one yet.
+    const best = rarePenOf(s, false);
+    const i = best >= 0 ? best : penWithRoom(s);
     if (i < 0) return false;
     const p = PADS[i];
     arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
@@ -913,6 +918,29 @@ const LESSONS: Lesson[] = [
     note: 'Run to close on a downy that hops away.',
   },
   {
+    // The tug, the first time a wild one pulls back against you (the seventh playtest held Pull through every
+    // catch: "catching is rote"). Let go while it pulls, press again once it stops. Until this is learned its
+    // pulls back last until you let go, and are slow to slip.
+    id: 'ease',
+    after: ['penin'],
+    unlocks: [],
+    then: ['ease'],
+    urgent: true,
+    ready: (s) => fighting(s, true),
+    text: (q) => (q.dev === 'touch' ? 'Let go of Pull when it pulls back.' : q.dev === 'pad' ? 'Release LT when it pulls back.' : 'Release right click when it pulls back.'),
+    start: (s) => {
+      s.learnCount['ease:from'] = s.learnCount['eased'] ?? 0;
+      s.learnCount['ease:up'] = 0;
+    },
+    each: (s, dt) => {
+      s.learnCount['ease:up'] = (s.learnCount['ease:up'] ?? 0) + dt;
+    },
+    done: (_s, n) => n('eased') > n('ease:from'),
+    // The fight ended (caught, slipped free or got away) without a let-go: it goes, not learned, and comes back at the next pull back.
+    lapse: (s) => (s.learnCount['ease:up'] ?? 0) > 2.5 && !fighting(s, false),
+    note: 'Wild downies pull back. Let go of Pull until they stop.',
+  },
+  {
     id: 'dusk',
     after: ['meadow'],
     unlocks: ['clock', 'sleep'],
@@ -964,6 +992,8 @@ const LESSONS: Lesson[] = [
     ready: (s) => s.coins >= FEEDER_COST && s.pads.some((p) => p.kind === 'pen'),
     text: () => 'Buy a feeder at the pen post.',
     done: (_s, n) => n('upgrade') >= 1,
+    // The coins went on something else: it goes, not learned, and comes back once you can pay again.
+    lapse: (s) => s.coins < FEEDER_COST,
     mark: (s, m, floor) => onPost(m, nearestPad(s, (i) => s.pads[i].kind === 'pen'), floor, false),
     note: 'Pen posts sell upgrades as you need them.',
   },
@@ -1006,10 +1036,12 @@ const LESSONS: Lesson[] = [
     note: 'A feeder drops food when its downies are hungry.',
   },
   {
+    // The second morning, not the first evening (the seventh playtest's came at 23:30, in the dark, the sixth
+    // line in two real minutes).
     id: 'garden',
     after: ['meadow'],
     unlocks: ['garden'],
-    ready: (s) => s.coins >= 200,
+    ready: (s) => s.coins >= 200 && s.day > 1,
     tag: 'build:garden',
     text: (q) => plotLine(q, 'Garden'),
     done: (s, n) => n('build:garden') >= 1 || s.pads.filter((p) => p.kind === 'garden').length >= 2,
@@ -1204,6 +1236,18 @@ export class Tutor {
 
   /** Seconds a stepped line's next step must last before the page changes to it. */
   static readonly STEP_HOLD = 0.25;
+  /**
+   * Real seconds between lessons coming up on the first day once the clock runs (the seventh playtest's first
+   * evening put six lines up in about two real minutes, mostly in the dark).
+   */
+  static readonly SPACE = 30;
+  /** Real seconds since a lesson last came up (a reload starts clear), and whether it came up on the first day with the clock running. */
+  private sinceBegin = 1e9;
+  private spaced = false;
+  /** The first day's lessons are still waiting out their 30 s. */
+  private get spacing(): boolean {
+    return this.spaced && this.sinceBegin < Tutor.SPACE;
+  }
 
   /** The lesson on screen, if any. */
   get current(): string {
@@ -1268,6 +1312,13 @@ export class Tutor {
       case 'deliver':
         this.add(s, e.rare ? 'order:rare' : 'order:live');
         break;
+      case 'eased':
+        if (e.eased) this.add(s, 'eased');
+        break;
+      case 'pullback':
+      case 'slip':
+        this.add(s, e.t);
+        break;
       case 'full':
       case 'jump':
       case 'sleep':
@@ -1292,6 +1343,8 @@ export class Tutor {
 
   private begin(s: RanchState, l: Lesson): void {
     this.active = l;
+    this.sinceBegin = 0;
+    this.spaced = s.day === 1 && s.learn.includes('time');
     this.shownFor = 0;
     this.shownLine = '';
     this.pendLine = '';
@@ -1301,6 +1354,21 @@ export class Tutor {
 
   private eligible(s: RanchState, l: Lesson, n: N): boolean {
     return (l.repeat || !Tutor.finished(s, l.id)) && l.after.every((a) => Tutor.finished(s, a)) && l.ready(s, n) && !l.lapse?.(s);
+  }
+
+  /**
+   * May a calm lesson come up now? The basics come whenever (the clock waits for them). Once the clock runs,
+   * calm lessons rest from 6 pm until morning (dusk and the night are the evening's lessons), and on the first
+   * day they come 30 s apart. The first day's evening waits at 6 pm for the feeder lessons (see evening).
+   */
+  private calmMay(s: RanchState): boolean {
+    if (!s.learn.includes('time')) return true;
+    // The first order is about to go up (the loop just ended): its lesson comes first, never 1.5 s after another.
+    if (s.learn.includes('orders') && s.orderDay === 0 && !s.learn.includes('lesson:order')) return false;
+    const h = s.hour;
+    const evening = s.day > 1 || s.learn.includes('evening');
+    if (h < 5.5 || h >= 18.3 || (h >= 18 && evening)) return false;
+    return !(s.day === 1 && this.spacing);
   }
 
   /** The tag the lesson on screen teaches (chosen for you when its post's tags come down), or null. */
@@ -1313,6 +1381,7 @@ export class Tutor {
     this.fresh.length = 0;
     this.mark.on = false;
     this.mark.slot = -1;
+    this.sinceBegin += dt;
     const n: N = (k) => s.learnCount[k] ?? 0;
     const v = this.view;
     // A finished line stays up, ticked, for a moment.
@@ -1366,13 +1435,19 @@ export class Tutor {
         }
       }
       if (!this.active) {
-        const next = LESSONS.find((q) => this.eligible(s, q, n));
+        const next = LESSONS.find((q) => this.eligible(s, q, n) && (q.urgent || this.calmMay(s)));
         if (next) {
           this.begin(s, next);
           continue;
         }
       }
       break;
+    }
+    // The first day's dusk waits at 6 pm (the sim holds the clock) until no calm lesson is up or waiting to come
+    // (the feeder bought and filled), and the last line has had its 30 s; from the second day it never waits.
+    if (!s.learn.includes('evening') && s.learn.includes('time')) {
+      const calmUp = (!!this.active && !this.active.urgent) || LESSONS.some((q) => !q.urgent && this.eligible(s, q, n));
+      if (s.day > 1 || (s.hour >= 18 && !calmUp && !this.spacing)) this.unlock(s, 'evening');
     }
     const l = this.active;
     if (!l) {
@@ -1519,6 +1594,7 @@ function creditQuiet(s: RanchState): void {
 export function teachAll(s: RanchState): void {
   credit(s, LESSON_IDS);
   creditQuiet(s);
+  if (!s.learn.includes('evening')) s.learn.push('evening');
 }
 
 /**
@@ -1553,6 +1629,7 @@ export function creditLessons(s: RanchState): void {
   credit(s, ids);
   // A ranch past its first day has had the day run on: its clock is not held for a loop lesson it never had.
   if (s.day > 1 && !s.learn.includes('time')) s.learn.push('time');
+  if (s.day > 1 && !s.learn.includes('evening')) s.learn.push('evening');
   // A ranch that has sold, built or slept has seen every control on screen before.
   if (s.stats.sold > 0 || pens > 0 || s.day > 1) credit(s, ['slots', 'jump']);
   creditQuiet(s);

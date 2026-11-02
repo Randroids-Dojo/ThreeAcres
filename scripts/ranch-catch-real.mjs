@@ -22,9 +22,14 @@ const tries = Number(process.argv[2]) || 6;
 // rare-clover, rare-ember, rare-brook: the board's rare one, lured (it has just eaten the food you blew near it,
 // so it lets you walk in to 4 m; the fight is what is measured).
 const kinds = (process.argv[3] || 'clover,ember,brook,thistle,rare-clover,rare-ember').split(',');
+// spread: reading the tug, it lets go of Pull its lag plus a wandering eye's spread (exponential, this mean in
+// ms) after the ring shows a pull back, and presses again the same way after it stops (as scripts/ranch-catch.ts).
+// The pull back is read off the HUD's ring through the hook (window.ranch.hud.tugState()), as a player sees it.
+// holds: never reads it (holds Pull all the way: the seventh playtest's way, a control).
 const THUMBS = {
-  careless: { lag: 180, gain: 0.55, wobble: 6, run: false },
-  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true },
+  careless: { lag: 180, gain: 0.55, wobble: 6, run: false, spread: 150 },
+  careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, spread: 30 },
+  ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, spread: -1 } } : {}),
 };
 const SENS = 0.0062;
 const wrap = (a) => {
@@ -48,6 +53,8 @@ const draw = await page.evaluate(() => {
 });
 
 async function chase(which, thumb, seed) {
+  // A note left from the try before (a brook slipping into the water) must not count against this one.
+  for (let i = 0; i < 40 && (await page.evaluate(() => !!document.querySelector('.rh-say.on'))); i++) await page.waitForTimeout(100);
   const rare = which.startsWith('rare-');
   const kind = rare ? which.slice(5) : which;
   // A fresh wild downy of the kind at one of its homes, 12 m off on a dry side (a lured rare one 8 m); nothing else wild.
@@ -66,6 +73,13 @@ async function chase(which, thumb, seed) {
     }
     const homes = { clover: [[-16, -9], [14, -4], [-8, -44], [20, -32]], ember: [[-45, -19], [-55, -1], [-47, 4]], brook: [[43, 4], [65, 9], [53, -22]], thistle: [[-60, -26]] };
     const H = homes[kind][seed % homes[kind].length];
+    // (Not with the crag between: the scripted thumb walks straight at it, and a real one would go round.)
+    const seg = (px, pz, ax, az, bx, bz) => {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz || 1)));
+      return Math.hypot(px - ax - dx * t, pz - az - dz * t);
+    };
     const d = sim.spawn(kind, H[0], H[1], false);
     d.hunger = 0.2;
     if (rare) {
@@ -79,7 +93,10 @@ async function chase(which, thumb, seed) {
       p.x = H[0] + Math.cos(a) * start;
       p.z = H[1] + Math.sin(a) * start;
       const fl = sim.phys.floor(p.x, p.z);
-      if (p.x > -76 && p.x < 76 && p.z > -56 && p.z < 56 && fl > -0.6) break;
+      // (On the downy's own side of the valley's walls, as the sim harness asks: a start at x 32 for a brook by the
+      // dead tree stood on the meadow side of the hollow's wall, and no thumb could reach it.)
+      const side = H[0] > 36 ? p.x > 37 : H[0] < -36 ? p.x < -37 : p.x > -35 && p.x < 35 && p.z < 17;
+      if (p.x > -76 && p.x < 76 && p.z > -56 && p.z < 56 && fl > -0.6 && side && (seg(-64, -34, p.x, p.z, H[0], H[1]) > 5 || k > 34)) break;
     }
     p.y = sim.phys.floor(p.x, p.z);
     p.vx = p.vz = p.vy = 0;
@@ -111,6 +128,18 @@ async function chase(which, thumb, seed) {
   let food = 0;
   let ticks = 0;
   const f0 = await page.evaluate(() => window.ranch.frames);
+  // Reading the tug off the ring: let go a reaction after it shows a pull back, press again a reaction after it stops.
+  const react = () => thumb.lag + -Math.log(1 - Math.random() * 0.999) * thumb.spread;
+  let wasBack = false;
+  let letGo = false;
+  let releaseAt = -1;
+  let pressAt = -1;
+  let backs = 0;
+  let slips = 0;
+  let escapes = 0;
+  let fightAt = -1;
+  let lastSay = '';
+  let caughtAt = 0;
   while (Date.now() - t0 < 14000) {
     const now = Date.now() - t0;
     const tick0 = Date.now();
@@ -118,11 +147,20 @@ async function chase(which, thumb, seed) {
       const s = window.ranch.sim.s;
       const p = s.player;
       const d = s.downies.find((q) => q.id === id);
-      return { p: { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch }, d: d && { x: d.x, y: d.y + 0.25, z: d.z, gone: d.gone }, caught: s.slots.some((q) => q.t === window.ranch.sim.s.downies.find((x) => x.id === id)?.kind && q.n > 0), food: s.slots.reduce((a, q) => a + (q.t && !['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0), kind: d?.kind, aboard: s.slots.reduce((a, q) => a + (['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0) };
+      const ring = window.ranch.hud.tugState();
+      // The note under the crosshair, as on screen: a slip ("It slipped free...") or a getaway.
+      const say = document.querySelector('.rh-say.on')?.textContent ?? '';
+      return { ring, say, p: { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch }, d: d && { x: d.x, y: d.y + 0.25, z: d.z, gone: d.gone }, caught: s.slots.some((q) => q.t === window.ranch.sim.s.downies.find((x) => x.id === id)?.kind && q.n > 0), food: s.slots.reduce((a, q) => a + (q.t && !['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0), kind: d?.kind, aboard: s.slots.reduce((a, q) => a + (['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0) };
     }, setup.id);
     food = o.food;
+    if (o.say !== lastSay) {
+      if (/slipped free/.test(o.say)) slips++;
+      if (/got away|into the water/.test(o.say)) escapes++;
+      lastSay = o.say;
+    }
     if (o.aboard > 0) {
       result = 'caught';
+      caughtAt = now;
       break;
     }
     if (!o.d || o.d.gone) {
@@ -160,7 +198,32 @@ async function chase(which, thumb, seed) {
       walking = true;
       walkTicks = 0;
     } else if (walking) walkTicks++;
-    pulling = dist < 7.6;
+    // The ring shows a pull back: let go of Pull (a reaction late), and press again (a reaction after it stops).
+    const back = !!o.ring.back;
+    if (back && !wasBack) backs++;
+    if (fightAt < 0 && o.ring.tug > 0) fightAt = now;
+    if (thumb.spread >= 0) {
+      if (back && !wasBack) {
+        releaseAt = now + react();
+        pressAt = -1;
+      }
+      if (!back && wasBack) {
+        releaseAt = -1;
+        if (letGo) pressAt = now + react();
+      }
+      if (releaseAt >= 0 && now >= releaseAt) {
+        letGo = true;
+        releaseAt = -1;
+      }
+      if (pressAt >= 0 && now >= pressAt) {
+        letGo = false;
+        pressAt = -1;
+      }
+    }
+    wasBack = back;
+    // A slip or a getaway ends the fight: the ring goes, and the thumb presses again when it next comes in reach.
+    if (o.ring.tug <= 0 && !back) letGo = false;
+    pulling = dist < 7.6 && !letGo;
     const next = [...stick(), ...btn(), [lx, ly, fid]];
     // CDP's touchEnd releases the points it lists (the playtest's chase listed the ones to keep, so when it
     // stopped walking it let go of Pull and the look finger and kept walking): list only those to lift.
@@ -179,13 +242,18 @@ async function chase(which, thumb, seed) {
   const fps = ((await page.evaluate(() => window.ranch.frames)) - f0) / secs;
   await t.send('touchEnd', []);
   await page.waitForTimeout(250);
-  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps };
+  const first = result === 'caught' && slips === 0 && escapes === 0;
+  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips };
 }
 
 console.log(`Real-touch catches on the Pixel viewport, ${tries} tries per kind and thumb (${process.env.RANCH_URL || 'default url'})`);
 for (const kind of kinds) {
   for (const [name, thumb] of Object.entries(THUMBS)) {
     let n = 0;
+    let first = 0;
+    let fight = 0;
+    let backs = 0;
+    let slipped = 0;
     let food = 0;
     let tick = 0;
     let fps = 0;
@@ -193,12 +261,18 @@ for (const kind of kinds) {
     for (let k = 0; k < tries; k++) {
       const r = await chase(kind, thumb, k + 1);
       if (r.result === 'caught') n++;
+      if (r.first) {
+        first++;
+        fight += r.fight;
+      }
+      backs += r.backs;
+      if (r.slips) slipped++;
       if (r.food > 0) food++;
       tick += r.tickMs / tries;
       fps += r.fps / tries;
-      out.push(`${r.result[0]}${r.secs.toFixed(0)}`);
+      out.push(`${r.first ? 'F' : r.result[0]}${r.secs.toFixed(0)}`);
     }
-    console.log(`   ${kind.padEnd(8)} ${name.padEnd(9)} ${n} of ${tries} caught, food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)`);
+    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 14 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s; ${(backs / tries).toFixed(1)} pull backs a try, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)`);
   }
 }
 await browser.close();

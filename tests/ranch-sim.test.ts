@@ -254,6 +254,8 @@ describe('the Exchange', () => {
   it('drifts prices within a quarter; each sale today takes a little off, never below the floor', () => {
     const sim = quiet();
     for (let d = 0; d < 20; d++) {
+      // (Round 7: sleep only from dusk; by day there is none, and no day is skipped.)
+      sim.s.hour = 21;
       sim.sleep();
       for (const k of ['clover', 'ember', 'brook', 'thistle'] as const) {
         expect(sim.s.market.mult[k]).toBeGreaterThanOrEqual(0.75);
@@ -308,6 +310,7 @@ describe('the Exchange', () => {
     const sim = quiet();
     sim.drop('tuft-clover', 0, 30);
     sim.s.market.sold.clover = 10;
+    sim.s.hour = 21;
     sim.sleep();
     expect(sim.s.items.filter((i) => !i.gone && i.type.startsWith('tuft')).length).toBe(0);
     expect(sim.s.market.sold.clover).toBe(0);
@@ -671,7 +674,7 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     const pullFor = (secs: number) => {
       for (let t = 0; t < secs && !d.gone; t += 1 / 30) sim.update(1 / 30, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
     };
-    pullFor(0.6);
+    pullFor(0.55);
     expect(d.gone).toBe(false);
     expect(d.tug).toBeGreaterThan(0.4);
     // Let go once it was well on its way: it gets away (the bellows cannot take it for a moment). Close in on it
@@ -685,14 +688,15 @@ describe('the bellows: aimed pulls, wild tugs, tipping a window out', () => {
     const l = Math.max(away, 1e-3);
     stand(sim, d.x - ((d.x - sim.s.player.x) / l) * 4.5, d.z - ((d.z - sim.s.player.z) / l) * 4.5);
     let t = 0;
-    while (!d.gone && t < 4) {
-      sim.update(1 / 30, { ...idle, draw: true }, aimFrom(sim, d.x, d.y + 0.25, d.z));
+    // (Round 7: it pulls back now and then, and a thumb that reads it lets go of Pull until it stops.)
+    while (!d.gone && t < 7) {
+      sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aimFrom(sim, d.x, d.y + 0.25, d.z));
       t += 1 / 30;
     }
     expect(d.gone).toBe(true);
-    expect(t).toBeGreaterThan(0.8);
+    expect(t).toBeGreaterThan(1.2);
     // (Round 4: one that got away is wary, and digs in half as long again.)
-    expect(t).toBeLessThan(2.6);
+    expect(t).toBeLessThan(6);
     expect(sim.s.slots.some((q) => q.t === 'clover')).toBe(true);
   }));
 

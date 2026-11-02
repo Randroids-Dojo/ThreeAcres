@@ -489,6 +489,9 @@ describe('the loop, after the meadow', () => {
     s.hour = 18.4;
     run(0.2);
     expect(tutor.current).toBe('dusk');
+    // (The next morning: round 7 spaces the first day's lessons 30 s apart once the clock runs.)
+    s.day = 2;
+    s.night = 2;
     s.hour = 6;
     run(2);
     expect(tutor.current).toBe('farm');

@@ -294,7 +294,8 @@ for (let i = 0; i < 9; i++) {
   tugMax = Math.max(tugMax, await p.evaluate(() => window.__wild.tug));
 }
 await touch('touchEnd', []);
-await p.waitForTimeout(500);
+// (Round 7: a clover's let-go pull fades at 0.9 a second, so it gets away about 0.75 s later: wait for the note.)
+for (let i = 0; i < 25 && !(await p.evaluate(() => document.querySelector('.rh-say').classList.contains('on'))); i++) await p.waitForTimeout(80);
 const got = await p.evaluate(() => { const d = window.__wild; const e = document.querySelector('.rh-say'); return { noPull: d.noPull, tame: d.tame, gone: d.gone, note: e.classList.contains('on') ? e.textContent : '' }; });
 check('let go mid-tug, a wild downy gets away: "It got away." and no second grab at once', tugMax > 0.35 && got.noPull > 0 && !got.tame && got.note === 'It got away.', `tug ${tugMax.toFixed(2)} ${JSON.stringify(got)}`);
 

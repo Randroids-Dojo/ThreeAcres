@@ -429,16 +429,19 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
   it('per kind, a careful thumb catches far more often than a careless one, which fails often', () => {
     const out: Record<string, [number, number]> = {};
     for (const k of kinds) {
-      const careless = catchRate(k, CARELESS, 30).rate;
-      const careful = catchRate(k, CAREFUL, 30).rate;
+      const careless = catchRate(k, CARELESS, 30).first;
+      const careful = catchRate(k, CAREFUL, 30).first;
       out[k] = [careless, careful];
-      // (Round 5: the harness's thumbs carry the real loop's lag, so it reads about as real touch does.)
+      // (Round 5: the harness's thumbs carry the real loop's lag, so it reads about as real touch does. Round 7:
+      // the tug is the skill, read on the ring; clover is the gentle first catch, so a careless thumb catches it
+      // nine times in ten on the first try and every other kind far less often.)
+      // (Thirty tries here; the round 7 test holds the careful thumb to 90% over 120.)
       expect(careful, `${k} careful`).toBeGreaterThanOrEqual(0.8);
-      expect(careless, `${k} careless`).toBeLessThanOrEqual(0.7);
-      expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.2);
+      expect(careless, `${k} careless`).toBeLessThanOrEqual(k === 'clover' ? 0.97 : 0.8);
+      if (k !== 'clover') expect(careful - careless, `${k} gap`).toBeGreaterThanOrEqual(0.2);
     }
     // (The third playtest's careless thumb caught 8 of 8.)
-    expect(Object.values(out).reduce((a, [c]) => a + c, 0) / kinds.length).toBeLessThan(0.65);
+    expect(Object.values(out).reduce((a, [c]) => a + c, 0) / kinds.length).toBeLessThan(0.75);
   });
 
   it('a thistle bolts: walking at it on open ground you never get in reach; running, you do', () => {
@@ -465,10 +468,10 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
       walkMin = Math.min(walkMin, chase(false));
     });
     seeds(3, () => {
-      runMin = Math.min(runMin, chase(true));
+      runMin = Math.min(runMin, chase(true, 2.9));
     });
-    // Pull reaches 7.4 m (and a little give).
-    expect(walkMin).toBeGreaterThan(7.8);
+    // Pull reaches 7.4 m. (Round 7: it bolts for two seconds, then is winded for eight.)
+    expect(walkMin).toBeGreaterThan(7.4);
     expect(runMin).toBeLessThan(7);
     let tired = 1e9;
     seeds(3, () => {
@@ -492,10 +495,11 @@ describe('P2: each kind has its own catch, and a careless thumb can fail it', ()
       const d = sim.spawn('brook', bx, bz, false);
       d.hopT = 99;
       let escaped = false;
-      for (let f = 0; f < 30 * 6 && !d.gone; f++) {
-        const on = f % 8 < 5 && !escaped;
+      // (Round 7: the thumb lets go while it pulls back, as the tug asks; its time waits meanwhile.)
+      for (let f = 0; f < 30 * 12 && !d.gone; f++) {
+        const on = f % 8 < 4 && !escaped;
         const aim = on ? aimAt(sim, d.x, d.y + 0.25, d.z) : aimAt(sim, d.x, d.y + 3, d.z + 3);
-        sim.update(1 / 30, { ...idle, draw: !escaped }, aim);
+        sim.update(1 / 30, { ...idle, draw: !escaped && d.back <= 0 }, aim);
         for (const e of sim.events) if (e.t === 'escape' && e.dove) escaped = true;
         sim.events.length = 0;
         // Keep it in reach while it is held (the test is about the time, not the chase).
@@ -515,7 +519,8 @@ describe('P2: leaving the ranch is fine once you have invested, and the gardens 
       const sim = quiet(6);
       // (No pests: this is about food. The clock runs.)
       sim.teaching = true;
-      sim.s.learn = ['time'];
+      // (Round 7: the first day's dusk waits for the feeder lessons; this ranch is past them.)
+      sim.s.learn = ['time', 'evening'];
       const s = sim.s;
       s.pads[0].crop = crop ? 'cloverhead' : null;
       s.pads[0].grow = 0;
@@ -544,7 +549,10 @@ describe('P2: leaving the ranch is fine once you have invested, and the gardens 
     // a feed run, keeps the pen in.)
     const no = away(false, false);
     expect(no.out).toBe(true);
-    expect(away(false).out).toBe(false);
+    // (Round 7: a bare garden's full bed tips only a third of its crop into the feeder, so an empty feeder beside
+    // it is no longer enough on its own; it still tips some in. See tests/ranch-round7.test.ts for the feeder
+    // running down over days.)
+    expect(away(false).stored).toBeGreaterThan(0);
     expect(FEEDER_CAP).toBeGreaterThanOrEqual(60);
   }));
 

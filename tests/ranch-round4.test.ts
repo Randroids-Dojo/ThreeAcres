@@ -354,10 +354,11 @@ describe('P2: a downy being tugged beats food in the cone, and glides go sideway
     // The fight starts on the brook.
     run(sim, 0.3, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
     expect(d.tug).toBeGreaterThan(0);
-    // The aim slips onto the berries beside it, still on the brook's body with its give.
+    // The aim slips onto the berries beside it, still on the brook's body with its give. (Round 7: letting go of
+    // Pull while it pulls back, as the tug asks.)
     for (let t = 0; t < 1.5 && !d.gone; t += 1 / 30) {
       const aim = aimAt(sim, d.x + 0.12, d.y + 0.2, d.z);
-      sim.update(1 / 30, { ...idle, draw: true }, aim);
+      sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aim);
       sim.events.length = 0;
     }
     expect(s.slots.some((q) => q.t === 'dewberry')).toBe(false);
@@ -381,7 +382,7 @@ describe('P2: a downy being tugged beats food in the cone, and glides go sideway
       for (let t = 0; t < 2.4 && !d.gone; t += 1 / 30) {
         const p = s.player;
         const aim = aimAt(sim, d.x, d.y + 0.25, d.z);
-        sim.update(1 / 30, { ...idle, draw: true }, aim);
+        sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aim);
         sim.events.length = 0;
         if (d.drawn > 0 || d.gone) break;
         const tx = p.x - d.x;

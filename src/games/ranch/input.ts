@@ -38,7 +38,7 @@ const DEAD = 0.16;
 /** Seconds the switch key must be held to tip a window out; a shorter press switches. */
 const HOLD_EMPTY = 0.55;
 
-function buzz(ms: number): void {
+export function buzz(ms: number): void {
   try {
     navigator.vibrate?.(ms);
   } catch {

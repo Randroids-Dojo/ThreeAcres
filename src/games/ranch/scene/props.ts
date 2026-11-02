@@ -33,6 +33,7 @@ import {
   BOARD,
   CLOVER_PATCHES,
   CRAG,
+  SPRING,
   DEAD_TREE,
   DOOR,
   EXCHANGE,
@@ -529,6 +530,18 @@ export function buildProps(boardMat: Material): Props {
     crown.push([OAK.x, y + 7.6, OAK.z]);
     crown.forEach(([cx, cy, cz], k) => S.push(blob(2.4 + R() * 0.8, k % 2 ? 0x86a868 : 0x93b06c, cx, cy, cz, 0.3, k + 40)));
     for (let k = 0; k < 5; k++) S.push(blob(1.7, 0x9cb874, OAK.x + (R() - 0.5) * 5, y + 8 + R() * 1.5, OAK.z + (R() - 0.5) * 5, 0.3, k + 60));
+  }
+  // The spring, where the stream rises: a ring of grey and mossy stones round its head, so "the spring" is a
+  // place you can see (the rare clover's clue; "the footbridge" had two in the meadow).
+  {
+    const R = rng(23);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2 + R() * 0.25;
+      const rr = 1.7 + R() * 0.35;
+      const x = SPRING.x + Math.cos(a) * rr;
+      const z = SPRING.z + Math.sin(a) * rr;
+      S.push(blob(0.36 + R() * 0.22, k % 3 ? 0xb6b2aa : 0x93a684, x, heightAt(x, z) + 0.1, z, 0.3, 300 + k, 0.7));
+    }
   }
   {
     const x = DEAD_TREE.x;

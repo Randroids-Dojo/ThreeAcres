@@ -194,7 +194,8 @@ describe('P1: the rare downy is a hunt', () => {
     const { sim, d } = huntTaken();
     const s = sim.s;
     const sp = SIGHTINGS[0];
-    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, and stays$/);
+    // (Round 7: and what it is worth a day once penned.)
+    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/);
     const floor = (x: number, z: number) => sim.phys.floor(x, z);
     const mark = { on: false, icon: 'arrow' as const, x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0, slot: -1 };
     // In the meadow, 40 m off: the clue only.
@@ -253,12 +254,12 @@ describe('P1: the rare downy is a hunt', () => {
     stand(sim, d.x, d.z + 4);
     run(sim, 0.3, idle, () => aimAt(sim, d.x, d.y, d.z));
     expect(d.bolt <= 0 || !d.alert).toBe(true);
-    // A careful pull brings it in.
-    for (let t = 0; t < 8 && !d.gone; t += 1 / 30) {
+    // A careful pull brings it in. (Round 7: letting go of Pull while it pulls back.)
+    for (let t = 0; t < 14 && !d.gone; t += 1 / 30) {
       const p = s.player;
       const dist = Math.hypot(d.x - p.x, d.z - p.z);
       if (dist > 4) stand(sim, d.x + ((p.x - d.x) / dist) * 3.5, d.z + ((p.z - d.z) / dist) * 3.5);
-      sim.update(1 / 30, { ...idle, draw: true }, aimAt(sim, d.x, d.y + 0.25, d.z));
+      sim.update(1 / 30, { ...idle, draw: d.back <= 0 }, aimAt(sim, d.x, d.y + 0.25, d.z));
       sim.events.length = 0;
     }
     expect(s.slots.some((q) => (q.downs ?? []).some((r) => r.rare))).toBe(true);

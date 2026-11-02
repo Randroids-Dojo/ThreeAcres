@@ -186,7 +186,7 @@ function only(ui, allowed) {
 }
 
 // =================================================================== phone, touch
-{
+if (!process.env.EVENING) {
   console.log('-- phone, touch');
   const { ctx, page, problems } = await open({ viewport: { width: 412, height: 838 }, deviceScaleFactor: 2.6, hasTouch: true, isMobile: true }, '&fresh');
   const k = kit(page);
@@ -210,6 +210,41 @@ function only(ui, allowed) {
     await touch('touchEnd', []);
     await page.waitForTimeout(80);
     return true;
+  };
+  /**
+   * Hold Pull, reading the tug (round 7): when the ring shows a pull back, lift the finger a moment later, and
+   * press again once it stops. Returns the pull backs seen and every lesson line that came up meanwhile.
+   */
+  const pullReading = async (ms, id, during, until) => {
+    const c = await centre('.rt-draw');
+    if (!c) return { backs: 0, lines: [], warm: false };
+    let down = true;
+    let backs = 0;
+    let warm = false;
+    const lines = [];
+    await touch('touchStart', [[c[0], c[1], id]]);
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if (during) await during();
+      const q = await page.evaluate(() => ({ back: window.ranch.hud.tugState().back, line: window.ranch.seen().line, warm: document.querySelector('.rh-cross').classList.contains('back') }));
+      if (q.line && !lines.includes(q.line)) lines.push(q.line);
+      warm ||= q.warm;
+      if (down && q.back) {
+        backs++;
+        await page.waitForTimeout(300);
+        await touch('touchEnd', [[c[0], c[1], id]]);
+        down = false;
+      } else if (!down && !q.back) {
+        await page.waitForTimeout(150);
+        await touch('touchStart', [[c[0], c[1], id]]);
+        down = true;
+      }
+      if (until && (await until())) break;
+      await page.waitForTimeout(60);
+    }
+    if (down) await touch('touchEnd', [[c[0], c[1], id]]);
+    await page.waitForTimeout(80);
+    return { backs, lines, warm };
   };
   const tapTag = async (id) => {
     const i = await page.evaluate((id) => window.ranch.menuOptions().indexOf(id), id);
@@ -445,6 +480,9 @@ function only(ui, allowed) {
   await k.place(14.8 + 1.2, 31.8 + 2.2, 14.8 + 0.4, 5.6, 31.8);
   await frames(page, 6);
   check('phone: the Use button shows at a post now', (await k.ui()).use);
+  // Round 7: it sits with the thumb buttons (above Jump), clear of the view's middle (it sat at y 588 over the world).
+  const useAt = await page.evaluate(() => { const r = document.querySelector('.rt-act').getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: innerWidth, h: innerHeight }; });
+  check('phone: the Use button sits by the thumb buttons on the right, clear of the middle of the view', useAt.l > useAt.w * 0.66 && useAt.t > useAt.h * 0.55 && useAt.r <= useAt.w, JSON.stringify(useAt));
   const act = await centre('.rt-act');
   if (act) await tap(act[0], act[1], 12);
   await page.waitForTimeout(700);
@@ -544,8 +582,12 @@ function only(ui, allowed) {
   const noticed = await page.evaluate(() => { const s = window.ranch.sim.s; return s.downies.some((q) => !q.gone && !q.tame && !q.keep && q.alert); });
   check('phone: the wild downy noticed you', noticed);
   await k.place(d.x + 4.2, d.z + 2, d.x, d.y + 0.25, d.z);
-  await press('.rt-draw', 3000, 17, async () => { const q = await k.downy('wild'); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
-  check('phone: a steady Pull catches the wild downy and ends the meadow lesson', await k.finished('meadow'));
+  // Round 7: the tug is a skill. The first time a wild one pulls back, its line comes up (in touch words, with the
+  // button's word) and the ring goes warm; it waits for you to let go, then a steady Pull between its pulls brings it in.
+  const meadowPull = await pullReading(12000, 17, async () => { const q = await k.downy('wild'); if (q) await k.aim(q.x, q.y + 0.25, q.z); }, () => k.finished('meadow'));
+  check('phone: the first pull back brings the tug line, in touch words: "Let go of Pull when it pulls back."', meadowPull.lines.includes('Let go of Pull when it pulls back.'), JSON.stringify(meadowPull));
+  check('phone: the ring goes warm while it pulls back', meadowPull.warm, JSON.stringify(meadowPull));
+  check('phone: letting go through its pull and pulling again catches the wild downy, ending the meadow lesson and the tug line', (await k.finished('meadow')) && (await k.finished('ease')), await k.why());
   s = await k.st();
   // Round 5: hunger runs again, but the afternoon stays at half past four through the loop lesson (the fifth
   // playtest's loop ran from 16:30 through the pests to 2:40 am, and the sleep line lapsed both nights).
@@ -659,7 +701,7 @@ function only(ui, allowed) {
   // feeder, and the first night woke the pen starving). At its price, 150, with a pen, its lesson comes before the
   // garden and before dusk; the open order's tally stays on the page under the lesson's line.
   await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 150; });
-  check('phone: 150 coins and a pen bring the feeder lesson, before the garden and before dusk', await k.lessonOn('ups', 4000), await k.why());
+  check('phone: 150 coins and a pen bring the feeder lesson, before the garden and before dusk', await k.lessonOn('ups', 36000), await k.why());
   u = await k.ui();
   const feederEarly = await page.evaluate(() => ({ hour: window.ranch.sim.s.hour, o: window.ranch.sim.s.orders[0], calm: window.__calm() }));
   check('phone: "Buy a feeder at the pen post.", the order\'s tally kept under it ("Clover fluff, 1 of 4.")', u.page === 'Buy a feeder at the pen post.' && feederEarly.calm.length === 1 && feederEarly.calm[0] === `Clover fluff, ${feederEarly.o.got} of ${feederEarly.o.n}.` && feederEarly.hour < 18.3, `${u.page} ${JSON.stringify(feederEarly.calm)} ${feederEarly.hour.toFixed(2)}`);
@@ -676,7 +718,8 @@ function only(ui, allowed) {
   await tapTag('pen:feeder');
   check('phone: fitting a feeder ends the upgrades lesson', await k.finished('ups'));
   // ---- the new feeder: filled in its own lesson, the hopper marked (the playtest's sat empty a day and a half)
-  check('phone: a lesson to fill the feeder comes next', await k.lessonOn('feeder', 4000));
+  // (Round 7: on the first day a lesson comes 30 s after the one before it, the clock waiting at 6 pm meanwhile.)
+  check('phone: a lesson to fill the feeder comes next', await k.lessonOn('feeder', 36000));
   await page.evaluate(() => { const sim = window.ranch.sim; for (let i = 0; i < 3; i++) sim.stow('cloverhead'); });
   const headSlot = await k.slotOf('cloverhead');
   if ((await k.st()).sel !== headSlot) {
@@ -717,7 +760,7 @@ function only(ui, allowed) {
 
   // ---- 10. dusk: the clock and the door
   await page.evaluate(() => (window.ranch.sim.s.hour = 18.2));
-  check('phone: dusk brings its lesson', await k.lessonOn('dusk', 8000));
+  check('phone: dusk brings its lesson', await k.lessonOn('dusk', 40000));
   u = await k.ui();
   check('phone: the hour arc arrives with dusk', u.clock && u.page === 'Sleep at the front door till morning.', u.page);
   check('phone: no nettlebacks yet', (await k.st()).nettles === 0);
@@ -905,7 +948,7 @@ function only(ui, allowed) {
   if (actR) { await tap(actR[0], actR[1], 37); await page.waitForTimeout(900); }
   const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /downy$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
   const rarePay = Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
-  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and that it stays", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /on top of sales$/.test(t)) && rareTag.all.some((t) => /Caught today\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook) downy$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, and stays$/.test(rareTag.note), JSON.stringify(rareTag));
+  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds a day once penned (round 7)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /on top of sales$/.test(t)) && rareTag.all.some((t) => /Caught today\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook) downy$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then about [\d,]+ a day)$/.test(rareTag.note), JSON.stringify(rareTag));
   check("phone: the rare one's coins are no more than the trip's (the playtest's 2,680 was 3.8 times it)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
   await k.shot('phone-18d-rare-tags');
   if (rareTag) await takeTag(rareTag.id);
@@ -952,6 +995,9 @@ function only(ui, allowed) {
   }
   check('phone: its food blown near it for real, it comes to eat it (lured)', lured, await k.why());
   await page.waitForTimeout(300);
+  // Round 7: its fed window shows, a ring over it (the seventh playtest's ran out unseen).
+  const fedRing = await page.evaluate(() => ({ share: window.ranch.hud.fedState(), on: document.querySelector('.rh-fed')?.classList.contains('on') }));
+  check('phone: lured, a ring over it shows its fed window', fedRing.on && fedRing.share > 0, JSON.stringify(fedRing));
   u = await k.ui();
   check('phone: lured, the line says to walk up and hold Pull', u.page === 'Walk up and hold Pull on it.', u.page);
   let caughtRare = false;
@@ -968,7 +1014,7 @@ function only(ui, allowed) {
       if (!rd) break;
     }
     await k.place(rd.x + 3.4, rd.z + 1.2, rd.x, rd.y + 0.25, rd.z);
-    await press('.rt-draw', 3600, 38, async () => { const q = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; }); if (q) await k.aim(q.x, q.y + 0.25, q.z); });
+    await pullReading(9000, 38, async () => { const q = await page.evaluate(() => { const d = window.ranch.sim.rareWild(); return d && { x: d.x, y: d.y, z: d.z }; }); if (q) await k.aim(q.x, q.y + 0.25, q.z); }, () => page.evaluate(() => window.ranch.sim.s.slots.some((q) => (q.downs ?? []).some((d) => d.rare))));
     caughtRare = await page.evaluate(() => window.ranch.sim.s.slots.some((q) => (q.downs ?? []).some((d) => d.rare)));
   }
   check('phone: pulled for real while it is lured, the rare one comes into the jar', caughtRare, await k.why());
@@ -1024,6 +1070,12 @@ function only(ui, allowed) {
   check('phone: the pause page holds the goals done and the current one (no more), and the latest notes, all on screen', pause.goals === pause.done + 1 && pause.open === 1 && pause.notes >= 1 && pause.notes <= 3 && pause.fits, JSON.stringify(pause));
   await k.shot('phone-19-pause');
 
+  // Round 7: every lesson line on the phone's page reads on one line, or wraps evenly onto two (the seventh
+  // playtest's "...to shoo / it." and "Sleep at the front door till morning.").
+  const fit = await page.evaluate(() => window.ranch.lessonFit());
+  const ragged = fit.filter((q) => q.lines > 2 || (q.lines === 2 && q.last < 0.4));
+  check(`phone: all ${fit.length} lesson lines in touch words read on one line or two even ones on the 412 px page`, fit.length > 40 && ragged.length === 0, ragged.slice(0, 4).map((q) => `${q.line} (${q.lines} lines, last ${q.last.toFixed(2)})`).join(' | '));
+  console.log(`   lesson lines on the phone page: ${fit.filter((q) => q.lines === 1).length} on one line, ${fit.filter((q) => q.lines === 2).length} on two (the shortest last line ${Math.min(...fit.filter((q) => q.lines === 2).map((q) => q.last)).toFixed(2)} of the first)`);
   const zero = await page.evaluate(() => window.__zero);
   check('phone: touches never read as 0,0 (no pointer lock from a touch)', !zero, zero ?? '');
   const bad = await page.evaluate(() => window.__bad);
@@ -1034,10 +1086,92 @@ function only(ui, allowed) {
   await ctx.close();
 }
 
+// =================================================================== phone: the first evening at real speed (round 7)
+// The seventh playtest's first evening put six lines up in about two real minutes, mostly in the dark: the order
+// at 17:36, then the feeder until dusk took over before it was filled, the night at 20:30, the garden and planting
+// at 23:30. Here the loop lesson has just ended (the lessons before it learned through the hook) and an eager
+// player does each thing the moment its line is up: takes the order, buys the feeder, blows food into it. Nothing
+// jumps the clock. Each new lesson line is timed, in real seconds, as it comes up. Run on its own with EVENING=1.
+{
+  console.log('-- phone, the first evening at real speed');
+  const { ctx, page, problems } = await open({ viewport: { width: 412, height: 838 }, deviceScaleFactor: 2.6, hasTouch: true, isMobile: true }, '&fresh');
+  const k = kit(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id, radiusX: 8, radiusY: 8, force: 1 })) });
+  await touch('touchStart', [[300, 300, 1]]);
+  await page.waitForTimeout(60);
+  await touch('touchEnd', [[300, 300, 1]]);
+  await page.evaluate(() => {
+    const r = window.ranch;
+    const sim = r.sim;
+    const s = sim.s;
+    for (const id of ['look', 'walk', 'draw', 'puff', 'feed', 'sell', 'pen', 'penin', 'slots', 'meadow', 'jump', 'run', 'ease', 'farm']) if (!s.learn.includes(`lesson:${id}`)) s.learn.push(`lesson:${id}`);
+    for (const f of ['bellows', 'draw', 'puff', 'pause', 'coins', 'pads', 'slots', 'jump', 'appetite', 'ease', 'orders', 'time']) if (!s.learn.includes(f)) s.learn.push(f);
+    s.pads[1].kind = 'pen';
+    s.pads[1].ups = [];
+    sim.phys.setPads(s.pads);
+    for (let i = 0; i < 3; i++) sim.spawn('clover', 17 + Math.cos(i * 2) * 2, 26.5 + Math.sin(i * 2) * 2, true).hunger = 0.3;
+    // Coins for the feeder and the garden both (the playtest's garden lesson came at 23:30).
+    s.coins = 420;
+    s.hour = 16.5;
+    s.day = 1;
+    s.orderDay = 0;
+    const p = s.player;
+    p.x = -5;
+    p.z = 34;
+    window.__begins = [];
+    let last = '';
+    const t0 = performance.now();
+    const tick = () => {
+      const v = r.seen();
+      if (v.lesson && v.line && v.lesson !== last) {
+        window.__begins.push({ id: v.lesson, t: (performance.now() - t0) / 1000, hour: s.hour, day: s.day });
+        last = v.lesson;
+      }
+      if (!v.lesson) last = '';
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const t0 = Date.now();
+  let feederTicked = -1;
+  while (Date.now() - t0 < 360000) {
+    const q = await page.evaluate(() => { const r = window.ranch; const s = r.sim.s; return { lesson: r.seen().lesson, line: r.seen().line, hour: s.hour, offers: r.sim.offers().length, feeder: s.pads[1].ups.includes('feeder'), filled: s.pads[1].feeder.n, done: s.learn.includes('lesson:feeder'), night: (window.__begins ?? []).some((b) => b.id === 'night') }; });
+    if (q.night) break;
+    if (q.done && feederTicked < 0) feederTicked = q.hour;
+    if (q.lesson === 'order' && q.line && q.offers) await page.evaluate(() => window.ranch.sim.takeOrder(0));
+    if (q.lesson === 'ups' && q.line && !q.feeder) await page.evaluate(() => window.ranch.sim.choose({ kind: 'pad', id: 1, label: '', x: 0, y: 0, z: 0 }, 'pen:feeder'));
+    if (q.lesson === 'feeder' && q.line && q.filled === 0) {
+      // Clover heads aboard and chosen, then a real Blow at the hopper, the arrow's spot.
+      await page.evaluate(() => { const sim = window.ranch.sim; const s = sim.s; for (let i = 0; i < 3; i++) sim.stow('cloverhead'); s.sel = s.slots.findIndex((w) => w.t === 'cloverhead'); });
+      await page.waitForTimeout(400);
+      const hop = await page.evaluate(() => { const m = window.ranch.tutor.mark; return { x: m.x, y: m.y, z: m.z }; });
+      await k.place(21.2, 34, hop.x, hop.y - 0.75, hop.z);
+      await frames(page, 3);
+      const puff = await page.evaluate(() => { const e = document.querySelector('.rt-puff').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; });
+      await touch('touchStart', [[puff[0], puff[1], 33]]);
+      await page.waitForTimeout(90);
+      await touch('touchEnd', [[puff[0], puff[1], 33]]);
+    }
+    await page.waitForTimeout(200);
+  }
+  const begins = await page.evaluate(() => window.__begins);
+  console.log(`   the first evening: ${begins.map((b) => `${b.id} at ${b.t.toFixed(1)} s (${Math.floor(b.hour)}:${String(Math.round((b.hour % 1) * 60)).padStart(2, '0')})`).join(', ')}; the feeder lesson ticked at ${feederTicked.toFixed(2)} h`);
+  const ids = begins.map((b) => b.id);
+  check('evening: order, feeder, filling it, dusk, then night, in that order (no garden)', ids.join() === 'order,ups,feeder,dusk,night', ids.join());
+  const gaps = begins.slice(1).map((b, i) => b.t - begins[i].t);
+  check('evening: no two new lesson lines within 30 real seconds of each other', gaps.length >= 4 && gaps.every((g) => g >= 29.5), gaps.map((g) => g.toFixed(1)).join(', '));
+  const late = begins.filter((b) => b.id !== 'night' && (b.hour >= 19 || b.day > 1));
+  check('evening: no lesson but the night one starts after 7 pm', late.length === 0, late.map((b) => `${b.id} ${b.hour.toFixed(2)}`).join(', '));
+  check('evening: the feeder is filled before dusk comes (dusk waited at 6 pm for it)', feederTicked > 0 && feederTicked < 18.3, feederTicked.toFixed(2));
+  check('evening: no console errors', problems.length === 0, problems.slice(0, 4).join(' | '));
+  await ctx.close();
+}
+
 // =================================================================== desktop, a browser that refuses pointer lock
 // (The fourth playtest, in headless Chrome: every click asked for pointer lock again and the line stayed "Click
 // the view to look around." After a refusal it falls back to right-drag, and says so.)
-{
+if (!process.env.EVENING) {
   console.log('-- desktop, pointer lock refused');
   const { ctx, page, problems } = await open({ viewport: { width: 1280, height: 800 } }, '&fresh');
   const k = kit(page);
@@ -1068,7 +1202,7 @@ function only(ui, allowed) {
 }
 
 // =================================================================== desktop, keys and mouse
-{
+if (!process.env.EVENING) {
   console.log('-- desktop, keys and mouse');
   const { ctx, page, problems } = await open({ viewport: { width: 1280, height: 800 } }, '&fresh&nolock');
   const k = kit(page);
@@ -1182,7 +1316,7 @@ function only(ui, allowed) {
 }
 
 // =================================================================== a returning player's old save
-{
+if (!process.env.EVENING) {
   console.log('-- returning player, a save from before the lessons');
   const { ctx, page, problems } = await open({ viewport: { width: 412, height: 838 }, deviceScaleFactor: 2.6, hasTouch: true, isMobile: true }, '&fresh&taught');
   // Make it look like a ranch from before the lessons: a pen, sales, a day gone by.
@@ -1230,7 +1364,7 @@ function only(ui, allowed) {
 }
 
 // =================================================================== a gamepad's words
-{
+if (!process.env.EVENING) {
   console.log('-- gamepad wording');
   const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
   await ctx.addInitScript(() => {

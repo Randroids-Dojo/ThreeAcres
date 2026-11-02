@@ -95,6 +95,14 @@ export interface Downy extends Body {
   rare: boolean;
   /** Seconds a rare wild one stays lured (going for its favourite food, eating it, and a while after): it lets you near. Not saved. */
   calm: number;
+  /** The tug: seconds left of the pull back it is making now (0: none), seconds of pulling until its next (-1: not set), seconds you held on through this one, whether you let go during it, and the moment after one in which a let-go pull keeps what it has. Not saved. */
+  back: number;
+  backT: number;
+  /** The rare one was lured last frame (so its window running out can be told). Not saved. */
+  lured?: boolean;
+  backHeld: number;
+  eased: boolean;
+  easeT: number;
 }
 
 export interface Item extends Body {
@@ -142,6 +150,23 @@ export interface Nettle extends Body {
   wx?: number;
   wz?: number;
   wT?: number;
+  /** Where its current detour started (one that got nowhere tries the other side next time). Not saved. */
+  dfx?: number;
+  dfz?: number;
+  /** Seconds of watchdog windows in a row it got nowhere (a leaving one: gone after 10 unwatched). */
+  lostT?: number;
+  /** Seconds treats are ignored for (it gave up on one it could not reach). */
+  ignoreT?: number;
+  /** Leaving: seconds out of your sight. */
+  unseenT?: number;
+  /** Where it last got wedged, and how many times in a row there (each a longer way round). */
+  sx?: number;
+  sz?: number;
+  stuckN?: number;
+  /** The pen it prowls round (-1: none), the angle it is at, and which way round it goes. */
+  prowl?: number;
+  pa?: number;
+  pdir?: number;
 }
 
 /**
@@ -182,6 +207,8 @@ export interface Pad {
   feeder: { t: Food | null; n: number };
   feedT: number;
   chute: number[];
+  /** A full garden bed's share of its crop owed to the feeder next door, part way to the next whole one. Not saved. */
+  tip?: number;
 }
 
 export interface Source {
@@ -444,6 +471,11 @@ export function newDowny(s: RanchState, kind: DownyKind, x: number, y: number, z
     caught: 0,
     rare: false,
     calm: 0,
+    back: 0,
+    backT: -1,
+    backHeld: 0,
+    eased: false,
+    easeT: 0,
   };
 }
 
