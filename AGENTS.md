@@ -45,6 +45,7 @@ node scripts/qa/e2e.mjs 20 [w h] [url] # bot plays each game, then a storm of ra
 node scripts/qa/shell-keys.mjs [url]   # the switcher on a keyboard: Escape and ` open and close it in every game, Tab stays on it, Enter plays a card
 node scripts/qa/sunup-keys.mjs [url]   # Sunup on a keyboard: a focused button never takes Space, Sleep before evening asks, Space works at the well
 node scripts/qa/sunup-queue.mjs [url]  # Sunup's tap queue with real touch: each tap keeps its seed, well trips never merge, crows go first, no question eats the queue
+node scripts/qa/sunup-first15.mjs [url] # Sunup's first fifteen minutes on a phone: when the first real choice comes, how many, and dead days
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth
@@ -55,6 +56,8 @@ npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates
 npx tsx scripts/deck-twists.ts         # Seedbound: what each twist really costs or pays a run, against the quota it moves
 npx tsx scripts/ranch-orders.ts        # Thistledown: how varied each morning's orders are and whether they compete
 npx tsx scripts/ranch-catch.ts         # Thistledown: catch success per kind for a careless thumb against a careful one
+npx tsx scripts/ranch-first15.ts       # Thistledown: a scripted player's first fifteen minutes: dead walking, idle time, gaps between new things
+npx tsx scripts/ranch-hunt.ts          # Thistledown: how long a rare downy's hunt takes a careful player, clue to catch
 node scripts/ranch-catch-real.mjs      # the same with real touch in the browser (RANCH_URL=...)
 node scripts/ranch-pest-night.mjs      # Thistledown: pests readable at night (eye glow measured from the frame)
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
