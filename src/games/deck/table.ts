@@ -24,6 +24,9 @@ import {
   newRun,
   nextPick,
   PAGES,
+  levelName,
+  levelText,
+  pageLevel,
   playCard,
   previewPlay,
   recordRun,
@@ -46,7 +49,7 @@ import {
   type RunState,
   type Step,
 } from './rules';
-import { learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, type Piece } from './lessons';
+import { earnTable, learnedAll, newLearn, PIECES, REFRESH, Tutor, type Learn, type Line, type Piece } from './lessons';
 import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
 import { Board, type PreviewMark } from './view/board';
@@ -299,6 +302,8 @@ export class Table {
       this.prefs = { ...{ fast: false }, ...data.prefs };
       // A save from before the lessons: everything is already on the table; the can and the weather get a refresher.
       this.tutor = new Tutor(data.learn ?? learnedAll(REFRESH));
+      // A returning player's table has every piece (round 8: a second run after the guided one had no spent heap).
+      earnTable(this.tutor.learn, this.meta.runs);
     } else {
       this.meta = data?.meta ?? newMeta();
       this.tutor = new Tutor(data?.learn ?? (this.meta.runs > 0 ? learnedAll() : newLearn()));
@@ -320,6 +325,8 @@ export class Table {
     const s = seed ?? ((Date.now() ^ (Math.random() * 0x7fffffff)) | 0);
     this.run = newRun(s, this.meta, guided).s;
     this.tutor.drop();
+    // Every piece of the table a finished run has earned is there from the new run's first dawn.
+    earnTable(this.tutor.learn, this.meta.runs);
     this.held = null;
     this.seq?.finish();
     this.seq = null;
@@ -632,7 +639,8 @@ export class Table {
       const handH = Math.round(Math.max(this.cardH + 30, Math.min(250, H * 0.28)));
       place(this.ledger, sx, 12, P - 66, 94);
       place(this.purse, sx + P - 56, 16, 56, 56);
-      place(this.book, sx + P - 58, 80, 58, 44);
+      // Round 8: wide enough for its word (it spilled past the book's edge).
+      place(this.book, sx + P - 64, 80, 64, 44);
       place(this.peg, sx, 116, P - 66, 32);
       // The bench is the desktop's controls: it takes the side panel's lower half at a size a mouse
       // finds at once (it was 200 px tall, its labels 11.5 px, with 500 px of bare table above it).
@@ -832,7 +840,7 @@ export class Table {
 
   private renderPages(): void {
     const room = maxPages(this.run);
-    const key = `${this.run.pages.join()}|${room}`;
+    const key = `${this.run.pages.map((p) => `${p}${pageLevel(this.run, p)}`).join()}|${room}`;
     if (this.pages.dataset.k === key) return;
     this.pages.dataset.k = key;
     this.pages.innerHTML = '';
@@ -841,8 +849,10 @@ export class Table {
     // seventh playtest's desktop showed half of Big Basket and hid two more pages.
     const list = el('ul', 'sb-keptlist');
     for (const p of this.run.pages) {
-      const li = el('li', 'sb-keptline', `<b>${PAGES[p].name}</b>`);
-      li.title = PAGES[p].text;
+      // An engine page bought up a level says so: "Busy Bees II".
+      const lv = pageLevel(this.run, p);
+      const li = el('li', 'sb-keptline', `<b>${levelName(PAGES[p].name, lv)}</b>`);
+      li.title = (lv > 1 && levelText(p, lv)) || PAGES[p].text;
       list.append(li);
     }
     // The room left, a dashed line for each page more it keeps: the stall sells pages to fill them.
@@ -932,8 +942,8 @@ export class Table {
     const day = this.run.phase === 'day';
     hand.forEach((card, i) => {
       let c = this.cards.get(card.uid);
-      const bonus = faceBonus(card.id, this.run.pages);
-      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? 'b' : ''}` : ''}`;
+      const bonus = faceBonus(card.id, this.run.pages, this.run.levels);
+      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}` : ''}`;
       if (!c) {
         const d = el('div', 'sb-card');
         const img = el('img');
@@ -1749,7 +1759,10 @@ export class Table {
     this.aimNote = false;
     n.textContent = text;
     // Measured from the table's left edge, so its width is its own, not what was left of the screen where it last stood
-    // (a note last by the right edge wrapped, measured twice as tall, and hung below the strip).
+    // (a note last by the right edge wrapped, measured twice as tall, and hung below the strip). Round 8: then held at
+    // that width, so it cannot wrap again where it goes: a note about C1 on the phone measured one line at the left
+    // edge, wrapped to two by the right one, and its top rose over the column letters.
+    n.style.width = '';
     n.style.left = '0px';
     const br = this.boardWrap.getBoundingClientRect();
     const tr = this.tableEl.getBoundingClientRect();
@@ -1758,6 +1771,7 @@ export class Table {
     const oy = br.top - tr.top;
     const w = n.offsetWidth || 160;
     const h = n.offsetHeight || 26;
+    if (n.offsetWidth) n.style.width = `${w + 1}px`;
     const bedL = ox + b.bx;
     const bedR = ox + b.bx + b.T * b.cols;
     let x = ox + b.bx + (b.T * b.cols) / 2;

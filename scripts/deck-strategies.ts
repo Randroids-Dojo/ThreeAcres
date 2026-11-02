@@ -19,6 +19,12 @@
 // hand at dusk, by scoops bought for good (and by scoops above the usual three
 // a morning, Green Thumb and the Long Furrow too).
 //
+// Round 8 adds the engine page's level when each run ends (II or more, III), the
+// coins left at the end, stalls offering a twist aimed as the stall before did,
+// and (with --seasons) the median take over quota season by season: the curve.
+// --tune=key:value plays any TUNING number; a value in brackets or braces is
+// read as JSON (--tune=quotas2:[700,900,1080,1220]).
+//
 // It uses only the bot and the rules' public calls, so the same file runs
 // against an older build (copy it into a `git archive` of the commit).
 // npx tsx scripts/deck-strategies.ts [runs] [policy...] [--seasons] [--noTwists] [--first=n]
@@ -37,9 +43,12 @@ if (process.argv.includes('--noTwists')) tuning.twists = false;
 // Round 7: the run's first stall offers all four engines here, so a policy committed to one can always take it.
 if (tuning.engineChoices !== undefined) tuning.engineChoices = 4;
 if (process.argv.includes('--noEngines')) tuning.engines = false;
+// --tune=key:value plays any TUNING number; a value in brackets or braces is read as JSON (rows of quotas, levels).
 for (const a of process.argv.filter((x) => x.startsWith('--tune='))) {
-  const [k, v] = a.slice(7).split(':');
-  (tuning as unknown as Record<string, number>)[k] = Number(v);
+  const at = a.indexOf(':');
+  const k = a.slice(7, at);
+  const v = a.slice(at + 1);
+  (tuning as unknown as Record<string, unknown>)[k] = /^[[{]/.test(v) ? JSON.parse(v) : Number(v);
 }
 
 const med = (a: number[]) => {
@@ -108,6 +117,15 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
   if (!shop) throw new Error(`no policy ${name}`);
   const cleared: number[] = [];
   const unspent: number[] = [];
+  // Round 8: take over quota by season, and the engine page's level when the run ends (runs at II or more, at III).
+  const byK: number[][] = Array.from({ length: 12 }, () => []);
+  const levels = [0, 0];
+  // Of the runs that reached year 3: the engine page at II or more, at III, and the coins left at the end of those lost.
+  const late = { runs: 0, two: 0, three: 0, lost: [] as number[] };
+  // Round 8: hitches aimed the same way as the stall before offered (the same twist on the same crop, row or page).
+  let aimRepeats = 0;
+  let aimStalls = 0;
+  let maxAim = 0;
   const ratio: number[][] = [[], [], []];
   const dawn: number[] = [];
   const played = new Array(12).fill(0);
@@ -143,6 +161,9 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     let prev: { kind: string; recipe: string } | null = null;
     let season: Harvest[] = [];
     let lastSeason: Harvest[] = [];
+    let prevOffer: { id: string; crop?: string; row?: number; page?: string }[] = [];
+    const aimCount = new Map<string, number>();
+    const aimKey = (t: { id: string; crop?: string; row?: number; page?: string }) => `${t.id}:${t.crop ?? ''}:${t.row ?? ''}:${t.page ?? ''}`;
     const tally = (ev: Ev[]) => {
       for (const e of ev) {
         if (e.t === 'harvest') season.push(e.h);
@@ -180,6 +201,14 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
         const all = Object.values(by).reduce((a, b) => a + (b ?? 0), 0);
         const lean = !!glutCrop && (by[glutCrop] ?? 0) >= all / 3;
         const hitchOn = s.shop?.twists?.find((t) => !(R.BOONS as readonly string[]).includes(t.id));
+        if (s.shop?.twists?.length) {
+          aimStalls++;
+          const now = s.shop.twists;
+          const crop = (t: { id: string; crop?: string }) => (t.id === 'glut' || t.id === 'buyer' ? t.crop : undefined);
+          if (now.some((t) => prevOffer.some((b) => aimKey(b) === aimKey(t) || (!!crop(t) && crop(t) === crop(b))))) aimRepeats++;
+          for (const t of now) if (!(R.BOONS as readonly string[]).includes(t.id)) aimCount.set(aimKey(t), (aimCount.get(aimKey(t)) ?? 0) + 1);
+          prevOffer = now.map((t) => ({ ...t }));
+        }
         if (hitchOn && lastSeason.length) {
           const m = miss.get(hitchOn.id) ?? [0, 0];
           miss.set(hitchOn.id, [m[0] + 1, m[1] + (hitchHit(hitchOn, lastSeason, s) < 0.05 ? 1 : 0)]);
@@ -241,11 +270,23 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
             if (l.cleared) a[1]++;
           }
           ratio[l.year - 1].push(l.earned / l.quota);
+          byK[k].push(l.earned / l.quota);
         }
       }
     }
     cleared.push(s.stats.seasonsCleared);
     unspent.push(s.coins);
+    maxAim = Math.max(maxAim, ...aimCount.values(), 0);
+    const st = s as R.RunState & { levels?: Record<string, number>; engine?: string | null };
+    const lv = Math.max(0, ...Object.values(st.levels ?? {}));
+    if (lv >= 2) levels[0]++;
+    if (lv >= 3) levels[1]++;
+    if (s.stats.seasonsCleared >= 8) {
+      late.runs++;
+      if (lv >= 2) late.two++;
+      if (lv >= 3) late.three++;
+      if (s.stats.seasonsCleared < 12) late.lost.push(s.coins);
+    }
   }
   const y = (n: number) => `${((cleared.filter((c) => c >= n).length / runs) * 100).toFixed(0)}%`.padStart(4);
   console.log(
@@ -267,8 +308,11 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     console.log(`${''.padEnd(17)} at dusk, by scoops bought for good: none ${days(bought, 0)}; one ${days(bought, 1)}; two or more ${days(bought, 2)}`);
     console.log(`${''.padEnd(17)} at dusk, by scoops above the usual three a morning: none ${days(idle, 0)}; one ${days(idle, 1)}; two ${days(idle, 2)}; three or more ${days(idle, 3)}`);
   }
+  console.log(`${''.padEnd(17)} round 8: of the runs that reached year 3 (${late.runs}), the engine page at II or more ${pct(late.two, late.runs)}, at III ${pct(late.three, late.runs)}; coins left when one of those was lost: median ${med(late.lost)} (${late.lost.length} runs)`);
+  console.log(`${''.padEnd(17)} round 8: the engine page at II or more when the run ends ${pct(levels[0], runs)}, at III ${pct(levels[1], runs)}; coins left at the end median ${med(unspent)}, p90 ${[...unspent].sort((a, b) => a - b)[Math.floor(runs * 0.9)] ?? 0}; stalls offering a twist aimed as the stall before ${pct(aimRepeats, aimStalls)} of ${aimStalls}; the most one hitch was offered in a run ${maxAim}`);
   if (perSeason) {
     console.log(`${''.padEnd(17)} per season: ${played.map((p, k) => (p ? `${Math.round((met[k] / p) * 100)}%` : '-')).join(' ')}`);
+    console.log(`${''.padEnd(17)} take/quota median by season: ${byK.map((a) => (a.length ? med(a).toFixed(2) : '-')).join(' ')}`);
     console.log(`${''.padEnd(17)} top crops of the seasons met in years 2 and 3: ${[...kinds.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
   }
 }

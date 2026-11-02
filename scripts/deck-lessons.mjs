@@ -182,7 +182,8 @@ async function session(label, viewport, touch) {
         },
         cost: [...document.querySelectorAll('.sb-hand .sb-card .sb-cost i')].filter(vis).length,
         book: vis(q('.sb-book')),
-        line: vis(q('.sb-hint.on')) ? q('.sb-hint').textContent : vis(q('.sb-stall-lesson')) ? q('.sb-stall-lesson').textContent : '',
+        // Round 8: at the first stall the engine's lesson is the line over the three engines.
+        line: vis(q('.sb-hint.on')) ? q('.sb-hint').textContent : vis(q('.sb-stall-lesson')) ? q('.sb-stall-lesson').textContent : vis(q('.sb-engines-head')) ? q('.sb-engines-head').textContent : '',
         lesson: d.lesson()?.id ?? null,
         sheet: sheet ? sheet.dataset.kind : null,
         done: d.table.tutor.learn.done.slice(),
@@ -656,7 +657,7 @@ async function session(label, viewport, touch) {
     await shot('19-stall');
     // Round 7: the run's first stall offers an engine to take home, free. Its lesson comes first; then the purse's.
     const offer = await p.evaluate(() => ({ n: document.querySelectorAll('.sb-enginecard').length, rules: window.deck.state().shop.engines?.length ?? 0, words: [...document.querySelectorAll('.sb-enginecard')].map((e) => e.textContent.trim()) }));
-    check(`${label}: the first stall offers three engines, a card and its page each, with one line to pick`, offer.n === 3 && offer.rules === 3 && t.lesson === 'engine' && /^Pick one to take home\.$/.test(t.line), `${offer.n} clippings, lesson ${t.lesson}: ${t.line}; ${offer.words.join(' | ')}`);
+    check(`${label}: the first stall offers three engines, a card and its page each, with one line to pick`, offer.n === 3 && offer.rules === 3 && t.lesson === 'engine' && /^Pick one to take home, free\.$/.test(t.line), `${offer.n} clippings, lesson ${t.lesson}: ${t.line}; ${offer.words.join(' | ')}`);
     // The way on asks for a pick first.
     await p.evaluate(() => document.querySelector('.sb-signpost').scrollIntoView({ block: 'center' }));
     if (touch) await tap(...(await center('.sb-signpost')));

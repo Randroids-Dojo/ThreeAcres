@@ -83,6 +83,17 @@ const toHand = (s: RunState, id: CardId) => s.hand.some((c) => c.id === id);
 export function spareCard(s: RunState): Card | undefined {
   return s.hand.find((c, i) => CARDS[c.id].target !== 'board' && targetsFor(s, i).length === 0);
 }
+/**
+ * Round 8: a card the scoops cannot pay for today, once nothing else in the hand can be played: the hand is stuck. The
+ * eighth playtest's corn runs ended days with three to five three-scoop corn cards in hand and never met the spent
+ * heap, whose lesson came only for a card with no plot. A card that is merely dear while others can still be played
+ * is not one (round 7: the playtest tossed a strawberry it would have sown the next morning).
+ */
+export function dearCard(s: RunState): Card | undefined {
+  const playable = (c: Card, i: number) => costOf(c.id, c.up) <= s.energy && (CARDS[c.id].target === 'board' || targetsFor(s, i).length > 0);
+  if (s.hand.some(playable)) return undefined;
+  return s.hand.find((c, i) => costOf(c.id, c.up) > s.energy && (CARDS[c.id].target === 'board' || targetsFor(s, i).length > 0));
+}
 const standing = (s: RunState, obj: 'scarecrow' | 'beehive') => s.plots.some((p) => p.obj === obj);
 /** A dear card in hand the scoops can pay for: two scoops or more. */
 const dear = (v: View) => v.s.hand.find((c) => costOf(c.id, c.up) >= 2 && affordable(v, c));
@@ -249,12 +260,18 @@ const LESSONS: Lesson[] = [
     after: ['tin'],
     unlocks: ['spent'],
     where: 'table',
-    ready: (v) => v.s.phase === 'day' && !v.s.tossed && v.s.hand.length >= 2 && !!spareCard(v.s) && (v.s.day >= 6 || v.s.season > 0 || v.s.year > 1),
-    text: (v) => (v.dev === 'key' ? 'Take a card up, then press X.' : 'Drag a spare card to Spent.'),
+    // A card with nowhere to go, or (round 8) a hand stuck with cards the scoops cannot pay for today.
+    ready: (v) => v.s.phase === 'day' && !v.s.tossed && v.s.hand.length >= 2 && (!!spareCard(v.s) || !!dearCard(v.s)) && (v.s.day >= 6 || v.s.season > 0 || v.s.year > 1),
+    text: (v) => {
+      const spare = spareCard(v.s);
+      const dear = spare ? undefined : dearCard(v.s);
+      if (v.dev === 'key') return dear ? `Press Shift ${v.s.hand.indexOf(dear) + 1}, then X.` : 'Take a card up, then press X.';
+      return dear ? 'Drag a card too dear today to Spent.' : 'Drag a spare card to Spent.';
+    },
     point: () => 'heap',
     done: (v) => v.n('toss') >= 1 || nightPassed(v, 'spent'),
-    // No spare card left in the hand (played, or the hand empty): put away until one comes.
-    away: (v) => !spareCard(v.s) && !v.s.tossed,
+    // No spare or stuck card left in the hand (played, or the hand empty): put away until one comes.
+    away: (v) => !spareCard(v.s) && !dearCard(v.s) && !v.s.tossed,
   },
   {
     id: 'newcard',
@@ -321,7 +338,8 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     where: 'stall',
     ready: (v) => v.s.phase === 'shop' && !!v.s.shop?.engines?.length && v.s.shop.engine === undefined,
-    text: () => 'Pick one to take home.',
+    // Round 8: the stall's own line over the three says it, with "free" (later runs had no line at all).
+    text: () => 'Pick one to take home, free.',
     point: () => 'stall',
     done: (v) => v.s.shop?.engine !== undefined || v.n('leave') > v.n('at:engine:leave'),
   },
@@ -365,6 +383,19 @@ export const REFRESH = ['can', 'weather', 'saved', 'twist', 'engine'];
 
 export function newLearn(): Learn {
   return { seen: [], done: [], n: {}, cards: [] };
+}
+
+/**
+ * Round 8: a returning player has earned the whole table. Every piece a lesson brings in is there from the start of a
+ * run after the first one finishes, whatever the first run reached (the eighth playtest's guided run ended after 42
+ * days without the spent heap or the weather, and runs 2 to 4 never had the heap). Lessons not yet given still come
+ * when they first matter. Returns true if anything was added.
+ */
+export function earnTable(learn: Learn, runsFinished: number): boolean {
+  if (runsFinished < 1) return false;
+  const add = PIECES.filter((p) => !learn.seen.includes(p));
+  learn.seen.push(...add);
+  return add.length > 0;
 }
 
 /** Everything brought in and taught: a player with finished runs, or an older save. */

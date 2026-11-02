@@ -11,7 +11,7 @@
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
 import { Rng } from '../../../render2d/rng';
-import { baseChips, CARDS, CELLAR_YIELD, costOf, SEEDS, TUNING, type CardId, type SeedId } from '../rules';
+import { baseChips, CARDS, CELLAR_YIELD, costOf, engineNum, SEEDS, TUNING, type CardId, type PageId, type SeedId } from '../rules';
 import { CROP_COLOR, paintSeedCrop, paintSeedProduce, TOP } from './crops';
 import { paintGlyph } from './glyphs';
 import { basket, drawBits, loop, moon, num, pictogram, scoop, tall, type Bit } from './icons';
@@ -45,6 +45,8 @@ const BOOSTED = '#2f7a2e';
 export interface FaceBonus {
   yield: number;
   bees: boolean;
+  /** Busy Bees' times at the run's level (round 8: it levels up at the stall). */
+  times?: number;
 }
 
 /** A box on a face in card units (100 by 140). */
@@ -328,7 +330,7 @@ function packet(ctx: Ctx, id: SeedId, up: boolean, S: number, showCost: boolean,
   ctx.lineTo(90, 106);
   ink(ctx, '#8a7350', 0.4, 0.7);
   // The rule, as pictures.
-  ruleAt(ctx, pictogram(id, up, !!bonus?.bees), 50, 120, 19, 1 / S);
+  ruleAt(ctx, pictogram(id, up, bonus?.bees ? (bonus.times ?? TUNING.beesTimes) : 0), 50, 120, 19, 1 / S);
   if (fine) {
     ctx.strokeStyle = col;
     ctx.globalAlpha = 0.55;
@@ -614,7 +616,7 @@ function plaque(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean,
   ctx.beginPath();
   ctx.roundRect(14, 76, 72, 22, 4);
   fill(ctx, '#f3e7c6', 0.85);
-  ruleAt(ctx, pictogram(id, up, !!bonus?.bees), 50, 87, 18, 1 / S);
+  ruleAt(ctx, pictogram(id, up, bonus?.bees ? (bonus.times ?? TUNING.beesTimes) : 0), 50, 87, 18, 1 / S);
   if (fine) {
     ctx.strokeStyle = 'rgba(243,231,198,0.55)';
     ctx.lineWidth = 0.6;
@@ -663,14 +665,14 @@ export function faceBoxes(id: CardId, up: boolean, cost = true, bonus: FaceBonus
 }
 
 function faceKey(id: CardId, up: boolean, cost: boolean, bonus: FaceBonus | null): string {
-  return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? 'b' : ''}` : ''}`;
+  return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}` : ''}`;
 }
 
 /** What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x1.5 on the beehive (and the sunflower, while it reaches it). */
-export function faceBonus(id: CardId, pages: readonly string[]): FaceBonus | null {
+export function faceBonus(id: CardId, pages: readonly string[], levels: Partial<Record<PageId, number>> = {}): FaceBonus | null {
   const y = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? CELLAR_YIELD : 0;
   const bees = (id === 'beehive' || (id === 'sunflower' && TUNING.beesSun)) && pages.includes('bees');
-  return y || bees ? { yield: y, bees } : null;
+  return y || bees ? { yield: y, bees, ...(bees ? { times: engineNum({ levels }, 'bees') } : {}) } : null;
 }
 
 /** A data URL of a card face, painted once. `cost` false leaves the scoops off (before the scoops are introduced). */

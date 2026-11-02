@@ -4,7 +4,7 @@
 // another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, CARDS, SEEDS } from './cards';
-import { around, bySeason, guarded, immune, isEmpty, isRipe, isTall, neighbours, newTally, pageOn, perennial, picksOf, twistOn, TUNING } from './board';
+import { around, bySeason, engineNum, guarded, immune, isEmpty, isRipe, isTall, neighbours, newTally, pageOn, perennial, picksOf, twistOn, TUNING } from './board';
 import { pick, rand } from './rng';
 import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, SeedId, Step } from './types';
 
@@ -98,16 +98,17 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
     hives++;
     bees++;
   }
-  // Busy Bees: one x1.5 for a crop a sunflower or a beehive blooms, however many there are (it used to double every bee).
-  if (bees && page('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: TUNING.beesTimes });
+  // Busy Bees: one multiplier for a crop a beehive blooms, however many there are (it used to double every bee); its
+  // level (round 8) sets how much.
+  if (bees && page('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: engineNum(s, 'bees') });
   // Trellis (round 7): beans and strawberries bloom each crop beside them.
   if (page('vines') && (TUNING.vinesSelf || (kind !== 'beans' && kind !== 'strawberry'))) {
     const vines = nb.filter((j) => snap.crops[j]?.kind === 'beans' || (TUNING.vinesBerry && snap.crops[j]?.kind === 'strawberry')).slice(0, TUNING.vinesCap);
-    for (const j of vines) mult.push({ label: `${snap.crops[j]!.kind === 'beans' ? 'beans' : 'a strawberry'} beside it`, icon: 'vines', op: '+', v: TUNING.vinesBloom, from: j });
+    for (const j of vines) mult.push({ label: `${snap.crops[j]!.kind === 'beans' ? 'beans' : 'a strawberry'} beside it`, icon: 'vines', op: '+', v: engineNum(s, 'vines'), from: j });
   }
   // Tall Rows (round 7): corn and sunflowers bloom for each crop beside them.
   if ((kind === 'corn' || kind === 'sunflower') && page('tall')) {
-    for (const j of nb) if (snap.crops[j]) mult.push({ label: 'a crop beside it', icon: 'tall', op: '+', v: TUNING.tallBloom, from: j });
+    for (const j of nb) if (snap.crops[j]) mult.push({ label: 'a crop beside it', icon: 'tall', op: '+', v: engineNum(s, 'tall'), from: j });
   }
   if (kind === 'corn') {
     const b = near('beans')[0];

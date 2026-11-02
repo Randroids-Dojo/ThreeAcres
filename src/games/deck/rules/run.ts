@@ -3,7 +3,7 @@
 // mutates the run and returns what happened as events.
 
 import { CARDS, costOf, ENGINE_IDS, ENGINES, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT, UNLOCK_ORDER } from './cards';
-import { bySeason, emptyPlot, energyMax, frosted, handSize, isEmpty, isFinal, isRipe, neighbours, newTally, nextSeason, pageOn, perennial, runQuota, seasonIndex, TUNING } from './board';
+import { bySeason, emptyPlot, energyMax, frosted, handSize, isEmpty, isFinal, isRipe, LEVELLED, MAX_LEVEL, neighbours, newTally, nextSeason, pageLevel, pageOn, perennial, runQuota, seasonIndex, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, EngineId, Ev, Meta, PageId, Rarity, RunState, Season, SeedId, Shop, Tally, Twist, TwistId } from './types';
@@ -100,9 +100,11 @@ export function cloneRun(s: RunState): RunState {
     pool: [...s.pool],
     script: s.script.map((d) => [...d]),
     stats: { ...s.stats, log: s.stats.log, byKind: { ...s.stats.byKind } },
-    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })), twists: s.shop.twists?.map((t) => ({ ...t })), engines: s.shop.engines && [...s.shop.engines] } : null,
+    shop: s.shop ? { ...s.shop, cards: s.shop.cards.map((c) => ({ ...c })), pages: s.shop.pages.map((p) => ({ ...p })), twists: s.shop.twists?.map((t) => ({ ...t })), engines: s.shop.engines && [...s.shop.engines], level: s.shop.level && { ...s.shop.level } } : null,
     end: s.end ? { ...s.end } : null,
     tally: s.tally && cloneTally(s.tally),
+    levels: s.levels && { ...s.levels },
+    lastTwists: s.lastTwists?.map((t) => ({ ...t })),
   };
 }
 
@@ -511,11 +513,15 @@ export function hazardAnswers(s: RunState): CardId[][] {
  * of five fresh stock rolls, since every hazard took a slot of its own and
  * fresh stock forced them again.
  */
-function rollCards(s: RunState, fresh = false): CardId[] {
+function rollCards(s: RunState, fresh = false, engines: readonly EngineId[] = s.shop?.engines ?? []): CardId[] {
   const out: CardId[] = [];
   const last = s.lastTray ?? [];
+  // Round 8: the stall that gives an engine away sells none of the engines' cards beside it (the eighth playtest's
+  // desktop stall sold a beehive for 45 coins beside the clipping that gives one free).
+  const gifts = new Set(engines.flatMap((id) => ENGINES[id].gift));
+  const pool = s.pool.filter((c) => !gifts.has(c));
   const add = (opts: CardId[]) => {
-    const free = opts.filter((c) => !out.includes(c));
+    const free = opts.filter((c) => !out.includes(c) && !gifts.has(c));
     const pool = free.filter((c) => !last.includes(c)).length ? free.filter((c) => !last.includes(c)) : free;
     if (pool.length) out.push(pick(s, pool));
   };
@@ -534,15 +540,15 @@ function rollCards(s: RunState, fresh = false): CardId[] {
   }
   if (!out.some(isSeed)) {
     const rarity = rollRarity(s);
-    const seeds = s.pool.filter(isSeed);
+    const seeds = pool.filter(isSeed);
     add(seeds.some((c) => CARDS[c].rarity === rarity) ? seeds.filter((c) => CARDS[c].rarity === rarity) : seeds);
   }
   // Never a tray of starter commons only.
-  if (!out.some((c) => CARDS[c].rarity !== 'common')) add(s.pool.filter((c) => CARDS[c].rarity === 'uncommon'));
+  if (!out.some((c) => CARDS[c].rarity !== 'common')) add(pool.filter((c) => CARDS[c].rarity === 'uncommon'));
   while (out.length < TUNING.goods) {
     const rarity = rollRarity(s);
-    let opts = s.pool.filter((c) => CARDS[c].rarity === rarity && !out.includes(c));
-    if (!opts.length) opts = s.pool.filter((c) => !out.includes(c));
+    let opts = pool.filter((c) => CARDS[c].rarity === rarity && !out.includes(c));
+    if (!opts.length) opts = pool.filter((c) => !out.includes(c));
     if (!opts.length) break;
     add(opts);
   }
@@ -577,17 +583,55 @@ function goods(s: RunState, cards: CardId[]): Shop['cards'] {
 
 function makeShop(s: RunState): Shop {
   const twists = twistsDue(s) ? offerTwists(s) : undefined;
+  // The next stall aims its twists at something else (round 8: "Trellis rests" came up 6 times in 15 stalls).
+  s.lastTwists = twists?.map((t) => ({ ...t })) ?? [];
   const engines = engineDue(s) ? offerEngines(s) : undefined;
+  const level = levelDue(s);
   return {
     ...(engines ? { engines } : {}),
-    cards: goods(s, rollCards(s)),
+    cards: goods(s, rollCards(s, false, engines ?? [])),
     pages: rollPages(s).map((page) => ({ page, price: Math.round(PAGES[page].price * priceScale(s)), sold: false })),
     reroll: TUNING.rerollBase,
     rerolls: 0,
     removed: 0,
     upgraded: 0,
     ...(twists ? { twists } : {}),
+    ...(level ? { level } : {}),
   };
+}
+
+// ---------------------------------------------------------------- the engine's page, levelled
+
+/**
+ * The run's engine page at its next level, if the stall pins it: from the stall before `levelFrom` on, while the page
+ * is kept and short of its last level (round 8). One level a stall.
+ */
+function levelDue(s: RunState): Shop['level'] | undefined {
+  const page = s.engine ? ENGINES[s.engine].page : null;
+  if (!page || !s.pages.includes(page) || seasonIndex(nextSeason(s)) < TUNING.levelFrom) return undefined;
+  const to = pageLevel(s, page) + 1;
+  if (to > MAX_LEVEL) return undefined;
+  return { page, to, price: levelPrice(to), sold: false };
+}
+
+/** What a level costs at the stall: II, then III. */
+export function levelPrice(to: number): number {
+  return TUNING.levelPrice[Math.max(0, Math.min(TUNING.levelPrice.length - 1, to - 2))];
+}
+
+export function canBuyLevel(s: RunState): boolean {
+  const o = s.shop?.level;
+  return s.phase === 'shop' && !!o && !o.sold && s.coins >= o.price && s.pages.includes(o.page);
+}
+
+/** Take the engine's page up a level: its number grows for the rest of the run. */
+export function buyLevel(s: RunState): Ev[] | null {
+  if (!canBuyLevel(s)) return null;
+  const o = s.shop!.level!;
+  s.coins -= o.price;
+  o.sold = true;
+  s.levels = { ...(s.levels ?? {}), [o.page]: o.to };
+  return [{ t: 'level', page: o.page, to: o.to }];
 }
 
 export function buyCard(s: RunState, i: number): Ev[] | null {
@@ -625,10 +669,13 @@ const RESTABLE: readonly PageId[] = ['bees', 'cellar', 'vines', 'tall', 'market'
  * The hitches that could come to this run, each aimed at what it relies on and priced by what it would cost this run
  * if it played the season as it played the last (round 7): a glut of the crop that took the most (half its coins);
  * frost on the row its sown crops paid most from (their coins), naming the crop sown there most; a crow every morning
- * while no scarecrow stands (the extra crows, each taking a crop of the mean pay); the page whose bonuses added the
- * most resting for the season (what it added). The seventh playtest took "sunflowers face up" with no sunflower
+ * while the run owns no scarecrow (the extra crows, each taking a crop of the mean pay); the page whose bonuses added
+ * the most resting for the season (what it added). The seventh playtest took "sunflowers face up" with no sunflower
  * planted and crows with a scarecrow standing: each knocked 60 to 70 off a quota for free. Sunflowers facing up are no
  * longer offered: played ahead they cost nothing (a sunflower is sown above instead).
+ *
+ * Round 8: a scarecrow in the tin counts (the eighth playtest was offered a crow every morning with one in the tin, and
+ * took 1,223 against 460), and no page rests that is another engine's (Trellis rested in bee and corn runs).
  */
 export function hitchAims(s: RunState): Aim[] {
   const t = s.tally;
@@ -639,10 +686,13 @@ export function hitchAims(s: RunState): Aim[] {
   const r = t.rows.reduce((best, v, i) => (v > t.rows[best] ? i : best), 0);
   if (t.rows[r] > 0) out.push({ t: { id: 'frost', row: r, crop: byCoins(t.rowKinds[r] ?? {})[0] }, v: t.rows[r] / t.take });
   const p = bySeason(TUNING.crowChance, nextSeason(s));
-  if (p > 0 && !s.plots.some((pl) => pl.obj === 'scarecrow')) out.push({ t: { id: 'crows' }, v: (TUNING.days * Math.max(0, TUNING.crowEvery - p)) / Math.max(1, t.harvests) });
-  const pg = RESTABLE.filter((id) => s.pages.includes(id) && (t.from[id] ?? 0) > 0).sort((a, b) => (t.from[b] ?? 0) - (t.from[a] ?? 0))[0];
+  const scarecrow = s.plots.some((pl) => pl.obj === 'scarecrow') || allCards(s).some((c) => c.id === 'scarecrow');
+  if (p > 0 && !scarecrow) out.push({ t: { id: 'crows' }, v: (TUNING.days * Math.max(0, TUNING.crowEvery - p)) / Math.max(1, t.harvests) });
+  const mine = s.engine ? ENGINES[s.engine].page : null;
+  const restable = RESTABLE.filter((id) => !LEVELLED.includes(id) || id === mine);
+  const pg = restable.filter((id) => s.pages.includes(id) && (t.from[id] ?? 0) > 0).sort((a, b) => (t.from[b] ?? 0) - (t.from[a] ?? 0))[0];
   if (pg) out.push({ t: { id: 'rest', page: pg }, v: (t.from[pg] ?? 0) / t.take });
-  return out.map((a) => ({ t: a.t, v: a.v * (TUNING.easeTimes[a.t.id] ?? 1) }));
+  return out;
 }
 
 /**
@@ -664,36 +714,95 @@ export function boonAims(s: RunState): Aim[] {
   return out.map((a) => ({ t: a.t, v: a.v * (TUNING.worthTimes[a.t.id] ?? 1) }));
 }
 
-/** The share a hitch takes off the quota: what it is expected to cost, rounded to a whole percent, within bounds. */
+/** The share a hitch takes off the quota: rounded to a whole percent, within bounds. */
 export function easeOf(v: number): number {
   return Math.min(TUNING.easeMax, Math.max(TUNING.easeMin, Math.round(v * 100) / 100));
+}
+
+/** What a hitch would still cost a careful player who plays round it, as a share of a season's take (round 8). */
+export function hitchCost(a: Aim): number {
+  return a.v * (TUNING.adapt[a.t.id] ?? 0.5);
+}
+
+/**
+ * The share a hitch would take off the quota before bounds (round 8): what it still costs a careful player, and the
+ * worth of the help offered beside it, so the two are worth the same by the rules' own estimate.
+ */
+export function hitchCut(a: Aim, worth = TUNING.hitchMargin): number {
+  return (hitchCost(a) + worth) * (TUNING.easeTimes[a.t.id] ?? 1);
+}
+
+/**
+ * Two twists aimed the same way: the same twist on the same crop, row or page, or a glut and a buyer on the same crop
+ * (the eighth playtest's carrots went glut, buyer, glut, buyer).
+ */
+export function sameAim(a: Twist, b: Twist): boolean {
+  const crop = (t: Twist) => (t.id === 'glut' || t.id === 'buyer' ? t.crop : undefined);
+  if (crop(a) && crop(a) === crop(b)) return true;
+  return a.id === b.id && a.crop === b.crop && (a.row ?? -1) === (b.row ?? -1) && a.page === b.page;
 }
 
 /**
  * Two twists for the coming season, one that helps and one that gets in the way, in a random order. Round 7: both are
  * aimed at this run and priced for it. A hitch comes only if it would cost at least `minHit` of a season's take (one
- * that misses the build never comes) and no more than the most a quota is cut; it takes what it is expected to cost
- * off the quota. Part of that a careful player can play round (sow elsewhere, grow another crop): what is left is the
- * hitch's worth, and the help offered beside it is the one whose worth is nearest it, so the pick is close and
- * depends on the plot. Neither repeats the season just played.
+ * that misses the build never comes). Round 8: the help is drawn first among those worth at least `minWorth` (a kind
+ * at random, then one of that kind), and the hitch takes off the quota what it would still cost a careful player
+ * (`adapt`, from deck-twists) and the help's worth, so by the rules' estimate the two are worth the same and which is
+ * better depends on how the plot is played. Both carry what they would do in coins (`worth`), which the stall says.
+ * Round 7 took a hitch's whole expected cost off: frost cut 25% and cost 10.5% played. Neither repeats the season just
+ * played, and nothing the last stall offered is aimed the same way again (the eighth playtest's carrots went glut,
+ * buyer, glut, buyer; "Trellis rests" came up 6 times in 15 stalls).
  */
 export function offerTwists(s: RunState): Twist[] {
   const last = s.twist?.id;
-  const aims = hitchAims(s).filter((a) => a.t.id !== last);
-  const hits = aims.filter((a) => a.v >= TUNING.minHit && a.v <= TUNING.easeMax);
-  const goods = boonAims(s).filter((a) => a.t.id !== last && a.v >= TUNING.minWorth);
-  // None in the range: the lightest that costs more than the most a quota is cut (a hard trade, never a coupon), else
+  const before = s.lastTwists ?? [];
+  const fresh = (t: Twist) => t.id !== last && !before.some((b) => sameAim(b, t));
+  const helps = boonAims(s).filter((a) => fresh(a.t));
+  const goods = helps.filter((a) => a.v >= TUNING.minWorth);
+  const least = goods.length ? Math.min(...goods.map((g) => g.v)) : TUNING.hitchMargin;
+  const aims = hitchAims(s).filter((a) => fresh(a.t));
+  const hits = aims.filter((a) => a.v >= TUNING.minHit && hitchCut(a, least) <= TUNING.easeMax);
+  // None in the range: the lightest that cuts more than the most a quota is cut (a hard trade, never a coupon), else
   // the heaviest there is. A run with no tally to read (a save from before round 7): a glut of its top crop.
-  const heavy = aims.filter((a) => a.v > TUNING.easeMax).sort((a, b) => a.v - b.v)[0] ?? [...aims].sort((a, b) => b.v - a.v)[0];
+  const heavy = aims.filter((a) => hitchCut(a, least) > TUNING.easeMax).sort((a, b) => a.v - b.v)[0] ?? [...aims].sort((a, b) => b.v - a.v)[0];
   const lean = topCrops(s)[0] ?? 'carrot';
-  const h = hits.length ? pick(s, hits) : (heavy ?? { t: last === 'glut' ? ({ id: 'frost', row: s.rows - 1 } as Twist) : ({ id: 'glut', crop: lean } as Twist), v: 0.15 });
-  const worth = h.v * (1 - (TUNING.adapt[h.t.id] ?? 0.5));
-  const near = [...goods].sort((x, y) => Math.abs(x.v - worth) - Math.abs(y.v - worth));
-  const close = near.filter((x) => Math.abs(x.v - worth) <= Math.abs(near[0].v - worth) + TUNING.pairSlack);
-  const g = close.length ? pick(s, close) : { t: { id: last === 'company' ? 'calm' : 'company' } as Twist, v: 0.1 };
-  const b: Twist = { ...h.t, ease: easeOf(h.v) };
-  const a: Twist = { ...g.t };
+  const spare = ([{ id: 'glut', crop: lean }, { id: 'frost', row: s.rows - 1 }, { id: 'glut', crop: lean === 'carrot' ? 'radish' : 'carrot' }] as Twist[]).find(fresh) ?? { id: 'frost', row: 0 };
+  const h: Aim = hits.length ? pick(s, hits) : (heavy ?? { t: spare, v: 0.15 });
+  // The help: one that keeps the hitch's cut in bounds, a kind at random (buyers come one to a crop), then one of it.
+  const fit = goods.filter((g) => hitchCut(h, g.v) <= TUNING.easeMax);
+  const from = fit.length ? fit : [...goods].sort((x, y) => x.v - y.v).slice(0, 1);
+  const kinds = [...new Set(from.map((g) => g.t.id))];
+  const kind = kinds.length ? pick(s, kinds) : null;
+  const known = !!s.tally && s.tally.take > 0;
+  const fallback: Aim = [...helps].sort((x, y) => y.v - x.v)[0] ?? { t: { id: last === 'company' ? 'calm' : 'company' }, v: 0 };
+  const g: Aim = kind ? pick(s, from.filter((x) => x.t.id === kind)) : fallback;
+  const gv = round2(g.v);
+  const ease = easeOf(hitchCut(h, gv));
+  const cost = Math.min(hitchCost(h), ease);
+  const b: Twist = known ? { ...h.t, ease, worth: round2(cost) } : { ...h.t, ease };
+  const a: Twist = known ? { ...g.t, worth: gv } : { ...g.t };
   return rand(s) < 0.5 ? [a, b] : [b, a];
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * What a twist on offer would do to the coming season's take, in coins (round 8): a help's gain, what a hitch would
+ * still cost a careful player. Both from the shares the rules priced and paired the twists by, against the season's
+ * quota, so the stall's two numbers can be set side by side.
+ */
+export function twistCoins(s: RunState, t: Twist): number {
+  const n = Math.max(0, (t.worth ?? 0) * twistQuota(s, null));
+  return n >= 100 ? Math.round(n / 10) * 10 : Math.max(5, Math.round(n / 5) * 5);
+}
+
+/**
+ * A twist's number, the same short line on both clippings under the twist's own line, so they can be weighed at a
+ * glance: "About 320 more coins." for a help, "About 300 fewer coins." for a hitch (null for a save from before round 8).
+ */
+export function twistNote(s: RunState, t: Twist): string | null {
+  if (t.worth === undefined) return null;
+  return `About ${twistCoins(s, t)} ${HITCHES.includes(t.id) ? 'fewer' : 'more'} coins.`;
 }
 
 // ---------------------------------------------------------------- the run's engine
@@ -723,6 +832,7 @@ export function chooseEngine(s: RunState, i: number): Ev[] | null {
 export function takeEngine(s: RunState, id: EngineId): void {
   const e = ENGINES[id];
   s.engine = id;
+  s.levels = { ...(s.levels ?? {}), [e.page]: 1 };
   for (const c of e.gift) if (id !== 'vines' || TUNING.vinesGift) s.draw.push(newCard(s, c));
   for (const c of e.cards) if (!s.pool.includes(c)) s.pool.push(c);
   if (!s.pages.includes(e.page)) {
@@ -850,8 +960,8 @@ export function reroll(s: RunState): Ev[] | null {
   s.coins -= sh.reroll;
   sh.reroll += TUNING.rerollStep;
   sh.rerolls++;
-  // Fresh stock is new cards: it does not force a hazard's answer again.
-  sh.cards = goods(s, rollCards(s, true));
+  // Fresh stock is new cards: it does not force a hazard's answer again (nor sell an engine on offer free).
+  sh.cards = goods(s, rollCards(s, true, sh.engines ?? []));
   return [{ t: 'reroll' }];
 }
 

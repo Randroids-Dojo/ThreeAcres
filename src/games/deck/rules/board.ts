@@ -8,26 +8,29 @@ import type { Crop, PageId, Plot, RunState, Season, SeedId, Tally, Twist, TwistI
 export const TUNING = {
   /**
    * Year 1's quotas, spring to winter. Round 7 raised summer to winter (260, 300, 350): every run takes an engine at its
-   * first stall, and at the old row the decent bot met year 1 97% of the time at 1.6 to 2 times the quota.
+   * first stall, and at the old row the decent bot met year 1 97% of the time at 1.6 to 2 times the quota. Round 8
+   * (320, 400, 470 before): with an engine year 1 was free (the eighth playtest's bees took 721 against 320, Tall Rows
+   * 1,282 against 400; the bot's median take was 1.62 times the quota with bees, 1.65 with corn).
    */
-  quotas: [170, 320, 400, 470] as number[],
+  quotas: [170, 360, 480, 590] as number[],
   /**
    * Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. Round 4 set years 2 and 3 against
    * the strong builds (roots with the Cellar, bloom with Busy Bees, perennials), which ran at 1.8 to 2.5 times the old
    * quotas: a run that clears year 2 no longer all but surely clears year 3, and the combos are needed to win. Round 6
    * raised summer to winter (600, 710, 790 before): the sixth playtest called year 2 a walkover once a build exists.
    * Round 7 (430, 620, 740, 830 before) prices them against the four engines every run now builds (deck-fit): each
-   * engine wins 31 to 40% at these rows.
+   * engine wins 31 to 40% at these rows. Round 8 (540, 860, 1,060, 1,200 before): the engine pages level up, so years
+   * 2 and 3 climb a step each season from a year 2 spring that is no walkover (round 7's bot took 1.85 times 540).
    */
-  quotas2: [540, 860, 1060, 1200] as number[],
+  quotas2: [730, 920, 1080, 1220] as number[],
   /**
    * Year 3's, the last: its winter is the finish line. A fixed row that grows through the year, so earning more never
    * makes the game harder: round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter, which pushed
    * the sixth playtest's every year 3 quota to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given),
    * and every extra coin earned in year 2 raised next year's quotas, so holding back paid. Round 7: 900, 980, 1,060,
-   * 1,140 before the engines.
+   * 1,140 before the engines. Round 8: 1,250, 1,350, 1,450, 1,550 before the levels.
    */
-  quotas3: [1250, 1350, 1450, 1550] as number[],
+  quotas3: [1440, 1640, 1820, 2000] as number[],
   /** Each year after the third multiplies year 3's quotas by this (checks and the balance scripts only: a run ends after year 3). */
   yearMult: 1.3,
   /**
@@ -111,9 +114,11 @@ export const TUNING = {
    * since every run now takes an engine at its first stall and the bee engine,
    * at x1.5, took 2.4 times its year 2 quotas against 1.8 to 1.9 for the others
    * (priced with deck-fit at round 7's rows it won 77% at x1.5, 54% at x1.35,
-   * 30% at x1.25, the other engines 24 to 47%).
+   * 30% at x1.25, the other engines 24 to 47%). Round 8: x1.2 at level I (Busy
+   * Bees II and III are x1.6 and x2.1), since the bees made year 1 a walkover
+   * (a median take of 1.62 times the quota).
    */
-  beesTimes: 1.3,
+  beesTimes: 1.2,
   /** Busy Bees reaches the crop below a sunflower too (round 7: only crops near a beehive, the engine's own card). */
   beesSun: false,
   /**
@@ -222,28 +227,106 @@ export const TUNING = {
   minHit: 0.06,
   /** A help is offered only if it would bring this run at least this share of a season's take. */
   minWorth: 0.04,
-  /** A hitch's expected cost, times this, is the share it takes off the quota, within these bounds (a heavier one is not offered). */
+  /**
+   * A hitch's cut (what it still costs a careful player, and `hitchMargin`), times this, is the share it takes off the
+   * quota, within these bounds (a heavier one is not offered).
+   */
   easeTimes: { glut: 1, frost: 1, crows: 1, rest: 1 } as Partial<Record<TwistId, number>>,
   easeMin: 0.05,
   easeMax: 0.35,
   /**
    * The share of a hitch's expected cost a careful player still pays after playing round it (measured with
    * deck-twists: the decent bot sows elsewhere under frost and grows other crops in a glut, and can do little about a
-   * page at rest). What is left of the quota cut is the hitch's worth, and the help offered beside it is the one whose
-   * worth is nearest.
+   * page at rest). Round 8 measured frost at 10.5% played against 25.3% expected (0.6 before), and then, with the
+   * levels, frost 13.7 against 33.2, a glut 27.0 against 29.3, a rest 20.6 against 27.2 (deck-twists, 30 runs).
    */
-  adapt: { glut: 0.8, frost: 0.6, crows: 1, rest: 0.85 } as Partial<Record<TwistId, number>>,
+  adapt: { glut: 0.92, frost: 0.42, crows: 0.6, rest: 0.85 } as Partial<Record<TwistId, number>>,
   /**
    * A help's estimate from the season just played, times this, is what it brought when played ahead (deck-twists, the
    * bot's own buying with every card: a buyer brought about half its crop's coins, since the crop is grown less once
-   * the season has a new top crop; long picks more than one last pick each, since the perennial stands longer).
+   * the season has a new top crop; long picks more than one last pick each, since the perennial stands longer). Round 8
+   * re-measured them twice (deck-twists, 30 runs): a buyer brought 1.55 times its estimate both times, long picks 1.5
+   * to 1.6 times, good company 1.3 then 0.64 times (1.1 is between), sunflowers all round 0.4 then 1.6 times on few
+   * offers (0.3: seldom worth offering).
    */
-  worthTimes: { buyer: 0.5, company: 1.05, calm: 0.15, picks: 1.4, sunall: 0.45 } as Partial<Record<TwistId, number>>,
-  /** Helps within this much of the nearest worth are offered at random, for variety. */
-  pairSlack: 0.03,
+  worthTimes: { buyer: 1.2, company: 1.1, calm: 0.15, picks: 3, sunall: 0.3 } as Partial<Record<TwistId, number>>,
   /** In a season of crows a crow comes every morning (round 6: twice as often, which cost a few coins). */
   crowEvery: 1,
+  /**
+   * Round 8: each engine page's number at levels II and III, bought at the stall (level I is `beesTimes`, `hotPicks`,
+   * `vinesBloom` and `tallBloom`). The eighth playtest died in every run with 1,979 to 5,711 coins unspent: the scoop
+   * was refused, the page slot doubled to 4,000 and year 3 takes stayed flat while the quotas climbed.
+   */
+  levelUp: { bees: [1.6, 2.1], hot: [4, 6], vines: [3, 6], tall: [2, 2.5] } as Partial<Record<PageId, number[]>>,
+  /** What levels II and III cost at the stall (the same in every year). */
+  levelPrice: [800, 1800] as number[],
+  /** The next level is pinned from the stall before this season on (3 is year 1 winter). */
+  levelFrom: 4,
+  /**
+   * Round 8: a hitch takes off what it would still cost a careful player (`adapt` of its expected cost) and the worth of
+   * the help offered beside it; with no help to read, this much. Round 7 took its whole expected cost off: frost cut 25%
+   * and cost 10.5% played, a free cut.
+   */
+  hitchMargin: 0.08,
 };
+
+/** The engine pages that level up at the stall (round 8). */
+export const LEVELLED: readonly PageId[] = ['bees', 'hot', 'vines', 'tall'];
+/** Levels an engine page goes to. */
+export const MAX_LEVEL = 3;
+const ROMAN = ['', '', 'II', 'III', 'IV'];
+
+/** An engine page's level as kept: I unless bought higher. */
+export function pageLevel(s: Partial<Pick<RunState, 'levels'>>, id: PageId): number {
+  return s.levels?.[id] ?? 1;
+}
+
+/** An engine page's number at a level: Busy Bees' times, Hot Beds' picks, Trellis' and Tall Rows' bloom. */
+export function levelNum(id: PageId, level: number): number {
+  const first = id === 'bees' ? TUNING.beesTimes : id === 'hot' ? TUNING.hotPicks : id === 'vines' ? TUNING.vinesBloom : id === 'tall' ? TUNING.tallBloom : 0;
+  if (level <= 1) return first;
+  const up = TUNING.levelUp[id] ?? [];
+  return up[Math.min(up.length, level - 1) - 1] ?? first;
+}
+
+/** The number at work for this run's page (its level). */
+export function engineNum(s: Partial<Pick<RunState, 'levels'>>, id: PageId): number {
+  return levelNum(id, pageLevel(s, id));
+}
+
+/** A page's name at a level: "Busy Bees II". */
+export function levelName(name: string, level: number): string {
+  return level >= 2 ? `${name} ${ROMAN[level] ?? level}` : name;
+}
+
+/**
+ * An engine page's rule at a level, in the page's own words ("Crops near a beehive get x1.5 bloom."), so the stall
+ * says what the next level does in the same terms as the page. Level I is the page as printed.
+ */
+export function levelText(id: PageId, level: number): string | null {
+  const n = levelNum(id, level);
+  switch (id) {
+    case 'bees':
+      return `Crops near a beehive get x${n} bloom.`;
+    case 'hot':
+      return `Chilies stay and pick for ${n} nights.`;
+    case 'vines':
+      return `Beans and strawberries give the other crops beside them +${n} bloom.`;
+    case 'tall':
+      return `Corn ripens two nights sooner. Tall crops get +${n} bloom for each neighbour.`;
+    default:
+      return null;
+  }
+}
+
+/** What the next level does, said against what it does now: "Crops near a beehive get x1.5 bloom, not x1.3." */
+export function levelChange(id: PageId, to: number): string | null {
+  const t = levelText(id, to);
+  if (!t) return null;
+  const n = levelNum(id, to - 1);
+  const was = id === 'bees' ? `x${n}` : id === 'hot' ? `${n}` : `+${n}`;
+  return `${t.replace(/\.$/, '')}, not ${was}.`;
+}
 
 /** The run's last season: its winter is the finish line. */
 export function isFinal(s: Pick<RunState, 'year' | 'season'>): boolean {
@@ -337,9 +420,9 @@ export function pageOn(s: Pick<RunState, 'pages' | 'twist' | 'day'>, id: PageId,
  * Picks a crop gives before it leaves: one more for beans and strawberries in a season of long picks; a chili picks
  * for three nights with Hot Beds.
  */
-export function picksOf(s: Pick<RunState, 'twist' | 'day'> & Partial<Pick<RunState, 'pages'>>, kind: SeedId, n = 0): number {
+export function picksOf(s: Pick<RunState, 'twist' | 'day'> & Partial<Pick<RunState, 'pages' | 'levels'>>, kind: SeedId, n = 0): number {
   let p = SEEDS[kind].picks;
-  if (kind === 'chili' && s.pages && pageOn(s as Pick<RunState, 'pages' | 'twist' | 'day'>, 'hot', n)) p = TUNING.hotPicks;
+  if (kind === 'chili' && s.pages && pageOn(s as Pick<RunState, 'pages' | 'twist' | 'day'>, 'hot', n)) p = engineNum(s, 'hot');
   return p > 1 && twistOn(s, n)?.id === 'picks' ? p + 1 : p;
 }
 

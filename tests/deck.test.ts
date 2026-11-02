@@ -1578,7 +1578,7 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       kinds: { carrot: 400, beans: 150, strawberry: 140, sunflower: 120, radish: 100, lettuce: 90 },
       rows: [100, 150, 200, 300],
       rowKinds: [{ radish: 100 }, { beans: 150 }, { lettuce: 200 }, { carrot: 300 }],
-      from: { bees: 150, sunflower: 90 },
+      from: { bees: 150, sunflower: 300 },
       pests: 800,
       company: 140,
       last: 90,
@@ -1602,6 +1602,8 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       const t = newRun(seed, null).s;
       t.season = 3;
       t.pages = ['bees'];
+      // Round 8: only the run's own engine page rests.
+      t.engine = 'bees';
       toStallWith(t, rich());
       const tw = t.shop!.twists!;
       expect(tw).toHaveLength(2);

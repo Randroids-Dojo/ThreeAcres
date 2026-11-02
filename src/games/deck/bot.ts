@@ -8,7 +8,9 @@
 import {
   allCards,
   buyCard,
+  buyLevel,
   buyPage,
+  canBuyLevel,
   buyScoop,
   buySlot,
   canBuyScoop,
@@ -292,6 +294,8 @@ export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
   const fuzz = (v: number) => v * (1 + (dice.next() * 2 - 1) * (o.shopNoise ?? o.noise));
   for (let guard = 0; guard < 12; guard++) {
     let did = false;
+    // The engine's page up a level (round 8), first: a run that saves buys one or two in years 2 and 3.
+    if (canBuyLevel(s) && buyLevel(s)) continue;
     // Room for one more page, once the almanac is full and coins are piling up.
     if (canBuySlot(s) && s.coins >= 1.25 * slotPrice(s) && buySlot(s)) continue;
     // With the almanac full, a page is only worth it if it beats the weakest kept one by a margin.

@@ -6,7 +6,7 @@
 // (only the bot's worth of a scoop reads it), so one play prices nearby rows. Players: the stall policies of the
 // strategy table (whole catalogue), and the decent, strict and guided bots of
 // deck-seasons (the catalogue a new player has).
-// npx tsx scripts/deck-fit.ts play <player> [runs] [--cellarYield=2] [--cellarCap=2] [--newStock=2] [--bees=2] [--tag=-name]
+// npx tsx scripts/deck-fit.ts play <player> [runs] [--cellarYield=2] [--cellarCap=2] [--newStock=2] [--bees=2] [--tag=-name] [--set=key:JSON]
 // npx tsx scripts/deck-fit.ts fit [y2 quotas a,b,c,d] [y3 quotas a,b,c,d] [--y1=a,b,c,d] [--y3scale=a,b,c,d] [--carry=0.25] [--tag=-name] [--guidedSummer=180]
 // Round 5: a take is the season's own (carried coins left out), and the pricing carries a share of each surplus into
 // the next season. --noTwists plays without the seasons' twists.
@@ -50,6 +50,14 @@ if (args[0] === 'play') {
   if (tune) for (const kv of tune.split(',')) {
     const [k, v] = kv.split(':');
     (TUNING as unknown as Record<string, number>)[k] = Number(v);
+  }
+  // Round 8: --set=key:JSON (any number of them) sets any TUNING value, rows and levels too (--set=levelUp:{"vines":[3,5]}).
+  for (const a of process.argv.filter((x) => x.startsWith('--set='))) {
+    const at = a.indexOf(':');
+    const k = a.slice(6, at);
+    const v = JSON.parse(a.slice(at + 1));
+    const t = TUNING as unknown as Record<string, unknown>;
+    t[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(t[k] as object), ...v } : v;
   }
   const hitch = flag('hitch');
   if (hitch) for (const kv of hitch.split(',')) {

@@ -8,10 +8,16 @@ import type { GameContext } from '../../shell/types';
 import {
   allCards,
   buyCard,
+  buyLevel,
   buyPage,
   buyScoop,
   buySlot,
   canBuyScoop,
+  levelChange,
+  levelName,
+  pageLevel,
+  levelText,
+  twistNote,
   canRemove,
   scoopOnSale,
   scoopsIdle,
@@ -269,13 +275,14 @@ export class Sheets {
       'A run is three years of four seasons. Meet the last winter to win; the run ends the night you do.',
       'A season is six days. Each day you draw up to five cards and fill three seed scoops. A card costs the scoops printed in its corner: a radish is free, corn and the pumpkin take three.',
       'Every crop pulled up puts a scoop back on the next morning\'s bench, two at most a night. A strawberry puts one back with every pick.',
-      'Sow seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. Beans and strawberries stay and pick night after night. The watering can and rain add a night.',
+      'Plant seeds on bare plots. Every crop grows a night each night; the moons on a packet are the nights it needs. Beans and strawberries stay and pick night after night. The watering can and rain add a night.',
       'At night every ripe crop is pulled. Each harvest pays yield × bloom: yield (the basket) is what the crop is worth, bloom (the red flower) multiplies it.',
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
       'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on.',
-      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you sow most. The one that gets in the way asks a smaller quota, about what it would cost you. Pick one; it holds all season.',
+      'From year 2 the stall sells your engine\'s page at its next level, such as Busy Bees II, then III. Each level makes it pay more, and the quotas climb to match.',
+      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you plant most. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota: what it would cost you, plus what the other would bring. Pick one; it holds all season.',
       'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
       'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
@@ -495,17 +502,24 @@ export class Sheets {
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
     // A run's first stall: an engine to take home, free (a card and the page that multiplies it). Pick one; it can be
-    // changed until the stall is left.
+    // changed until the stall is left. Round 8: until one is picked the stall shows only the three, large enough to
+    // read, under a line that says to pick one and that it is free (the eighth playtest's later runs said neither, the
+    // cards were 50 px, and the desktop tray sold a beehive beside the free one). Once picked, they sit small above
+    // the stall, where the pick can still be changed.
+    const choosing = !!sh.engines?.length && sh.engine === undefined;
     if (sh.engines?.length) {
-      const row = el('div', `sb-engines${this.needEngine ? ' ask' : ''}`);
+      if (choosing) wrap.append(el('p', 'sb-engines-head', 'Pick one to take home, free.'));
+      const row = el('div', `sb-engines${choosing ? ' big' : ''}${this.needEngine ? ' ask' : ''}`);
       row.setAttribute('role', 'radiogroup');
-      row.setAttribute('aria-label', 'Take one home, free');
+      row.setAttribute('aria-label', 'Pick one to take home, free');
       sh.engines.forEach((id, i) => {
         const on = sh.engine === i;
         const e = ENGINES[id];
+        // Two of a card wear a "x2" on the face.
+        const two = e.gift.length > 1 ? `<i class="sb-twice">x${e.gift.length}</i>` : '';
         const b = btn(
           `sb-enginecard${on ? ' picked' : sh.engine !== undefined ? ' other' : ''}`,
-          `<img src="${faceUrl(e.gift[0], false)}" alt=""><span><b>${esc(engineText(id).replace(/\.$/, ''))}</b> ${esc(PAGES[e.page].text)}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`,
+          `<span class="sb-engface"><img src="${faceUrl(e.gift[0], false)}" alt="">${two}</span><span><b>${esc(engineText(id).replace(/\.$/, ''))}</b> ${esc(PAGES[e.page].text)}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`,
           () => {
             if (!chooseEngine(s, i)) return;
             this.t.tutor.count('engine');
@@ -530,7 +544,11 @@ export class Sheets {
         const on = sh.twist === i;
         // A hitch is a trade: it says what it takes off the season's quota ("Summer asks 510, not 600.").
         const trade = twistEase(tw) ? `<em class="sb-trade">${cap(SEASON_NAMES[coming.season])} asks ${twistQuota(s, tw)}, not ${twistQuota(s, null)}.</em>` : '';
-        const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${trade}${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
+        // Round 8: both say what they would do to the season's take, in coins, from the shares the rules priced them by
+        // ("Your carrots would pay about 320 more."): the eighth playtest's help showed no number beside the hitch's.
+        const note = twistNote(s, tw);
+        const worth = note ? `<em class="sb-worth">${esc(note).replace(/(\d+)/, '<b>$1</b>')}</em>` : '';
+        const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${worth}${trade}${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
           if (!chooseTwist(s, i)) return;
           this.t.tutor.count('twist');
           this.needTwist = false;
@@ -580,7 +598,7 @@ export class Sheets {
         const key = `kept:${p}`;
         // With the almanac full and a new page lifted, a kept page can be swapped out: two taps, like everything here.
         const swap = full && pickedPage >= 0 && !sh.pages[pickedPage].sold;
-        const k = btn(`sb-keptpage${this.picked === key ? ' lifted' : ''}`, esc(PAGES[p].name), () => {
+        const k = btn(`sb-keptpage${this.picked === key ? ' lifted' : ''}`, esc(levelName(PAGES[p].name, pageLevel(s, p))), () => {
           if (!swap && !this.picked?.startsWith('kept:')) return;
           const o = sh.pages[this.swapFor ?? pickedPage];
           if (this.picked !== key) {
@@ -605,6 +623,24 @@ export class Sheets {
         read = `Tear out <b>${esc(PAGES[out].name)}</b> for <b>${esc(PAGES[o.page].name)}</b>? ${ask(o.price, 'swap')}`;
       }
     }
+    // Round 8: the run's engine page at its next level, said in the page's own words: the late use for coins the
+    // eighth playtest asked for (every run died with 1,979 to 5,711 coins unspent).
+    const buys = el('div', 'sb-cork-buys');
+    const lv = sh.level;
+    if (lv && s.pages.includes(lv.page)) {
+      const name = levelName(PAGES[lv.page].name, lv.to);
+      const b = btn(`sb-levelup${this.picked === 'level' ? ' lifted' : ''}${lv.sold ? ' sold' : ''}`, `<span>${esc(name)}</span><em>${lv.sold ? 'taken' : `${lv.price} coins`}</em>`, () =>
+        this.lift('level', () => {
+          if (buyLevel(s)) this.bought('page', `${PAGES[lv.page].name} is now ${name}.`);
+          else this.ctx.audio.cue('deck.deny');
+          this.stall();
+        }),
+      );
+      b.disabled = lv.sold;
+      b.setAttribute('aria-label', `${name}, ${lv.price} coins. ${levelText(lv.page, lv.to) ?? ''}`);
+      if (this.picked === 'level' && !lv.sold) read = `<b>${esc(name)}</b>. ${esc(levelChange(lv.page, lv.to) ?? '')} ${ask(lv.price)}`;
+      buys.append(b);
+    }
     // Room for one more page: a late use for coins, sold once the almanac is full.
     if (slotOnSale(s)) {
       const price = slotPrice(s);
@@ -616,9 +652,10 @@ export class Sheets {
         }),
       );
       if (this.picked === 'slot') read = `Room for one more almanac page, for good. ${ask(price)}`;
-      cork.append(b);
+      buys.append(b);
     }
-    if (this.t.seen('pages')) body.append(cork);
+    if (buys.childElementCount) cork.append(buys);
+    if (this.t.seen('pages') && !choosing) body.append(cork);
 
     // The tray of seed and tools, rarer stock laid out a little larger.
     const tray = el('div', 'sb-tray');
@@ -663,7 +700,9 @@ export class Sheets {
           go();
         }),
       );
-      if (this.picked === key) read = `${words} ${ok ? `<em>${tap} again to ${verb}.</em>` : stop ? `<em>${stop}</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`;
+      // A thing bought outright says its price, like the goods (round 8: the scoop said only "Tap again to buy it.").
+      const again = verb === 'buy' ? ask(price) : `<em>${tap} again to ${verb}.</em>`;
+      if (this.picked === key) read = `${words} ${ok ? again : stop ? `<em>${stop}</em>` : s.coins < price ? `<em>Short ${price - s.coins} coins.</em>` : `<em>${why}</em>`}`;
       lip.append(b);
     };
     const bucket = thingUrl('compost', 44, (g, px) => paintBucket(g, px));
@@ -687,13 +726,13 @@ export class Sheets {
       // (the sixth playtest's 3,200-coin scoop sat unused with 3 to 6 others most days).
       const idle = Math.round(scoopsIdle(s));
       const unused = scoopsIdle(s) >= 1 ? ` Last season ${idle} ${idle === 1 ? 'scoop' : 'scoops'} a day sat unused.` : '';
-      thing('scoop', scoopUrl(true), 'A scoop', scoopPrice(s), canBuyScoop(s), `One more seed scoop on the bench every day, for good.${unused}`, 'buy it', '', () => {
+      thing('scoop', scoopUrl(true), 'A scoop', scoopPrice(s), canBuyScoop(s), `One more seed scoop on the bench every day, for good.${unused}`, 'buy', '', () => {
         if (buyScoop(s)) this.bought('service', 'A new scoop for the bench, for good.');
         this.stall();
       }, scoopOnSale(s) ? '' : 'You have scoops to spare.');
     }
     if (this.t.seen('services')) tray.append(lip);
-    body.append(tray);
+    if (!choosing) body.append(tray);
     wrap.append(body);
 
     // The slip's own place: what the lifted thing is, else what was just done, else the stall's lesson.
@@ -707,7 +746,7 @@ export class Sheets {
       if (this.doneCard) d.append(Object.assign(el('img'), { src: faceUrl(this.doneCard.id, true), alt: '' }));
       d.append(el('p', '', esc(this.done)));
       spot.append(d);
-    } else if (this.t.stallLine) spot.append(this.lessonEl);
+    } else if (this.t.stallLine && !(choosing && this.t.stallLine.id === 'engine')) spot.append(this.lessonEl);
     foot.append(spot);
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : isFinal(nextSeason(s)) ? 'On to the last winter' : `On to ${SEASON_NAMES[s.season + 1]}`;
     foot.append(
@@ -807,7 +846,9 @@ export class Sheets {
     if (this.kind !== 'stall') return;
     const spot = this.el.querySelector('.sb-slipspot');
     if (!spot) return;
-    if (!line) this.lessonEl.remove();
+    // The engine's lesson is the line over the three engines while they are chosen: not said twice.
+    const said = line?.id === 'engine' && !!this.el.querySelector('.sb-engines-head');
+    if (!line || said) this.lessonEl.remove();
     else if (!spot.querySelector('.sb-read, .sb-done') && !spot.contains(this.lessonEl)) spot.append(this.lessonEl);
   }
 
@@ -833,7 +874,8 @@ export class Sheets {
       const li = el('li');
       const last = k === s.stats.log.length - 1;
       const how = l.cleared ? 'Met.' : last && end?.gaveUp ? `Given up${end.day ? ` on day ${end.day}` : ''}.` : `Short by ${l.quota - l.earned}. The run ends here.`;
-      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned}${l.carried ? `, ${l.carried} of it carried in,` : ''} against a quota of ${l.quota}. ${how}`;
+      // Round 8: each season's twist, as the won page lists them.
+      li.innerHTML = `<b>${cap(SEASON_NAMES[l.season])}, year ${l.year}.</b> Took ${l.earned}${l.carried ? `, ${l.carried} of it carried in,` : ''} against a quota of ${l.quota}. ${how}${l.twist ? ` ${esc(twistText(l.twist))}` : ''}`;
       list.append(li);
     });
     // Given up at the stall, between seasons: the run ends before the next one starts.
@@ -930,7 +972,7 @@ export class Sheets {
         row.append(c);
       }
       build.append(row);
-      if (s.pages.length) build.append(el('p', 'sb-win-pages', `Pages kept: ${listOf(s.pages.map((p) => PAGES[p].name))}.`));
+      if (s.pages.length) build.append(el('p', 'sb-win-pages', `Pages kept: ${listOf(s.pages.map((p) => levelName(PAGES[p].name, pageLevel(s, p))))}.`));
       page.append(build);
     }
     // The record of wins.

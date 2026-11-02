@@ -46,6 +46,11 @@
 // card off the caption and the close-up off the scoops, bench, plate, ledger and
 // hand; garlic and ladybirds picture a pest; the win page; desktop goods 115 px
 // wide and up. ONLY=text runs just the states whose name holds it.
+// Round 8: a note about any first-row plot in four columns stays off the column letters (the playtest's C1 note on
+// the phone sat over B, C and D, wrapped to two lines where it went); both twists say what they would do in coins; the
+// engine page's next level on the cork board takes two taps, says the level in the page's own words with its price,
+// and nothing moves between the taps; the scoop's slip says its price; the first stall shows its engines large and
+// alone under "Pick one to take home, free."; the almanac's word stays inside its book on the table and the stall.
 //
 // Round 6 adds: four-digit takes and quotas (1239 of 1550, 12400 of 15500) and five-digit coins on the ledger and
 // purse, every digit inside its piece and clear of the other (the phone's purse covered "1239 of 15"); a radish aimed
@@ -1115,7 +1120,8 @@ async function run(label, viewport, touch) {
       const open = await p.evaluate(() => document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '');
       await tapAt('.sb-thing', at);
       const bought = await p.evaluate(() => window.deck.state().scoops);
-      if (!/again to buy/.test(open) || bought !== 1) extra.push(`a bench spent to the last scoop: "${open}", scoops ${bought}`);
+      // Round 8: with its price, like the goods ("Tap again to buy, 600 coins."; it said only "Tap again to buy it.").
+      if (!/again to buy, \d+ coins\./.test(open) || bought !== 1) extra.push(`a bench spent to the last scoop: "${open}", scoops ${bought}`);
       console.log(`       ${label} the scoop: "${spare.slip}" / "${open}"`);
     }],
     ['round 6: the phone stall\'s goods grow into its room', async () => {
@@ -1494,6 +1500,117 @@ async function run(label, viewport, touch) {
       if (q.cut && !q.more) extra.push(`${q.cut} of the ${q.n} new cards are cut off with no shade`);
       console.log(`       ${label} the run's end: ${q.n} new cards, ${q.cut} below the fold, scrolls ${q.scroll} px, shade ${q.more}`);
     }],
+    // Round 8: a plot note never over the column letters (the playtest's C1 note on the phone sat over B, C and D); both
+    // twists say what they would do in coins; the engine page's next level on the cork board, two taps, in the page's
+    // own words; the first stall's engines large and alone until one is picked.
+    ['round 8: a note about a first-row plot stays off the column letters, in four columns', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        const b = t.board;
+        s.cols = 4;
+        s.plots = Array.from({ length: 16 }, () => ({ crop: null, obj: null, boost: 0, last: null }));
+        s.plots[2].crop = { uid: 9811, kind: 'strawberry', age: 1, days: 3, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.plots[3].crop = { uid: 9812, kind: 'corn', age: 1, days: 4, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false };
+        s.plots[1].crop = { uid: 9813, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 0, pest: 2, sprout: false };
+        t.syncAll();
+        const br = b.canvas.getBoundingClientRect();
+        const keys = b.keyBoxes().map((k) => ({ l: br.left + k.x, t: br.top + k.y, r: br.left + k.x + k.w, b: br.top + k.y + k.h, text: k.text }));
+        const hits = [];
+        const lines = [];
+        // Each plot of row 1 read in turn, each after a note by the far edge (the width a note last had must not carry over).
+        for (const [plot, line] of [[3], [2], [1], [0], [2, 'Strawberry pays 16 tomorrow night.'], [3, 'Corn pays 24 in 2 nights, next season.']]) {
+          const text = line ?? t.plotLine(plot);
+          t.say(text, plot);
+          lines.push(text);
+          const n = document.querySelector('.sb-note').getBoundingClientRect();
+          for (const k of keys) if (Math.min(n.right, k.r) - Math.max(n.left, k.l) > 0 && Math.min(n.bottom, k.b) - Math.max(n.top, k.t) > -2) hits.push(`"${text}" over ${k.text}`);
+        }
+        return { hits, lines };
+      });
+      for (const h of q.hits) extra.push(`a note over the column letters: ${h}`);
+      console.log(`       ${label} row 1 notes: ${q.lines.join(' / ')}; over the letters: ${q.hits.length}`);
+    }],
+    ['round 8: the almanac\'s word stays inside its book, on the table and at the stall', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+      const inside = () =>
+        p.evaluate(() =>
+          [['.sb-book', '.sb-book-title'], ['.sb-stall-book', '.sb-stall-book span']].flatMap(([b, t]) => {
+            const be = document.querySelector(b);
+            const te = document.querySelector(t);
+            if (!be || !te || !be.getBoundingClientRect().width) return [];
+            const r = be.getBoundingClientRect();
+            // The word's ink: its text box, not its line box (a rotated span measures its own run of letters).
+            const range = document.createRange();
+            range.selectNodeContents(te);
+            const w = range.getBoundingClientRect();
+            const out = Math.max(r.left + 3 - w.left, w.right - (r.right - 3), r.top + 3 - w.top, w.bottom - (r.bottom - 3));
+            return [{ b, out: Math.round(out * 10) / 10 }];
+          }),
+        );
+      const table = await inside();
+      await toStall(98, 400, null);
+      const stall = await inside();
+      for (const q of [...table, ...stall]) if (q.out > 0.5) extra.push(`"Almanac" spills ${q.out} px past ${q.b}`);
+      console.log(`       ${label} the almanac's word inside its book: ${[...table, ...stall].map((q) => `${q.b} ${q.out <= 0.5 ? 'inside' : `${q.out} px out`}`).join(', ')}`);
+    }],
+    ['round 8: both twists say what they would do, in coins', async () => {
+      await toStall(98, 4000, (s) => {
+        s.year = 1;
+        s.season = 3;
+        s.engine = 'bees';
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
+        // A season played: carrots took the most, the beans and strawberries pick, the bottom row paid most.
+        s.tally = { take: 1000, harvests: 40, kinds: { carrot: 400, beans: 150, strawberry: 140, radish: 100 }, rows: [100, 150, 200, 300], rowKinds: [{ radish: 100 }, { beans: 150 }, { strawberry: 140 }, { carrot: 300 }], from: { bees: 150 }, pests: 200, company: 140, last: 90 };
+      });
+      const q = await p.evaluate(() => [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ worth: e.querySelector('.sb-worth')?.textContent ?? '', bold: e.querySelector('.sb-worth b')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })));
+      const help = q.find((c) => !c.trade);
+      const hitch = q.find((c) => c.trade);
+      if (!help || !/^About \d+ more coins\.$/.test(help.worth) || !/^\d+$/.test(help.bold)) extra.push(`the help's number: ${JSON.stringify(help)}`);
+      if (!hitch || !/^About \d+ fewer coins\.$/.test(hitch.worth) || !/^\d+$/.test(hitch.bold)) extra.push(`the hitch's number: ${JSON.stringify(hitch)}`);
+      console.log(`       ${label} twists: "${help?.worth}" | "${hitch?.worth}" "${hitch?.trade}"`);
+    }],
+    ['round 8: the engine page\'s next level, two taps, in its own words', async () => {
+      await toStall(98, 3000, (s) => {
+        s.year = 1;
+        s.season = 3;
+        s.engine = 'bees';
+        s.levels = { bees: 1 };
+        s.pages = ['barrel', 'cellar', 'bees', 'thumb'];
+      });
+      await p.evaluate(() => {
+        window.deck.table.tutor.unlock('pages');
+        window.deck.table.tutor.unlock('services');
+        window.deck.table.sheets.stall();
+      });
+      await settle(200);
+      const before = await p.evaluate(() => ({ text: document.querySelector('.sb-levelup')?.textContent ?? '', level: window.deck.state().shop.level, coins: window.deck.state().coins }));
+      await tapAt('.sb-levelup');
+      const slip = await p.evaluate(() => document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '');
+      const one = await p.evaluate(() => window.deck.state().coins);
+      await tapAt('.sb-levelup');
+      const after = await p.evaluate(() => ({ coins: window.deck.state().coins, levels: window.deck.state().levels, kept: [...document.querySelectorAll('.sb-keptpage')].map((e) => e.textContent), done: document.querySelector('.sb-slipspot .sb-done')?.textContent ?? '' }));
+      if (!before.level || !/^Busy Bees II/.test(before.text)) extra.push(`the cork board pins no next level: ${JSON.stringify(before)}`);
+      if (!/^Busy Bees II\. Crops near a beehive get x[\d.]+ bloom, not x[\d.]+\. (Tap|Click) again to buy, \d+ coins\.$/.test(slip)) extra.push(`the next level's slip: "${slip}"`);
+      if (one !== before.coins) extra.push(`the first tap bought the level: ${before.coins} to ${one}`);
+      if (after.levels?.bees !== 2 || after.coins !== before.coins - (before.level?.price ?? 0) || !after.kept.includes('Busy Bees II')) extra.push(`the second tap: ${JSON.stringify(after)}`);
+      console.log(`       ${label} next level: "${before.text}" / "${slip}" / kept ${after.kept.join(', ')} / "${after.done}"`);
+    }],
+    ['round 8: the first stall shows its engines large and alone until one is picked', async () => {
+      await toStall(97, 120, null, true);
+      const q = await p.evaluate(() => ({
+        head: document.querySelector('.sb-engines-head')?.textContent ?? '',
+        faces: [...document.querySelectorAll('.sb-enginecard img:first-child')].map((e) => Math.round(e.getBoundingClientRect().width)),
+        goods: document.querySelectorAll('.sb-good').length,
+        cork: document.querySelectorAll('.sb-cork').length,
+      }));
+      const min = label === 'phone' ? 70 : 120;
+      if (q.head !== 'Pick one to take home, free.' || q.faces.length !== 3 || Math.min(...q.faces) < min || q.goods || q.cork) extra.push(`the engine pick: ${JSON.stringify(q)}`);
+      console.log(`       ${label} engine pick: "${q.head}", faces ${q.faces.join('/')} px`);
+    }],
     ['stall', async () => {
       await toStall(91, 400);
       const q = await purse();
@@ -1537,7 +1654,7 @@ async function run(label, viewport, touch) {
           flat.remove();
           return out;
         });
-      for (const sel of ['.sb-good', '.sb-pagebtn', '.sb-thing']) {
+      for (const sel of ['.sb-good', '.sb-pagebtn', '.sb-thing', '.sb-levelup', '.sb-slot']) {
         const n = await p.evaluate((sel) => document.querySelectorAll(sel).length, sel);
         for (let i = 0; i < n; i++) {
           const pt = await p.evaluate(([sel, i]) => { const e = document.querySelectorAll(sel)[i]; if (e.disabled) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.6]; }, [sel, i]);

@@ -34,6 +34,11 @@ export interface Twist {
   page?: PageId;
   /** A hitch: the share it takes off the season's quota, what it is expected to cost this run (round 7). */
   ease?: number;
+  /**
+   * Round 8: what the rules expect it to do to the season's take, as a share of the quota (a help's gain, what a
+   * hitch still costs a careful player). The stall says it in coins, so the two twists can be weighed at a glance.
+   */
+  worth?: number;
 }
 
 /**
@@ -162,6 +167,8 @@ export interface Shop {
   /** A run's first stall: the engines on offer, and the one picked (free; it can be changed until the stall is left). */
   engines?: EngineId[];
   engine?: number;
+  /** Round 8: the engine's page at its next level, pinned on the cork board, and its price (bought: sold). */
+  level?: { page: PageId; to: number; price: number; sold: boolean };
 }
 
 export interface RunStats {
@@ -263,6 +270,13 @@ export interface RunState {
   soft?: boolean;
   /** The engine picked at the run's first stall, if any. */
   engine?: EngineId | null;
+  /**
+   * Round 8: the level of each engine page kept (I when taken; II and III bought at the stall). The eighth playtest
+   * died in every run with 1,979 to 5,711 coins unspent while the quotas climbed past the engine.
+   */
+  levels?: Partial<Record<PageId, number>>;
+  /** Round 8: the twists the last stall offered, so the next one aims at something else. */
+  lastTwists?: Twist[];
   /** This season's take so far and where it came from (kept until the next season starts, for the stall's twists). */
   tally?: Tally;
   /** This year's new stock, laid on the year's first tray. */
@@ -349,4 +363,5 @@ export type Ev =
   | { t: 'upgrade'; card: Card }
   | { t: 'scoop' }
   | { t: 'slot' }
+  | { t: 'level'; page: PageId; to: number }
   | { t: 'reroll' };

@@ -364,7 +364,7 @@ const map = (k: Diagram): Bit => ({ t: 'map', k });
 const prod = (k: SeedId): Bit => ({ t: 'produce', k });
 
 /** What a card does, as a line of pictures: "carrot +2 basket" for the radish. `bees`: Busy Bees is kept. */
-export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
+export function pictogram(id: CardId, up: boolean, bees = 0): Bit[] {
   switch (id) {
     case 'radish':
       return [prod('carrot'), Y('+2'), BASKET];
@@ -378,7 +378,7 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
       return [prod('beans'), B('×1.5'), BLOOMB];
     case 'sunflower':
       // It faces the crop below it.
-      return bees ? [map('below'), B('+2'), BLOOMB, B(`×${TUNING.beesTimes}`)] : [map('below'), B('+2'), BLOOMB];
+      return bees ? [map('below'), B('+2'), BLOOMB, B(`×${bees}`)] : [map('below'), B('+2'), BLOOMB];
     case 'pumpkin':
       return [map('alone'), B('×2'), BLOOMB];
     case 'strawberry':
@@ -410,7 +410,7 @@ export function pictogram(id: CardId, up: boolean, bees = false): Bit[] {
       // A crow kept off, and the 3 by 3 it is kept off.
       return [{ t: 'nocrow' }, map('area')];
     case 'beehive':
-      return bees ? [map('area'), B('+1'), BLOOMB, B(`×${TUNING.beesTimes}`)] : [map('area'), B('+1'), BLOOMB];
+      return bees ? [map('area'), B('+1'), BLOOMB, B(`×${bees}`)] : [map('area'), B('+1'), BLOOMB];
     case 'rain':
       return [map('all'), MOON, I('+1')];
     case 'sun':

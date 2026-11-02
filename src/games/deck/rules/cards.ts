@@ -153,10 +153,10 @@ export interface PageDef {
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
   cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.3 bloom.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.2 bloom.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
-  rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },
+  rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Plant a different crop where one was just pulled: +4 yield.' },
   market: { id: 'market', name: 'Market Day', price: 130, text: 'Every fifth harvest in a day is x2.' },
   clover: { id: 'clover', name: 'Four-Leaf Clover', price: 140, text: 'One harvest in eight comes up golden, x3.' },
   furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column, and one more scoop a day.' },
@@ -184,9 +184,9 @@ export interface EngineDef {
  */
 export const ENGINES: Record<EngineId, EngineDef> = {
   bees: { id: 'bees', page: 'bees', gift: ['beehive'], cards: ['beehive', 'sunflower'] },
-  hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili'], cards: ['chili'] },
+  hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili', 'chili', 'chili'], cards: ['chili'] },
   vines: { id: 'vines', page: 'vines', gift: ['beans'], cards: ['beans', 'strawberry'] },
-  tall: { id: 'tall', page: 'tall', gift: ['corn', 'corn'], cards: ['corn', 'sunflower'] },
+  tall: { id: 'tall', page: 'tall', gift: ['corn'], cards: ['corn', 'sunflower'] },
 };
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[];
 
@@ -196,8 +196,9 @@ export function engineText(id: EngineId): string {
   const n = e.gift.length;
   const card = CARDS[e.gift[0]].name.toLowerCase();
   // "Beans and Trellis.": a card whose name is already a plural takes no article.
-  const one = /s$/.test(card) ? `${card[0].toUpperCase()}${card.slice(1)}` : `${/^[aeiou]/.test(card) ? 'An' : 'A'} ${card}`;
-  const what = n === 1 ? one : `${n === 2 ? 'Two' : String(n)} ${PLURALS[e.gift[0] as SeedId] ?? card}`;
+  // Corn, like mint, garlic and wheat, is said as one: "Corn and Tall Rows."
+  const one = /s$/.test(card) || MASS.includes(e.gift[0] as SeedId) ? `${card[0].toUpperCase()}${card.slice(1)}` : `${/^[aeiou]/.test(card) ? 'An' : 'A'} ${card}`;
+  const what = n === 1 ? one : `${['', '', 'Two', 'Three', 'Four'][n] ?? String(n)} ${PLURALS[e.gift[0] as SeedId] ?? card}`;
   return `${what} and ${PAGES[e.page].name}.`;
 }
 

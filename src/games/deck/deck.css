@@ -273,7 +273,7 @@
 
 /* ---------------------------------------------------------------- notes and lessons */
 .sb-note {
-  z-index: 6; transform: translate(-50%, -100%) rotate(-1.5deg); max-width: 250px; padding: 4px 9px 5px;
+  z-index: 6; transform: translate(-50%, -100%) rotate(-1.5deg); box-sizing: border-box; max-width: 250px; padding: 4px 9px 5px;
   background: #f4ead0; border-left: 3px solid #b8352a; font-size: 13.5px; font-style: italic; line-height: 1.25;
   box-shadow: 0 2px 0 rgba(42, 30, 18, 0.3); opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
 }
@@ -740,3 +740,52 @@
 .sb-entry-body.more { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 30px), rgba(0, 0, 0, 0.3)); mask-image: linear-gradient(180deg, #000 calc(100% - 30px), rgba(0, 0, 0, 0.3)); }
 .sb-new { flex-wrap: wrap; }
 .sb-keptlist.two { grid-template-columns: 1fr 1fr; column-gap: 6px; }
+/* Round 8: a run's first stall shows only its engines until one is picked: one line that says to pick one and that
+   it is free, and the three large enough to read (the eighth playtest's later runs had no line and 50 px cards). Once
+   one is picked they sit small above the stall, as in round 7. */
+.sb-engines-head { margin: 2px 0 0; flex: 0 0 auto; text-align: center; color: #fff3cc; font-size: 17px; font-style: italic; font-weight: 650; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.sb-engface { position: relative; flex: 0 0 auto; display: block; line-height: 0; }
+.sb-twice {
+  position: absolute; right: -6px; bottom: -4px; padding: 1px 5px 2px; border-radius: 9px; background: #b8352a; color: #fff3cc;
+  font-size: 12px; font-style: normal; font-weight: 750; line-height: 1.1; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.sb .sb-engines.big { flex: 0 0 auto; gap: 12px; align-items: stretch; padding-top: 6px; }
+.sb .sb-engines.big .sb-enginecard { flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 12px 10px 12px; max-width: 280px; }
+.sb .sb-engines.big .sb-enginecard img:first-child { height: 176px; }
+.sb .sb-engines.big .sb-enginecard span b { margin-bottom: 4px; }
+.sb[data-layout='wide'] .sb-engines.big .sb-enginecard img:first-child { height: 236px; }
+.sb[data-layout='wide'] .sb-engines.big .sb-enginecard span { font-size: 16px; }
+.sb[data-layout='wide'] .sb-engines-head { font-size: 21px; }
+.sb[data-layout='phone'] .sb-engines.big { flex-direction: row; gap: 6px; padding: 4px 2px 0; }
+.sb[data-layout='phone'] .sb-engines.big .sb-enginecard { padding: 8px 5px 9px; gap: 6px; }
+.sb[data-layout='phone'] .sb-engines.big .sb-enginecard img:first-child { height: 150px; }
+.sb[data-layout='phone'] .sb-engines.big .sb-enginecard span { font-size: 12.5px; line-height: 1.22; }
+.sb[data-layout='phone'] .sb-engines:not(.big) .sb-twice { font-size: 9px; right: -4px; bottom: -2px; padding: 0 3px 1px; }
+/* Round 8: what each twist would do to the season's take, in coins, the same shape on both clippings. */
+.sb .sb-twistcard .sb-worth { font-size: 12.5px; font-style: normal; font-weight: 560; line-height: 1.2; color: #2a1608; }
+.sb .sb-twistcard .sb-worth b { font-size: 14px; font-weight: 750; }
+.sb[data-layout='phone'] .sb-twistcard .sb-worth { font-size: 11.5px; line-height: 1.12; }
+.sb[data-layout='phone'] .sb-twistcard .sb-worth b { font-size: 12.5px; }
+.sb[data-layout='wide'] .sb-twistcard .sb-worth { font-size: 14.5px; }
+.sb[data-layout='wide'] .sb-twistcard .sb-worth b { font-size: 16px; }
+/* Round 8: the engine page's next level, and room for one more page, side by side on the cork board. */
+.sb-cork-buys { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px; margin-top: 8px; }
+.sb-cork-buys .sb-slot { margin: 0; }
+.sb-levelup {
+  display: flex; align-items: baseline; gap: 10px; padding: 4px 12px 5px; border: 1.5px solid rgba(90, 122, 58, 0.9);
+  background: #f3e9cf; color: #2a1608; font-size: 13.5px; font-style: italic; font-weight: 700; box-shadow: 0 3px 5px -3px rgba(0, 0, 0, 0.5);
+}
+.sb-levelup em { font-style: normal; font-weight: 600; color: #4a4a52; }
+.sb-levelup.lifted { border-color: #b8352a; transform: translateY(-2px); }
+.sb-levelup.sold { opacity: 0.55; }
+.sb[data-layout='phone'] .sb-cork-buys { margin-top: 4px; }
+.sb[data-layout='phone'] .sb-levelup { padding: 3px 9px 4px; font-size: 13px; }
+/* Round 8: the stall's book on the desktop is tall enough for its word (it spilled past the book). */
+.sb[data-layout='wide'] .sb-stall-book { height: 74px; }
+/* Round 8: on the phone the engine page's next level and room for one more page share a row. */
+.sb[data-layout='phone'] .sb-cork-buys { flex-wrap: nowrap; gap: 6px; }
+.sb[data-layout='phone'] .sb-cork-buys .sb-slot, .sb[data-layout='phone'] .sb-levelup { font-size: 12px; padding: 3px 7px 4px; gap: 6px; white-space: nowrap; }
+/* Round 8: the table's book on the desktop keeps its word inside it, clear of the spine (it spilled past the edge). */
+.sb[data-layout='wide'] .sb-book-title { font-size: 11.5px; letter-spacing: 0.02em; padding-left: 5px; }
+.sb-book-title, .sb-stall-book span { letter-spacing: 0.03em; }
+.sb[data-layout='phone'] .sb-book-title, .sb[data-layout='phone'] .sb-stall-book span { font-size: 9px; }

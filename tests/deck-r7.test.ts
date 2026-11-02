@@ -190,7 +190,10 @@ describe('round 7: twists aimed at the run', () => {
       const aim = X.hitchAims?.(s).find((a) => a.t.id === hitch.id);
       expect(aim, `${hitch.id} is aimed`).toBeDefined();
       expect(aim!.v).toBeGreaterThanOrEqual(TUNING.minHit);
-      expect(R.twistEase(hitch)).toBeCloseTo(Math.min(TUNING.easeMax, Math.max(TUNING.easeMin, Math.round(aim!.v * 100) / 100)), 5);
+      // Round 8: the cut is what it still costs a careful player and the worth of the help beside it.
+      const help = s.shop!.twists!.find((t) => !HITCHES.includes(t.id)) as R.Twist & { worth?: number };
+      const cut = R.hitchCut({ t: hitch, v: aim!.v }, help.worth ?? 0);
+      expect(R.twistEase(hitch)).toBeCloseTo(Math.min(TUNING.easeMax, Math.max(TUNING.easeMin, Math.round(cut * 100) / 100)), 5);
       // Crows never come while a scarecrow stands; sunflowers facing up never come (played ahead they cost nothing).
       if (hitch.id === 'crows' && s.plots.some((p) => p.obj === 'scarecrow')) crowsGuarded++;
       expect(hitch.id).not.toBe('sunup');
@@ -218,7 +221,8 @@ describe('round 7: twists aimed at the run', () => {
       expect(s.tally, 'the season just played is kept').toBeDefined();
       const t = s.tally!;
       // The seventh playtest's buyer for sunflowers (yield 3) was worth nothing next to 60 off.
-      expect((t.kinds[help.crop!] ?? 0) / t.take).toBeGreaterThanOrEqual(TUNING.minWorth / (TUNING.buyerTimes - 1));
+      // Round 8: its estimate is scaled to what a buyer brought when played ahead (`worthTimes`).
+      expect(((t.kinds[help.crop!] ?? 0) / t.take) * (TUNING.buyerTimes - 1) * (TUNING.worthTimes.buyer ?? 1)).toBeGreaterThanOrEqual(TUNING.minWorth - 1e-9);
       expect(R.twistText(help)).toBe(`A buyer pays double for your ${R.PLURALS[help.crop!]}.`);
     });
   }, 120000);
@@ -310,8 +314,8 @@ describe('round 7: the engines said plainly', () => {
   it('each engine reads as its gift and its page', () => {
     const say = (R as unknown as { engineText?: (id: string) => string }).engineText;
     expect(say?.('bees')).toBe('A beehive and Busy Bees.');
-    expect(say?.('hot')).toBe('Two chilies and Hot Beds.');
+    expect(say?.('hot')).toBe('Four chilies and Hot Beds.');
     expect(say?.('vines')).toBe('Beans and Trellis.');
-    expect(say?.('tall')).toBe('Two corn and Tall Rows.');
+    expect(say?.('tall')).toBe('Corn and Tall Rows.');
   });
 });
