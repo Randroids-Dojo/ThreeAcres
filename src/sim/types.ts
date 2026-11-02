@@ -274,8 +274,8 @@ export interface DayReport {
   kept?: { crop: CropId; n: number }[];
   /** Sunup: crops the season's turn took (out of season and not yet ripe). */
   turned?: number;
-  /** Sunup: requests filled overnight and what they paid. */
-  filled?: { who: string; reward: number }[];
+  /** Sunup: requests filled overnight and what they paid (`got` of `of` when one short of its count was paid in part). */
+  filled?: { who: string; reward: number; got?: number; of?: number }[];
   /** Sunup: coins a neighbour left so a farm with nothing left can start again. */
   gift?: number;
   /** Sunup: requests that ran out of time overnight, unfilled, and why (round 6: what took the crops sown for it). */
@@ -390,6 +390,12 @@ export interface WorldState {
   midday?: number;
   /** Sunup: crops crows took by day today (the morning card counts them with the night's; it counted only the night's). */
   eatenToday?: number;
+  /** Sunup, round 7: crops paid for at the crate today, as they were picked (the morning card sums yesterday's sales). */
+  soldToday?: { crop: CropId; n: number; value: number }[];
+  /** Sunup, round 7: the crops of the offer pinned last (`offerKey`): the next pair is never the same two. */
+  lastOffer?: string;
+  /** Sunup, round 7: taken requests lost by day (nothing left growing for them, no time to plant again), for the morning card. */
+  goneToday?: { who: string; crop: CropId; n: number; why?: RequestFail; lost?: number }[];
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */
@@ -407,11 +413,11 @@ export type SimEvent =
   | { type: 'bugs'; x: number; y: number }
   | { type: 'sprinkle'; x: number; y: number }
   | { type: 'crowIn'; id: number; x: number; y: number }
-  | { type: 'crowEat'; id: number; x: number; y: number; crop?: CropId }
+  | { type: 'crowEat'; id: number; x: number; y: number; crop?: CropId; /** Sunup: the request the crop was sown for. */ req?: number }
   | { type: 'crowScared'; id: number; x: number; y: number }
   | { type: 'step'; by: number; x: number; y: number; ground: TileKind }
   | { type: 'deny'; x: number; y: number; reason: string }
-  | { type: 'coins'; amount: number; x?: number; y?: number }
+  | { type: 'coins'; amount: number; x?: number; y?: number; /** Sunup: a crop paid for as it went into the crate. */ crate?: boolean }
   | { type: 'sell'; crop: CropId; n: number; value: number }
   | { type: 'buy'; item: string; cost: number }
   | { type: 'order'; id: number; done: boolean }
@@ -426,5 +432,5 @@ export type SimEvent =
   | { type: 'hire'; id: number }
   | { type: 'refill'; x: number; y: number; by: number }
   | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number }
-  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId }
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId; /** Paid in part: what it got of its count. */ got?: number; of?: number; /** Lost: what took its crops, or why it could not be met. */ why?: RequestFail; lost?: number }
   | { type: 'unlock'; what: string };

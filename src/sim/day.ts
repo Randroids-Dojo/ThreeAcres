@@ -31,6 +31,12 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
   // Crops crows took by day count with the night's (round 6: the card said nothing of them).
   const report: DayReport = { day: s.day, sold: [], wages: 0, grew: 0, withered: 0, eaten: s.eatenToday ?? 0, crewWork: 0, income: 0 };
   s.eatenToday = 0;
+  // Round 7: what the crate paid for by day is yesterday's sales on the morning card, with what sells overnight; and a
+  // request lost by day is told there too.
+  for (const r of s.soldToday ?? []) report.sold.push({ ...r });
+  s.soldToday = [];
+  if (s.goneToday?.length) report.withdrawn = [...s.goneToday];
+  s.goneToday = [];
   const coinsBefore = s.coins;
 
   // Under turns the hands do their day's work now.
@@ -178,7 +184,7 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
       }
       if (turned) report.turned = turned;
       // A request for a crop out of season now goes quietly (only older saves can have one).
-      s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || Math.min(o.got ?? 0, stockCount(s, it.crop)) >= it.n));
+      s.orders = s.orders.filter((o) => o.items.every((it) => inSeason(it.crop, now) || Math.min(o.got ?? 0, it.n) >= it.n));
     }
   }
   s.report = report;

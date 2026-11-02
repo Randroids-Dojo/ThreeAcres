@@ -424,6 +424,9 @@ describe('P3: lessons in their time', () => {
     s.learnCount['done:scarecrow'] = 5;
     const t = new Tutor();
     expect(t.update(s, 1, true).line).toBe('Check the forecast for rain and heat.');
+    // (Round 7: read for four seconds, though the farmer was busy for all of them.)
+    s.actors[0].moving = true;
+    for (let i = 0; i < 4; i++) t.update(s, 1, true);
     s.day += 1;
     t.update(s, 0.1, true);
     expect(s.learn).toContain('lesson:forecast');

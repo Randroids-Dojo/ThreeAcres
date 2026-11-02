@@ -37,6 +37,11 @@
 // phone's whole-farm view leaves little blank sky above the farm; and with a
 // mouse, the seed picker open, a click on a thirsty crop closes the picker
 // and the lesson pointer comes back.
+// Round 7: a full board (three taken requests and a pair, the last morning
+// card pinned on top, and the line that says what makes the pair a choice)
+// stays on the screen and either fits or scrolls, with a fade while there is
+// more below; scrolled by a real thumb (or the wheel) its last stamp comes
+// into view and takes a tap.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -188,6 +193,33 @@ async function run(label, viewport, touch) {
       await new Promise((r) => setTimeout(r, 120));
       window.sunup.dialogs.board('requests');
     })],
+    // Round 7: a full board: three taken requests and a pair, with the last morning card pinned on top (the tester's
+    // five notes ran past the bottom of a phone's screen). It must fit, or scroll and say so.
+    ['board requests, five notes and the morning card', async () => p.evaluate(async () => {
+      const st = window.sunup.state;
+      window.sunup.dialogs.close(true);
+      Object.assign(st, { day: 4, rep: 3, requested: 3, orders: [], coins: 400 });
+      st.parcels[1].owned = true;
+      for (const pc of [st.parcels[0], st.parcels[1]]) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) { const q = st.plots[y * st.W + x]; q.tilled = true; q.crop = null; }
+      const taken = [
+        { who: 'The lighthouse keeper', crop: 'carrot', n: 6, gain: 150, due: 12, grow: 6 },
+        { who: 'The Hollow Bend inn', crop: 'radish', n: 9, gain: 170, due: 9, grow: 9 },
+        { who: 'Old Tamsin', crop: 'lettuce', n: 4, gain: 60, due: 10, grow: 3 },
+      ];
+      const price = { carrot: 55, radish: 30, lettuce: 45 };
+      let tile = 0;
+      const tiles = [];
+      for (const pc of [st.parcels[0], st.parcels[1]]) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) tiles.push([x, y]);
+      for (const r of taken) {
+        const o = { id: st.nextId++, who: r.who, items: [{ crop: r.crop, n: r.n }], reward: r.n * price[r.crop] + r.gain, rep: 1, due: r.due, sowBy: 5, made: 4, seen: true, kind: 'easy', taken: true, got: 0, ...(r.grow < r.n ? { lost: { crows: r.n - r.grow } } : {}) };
+        st.orders.push(o);
+        for (let k = 0; k < r.grow; k++) { const [x, y] = tiles[tile++]; st.plots[y * st.W + x].crop = { id: st.nextId++, kind: r.crop, age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: 4, for: o.id }; }
+      }
+      window.sunup.pinRequests();
+      window.sunup.hud.lastCard = { day: st.day, title: 'Spring 4, cloudy', news: 'Old Tamsin paid 145, sold 8 for 340, 6 ripe to pick.' };
+      window.sunup.dialogs.board('requests');
+      await new Promise((r) => setTimeout(r, 300));
+    })],
     // Round 5: the lesson pointer asks before it builds.
     ['build question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmBuild('scarecrow', 220, () => {}); })],
     // The forecast's three words sit inside the day card.
@@ -299,6 +331,60 @@ async function run(label, viewport, touch) {
     if (name === 'board requests, one taken') {
       const q = await p.evaluate(() => ({ pair: document.querySelectorAll('.dialog .pair').length, taken: [...document.querySelectorAll('.dialog .item.req.taken')].map((e) => [...e.querySelectorAll('.tx > *')].map((c) => c.textContent)) }));
       if (q.pair !== 0 || q.taken.length !== 1 || !/^For .+, \+[\d,]+ over market$/.test(q.taken[0][1]) || !/wanted by|Wanted by/.test(q.taken[0][q.taken[0].length - 1])) hits.push(`taken note ${JSON.stringify(q)}`);
+    }
+    if (name === 'board requests, five notes and the morning card') {
+      const q = await p.evaluate(() => {
+        const d = document.querySelector('.dialog.on');
+        const body = d.querySelector('.body');
+        const dr = d.getBoundingClientRect();
+        const notes = [...body.querySelectorAll('.item.req')];
+        return {
+          notes: notes.length,
+          card: body.querySelector('.list .morning')?.textContent ?? '',
+          clash: body.querySelector('.list .clash')?.textContent ?? '',
+          onScreen: dr.top >= -1 && dr.bottom <= innerHeight + 1 && dr.left >= -1 && dr.right <= innerWidth + 1,
+          fits: body.scrollHeight <= body.clientHeight + 1,
+          scrolls: ['auto', 'scroll'].includes(getComputedStyle(body).overflowY) && body.scrollHeight > body.clientHeight + 1,
+          cue: !body.classList.contains('end'),
+          h: [Math.round(body.clientHeight), Math.round(body.scrollHeight)],
+        };
+      });
+      if (q.notes !== 5) hits.push(`the full board shows ${q.notes} notes, not 5`);
+      if (!/^Spring 4, cloudyOld Tamsin paid 145/.test(q.card)) hits.push(`no morning card pinned on the board (${q.card})`);
+      if (!/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8) hits.push(`the pair's clash line reads "${q.clash}"`);
+      if (!q.onScreen) hits.push('the board runs off the screen');
+      if (!q.fits && !q.scrolls) hits.push(`the board's notes run past its foot and do not scroll ${JSON.stringify(q.h)}`);
+      if (!q.fits && !q.cue) hits.push('the board has more below but no fade says so');
+      if (!q.fits) {
+        // Scroll the notes as a thumb or a wheel would; the last note's stamp comes fully into view and takes a tap.
+        const start = await p.evaluate(() => { const r = document.querySelector('.dialog.on .body').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height * 0.75]; });
+        if (touch) {
+          const cdp = await p.context().newCDPSession(p);
+          for (let k = 0; k < 4; k++) {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: start[0], y: start[1], id: 40 + k }] });
+            for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start[0], y: start[1] - i * 40, id: 40 + k }] });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await p.waitForTimeout(250);
+          }
+        } else {
+          await p.mouse.move(start[0], start[1]);
+          for (let k = 0; k < 6; k++) await p.mouse.wheel(0, 400);
+        }
+        await p.waitForTimeout(600);
+        const end = await p.evaluate(() => {
+          const body = document.querySelector('.dialog.on .body');
+          const br = body.getBoundingClientRect();
+          const last = [...body.querySelectorAll('.item.req')].pop();
+          const lr = last.getBoundingClientRect();
+          const btn = last.querySelector('.btn');
+          const r = btn?.getBoundingClientRect();
+          const hit = r ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) : null;
+          return { inView: lr.bottom <= br.bottom + 1 && lr.top >= br.top - 1, takes: !!btn && !!hit && btn.contains(hit), end: body.classList.contains('end'), top: Math.round(body.scrollTop) };
+        });
+        if (!end.inView || !end.takes) hits.push(`scrolled to its end, the board's last note is not wholly in view or its stamp takes no tap ${JSON.stringify(end)}`);
+        if (!end.end) hits.push('at its end the board still wears the fade');
+        console.log(`     ${label} full board: notes ${q.h[1]} px in a ${q.h[0]} px board, scrolled ${end.top} px by ${touch ? 'a thumb' : 'the wheel'}; last stamp takes a tap: ${end.takes}`);
+      } else console.log(`     ${label} full board: notes fit (${q.h[1]} px in ${q.h[0]} px)`);
     }
     if (name === 'build question') {
       const q = await p.evaluate(() => ({ title: document.querySelector('.dialog h2')?.textContent ?? '', btns: [...document.querySelectorAll('.dialog .ask .btn')].map((b) => b.textContent) }));

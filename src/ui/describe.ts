@@ -2,7 +2,7 @@
 // do. Under synergy soil it also explains the crop's quality, which is most
 // of the puzzle.
 
-import { doomedAtTurn, fieldRep, homestead, nightsToTurn, sowing, type Resolved } from '../sim/actions';
+import { doomedAtTurn, fieldRep, homestead, justInTime, nightsToTurn, sowing, type Resolved } from '../sim/actions';
 import { BUILD_COST, CAN_WATER, SPRINKLER_MORNINGS, STAMINA_COST } from '../sim/constants';
 import { CROPS, QUALITY_NAME } from '../sim/crops';
 import { qualityAt } from '../sim/soil';
@@ -158,5 +158,7 @@ export function seedNote(s: WorldState, c: CropId): { price: string; when: strin
   if (sw.next) return { price, when: `${SEASON_NAMES[(season(s.day) + 1) % 4]} crop`, state: 'next' };
   if (sw.late) return { price, when: 'Too late', state: 'late' };
   if (!sw.ok) return { price, when: d.seasons.map((n) => SEASON_NAMES[n]).join(', '), state: 'off' };
+  // Round 7: a crop that ripens only if watered every night until the turn says so before it goes in.
+  if (justInTime(s.day, c)) return { price, when: 'Just in time', state: 'now' };
   return { price, when: `${d.days} days${d.regrow ? `, then ${d.regrow}` : ''}`, state: 'now' };
 }

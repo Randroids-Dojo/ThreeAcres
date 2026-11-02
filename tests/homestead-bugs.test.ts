@@ -31,8 +31,8 @@ describe('the bug lesson', () => {
     let out = t.update(s, 0.1, true);
     expect(out.line).toBe('Bugs on your carrots. Pick them off.');
     expect(out.point).toEqual({ x: 4.5, y: 6.5 });
-    // On screen a couple of seconds, so it counts as seen.
-    for (let i = 0; i < 20; i++) out = t.update(s, 0.1, true);
+    // On screen long enough to be read (round 7: every line stays at least four seconds).
+    for (let i = 0; i < 41; i++) out = t.update(s, 0.1, true);
     stand(s, 4, 5, 's');
     s.tool = 'hands';
     s.actors[0].x = 4.5;

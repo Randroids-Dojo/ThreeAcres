@@ -3,21 +3,20 @@
 // under one fixed set of rules (the homestead); the shell hosts it.
 
 import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
-import { canAfford, homestead, resolve, workLeft } from '../../sim/actions';
+import { canAfford, homestead, resolve, sleepAsk } from '../../sim/actions';
 import { facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
-import { fillRequests } from '../../sim/goals';
+import { fillRequests, owedToday } from '../../sim/goals';
 import { guardedSure } from '../../sim/day';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
-import { STAMINA_COST } from '../../sim/constants';
 import { step } from '../../sim/step';
 import { daylightOf, hourOf, inMap, season, SEASON_NAMES, dayOfSeason } from '../../sim/world';
 import { PROPS, propAt } from '../../sim/map';
 import type { BuildKind, SimEvent, WorldState } from '../../sim/types';
 import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
-import { Hud } from '../../ui/hud';
+import { Hud, morningNews } from '../../ui/hud';
 import { Input } from '../../game/input';
 import { Tutor } from './lessons';
 import { pointerTap, type PointerTap } from './pointer';
@@ -93,6 +92,14 @@ export class Director {
       ...host,
       onChange: () => undefined,
       keyboard: () => this.input.lastKind === 'key',
+      // The last morning card, pinned on the board; after a reload, yesterday's report says it again.
+      lastCard: () => {
+        const s = this.state;
+        if (this.hud.lastCard?.day === s.day) return this.hud.lastCard;
+        if (!s.report || s.report.day !== s.day - 1) return null;
+        const news = morningNews(s);
+        return news ? { title: `${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}`, news } : null;
+      },
       pickBuild: (k: BuildKind) => {
         this.input.push({ type: 'buildKind', kind: k });
         this.input.push({ type: 'tool', tool: 'build' });
@@ -154,8 +161,10 @@ export class Director {
     if (mode === 'close' && wideScreen) {
       fy += CLOSE_LEAD;
       const p = this.lessonPoint;
-      if (p && Math.abs(p.x - f.x) < 7 && Math.abs(p.y - f.y) < 6) {
-        fx += (p.x - f.x) * 0.35;
+      // Round 7: from further away too, and far enough that the target comes into view (from the house the well sat at
+      // x 1,287 on a 1,280 px screen); the farmer stays well inside the frame (at most four tiles of lean).
+      if (p && Math.abs(p.x - f.x) < 13 && Math.abs(p.y - f.y) < 6) {
+        fx += Math.max(-4, Math.min(4, (p.x - f.x) * 0.45));
         fy += Math.max(0, p.y - f.y) * 0.35;
       }
     }
@@ -263,24 +272,23 @@ export class Director {
   }
 
   /**
-   * Sleep from the button or Enter. Before noon it asks first, so a stray tap
-   * does not throw away a morning, but only when something on the farm still
-   * wants doing (ripe or thirsty crops, bugs, a crow), and never while the
-   * first lesson teaches it or when there is no stamina left to spend. At any
-   * hour it asks while bugs (with the stamina to pick them) or a crow are on
-   * the farm: bugs spread overnight and a crow eats (round 6: a farm slept
-   * early lost crops it never saw go), and on a flock day.
+   * Sleep from the button or Enter. Round 7: before evening it always asks
+   * first (Space on a Sleep button that kept the keyboard put the farmer to
+   * bed at 3:27 pm, twice), and at any hour while bugs, a crow or a flock day
+   * would cost crops tonight, or a request still wants planting today on its
+   * last day for it. Never while the first lesson teaches sleep, nor with no
+   * stamina left for any job (`sleepAsk` in src/sim/actions.ts).
    */
   sleep(): void {
     const s = this.state;
     if (s.turnover >= 0) return;
     const teaching = !s.learn.includes('lesson:sleep');
-    const left = workLeft(s);
     // A flock day: crows still to come take a crop each from a farm left early, so the question asks at any hour.
     const flock = this.crowsDue();
-    const pests = (left.bugs > 0 && s.stamina >= STAMINA_COST.tend) || left.crows > 0;
-    if (!teaching && (flock || pests || (s.minute < 360 && s.stamina >= 10 && left.ripe + left.thirsty + left.bugs + left.crows > 0))) {
-      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), left, flock);
+    const owed = owedToday(s).reduce((a, x) => a + x.n, 0);
+    const q = sleepAsk(s, { teaching, flock, owedToday: owed });
+    if (q.ask) {
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), { ...q.left, flock, owed });
       return;
     }
     this.input.push({ type: 'sleep' });

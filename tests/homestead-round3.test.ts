@@ -158,7 +158,8 @@ describe('lessons and lines', () => {
     for (let i = 0; i < 3 && out.line !== 'Press C to see the whole farm.'; i++) out = t.update(s, 0.5, false);
     expect(out.line).toBe('Press C to see the whole farm.');
     t.onEvent(s, { type: 'rules', rules: { ...s.rules, camera: 'wide' }, changed: ['camera'] });
-    t.update(s, 0.1, false);
+    // (Round 7: once its line has been up four seconds.)
+    for (let i = 0; i < 40 && !s.learn.includes('lesson:wide'); i++) t.update(s, 0.1, false);
     expect(s.learn).toContain('lesson:wide');
     expect(t.update(s, 0.1, false).line).not.toBe('Press C to see the whole farm.');
   });

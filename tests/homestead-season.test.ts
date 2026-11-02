@@ -38,7 +38,8 @@ describe('the season turn can be planned for', () => {
     s.seed = 'carrot';
     const r = resolve(s, 'seeds', 2, 7);
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/^Too late\. Carrot won.t ripen before summer$/);
+    // (Round 7: the word names the crop as the picker shows it.)
+    expect(r.reason).toMatch(/^Carrots won.t ripen before summer$/);
     expect(seedNote(s, 'carrot')).toMatchObject({ state: 'late', when: 'Too late' });
     // A radish still makes it, and strawberries grow on into summer.
     expect(sowing(7, 'radish').ok).toBe(true);

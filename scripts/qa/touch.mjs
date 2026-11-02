@@ -43,6 +43,11 @@
 // measured) and stay up past 1.5 s; Sleep after noon asks while bugs are on
 // the farm and says they spread tonight; a crow that takes a crop by day says
 // so in a toast.
+// Round 7: Sleep before evening always asks (with only the hour when nothing
+// waits) and after 6 pm with nothing to do sleeps at once; a tap on a "Too
+// late" seed says why in the open picker and keeps the seed in hand; the day
+// card says the season's length; a real tap on a ripe crop pays at once with
+// a rise of coins over the crate; a toast of the day is gone by nightfall.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -289,7 +294,8 @@ await touch('touchStart', [[notNow[0], notNow[1], 12]]);
 await touch('touchEnd', []);
 await p.waitForTimeout(400);
 check('Not now keeps the day', await p.evaluate(() => !window.sunup.dialogs.open && window.sunup.state.turnover < 0 && window.sunup.state.day === 1));
-// Round 3: "Sleep now?" nearly every night. With nothing ripe, thirsty, bugged or pecked at, Sleep sleeps at once.
+// Round 7: before evening Sleep always asks, even with nothing left to do (a stray press put the farmer to bed at 3:27
+// pm), and says only the hour. After 6 pm with nothing ripe, thirsty, bugged or pecked at, Sleep sleeps at once.
 await p.evaluate(() => {
   const st = window.sunup.state;
   for (const q of st.plots) if (q.crop) { q.crop = null; }
@@ -298,14 +304,16 @@ await p.evaluate(() => {
 });
 await p.waitForTimeout(150);
 await tapSleep();
-const quiet = await p.evaluate(() => ({ open: window.sunup.dialogs.open, night: window.sunup.state.turnover >= 0 }));
-check('at 8:30 am with nothing left to do, Sleep sleeps without asking', !quiet.open && quiet.night, JSON.stringify(quiet));
-await p.waitForTimeout(3200);
-await p.evaluate(() => { window.sunup.state.minute = 400; window.sunup.state.stamina = 80; });
-// (Ripe radishes again for the after-noon check, so there is something to leave undone.)
-await p.evaluate(() => { const st = window.sunup.state; const q = st.plots[5 * st.W + 2]; q.tilled = true; q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; });
+const quiet = await p.evaluate(() => ({ open: window.sunup.dialogs.open, night: window.sunup.state.turnover >= 0, text: document.querySelector('.dialog.on p')?.textContent ?? '' }));
+check('round 7: at 8:30 am with nothing left to do, Sleep still asks, with only the hour', quiet.open && !quiet.night && /^It is 8:\d\d am\.$/.test(quiet.text), JSON.stringify(quiet));
+const notNow2 = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog .ask .btn')].find((e) => e.textContent === 'Not now'); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+await touch('touchStart', [[notNow2[0], notNow2[1], 13]]);
+await touch('touchEnd', []);
+await p.waitForTimeout(400);
+await p.evaluate(() => { window.sunup.state.minute = 13 * 60 + 10; window.sunup.state.stamina = 80; });
+await p.waitForTimeout(150);
 await tapSleep();
-check('after noon, Sleep sleeps at once', await p.evaluate(() => !window.sunup.dialogs.open && window.sunup.state.turnover >= 0));
+check('after 6 pm with nothing left to do, Sleep sleeps at once', await p.evaluate(() => !window.sunup.dialogs.open && window.sunup.state.turnover >= 0));
 await p.waitForTimeout(3200);
 
 // The seed picker opens over the left half of the screen, where the walk
@@ -579,7 +587,8 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   const back = await seen();
   check('from the far east field a bugged crop in the first field’s left column is off screen; a real tap on View shows it, a second comes back', !closeUp.on && whole.on && whole.camera === 'wide' && back.camera === 'close', JSON.stringify({ closeUp, whole, back }));
 
-  // A tap on a "Too late" seed puts the seed away: the picker closes, the hands come out, and the next plot tap plants nothing.
+  // Round 7: a tap on a "Too late" seed says why in the picker itself, which stays open, and the seed in hand stays (the
+  // sixth round closed the picker and put the hands in hand with no word the tester saw).
   await p.evaluate(() => { const st = window.sunup.state; st.day = 8; st.coins = 300; st.minute = 60; st.stamina = 100; st.plots[6 * st.W + 2].crop = null; for (let x = 2; x < 6; x++) { const q = st.plots[7 * st.W + x]; q.crop = null; q.tilled = true; } window.sunup.hud.pickTool('hands'); Object.assign(st.actors[0], { x: 3.5, y: 4.5, task: null, path: [] }); window.sunup.walkAim = null; });
   await p.waitForTimeout(900);
   await p.evaluate(() => document.querySelector('.seedbar.hidden') && window.sunup.hud.pickTool('seeds'));
@@ -592,14 +601,15 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   card = await centre('.seedbar .seed[data-crop="carrot"]');
   await tapAt(card[0], card[1], 84);
   await p.waitForTimeout(400);
-  const late = await p.evaluate(() => ({ picker: !document.querySelector('.seedbar').classList.contains('hidden'), tool: window.sunup.state.tool, toast: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent).join(' | ') }));
-  const planted0 = await p.evaluate(() => window.sunup.state.plots.filter((q) => q.crop).length);
-  const coins0 = await p.evaluate(() => window.sunup.state.coins);
-  const plotPt = await p.evaluate(() => window.sunup.r3d.project(3.5, 7.5, 0));
-  await tapAt(plotPt.x, plotPt.y, 85);
-  await p.waitForTimeout(2000);
-  const after = await p.evaluate(() => ({ planted: window.sunup.state.plots.filter((q) => q.crop).length, coins: window.sunup.state.coins }));
-  check('a tap on a "Too late" seed closes the picker and puts the seed away: the next plot tap plants nothing', !late.picker && late.tool === 'hands' && /Too late/.test(late.toast) && after.planted === planted0 && after.coins === coins0, JSON.stringify({ late, planted0, after, coins0 }));
+  const late = await p.evaluate(() => {
+    const m = document.querySelector('.seedbar .pickmsg');
+    const r = m?.getBoundingClientRect();
+    const bar = document.querySelector('.seedbar').getBoundingClientRect();
+    return { picker: !document.querySelector('.seedbar').classList.contains('hidden'), tool: window.sunup.state.tool, seed: window.sunup.state.seed, word: m?.classList.contains('on') ? m.textContent : '', inBar: !!r && r.width > 0 && r.top >= bar.top - 1 && r.bottom <= bar.bottom + 1, day: document.querySelector('.daycard .date')?.textContent ?? '' };
+  });
+  check('round 7: a tap on a "Too late" seed says why in the open picker ("Carrots won’t ripen before summer."), and keeps the seed in hand', late.picker && late.tool === 'seeds' && late.seed === 'radish' && late.word === 'Carrots won’t ripen before summer.' && late.inBar, JSON.stringify(late));
+  check('round 7: the day card gives the season’s length ("Spring 8 of 10")', late.day === 'Spring 8 of 10', late.day);
+  await p.evaluate(() => window.sunup.hud.closePicker());
 
   // The can in hand, a dry bugged crop tapped: the bugs come off, nothing is watered.
   await p.evaluate(() => {
@@ -706,7 +716,8 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await tapAt(w0.x, w0.y, 90);
   await p.waitForTimeout(2200);
   let w1 = await where();
-  check('P0: a real tap on the plot under the chevron does that plot’s own job: its radish is harvested, no Build tool, no scarecrow, no question', w1.radishes === w0.radishes + 1 && w1.builds.length === 0 && w1.tool !== 'build' && !w1.dialog && w1.coins === w0.coins, JSON.stringify({ before: w0, after: w1 }));
+  // (Round 7: the radish is paid for as it goes into the crate.)
+  check('P0: a real tap on the plot under the chevron does that plot’s own job: its radish is harvested, no Build tool, no scarecrow, no question', w1.radishes === w0.radishes + 1 && w1.builds.length === 0 && w1.tool !== 'build' && !w1.dialog && w1.coins === w0.coins + 30, JSON.stringify({ before: w0, after: w1 }));
   await p.screenshot({ path: '/tmp/acres-touch-r5-under-chevron.png' });
   // A real tap inside the target tile asks first; Not now does nothing at all. (With the radish picked, its plot is the
   // nearest bare soil in the field's middle, so the pointer may have moved there: tap wherever it points now.)
@@ -720,7 +731,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await p.waitForTimeout(500);
   let w2 = await where();
   const ask = await p.evaluate(() => ({ title: document.querySelector('.dialog.on h2')?.textContent ?? '', text: document.querySelector('.dialog.on p')?.textContent ?? '' }));
-  check('a real tap inside the target tile asks before it builds ("Build a scarecrow?", 40 coins, what it does)', w2.dialog && ask.title === 'Build a scarecrow?' && /^40 coins\. .+You have 220\.$/.test(ask.text) && w2.builds.length === 0, JSON.stringify({ ask, w2 }));
+  check('a real tap inside the target tile asks before it builds ("Build a scarecrow?", 40 coins, what it does)', w2.dialog && ask.title === 'Build a scarecrow?' && /^40 coins\. .+You have 250\.$/.test(ask.text) && w2.builds.length === 0, JSON.stringify({ ask, w2 }));
   await p.screenshot({ path: '/tmp/acres-touch-r5-ask.png' });
   const no = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog.on .ask .btn')].find((e) => e.textContent === 'Not now'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
   if (no) await tapAt(no[0], no[1], 92);
@@ -735,7 +746,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.length)); i++) await p.waitForTimeout(100);
   await p.waitForTimeout(500);
   let w4 = await where();
-  check('yes builds one scarecrow on the target (40 coins), the seeds stay in hand, and the lesson ends', w4.builds.join() === `scarecrow@${aim[0]},${aim[1]}` && w4.coins === w0.coins - 40 && w4.tool === 'seeds' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), JSON.stringify({ w4, aim }));
+  check('yes builds one scarecrow on the target (40 coins), the seeds stay in hand, and the lesson ends', w4.builds.join() === `scarecrow@${aim[0]},${aim[1]}` && w4.coins === w0.coins + 30 - 40 && w4.tool === 'seeds' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), JSON.stringify({ w4, aim }));
   // Never a chain: five more taps on bare soil plant five radishes and build nothing (five taps built five scarecrows).
   for (const [x, y, id] of [[7, 6, 95], [8, 6, 96], [9, 6, 97], [10, 6, 98], [7, 7, 99]]) {
     const q = await tilePt(x, y);
@@ -904,7 +915,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await tapAt(sleepBtn[0], sleepBtn[1], 123);
   await p.waitForTimeout(500);
   const ask = await p.evaluate(() => ({ open: window.sunup.dialogs.open, title: document.querySelector('.dialog h2')?.textContent ?? '', text: document.querySelector('.dialog p')?.textContent ?? '', turnover: window.sunup.state.turnover }));
-  check('round 6: Sleep at 5:40 pm with bugs on the farm asks first, and says bugs spread tonight', ask.open && ask.title === 'Sleep now?' && /Bugs left on a crop spread tonight\./.test(ask.text) && !/only/.test(ask.text) && ask.turnover < 0, JSON.stringify(ask));
+  check('round 6: Sleep at 5:40 pm with bugs on the farm asks first, and says bugs spread tonight', ask.open && ask.title === 'Sleep now?' && /Bugs left on crops spread tonight\./.test(ask.text) && !/only/.test(ask.text) && ask.turnover < 0, JSON.stringify(ask));
   const notNow = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog .ask .btn')].find((e) => e.textContent === 'Not now'); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
   await tapAt(notNow[0], notNow[1], 124);
   await p.waitForTimeout(400);
@@ -920,6 +931,53 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   const crowToast = await p.evaluate(() => ({ toasts: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent), eaten: window.sunup.state.eatenToday ?? 0 }));
   check('round 6: a crow that takes a crop by day says so, and it is counted for the morning card', crowToast.toasts.includes('A crow took a carrot.') && crowToast.eaten === 1, JSON.stringify(crowToast));
   await p.evaluate(() => { window.sunup.state.minute = 60; window.sunup.input.push({ type: 'tool', tool: 'hands' }); });
+
+  // Round 7: a crop is paid for the moment it goes into the crate. A real tap on a ripe radish by the yard: the coins
+  // count at once, and a small rise of coins shows over the crate as the crop lands.
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.dialogs.close(true);
+    st.rules.camera = 'close';
+    for (const x of [2, 3, 4, 5]) {
+      const q = st.plots[5 * st.W + x];
+      q.tilled = true;
+      q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day };
+    }
+    Object.assign(st.actors[0], { x: 4.5, y: 3.5, facing: 's', task: null, path: [] });
+    st.crows = [];
+  });
+  await p.waitForTimeout(900);
+  const pay0 = await p.evaluate(() => window.sunup.state.coins);
+  const ripe7 = await tilePt(4, 5);
+  await tapAt(ripe7.x, ripe7.y, 125);
+  let paidAt = -1;
+  const tapT = Date.now();
+  for (let i = 0; i < 30 && paidAt < 0; i++) {
+    if ((await p.evaluate(() => window.sunup.state.coins)) > pay0) paidAt = Date.now() - tapT;
+    else await p.waitForTimeout(50);
+  }
+  let rise = null;
+  for (let i = 0; i < 30 && !rise; i++) {
+    rise = await p.evaluate(() => {
+      const f = document.querySelector('.floaters .floater.coin');
+      if (!f) return null;
+      const r = f.getBoundingClientRect();
+      const c = window.sunup.r3d.project(5.5, 2.5, 0.9);
+      return { text: f.textContent, x: r.x + r.width / 2, y: r.y + r.height, crate: c, box: document.querySelector('.coins .num')?.textContent };
+    });
+    if (!rise) await p.waitForTimeout(60);
+  }
+  const pay1 = await p.evaluate(() => window.sunup.state.coins);
+  check('round 7: a real tap on a ripe radish pays at once (30 coins, counted on the coin box)', pay1 === pay0 + 30 && paidAt >= 0 && paidAt < 1200, JSON.stringify({ pay0, pay1, paidAt }));
+  check('round 7: a small rise of coins (+30) shows over the crate as the crop lands', !!rise && rise.text === '+30' && Math.abs(rise.x - rise.crate.x) < 40 && Math.abs(rise.y - rise.crate.y) < 70, JSON.stringify(rise));
+
+  // Round 7: words of the day go with it: a let-go note does not stay up through the night onto the morning card.
+  await p.evaluate(() => { window.sunup.hud.toast('Old Tamsin will find lettuces elsewhere.', '', 2800); window.sunup.state.minute = 13 * 60 + 30; window.sunup.input.push({ type: 'sleep' }); });
+  await p.waitForTimeout(300);
+  const overnight = await p.evaluate(() => [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent));
+  check('round 7: a toast of the day is gone once night falls', !overnight.some((t) => /elsewhere/.test(t)), JSON.stringify(overnight));
+  await p.waitForFunction(() => window.sunup.state.turnover < 0, null, { timeout: 10000 });
+  await p.waitForTimeout(400);
 }
 
 // A save from the old crew mode brings a farm hand along; Sunup is worked alone, so the hand has gone home on load.

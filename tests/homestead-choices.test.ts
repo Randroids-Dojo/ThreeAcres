@@ -165,13 +165,15 @@ describe('a morning offers two requests, and only one can be taken', () => {
       }
       // Offers nobody took go quietly: the morning card names only requests the player took.
       expect(withdrawn).toBe(0);
-      // A taken one left unsown goes the morning after its sow-by day, and the card says so.
+      // A taken one left unsown goes the morning after its last day for planting, and the card says so. (Round 7: a
+      // taken request's days to spare are days to plant, or replant after a loss: it goes the morning after the last
+      // day seed sown would still be ripe by its due day.)
       const t = farm(91 + day, { fields: 2, coins: 600, day });
       fillRequests(t, true);
       const taken = t.orders[0];
       step(t, 0.016, [{ type: 'accept', id: taken.id }]);
       let told = 0;
-      while (t.day <= sowByOf(taken)!) {
+      while (t.day <= Math.max(sowByOf(taken)!, taken.due - CROPS[taken.items[0].crop].days)) {
         nightfall(t, []);
         told += t.report?.withdrawn?.length ?? 0;
       }

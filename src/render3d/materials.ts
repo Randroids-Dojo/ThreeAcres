@@ -32,6 +32,11 @@ export const U = {
   uUpView: { value: new Vector3(0, 1, 0) },
   /** Soft sky rim on silhouettes, rgb and strength. */
   uRim: { value: new Vector4(0.8, 0.88, 1, 0.22) },
+  /**
+   * Round 7: moonlight on worked soil, rgb and strength (0 by day). At 10 pm in a storm a freshly hoed field read as
+   * black (frame luma about 15 of 255); the furrows keep a cool sheen so the worked plots stay readable.
+   */
+  uSoilNight: { value: new Vector4(0.62, 0.7, 1, 0) },
   /** Debug only, see armNaNWatch: paint non-finite output magenta. */
   uNaNWatch: { value: 0 },
   /** Debug only: plant a NaN at (x, y) drawing-buffer px within radius z, in opaque (w = 1) or blended (w = 2) materials. */
@@ -156,6 +161,7 @@ uniform vec3 uSnowColor;
 uniform vec3 uUpView;
 uniform vec4 uRim;
 uniform float uAo;
+uniform vec4 uSoilNight;
 #ifdef SOIL_WET
 varying float vWet;
 #endif
@@ -202,6 +208,9 @@ const FRAG_RIM = /* glsl */ `
   float rim = pow( 1.0 - facing, 3.0 ) * clamp( dot( nv, uUpView ) * 0.5 + 0.6, 0.0, 1.0 );
   reflectedLight.indirectDiffuse += diffuseColor.rgb * uRim.rgb * rim * uRim.w;
 }
+#endif
+#ifdef SOIL_WET
+reflectedLight.indirectDiffuse += diffuseColor.rgb * uSoilNight.rgb * uSoilNight.w;
 #endif
 `;
 

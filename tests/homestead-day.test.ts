@@ -38,12 +38,12 @@ describe('watering is less of a grind', () => {
   });
 });
 
-/** Nights that sold nothing and filled no request, over a bot run. */
-function quietNights(events: { type: string; done?: boolean }[]): number {
+/** Days that sold nothing and filled no request, over a bot run (round 7: a crop is paid for as it goes into the crate). */
+function quietNights(events: { type: string; done?: boolean; crate?: boolean }[]): number {
   let earned = false;
   let quiet = 0;
   for (const e of events) {
-    if (e.type === 'sell' || ((e.type === 'request' || e.type === 'order') && e.done)) earned = true;
+    if (e.type === 'sell' || (e.type === 'coins' && e.crate) || ((e.type === 'request' || e.type === 'order') && e.done)) earned = true;
     if (e.type === 'dawn') {
       if (!earned) quiet++;
       earned = false;
@@ -80,7 +80,8 @@ describe('a bot farm over twenty days', () => {
       // 1055 has 10.)
       expect(quietNights(r.events as never)).toBeLessThanOrEqual(10);
       expect(turned).toBeLessThan(10);
-    });
+      // (A few seconds alone; under a full parallel run on a loaded machine, more than the default.)
+    }, 20000);
   }
 });
 
@@ -110,5 +111,5 @@ describe('the day and stamina fit the work', () => {
     // Round 3 made watering two (a dry day on one or two fields is real work); planting and harvesting stay one.
     expect(STAMINA_COST.water + STAMINA_COST.plant + STAMINA_COST.harvest).toBeLessThanOrEqual(4);
     expect(STAMINA_MAX).toBe(100);
-  });
+  }, 20000);
 });

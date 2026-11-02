@@ -174,7 +174,7 @@ describe('the crow, the Build tool and the forecast come one a day', () => {
       return line;
     };
     s.crows.push({ id: 900, x: 3, y: 6, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
-    expect(run(20)).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
+    expect(run(41)).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     s.crows = [];
     run(2);
     expect(s.learn).toContain('lesson:pests');

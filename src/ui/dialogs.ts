@@ -8,7 +8,7 @@ import { fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { canDeliver, gainOf, isTaken, MILESTONES, offered, plantedFor, requestProgress, slackOf, sowByOf, stillToSow, stockCount, whyNot } from '../sim/goals';
+import { canDeliver, clashOf, gainOf, isShort, isTaken, lastSowOf, MILESTONES, offered, partPay, plantedFor, requestHave, requestProgress, slackOf, sowByOf, stillToSow, stockCount, whyNot } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, LossCause, Order, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
@@ -23,6 +23,8 @@ export interface DialogHost {
   pickBuild(kind: BuildKind): void;
   /** Is the keyboard what the player last used? Then an opened card takes the keyboard's focus. */
   keyboard?(): boolean;
+  /** Sunup: the last morning card, to pin on the board (round 7: it showed for a few seconds and was gone). */
+  lastCard?(): { title: string; news: string } | null;
 }
 
 type Tab = 'requests' | 'fields' | 'seeds' | 'tools' | 'builds' | 'crew' | 'market' | 'milestones';
@@ -49,6 +51,10 @@ export class Dialogs {
     close.onclick = () => this.close();
     head.append(this.title, close);
     this.root.append(head, this.body);
+    // The board's notes scroll inside it; a fade at the foot says there is more below until the end is reached.
+    const atEnd = () => toggle(this.body, 'end', this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 4);
+    this.body.addEventListener('scroll', atEnd, { passive: true });
+    new ResizeObserver(atEnd).observe(this.body);
     // Close on a press that began on the backdrop. A tap that opened the board
     // (on the act button) ends with a click over the new backdrop; that one must not close it.
     this.scrim.onpointerdown = () => (this.pressedScrim = true);
@@ -157,23 +163,11 @@ export class Dialogs {
   }
 
   /**
-   * Sleeping before noon with work still waiting asks first and says what waits; so does sleeping at any hour with
-   * bugs or a crow still on the farm (bugs left on a crop spread overnight, a crow left pecking takes its crop), or
-   * on a flock day (crows still to come take a crop each).
+   * The sleep question (round 7: before evening it always asks; at any hour while the night would cost something).
+   * Short: the hour, and the one thing most at stake (it ran 18 words over three sentences).
    */
-  confirmSleep(minute: number, onYes: () => void, left?: { ripe: number; thirsty: number; bugs: number; crows: number }, flock = false): void {
-    const bits: string[] = [];
-    if (left?.ripe) bits.push(`${left.ripe} ripe ${left.ripe === 1 ? 'crop' : 'crops'}`);
-    if (left?.thirsty) bits.push(`${left.thirsty} thirsty ${left.thirsty === 1 ? 'crop' : 'crops'}`);
-    if (left?.bugs) bits.push(`bugs on ${left.bugs} ${left.bugs === 1 ? 'crop' : 'crops'}`);
-    if (left?.crows) bits.push(left.crows === 1 ? 'a crow' : `${left.crows} crows`);
-    const list = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : (bits[0] ?? '');
-    const what = list ? ` ${list[0].toUpperCase()}${list.slice(1)} still ${bits.length === 1 && /^(a crow|1 )/.test(list) ? 'waits' : 'wait'}.` : '';
-    // What the night does to what is left: bugs spread to the crops beside them, a crow eats, a flock day's crows come.
-    const pests = [left?.bugs ? ' Bugs left on a crop spread tonight.' : '', left?.crows ? ` ${left.crows === 1 ? 'A crow left pecking takes its crop' : 'Crows left pecking take their crops'}.` : ''].join('');
-    const crows = flock ? ' Crows are about: those still to come take a crop each.' : pests || ' Crops grow and the crate ships overnight.';
-    // (Pests and flock days ask after noon too, when "only" would be wrong.)
-    this.ask('Sleep now?', 'sleep', `It is ${minute < 360 ? 'only ' : ''}${clock(minute)}.${what}${crows}`, 'Sleep', onYes);
+  confirmSleep(minute: number, onYes: () => void, why: SleepWhy = {}): void {
+    this.ask('Sleep now?', 'sleep', sleepText(minute, why), 'Sleep', onYes);
   }
 
   /** Re-render the open dialog after the farm changed (a purchase, a delivery). */
@@ -227,6 +221,9 @@ export class Dialogs {
       case 'requests': {
         // What is on the board now has been read: the badge counts only notes pinned after this.
         if (homestead(s) && s.orders.some((o) => o.seen === false)) this.host.send({ type: 'readBoard' });
+        // Round 7: the last morning card, pinned here to read again.
+        const card = this.host.lastCard?.();
+        if (card) list.append(el('div', 'morning', `<b>${esc(card.title)}</b>${esc(card.news)}`));
         list.append(el('p', 'legend', smithLine(s)));
         if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
         // A pair still to choose between hangs together, "or" between them: only one of the two can be taken.
@@ -242,6 +239,9 @@ export class Dialogs {
             const pair = el('div', 'pair');
             pair.append(this.requestNote(s, o), el('div', 'or', 'or'), this.requestNote(s, mate));
             list.append(pair);
+            // Round 7: what makes them a choice, plainly ("Both need 20 plots. You have 14.").
+            const clash = clashOf(s, o, mate);
+            if (clash) list.append(el('p', 'clash', clashWords(clash)));
           } else list.append(this.requestNote(s, o));
         }
         list.append(el('p', 'legend', paired ? 'Accept one of a pair.' : s.orders.some(offered) ? 'Accept a request to take it on.' : 'The crate keeps what requests need.'));
@@ -397,7 +397,7 @@ export class Dialogs {
     const toSow = stillToSow(s, o);
     const t = noteText(s, o);
     const lines = `<b${offered(o) ? ' class="gain"' : ''}>${keepWhole(t.head)}</b>${t.lines.map((l, i) => `<span${i === 1 && t.need ? ' class="need"' : i === t.lines.length - 1 ? ' class="when"' : ''}>${keepWhole(l)}</span>`).join('')}`;
-    const note = el('div', `item req${offered(o) ? ' offer' : ' taken'}`, `<span class="blob">${cropArt(it.crop)}</span><span class="tx">${lines}</span>`);
+    const note = el('div', `item req${offered(o) ? ' offer' : ' taken'}${isShort(s, o) ? ' short' : ''}`, `<span class="blob">${cropArt(it.crop)}</span><span class="tx">${lines}</span>`);
     note.dataset.crop = it.crop;
     note.dataset.id = String(o.id);
     if (offered(o)) {
@@ -412,6 +412,7 @@ export class Dialogs {
       note.append(b);
     } else if (isTaken(o) && canDeliver(s, o)) {
       const b = el('button', 'btn primary', 'Deliver');
+      b.dataset.deliver = String(o.id);
       b.onclick = () => {
         this.host.send({ type: 'deliver', id: o.id });
         this.host.cue('order');
@@ -509,7 +510,9 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
   const slack = spare <= 0 ? 'no day to spare' : spare === 1 ? 'a day to spare' : `${spare} days to spare`;
   const when = sowBy <= s.day ? 'today' : `by ${dayName(s, sowBy)}`;
   if (offered(o)) {
-    const need = toSow > 0 ? `Plant ${toSow} ${when}, seed ${fmt(toSow * d.seed)}` : `Wanted by ${dayName(s, o.due)}`;
+    // (Round 7: what is already planted for it since it was pinned says so: "15 sunflowers... Plant 9" did not.)
+    const sown = it.n - toSow;
+    const need = toSow > 0 ? `${sown > 0 ? `${sown} planted, plant ${toSow} more` : `Plant ${toSow}`} ${when}, seed ${fmt(toSow * d.seed)}` : `Wanted by ${dayName(s, o.due)}`;
     return { head: `+${fmt(gain)} over market`, lines: [`${it.n} ${name} for ${who}`, need, `Ripe in ${d.days} days, due ${dayName(s, o.due)}, ${slack}`], need: toSow > 0 };
   }
   // Taken: what is growing for it and in the crate (the fifth playtest's note said "0 of 9 in the crate" while nine
@@ -517,11 +520,48 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
   // Round 6: only crops sown for it count, so these are its own, and what took any of them says so.
   const p = requestProgress(s, o);
   const more = plantedFor(s, o) > 0 ? ' more' : '';
-  const need = toSow > 0 && s.day <= sowBy ? `Plant ${toSow}${more} ${when}, seed ${fmt(toSow * d.seed)}` : '';
+  // Round 7: a taken request can be planted (or replanted after a loss) until its last day for it; one that can no
+  // longer be met in full says what can still come and what it will pay for it.
+  const last = lastSowOf(o);
+  const lastWhen = last <= s.day ? 'today' : `by ${dayName(s, last)}`;
+  const short = isShort(s, o);
+  const coming = requestHave(s, o);
+  const need = short ? `${coming} of ${it.n} can come, pays ${fmt(partPay(o, coming))}` : toSow > 0 && s.day <= last ? `Plant ${toSow}${more} ${s.day <= sowBy ? when : lastWhen}, seed ${fmt(toSow * d.seed)}` : '';
   const lost = (Object.entries(o.lost ?? {}) as [LossCause, number][]).filter(([, n]) => n > 0).map(([c, n]) => `${n} lost to ${LOSS_WORD[c]}`);
   const have = [p.growing ? `${p.growing} growing` : '', p.crate ? `${p.crate} in the crate` : '', ...lost].filter(Boolean).join(', ');
   const wanted = have ? `${have[0].toUpperCase()}${have.slice(1)}, wanted by ${dayName(s, o.due)}` : `Wanted by ${dayName(s, o.due)}`;
-  return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(gain)} over market`, ...(need ? [need] : []), wanted], need: !!need };
+  return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(gain)} over market`, ...(need ? [need] : []), wanted], need: !!need && !short };
+}
+
+/** What makes a pair a choice, in eight words or fewer ("Both need 20 plots. You have 14."). */
+export function clashWords(c: { kind: 'soil' | 'coins'; need: number; have: number }): string {
+  return c.kind === 'soil' ? `Both need ${c.need} plots. You have ${c.have}.` : `Both need ${fmt(c.need)} of seed. You have ${fmt(c.have)}.`;
+}
+
+/** What the sleep question can name: what is left on the farm, a flock day, and planting a request still needs today. */
+export interface SleepWhy {
+  ripe?: number;
+  thirsty?: number;
+  bugs?: number;
+  crows?: number;
+  flock?: boolean;
+  owed?: number;
+}
+
+/**
+ * The sleep question's words: the hour, and the one thing most at stake, in
+ * ten words or fewer ("It is 3:27 pm. Bugs left on crops spread tonight.").
+ */
+export function sleepText(minute: number, why: SleepWhy = {}): string {
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const at = `It is ${clock(minute)}.`;
+  if (why.flock) return `${at} Crows still to come will take crops.`;
+  if (why.crows) return `${at} ${why.crows === 1 ? 'A crow will take its crop.' : 'Crows will take their crops.'}`;
+  if (why.bugs) return `${at} Bugs left on crops spread tonight.`;
+  if (why.owed) return `${at} A request needs ${why.owed} more planted today.`;
+  if (why.thirsty) return `${at} ${n(why.thirsty, 'crop is', 'crops are')} still thirsty.`;
+  if (why.ripe) return `${at} ${n(why.ripe, 'crop is', 'crops are')} ripe to pick.`;
+  return at;
 }
 
 /** What took a crop, after "lost to". */
@@ -532,7 +572,7 @@ const LOSS_WORD: Record<LossCause, string> = { crows: 'crows', bugs: 'bugs', dry
  * them, never inside one ("no / day to spare", "4 days to / go").
  */
 export function keepWhole(line: string): string {
-  return esc(line).replace(/(\+[\d,]+ over market|Sow \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|seed [\d,]+|Ripe in \d+ days?|[Dd]ue (?:tomorrow|[A-Z][a-z]+ \d+)|(?:no|a|\d+) days? to spare|[Ww]anted by (?:tomorrow|[A-Z][a-z]+ \d+)|\d+ (?:growing|in the crate|lost to (?:crows|bugs|a dry night|the heat|the turn)))/g, '<span class="nw">$1</span>');
+  return esc(line).replace(/(\+[\d,]+ over market|[Pp]lant \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|\d+ of \d+ can come|pays [\d,]+|Sow \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|seed [\d,]+|Ripe in \d+ days?|[Dd]ue (?:tomorrow|[A-Z][a-z]+ \d+)|(?:no|a|\d+) days? to spare|[Ww]anted by (?:tomorrow|[A-Z][a-z]+ \d+)|\d+ (?:growing|in the crate|lost to (?:crows|bugs|a dry night|the heat|the turn)))/g, '<span class="nw">$1</span>');
 }
 
 /** A day as the day card names it ("Spring 6"), or "tomorrow". */
@@ -558,11 +598,13 @@ export function sprinklerWords(s: WorldState): string {
  */
 export function smithLine(s: WorldState): string {
   const has = (t: 'can' | 'hoe') => !homestead(s) || s.learn.includes(t);
+  // Round 7: every tool still to come counts, not only the next of each ("Reputation 3. The smith will make anything."
+  // was wrong: the gold ones want 6 and 8).
   const next = (['hoe', 'can'] as const)
     .filter(has)
-    .map((t) => ({ t, u: TOOL_UPGRADES[t][s.tools[t]] }))
-    .filter((x) => x.u && x.u.rep > s.rep)
-    .sort((a, b) => a.u!.rep - b.u!.rep)[0];
+    .flatMap((t) => TOOL_UPGRADES[t].slice(s.tools[t]).map((u) => ({ t, u })))
+    .filter((x) => x.u.rep > s.rep)
+    .sort((a, b) => a.u.rep - b.u.rep)[0];
   const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
   const n = (k: number) => words[k] ?? String(k);
   // The smith is not named before his lesson.

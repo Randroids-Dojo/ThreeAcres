@@ -6,14 +6,14 @@
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
 import type { Input } from '../game/input';
-import { canAfford, doomedAtTurn, homestead, nightsToTurn, resolve, sowing } from '../sim/actions';
+import { canAfford, doomedAtTurn, homestead, justInTime, nightsToTurn, resolve, sowing } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, DAYS_PER_SEASON, FLOW_SPEEDS, HAND_NAMES, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, cropWord, QUALITY_NAME } from '../sim/crops';
-import { canDeliver, isTaken, MILESTONES, newRequests, stockCount } from '../sim/goals';
+import { canDeliver, isTaken, lastSowOf, MILESTONES, newRequests, requestHave, stockCount, whyNot } from '../sim/goals';
 import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import { propAt } from '../sim/map';
+import { CRATE, propAt } from '../sim/map';
 import type { BuildKind, CropId, RequestFail, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
 import { brief, canLevel, describe, denyText, seedNote, sentence, townName } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
@@ -88,7 +88,8 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
   // [priority, reading order, words]: lower priority numbers are kept first.
   const bits: [number, number, string][] = [];
   const filled = r.filled ?? [];
-  if (filled.length === 1) bits.push([3, 0, `${esc(townName(filled[0].who))} paid ${fmt(filled[0].reward)}`]);
+  // Round 7: one short of its count is paid for what it got ("paid 285 for 14 of 15").
+  if (filled.length === 1) bits.push([3, 0, `${esc(townName(filled[0].who))} paid ${fmt(filled[0].reward)}${filled[0].of ? ` for ${filled[0].got} of ${filled[0].of}` : ''}`]);
   else if (filled.length > 1) bits.push([3, 0, `${filled.length} requests paid ${fmt(filled.reduce((a, f) => a + f.reward, 0))}`]);
   if (sold) bits.push([4, 1, `sold ${sold} for ${fmt(value)}`]);
   // What was lost, in one clause.
@@ -99,14 +100,17 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
   if (lost.length) bits.push([1, 2, lost.join(' and ')]);
   // A request that ran out of time says so, rather than vanishing from the board; so does one that can no longer be met,
   // each with its cause (round 6).
-  const because = (g: { why?: RequestFail; lost?: number }) => (failWords(g.why, g.lost) ? ` (${failWords(g.why, g.lost)})` : '');
+  // Round 7: a cause the card already names among the losses is not said again ("Crows ate 1, Pell's pickles found
+  // sunflowers elsewhere (crows ate 1)").
+  const said = (why?: RequestFail) => (why === 'crows' && !!r.eaten) || ((why === 'bugs' || why === 'dry' || why === 'heat') && !!r.withered) || (why === 'turn' && !!r.turned);
+  const because = (g: { why?: RequestFail; lost?: number }) => (failWords(g.why, g.lost) && !said(g.why) ? ` (${failWords(g.why, g.lost)})` : '');
   const went = [...(r.lapsed ?? []), ...(r.withdrawn ?? [])];
   const gone = [...(r.lapsed ?? []).map((l) => `${esc(townName(l.who))} gave up on the ${cropWord(l.crop, l.n)}${because(l)}`), ...(r.withdrawn ?? []).map((w) => `${esc(townName(w.who))} found ${cropWord(w.crop, w.n)} elsewhere${because(w)}`)];
   if (gone.length === 1) bits.push([2, 3, gone[0]]);
   else if (gone.length > 1) {
     // Several: one cause for all, when they share one.
     const whys = [...new Set(went.map((g) => g.why))];
-    const one = whys.length === 1 ? failWords(whys[0], went.reduce((a, g) => a + (g.lost ?? 0), 0)) : '';
+    const one = whys.length === 1 && !said(whys[0]) ? failWords(whys[0], went.reduce((a, g) => a + (g.lost ?? 0), 0)) : '';
     bits.push([2, 3, `${gone.length} requests went elsewhere${one ? ` (${one})` : ''}`]);
   }
   // Bugs left on crops overnight spread to their neighbours: the card says how far.
@@ -122,15 +126,62 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
   // A flock day says so while there is still the day to watch for them.
   if (r.flock) bits.push([1, 7, 'crows are about today']);
   // A wet morning is planting weather: rain waters what goes in today (round 6: rain days had 6 to 10 seconds of work).
-  if (homestead(s) && (s.weather === 'rain' || s.weather === 'storm') && s.learn.includes('seeds')) bits.push([4.5, 6.5, 'what you plant today needs no water']);
+  // (Round 7: only when there is bare soil and the coins for a seed: it came with 0 coins and every plot sown.)
+  if (homestead(s) && (s.weather === 'rain' || s.weather === 'storm') && s.learn.includes('seeds') && canPlantNow(s)) bits.push([4.5, 6.5, 'what you plant today needs no water']);
   // What is ripe to pick this morning (Sunup), or, elsewhere, how many crops grew a stage.
   if (r.ripe) bits.push([5, 7, `${r.ripe} ripe to pick`]);
   else if (!homestead(s) && r.grew) bits.push([5, 7, `${r.grew} grew`]);
-  for (const k of r.kept ?? []) bits.push([6, 8, `${k.n} ${cropWord(k.crop, k.n)} kept for a request`]);
+  for (const k of homestead(s) ? [] : (r.kept ?? [])) bits.push([6, 8, `${k.n} ${cropWord(k.crop, k.n)} kept for a request`]);
   if (r.crewWork) bits.push([6, 9, `the crew did ${r.crewWork} jobs overnight`]);
   if (r.wages) bits.push([6, 10, `wages ${r.wages}`]);
   const kept = bits.map((b, i) => ({ b, i })).sort((x, y) => x.b[0] - y.b[0] || x.i - y.i).slice(0, Math.max(0, room));
   return sentence(kept.sort((x, y) => x.b[1] - y.b[1] || x.i - y.i).map((x) => x.b[2]));
+}
+
+/**
+ * Round 7: what a crop lost by day means for the request it was sown for, in
+ * a few words after the loss ("A crow took a sunflower. 14 of 15 can come."):
+ * still met in full (a day to replant), short (paid for what comes), or lost.
+ */
+export function requestAfterLoss(s: WorldState, req: number | undefined): string {
+  const o = req !== undefined ? s.orders.find((q) => q.id === req && isTaken(q)) : undefined;
+  if (!o) return '';
+  const it = o.items[0];
+  const have = requestHave(s, o);
+  if (have >= it.n) return '';
+  if (!whyNot(s, o)) {
+    const last = lastSowOf(o);
+    return ` Plant ${it.n - have} more ${last <= s.day ? 'today' : last === s.day + 1 ? 'by tomorrow' : `by ${SEASON_NAMES[season(last)]} ${dayOfSeason(last)}`}.`;
+  }
+  return have > 0 ? ` ${have} of ${it.n} can come.` : '';
+}
+
+/** Sunup: is there bare soil and the coins for a seed that can go in today (so a wet morning is planting weather)? */
+export function canPlantNow(s: WorldState): boolean {
+  const seeds = CROP_IDS.filter((c) => sowing(s.day, c).ok).map((c) => CROPS[c].seed);
+  if (!seeds.length || s.coins < Math.min(...seeds)) return false;
+  for (let i = 0; i < s.plots.length; i++) {
+    const p = s.plots[i];
+    if (s.tiles[i] !== 'field' || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned || p.crop || !p.tilled) continue;
+    if (!s.builds.some((b) => b.y * s.W + b.x === i)) return true;
+  }
+  return false;
+}
+
+/**
+ * Round 7: what a tap on a seed card does. A seed that cannot go in says why
+ * in the picker, which stays open, and the seed in hand is kept (a tap on a
+ * "Too late" carrot closed the picker with no word, and the next eleven plot
+ * taps planted nothing). One that only just ripens before the turn is chosen,
+ * with a warning to water it every night.
+ */
+export function seedTap(s: WorldState, crop: CropId): { ok: boolean; word: string } {
+  const d = CROPS[crop];
+  if (!homestead(s)) return { ok: true, word: '' };
+  const sw = sowing(s.day, crop);
+  if (!sw.ok) return { ok: false, word: sw.late ? `${sw.reason}.` : `${d.plural[0].toUpperCase()}${d.plural.slice(1)} grow in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}.` };
+  if (justInTime(s.day, crop)) return { ok: true, word: `${d.plural[0].toUpperCase()}${d.plural.slice(1)} ripen just before ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()}. Water every night.` };
+  return { ok: true, word: '' };
 }
 
 /**
@@ -196,6 +247,9 @@ export class Hud {
   private info = el('div', 'info empty');
   private toolbar = el('div', 'toolbar');
   private seedbar = el('div', 'seedbar hidden');
+  /** A word in the seed picker itself (round 7: "Carrots won't ripen before summer."), so it is never behind it. */
+  private pickMsg = el('div', 'pickmsg');
+  private pickMsgUntil = 0;
   private buildbar = el('div', 'buildbar hidden');
   private toasts = el('div', 'toasts');
   private boardBtn = el('button', 'btn iconbtn');
@@ -315,7 +369,8 @@ export class Hud {
 
   private updateDay(s: WorldState): void {
     const sn = season(s.day);
-    setText(this.date, `${SEASON_NAMES[sn]} ${dayOfSeason(s.day)}`);
+    // Round 7: the season's length is on screen ("Spring 7 of 10"; nine lettuces planted at 6 pm were lost at the turn).
+    setHtml(this.date, homestead(s) ? `${SEASON_NAMES[sn]} ${dayOfSeason(s.day)} <span class="of">of ${DAYS_PER_SEASON}</span>` : `${SEASON_NAMES[sn]} ${dayOfSeason(s.day)}`);
     setText(this.clockEl, s.rules.clock === 'turns' ? `${s.ap} of ${s.apMax} moves` : clock(s.minute));
     const wild = s.rules.weather === 'wild';
     // The next three days, read as a sentence: "Sunny, then rain, sun, cloud".
@@ -506,6 +561,7 @@ export class Hud {
       setText(b.querySelector('.key')!, gone ? '' : String(++k));
     }
     for (const b of this.buildbar.querySelectorAll<HTMLElement>('.seed')) toggle(b, 'on', s.buildKind === b.dataset.kind);
+    if (this.pickMsgUntil && performance.now() > this.pickMsgUntil) this.pickWord('', false);
     // A picker whose tool has left the hand is closed for good (it only hid, and kept the pointer hidden).
     const kept = pickersAfter({ seed: this.seedOpen, build: this.buildOpen }, s.tool, r.tools === 'smart');
     this.seedOpen = kept.seed;
@@ -546,6 +602,7 @@ export class Hud {
 
   private renderSeedbar(s: WorldState): void {
     this.seedbar.innerHTML = '';
+    this.seedbar.append(this.pickMsg);
     for (const c of CROP_IDS) {
       const d = CROPS[c];
       const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"></span><span class="wh"></span><span class="key"></span>`);
@@ -553,14 +610,13 @@ export class Hud {
       b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}. ${d.likes}.`;
       b.onclick = () => {
         const st = this.host.state();
-        const sw = homestead(st) ? sowing(st.day, c) : null;
-        if (sw && !sw.ok) {
-          this.toast(sw.late ? `${sw.reason}.` : `${d.name} grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}.`, 'deny');
+        const tap = seedTap(st, c);
+        if (!tap.ok) {
+          // Round 7: the word shows in the picker, which stays open, and the seed in hand stays as it was (the sixth
+          // round closed the picker and put the hands in hand, and the seventh playtest saw no word at all).
+          this.pickWord(tap.word, true);
           this.host.cue('deny');
-          // The seed that was in hand is not kept ready to sow: the picker closes and the hands come out, so the next
-          // tap on a plot plants nothing by surprise.
-          this.seedOpen = false;
-          if (st.rules.tools === 'kit' && st.tool === 'seeds') this.host.send({ type: 'tool', tool: 'hands' });
+          this.seedOpen = true;
           return;
         }
         if (st.rules.goal === 'almanac' && !st.almanac.unlocked.includes(c)) {
@@ -571,11 +627,24 @@ export class Hud {
         this.host.send({ type: 'seed', crop: c });
         if (st.rules.tools === 'kit') this.host.send({ type: 'tool', tool: 'seeds' });
         this.host.cue('tool');
-        if (window.innerWidth < 640) this.seedOpen = false;
+        // A crop that only just ripens before the turn is warned of before it goes in; the picker stays open to read it.
+        if (tap.word) this.pickWord(tap.word, false);
+        else {
+          this.pickWord('', false);
+          if (window.innerWidth < 640) this.seedOpen = false;
+        }
       };
       this.seedbar.append(b);
     }
     void s;
+  }
+
+  /** A word in the seed picker (a refusal, or a warning), for a few seconds. */
+  private pickWord(text: string, deny: boolean): void {
+    setText(this.pickMsg, text);
+    toggle(this.pickMsg, 'on', !!text);
+    toggle(this.pickMsg, 'deny', deny);
+    this.pickMsgUntil = text ? performance.now() + 3200 : 0;
   }
 
   private renderBuildbar(): void {
@@ -715,6 +784,12 @@ export class Hud {
       }
       case 'coins':
         if (e.x !== undefined && e.y !== undefined) this.float(e.x + 0.5, e.y + 0.5, `+${fmt(e.amount)}`);
+        // Round 7: a crop paid for as it goes into the crate: a small rise of coins at the crate, once the crop lands.
+        else if (e.crate && this.knows(s, 'coins')) this.crateCoins(e.amount);
+        break;
+      case 'night':
+        // Words of the day go with it: a let-go note stayed up through the night onto the morning card.
+        for (const n of [...this.toasts.children]) n.remove();
         break;
       case 'harvest': {
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
@@ -731,8 +806,9 @@ export class Hud {
         break;
       }
       case 'crowEat':
-        // A crop a crow takes by day says so (round 6: losses came from pests the player never saw).
-        if (homestead(s) && s.turnover < 0 && e.crop) this.toast(`A crow took ${e.crop === 'corn' || e.crop === 'beans' ? 'some' : 'a'} ${CROPS[e.crop].name.toLowerCase()}.`, '', 2600);
+        // A crop a crow takes by day says so (round 6: losses came from pests the player never saw), and, when it was
+        // sown for a request, what that means for the request (round 7: one crow voided a whole request without a word).
+        if (homestead(s) && s.turnover < 0 && e.crop) this.toast(`A crow took ${e.crop === 'corn' || e.crop === 'beans' ? 'some' : 'a'} ${CROPS[e.crop].name.toLowerCase()}.${requestAfterLoss(s, e.req)}`, '', 3200);
         break;
       case 'milestone': {
         // A milestone reads as something won, not a task: "Your first harvest is in".
@@ -754,7 +830,9 @@ export class Hud {
       case 'request':
         // Requests filled or gone overnight are on the morning card; this is one handed over by day, or the other of
         // a pair let go because seed went in for this one.
-        if (e.done && s.turnover < 0) this.toast(`<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
+        if (e.done && s.turnover < 0) this.toast(e.of ? `<b>${esc(e.who)}</b> took ${e.got} of ${e.of}. +${fmt(e.reward)} coins.` : `<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
+        // Lost by day, with its cause (round 7), or the other of a pair let go.
+        else if (!e.done && s.turnover < 0 && e.crop && e.why) this.toast(`${esc(e.who)} gave up on the ${CROPS[e.crop].plural}${failWords(e.why, e.lost) ? ` (${failWords(e.why, e.lost)})` : ''}.`, 'deny', 3200);
         else if (!e.done && s.turnover < 0 && e.crop) this.toast(`${esc(e.who)} will find ${CROPS[e.crop].plural} elsewhere.`, '', 2800);
         break;
       case 'upgrade': {
@@ -857,7 +935,48 @@ export class Hud {
     // Only news earns a morning card.
     if (!news) return;
     const weather = WEATHER_NAMES[s.weather].toLowerCase();
+    // Round 7: the board keeps the last card to read again (it showed for a few seconds, and was gone).
+    this.lastCard = { day: s.day, title: `${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}, ${weather}`, news };
     this.toast(`<b>${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}</b>, ${weather}<br>${news}`, 'big', 3800);
+  }
+
+  /** The last morning card, for the board (null before the first). */
+  lastCard: { day: number; title: string; news: string } | null = null;
+
+  /** The rise of coins at the crate: one at a time, a quick run of picks adding up on the same one. */
+  private crateRise: { el: HTMLElement | null; amount: number; t: number } | null = null;
+
+  private crateCoins(amount: number): void {
+    const now = performance.now();
+    const r = this.crateRise;
+    if (r && now - r.t < 900) {
+      r.amount += amount;
+      r.t = now;
+      if (r.el) {
+        r.el.textContent = `+${fmt(r.amount)}`;
+        r.el.classList.remove('rise');
+        void r.el.offsetWidth;
+        r.el.classList.add('rise');
+      }
+      return;
+    }
+    const rise: { el: HTMLElement | null; amount: number; t: number } = { el: null, amount, t: now };
+    this.crateRise = rise;
+    // After the crop's arc has landed in the crate (about 0.8 s), over the crate when it is on screen (the coin box
+    // counts it at once either way).
+    setTimeout(() => {
+      const p = this.host.project(CRATE.x + 0.5, CRATE.y - 0.5, 0.9);
+      const W = this.root.clientWidth;
+      const H = this.root.clientHeight;
+      if (!p || p.x < 20 || p.x > W - 20 || p.y < 40 || p.y > H - 40) return;
+      const f = el('div', 'floater coin rise');
+      f.textContent = `+${fmt(rise.amount)}`;
+      f.style.left = `${p.x}px`;
+      f.style.top = `${p.y}px`;
+      this.floaters.append(f);
+      rise.el = f;
+      setTimeout(() => f.remove(), 1600);
+    }, 750);
   }
 
   toast(html: string, kind: string, ms = 2400): void {

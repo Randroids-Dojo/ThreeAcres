@@ -63,9 +63,9 @@ describe('the crow lesson', () => {
     s.learn.push('pests');
     out = t.update(s, 0.1, true);
     expect(out.line).toBe('');
-    // A crow lands: now the line (on screen for a couple of seconds, so it counts as seen).
+    // A crow lands: now the line (on screen four seconds, so it counts as read; round 7).
     s.crows.push({ id: 900, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
-    for (let i = 0; i < 20; i++) out = t.update(s, 0.1, true);
+    for (let i = 0; i < 41; i++) out = t.update(s, 0.1, true);
     expect(out.line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     // Shooed: the crow lesson ends, and the scarecrow note follows the next morning (one new thing a day).
     t.onEvent(s, { type: 'crowScared', id: 900, x: 3, y: 5 } as never);
@@ -90,7 +90,7 @@ describe('a crow will not wait', () => {
     const t = new Tutor();
     expect(t.update(s, 0.1, true).line).toBe('Buy a second field.');
     s.crows.push({ id: 901, x: 3, y: 5, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
-    for (let i = 0; i < 20; i++) expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
+    for (let i = 0; i < 41; i++) expect(t.update(s, 0.1, true).line).toMatch(/^A crow is on your [a-z]+\. Shoo it\.$/);
     t.onEvent(s, { type: 'crowScared', id: 901, x: 3, y: 5 } as never);
     s.crows[0].phase = 'flee';
     t.update(s, 0.1, true);

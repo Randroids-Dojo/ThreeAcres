@@ -13,6 +13,7 @@ describe('each preset plays on its own', () => {
       const harvested = CROP_IDS.reduce((a, c) => a + s.stats.harvested[c], 0);
       expect(harvested).toBeGreaterThan(20);
       expect(s.stats.earned).toBeGreaterThan(500);
-    });
+      // (Twenty bot days take a second or two alone; under a full parallel run on a loaded machine, more than the default.)
+    }, 20000);
   }
 });

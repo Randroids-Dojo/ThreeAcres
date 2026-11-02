@@ -102,6 +102,8 @@ export const REQUEST_SOIL = { risk: 3, time: 5, size: 2, single: 3 } as const;
 export const REQUEST_RISK = 0.8;
 /** The bold one of a pair offers at least this much more gain than the safe one, or the pair is not offered. */
 export const REQUEST_BOLD = 1.2;
+/** Round 7: a request pays at least this share over what its crops fetch at market, once the gain cap has scaled it. */
+export const REQUEST_FLOOR = 0.15;
 /** The most a request's gain over market can be: this much for each plot of owned field, so requests grow with the farm. */
 export const REQUEST_GAIN_PER_PLOT = 14;
 /** How a bold request is sized against its safe partner, in plot-days: a long crop about twice, a big one about 2.2 times. */
@@ -109,7 +111,7 @@ export const REQUEST_SPAN = { long: 2, big: 2.2 } as const;
 /** No request asks for more than this share of the farm's plots (a pair is a choice, not the whole farm). */
 export const REQUEST_MOST = 0.6;
 /** The most a request asks for, or of the big crops. */
-export const REQUEST_MAX = 24;
+export const REQUEST_MAX = 32;
 export const REQUEST_MAX_BIG = 8;
 /** The least a request asks for. */
 export const REQUEST_MIN = 3;

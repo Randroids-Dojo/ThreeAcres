@@ -33,6 +33,15 @@
 // and crops crows took by day against what the morning card reported. It
 // reads the rules only through what round 5 had too (requestHave, farmPlots,
 // sowBudget, stillToSow), so it runs on the committed code for a before.
+// Round 7 adds, for every day, whether it ended with bare soil and coins
+// below the cheapest seed that could go in (a broke day: the seventh playtest
+// had 0 coins and 10 to 22 bare plots from Summer 1 to 5), and the bare
+// plots then; the days with under 10 s of work; and for each offer as it is
+// pinned, whether a pair names two different crops, whether it names the
+// same crops as the offer before, and whether the farm could take both (on
+// the farm's own soil and coins, counted here, not by the rules). It reads
+// the rules only through what round 6 had too, so it runs on the committed
+// code for a before.
 // npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs] [--mornings]
 import * as C from '../src/sim/constants';
 import { sowing } from '../src/sim/actions';
@@ -162,6 +171,10 @@ interface Farm {
   /** Withdrawn or lapsed requests that said why (round 6), of all that went. */
   goneWhy: number;
   goneAll: number;
+  /** Round 7: days that ended with bare soil and coins below the cheapest seed that could go in, with the bare plots then. */
+  brokeDays: { day: number; bare: number }[];
+  /** Round 7: offers as pinned: a pair of two different crops, the same crops as the offer before, and whether the farm could take both. */
+  offers: { pair: boolean; differ: boolean; repeat: boolean; both: boolean }[];
 }
 
 const JOBS = new Set(['till', 'water', 'plant', 'harvest', 'tend', 'refill', 'clear', 'build']);
@@ -273,6 +286,9 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
   let eatenReported = 0;
   let goneWhy = 0;
   let goneAll = 0;
+  const brokeDays: Farm['brokeDays'] = [];
+  const offers: Farm['offers'] = [];
+  let lastKey = '';
   const r = play(s, DAYS, {
     pace,
     each: (st: WorldState) => {
@@ -300,6 +316,14 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
         if (st.day >= 3 && st.day <= 12) {
           const cheapest = Math.min(...CROP_IDS.filter((c) => sowing(st.day, c).ok).map((c) => CROPS[c].seed));
           if (st.coins < cheapest) for (let i = 0; i < st.plots.length; i++) if (ownedAt(st, i) && st.tiles[i] === 'field' && st.plots[i].tilled && !st.plots[i].crop && !st.builds.some((b) => b.y * st.W + b.x === i)) idleSoil++;
+        }
+        // Round 7: a broke day ends with bare soil and not the coins for one seed of anything that could go in.
+        {
+          const sowable = CROP_IDS.filter((c) => sowing(st.day, c).ok).map((c) => CROPS[c].seed);
+          const cheapest = sowable.length ? Math.min(...sowable) : Infinity;
+          let bare = 0;
+          for (let i = 0; i < st.plots.length; i++) if (ownedAt(st, i) && st.tiles[i] === 'field' && st.plots[i].tilled && !st.plots[i].crop && !st.builds.some((b) => b.y * st.W + b.x === i)) bare++;
+          if (bare > 0 && st.coins < cheapest && sowable.length) brokeDays.push({ day: st.day, bare });
         }
         sleepHour.push(6 + st.minute / 60);
         staminaLeft.push(st.stamina);
@@ -351,6 +375,13 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
       const fresh2 = st.orders.filter((o) => !seenOrders.has(o.id) && (o as Order & { pair?: number }).pair !== undefined);
       if (PAIRS && fresh2.length === 2 && pairs.length < 10) pairs.push({ state: structuredClone(st), ids: [fresh2[0].id, fresh2[1].id] });
       if (fresh2.length === 2) pairPins.push(pairCompete(st, fresh2[0], fresh2[1]));
+      // Round 7: each new offer (after the first request), a pair or one alone.
+      const newOnes = st.orders.filter((o) => !seenOrders.has(o.id));
+      if (newOnes.length && (seenOrders.size > 0 || newOnes.length > 1)) {
+        const key = [...new Set(newOnes.map((o) => o.items[0].crop))].sort().join('+');
+        if (newOnes.length === 2 || seenOrders.size > 0) offers.push({ pair: newOnes.length === 2, differ: newOnes.length === 2 && newOnes[0].items[0].crop !== newOnes[1].items[0].crop, repeat: key === lastKey, both: newOnes.length === 2 ? canTakeBoth(st, newOnes[0], newOnes[1]) : false });
+        lastKey = key;
+      }
       let fresh = false;
       for (const o of st.orders) {
         if (seenOrders.has(o.id)) continue;
@@ -403,7 +434,8 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
   let sold = false;
   let noIncome = 0;
   for (const e of r.events) {
-    if (e.type === 'sell' || (e.type === 'request' && e.done) || (e.type === 'order' && e.done)) sold = true;
+    // (Round 7: a crop is paid for as it goes into the crate, by day.)
+    if (e.type === 'sell' || (e.type === 'coins' && (e as { crate?: boolean }).crate) || (e.type === 'request' && e.done) || (e.type === 'order' && e.done)) sold = true;
     if (e.type === 'dawn') {
       if (!sold) noIncome++;
       sold = false;
@@ -455,7 +487,38 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
     eatenReported,
     goneWhy,
     goneAll,
+    brokeDays,
+    offers,
   };
+}
+
+/**
+ * Round 7: could the farm take both of a pair, counted here from the farm
+ * itself and not by the rules' own measure: soil free now or freed by a crop
+ * ripe by the later sow-by day, and coins in hand with what the crops ripe by
+ * then fetch, after what taken requests still need planted.
+ */
+function canTakeBoth(s: WorldState, a: Order, b: Order): boolean {
+  const by = Math.max(G.sowByOf(a), G.sowByOf(b));
+  let room = 0;
+  let coins = s.coins;
+  for (let i = 0; i < s.plots.length; i++) {
+    if (!ownedAt(s, i) || s.tiles[i] !== 'field' || s.builds.some((q) => q.y * s.W + q.x === i)) continue;
+    const c = s.plots[i].crop;
+    if (!c || c.dead) room++;
+    else if (CROPS[c.kind].days - c.age <= by - s.day) {
+      if (CROPS[c.kind].regrow === 0) room++;
+      coins += CROPS[c.kind].price;
+    }
+  }
+  for (const o of s.orders) {
+    if (o === a || o === b || !G.isTaken(o)) continue;
+    const still = G.stillToSow(s, o);
+    room -= still;
+    coins -= still * CROPS[o.items[0].crop].seed;
+  }
+  const need = (o: Order) => G.stillToSow(s, o);
+  return need(a) + need(b) <= room && need(a) * CROPS[a.items[0].crop].seed + need(b) * CROPS[b.items[0].crop].seed <= coins;
 }
 
 /**
@@ -501,6 +564,10 @@ function syntheticMornings(): void {
   let counted = 0;
   let grown = 0;
   let seed = 1;
+  let differ = 0;
+  let clash = 0;
+  let repeats = 0;
+  let seconds = 0;
   for (const fields of [1, 2, 3]) for (const purse of [150, 400, 1200, 3000]) for (const day of [4, 6, 13, 16, 24, 26, 34]) for (const sown of [false, true]) {
     const s = world('sunup', seed++ * 7919);
     for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver']) s.learn.push(`lesson:${id}`);
@@ -538,11 +605,24 @@ function syntheticMornings(): void {
       if (c.competeBy) compete++;
       if (c.soilBy) soil++;
       if (c.coinsBy) coins++;
+      if (offer[0].items[0].crop !== offer[1].items[0].crop) differ++;
+      if (!canTakeBoth(s, offer[0], offer[1])) clash++;
+    }
+    // The morning after, with nothing taken (both let go): does the board offer the same crops again?
+    if (offer.length) {
+      const key = [...new Set(offer.map((o) => o.items[0].crop))].sort().join('+');
+      s.orders = [];
+      const again = G.offerRequests(s);
+      if (again.length) {
+        seconds++;
+        if ([...new Set(again.map((o) => o.items[0].crop))].sort().join('+') === key) repeats++;
+      }
     }
   }
   console.log(`\nSunup, mornings like the tester's (1 to 3 fields, 150 to 3,000 coins, nothing growing or a third sown a day earlier): ${offers} offers, ${pairs} pairs`);
   console.log(`  offers the rules count as met in part already (crops growing, the crate): ${pct(counted, offers)}`);
   console.log(`  pairs that compete (the farm could not sow both by their sow-by days): ${pct(compete, pairs)} (for soil ${pct(soil, pairs)}, for coins ${pct(coins, pairs)})${grown ? '' : ''}`);
+  console.log(`  round 7: pairs of two different crops ${pct(differ, pairs)}; pairs the farm could not take both of, counted from the farm ${pct(clash, pairs)}; the next offer names the same crops ${pct(repeats, seconds)} (${seconds} next offers)`);
 }
 
 /**
@@ -734,6 +814,15 @@ for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the
   const actOf = (xs: typeof wetAct) => (xs.length ? `median ${med(xs.map((a) => a.secs)).toFixed(0)} s, under 10 s on ${pct(xs.filter((a) => a.secs < 10).length, xs.length)} (${xs.length} days)` : 'no days');
   console.log(`           active seconds, days 2 to 10: wet days ${actOf(wetAct.filter((a) => a.wet))}; dry days ${actOf(wetAct.filter((a) => !a.wet))}`);
   console.log(`           crops crows took by day ${avg((f) => f.eatenByDay).toFixed(1)} a farm; the morning cards said crows ate ${avg((f) => f.eatenReported).toFixed(1)} (all crows ${avg((f) => f.eaten).toFixed(1)}); requests that went and said why ${pct(farms.reduce((a, f) => a + f.goneWhy, 0), farms.reduce((a, f) => a + f.goneAll, 0))} of ${farms.reduce((a, f) => a + f.goneAll, 0)}`);
+  // Round 7.
+  const brokeAll = farms.flatMap((f) => f.brokeDays);
+  const brokeAfter = brokeAll.filter((b) => b.day > 3);
+  console.log(`  round 7: broke days (ended with bare soil and coins below the cheapest seed): ${brokeAll.length} in all, ${brokeAfter.length} after Spring 3 (${(brokeAfter.length / farms.length).toFixed(1)} a farm; per farm ${farms.map((f) => f.brokeDays.filter((b) => b.day > 3).length).join(' ')}); bare plots on them median ${med(brokeAfter.map((b) => b.bare))}, most ${Math.max(0, ...brokeAfter.map((b) => b.bare))}; days ${[...new Set(brokeAfter.map((b) => b.day))].sort((x, y) => x - y).join(', ') || 'none'}`);
+  const quiet = farms.flatMap((f) => f.active).filter((a) => a.day > 3);
+  console.log(`           days after Spring 3 with under 10 s of work: ${pct(quiet.filter((a) => a.secs < 10).length, quiet.length)} (${quiet.filter((a) => a.secs < 10).length} of ${quiet.length}); earned by the morning of days 4, 7, 10: ${[4, 7, 10].map((d) => num(avg((f) => f.earnedBy[d] ?? f.earned))).join(', ')}`);
+  const offs = farms.flatMap((f) => f.offers);
+  const prs = offs.filter((o) => o.pair);
+  console.log(`           offers after the first ${offs.length}, ${pct(prs.length, offs.length)} of them pairs; pairs of two different crops ${pct(prs.filter((o) => o.differ).length, prs.length)}; offers naming the same crops as the offer before ${pct(offs.filter((o) => o.repeat).length, offs.length)}; pairs the farm could take both of ${pct(prs.filter((o) => o.both).length, prs.length)} (so ${pct(prs.filter((o) => !o.both).length, prs.length)} compete)`);
   if (PAIRS) {
     // Every pair the bot was offered, played out both ways by a diligent player and a busy one.
     type Out = { kinds: string; bold: number; safe: number; diligent: number; busy: number; scale: number; noise: number; free: number; coins: number };

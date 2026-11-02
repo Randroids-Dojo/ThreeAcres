@@ -205,28 +205,32 @@ describe('P2: losses are counted, and a request that fails says why', () => {
     expect(hud.morningNews(s)).toMatch(/[Cc]rows ate 1/);
   });
 
+  // Round 7: a request with crops still growing for it stays and pays for what it gets, so this one has only one
+  // lettuce sown for it, on its last day for planting; the crow leaves it nothing, and it goes there and then.
   it('a taken request whose crops crows ate, past its sow-by day, is withdrawn with that cause, and the card says so', () => {
     const s = farm(73, { coins: 0, day: 6 });
     s.learn.push('lesson:pests');
     const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'lettuce', n: 4 }], reward: 260, rep: 1, due: 10, sowBy: 6, made: 6, seen: true, kind: 'easy', got: 0 };
     s.orders = [o];
-    for (let x = 2; x < 6; x++) plant(s, x, 7, 'lettuce', 0);
+    plant(s, 3, 7, 'lettuce', 0);
     (goals as { claimCrops?: (s: WorldState) => void }).claimCrops?.(s);
-    expect(requestHave(s, o)).toBe(4);
+    expect(requestHave(s, o)).toBe(1);
     for (const p of s.plots) if (p.crop) p.wet = true;
-    // A crow takes one by day.
+    // A crow takes it by day.
     stand(s, 18, 3, 's');
     s.minute = 400;
     s.crows.push({ id: s.nextId++, x: 3, y: 7, fromX: -3, fromY: 4, phase: 'peck', t: 0 });
     for (let i = 0; i < 30 * 20 && plots(s, 3, 7).crop; i++) step(s, 1 / 30);
     expect(plots(s, 3, 7).crop).toBeNull();
-    // The sow-by day passes with too few growing for it: withdrawn in the morning.
+    // Past its last day for planting with nothing growing for it: it goes, and the morning card says why.
     s.coins = 0;
+    s.day = 7;
     nightfall(s, []);
     const w = s.report?.withdrawn?.[0] as { why?: string; lost?: number } | undefined;
     expect(w?.why).toBe('crows');
     expect(w?.lost).toBe(1);
-    expect(hud.morningNews(s)).toMatch(/Old Tamsin found lettuces elsewhere \(crows ate 1\)/);
+    // (Round 7: once, not twice: "Crows ate 1, Old Tamsin found lettuces elsewhere (crows ate 1)" said it twice.)
+    expect(hud.morningNews(s)).toMatch(/Old Tamsin found lettuces elsewhere/);
   });
 
   it('bugs left overnight: the card says how far they spread', () => {

@@ -8,7 +8,7 @@
 import type { Command } from '../../sim/commands';
 import { BUILD_COST, FIELD_SEED, TOOL_UPGRADES } from '../../sim/constants';
 import { CROP_IDS, CROPS, cropWord } from '../../sim/crops';
-import { nightsToTurn, workLeft } from '../../sim/actions';
+import { nightsToTurn, sowing, workLeft } from '../../sim/actions';
 import { guardedSure } from '../../sim/day';
 import { isTaken, offered, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
@@ -28,7 +28,9 @@ interface Lesson {
   text(s: WorldState, touch: boolean): string;
   /**
    * Finished? `n` reads the counts the tutor keeps; `acted` says the farmer has done the lesson's `act` since its
-   * line came up. Passive lessons finish on their own after `passive` seconds, or sooner when they have a `done`.
+   * line came up. Passive lessons finish when the farmer does their `act`, or once their line has been on screen for
+   * `passive` seconds while the farmer stood idle (round 7: the forecast and sprinkler lines ended on an 8 to 10 s
+   * timer while the tester was busy, and were never read). Every line stays at least `MIN_SHOW` seconds.
    */
   done?(s: WorldState, n: (k: string) => number, acted: boolean): boolean;
   passive?: number;
@@ -176,7 +178,8 @@ const LESSONS: Lesson[] = [
     after: [],
     unlocks: [],
     ready: () => true,
-    text: (_s, touch) => (touch ? 'Tap a radish to harvest it.' : 'Walk to a radish. Space harvests it.'),
+    // Round 7: the keys are named ("Walk to a radish" did not say how on a desktop).
+    text: (_s, touch) => (touch ? 'Tap a radish to harvest it.' : 'Walk with WASD. Space harvests a radish.'),
     done: (s, n) => n('harvest') >= 4 || !anyRipe(s),
     point: (s) => nearest(s, (c) => live(c) && c.stage === 4 && c.kind === 'radish'),
   },
@@ -235,7 +238,7 @@ const LESSONS: Lesson[] = [
     stagger: true,
     ready: (s) => s.stamina < 70,
     text: () => 'Watch your stamina. Each job uses some.',
-    passive: 7,
+    passive: 4,
   },
   {
     // However the field was bought (from the board, or by tapping it), owning
@@ -272,7 +275,9 @@ const LESSONS: Lesson[] = [
       const o = toSowFor(s) ?? s.orders.find(isTaken);
       const it = o?.items[0];
       const n = o ? Math.max(1, stillToSow(s, o)) : 3;
-      return it ? `Plant ${n} ${cropWord(it.crop, n)} for the request.` : 'Plant seeds for the request.';
+      // (Round 7: says "more" when some are growing for it already.)
+      const more = o && n < it!.n ? ' more' : '';
+      return it ? `Plant ${n}${more} ${cropWord(it.crop, n)} for the request.` : 'Plant seeds for the request.';
     },
     done: (s) => !toSowFor(s),
     hold: (s) => !bareSpot(s),
@@ -375,7 +380,7 @@ const LESSONS: Lesson[] = [
     stagger: true,
     ready: (s) => s.day > doneOn(s, 'scarecrow'),
     text: () => 'Check the forecast for rain and heat.',
-    passive: 8,
+    passive: 4,
   },
   {
     // Two fields want a lot of watering: a day the forecast has come and gone, the sprinkler joins the Build tool,
@@ -387,8 +392,7 @@ const LESSONS: Lesson[] = [
     act: 'build:sprinkler',
     ready: (s) => fields(s) >= 2 && s.coins >= BUILD_COST.sprinkler && s.day > doneOn(s, 'forecast'),
     text: () => 'Build a sprinkler to water around it.',
-    passive: 10,
-    done: (_s, _n, acted) => acted,
+    passive: 6,
     hold: (s) => s.coins < BUILD_COST.sprinkler || !bareSpot(s),
     point: (s) => buildSpot(s, false),
     build: 'sprinkler',
@@ -420,7 +424,9 @@ const LESSONS: Lesson[] = [
     unlocks: ['seedtab'],
     ready: (s) => nightsToTurn(s.day) <= 3,
     text: (s) => `${SEASON_NAMES[season(s.day)]} ends soon. Plant ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()} seeds.`,
-    passive: 9,
+    // Ends when a next season's seed goes in, or once read while idle.
+    act: 'plant:next',
+    passive: 6,
     // It says to plant, so it waits for bare soil and points at it (the sixth playtest's chevron sat on a bug).
     hold: (s) => !bareSpot(s),
     point: (s) => bareSpot(s),
@@ -437,9 +443,8 @@ const LESSONS: Lesson[] = [
     // came for 7 seconds while the tester was still hoeing, and went unseen.
     ready: (s) => fields(s) >= 2 && (!meadow(s) || s.day > doneOn(s, 'hoe')),
     text: (_s, touch) => (touch ? 'Tap View to see the whole farm.' : 'Press C to see the whole farm.'),
-    passive: 20,
-    // Pressing C or tapping View does what it says: the line goes.
-    done: (_s, _n, acted) => acted,
+    // Pressing C or tapping View does what it says: the line goes; or once read while idle.
+    passive: 8,
   },
   {
     id: 'smith',
@@ -448,7 +453,9 @@ const LESSONS: Lesson[] = [
     stagger: true,
     ready: (s) => smithReady(s),
     text: () => 'The smith has better tools now.',
-    passive: 9,
+    // Ends when the board is opened (the smith is on it), or once read while idle.
+    act: 'board',
+    passive: 5,
   },
 ];
 
@@ -489,8 +496,19 @@ export function allLines(s: WorldState): string[] {
   return [...new Set(out)];
 }
 
-/** Seconds a line must have been on screen before its lesson counts as done. */
+/** Seconds an urgent line must have been on screen for its trouble going away by itself to count as seen. */
 export const SEEN = 1.5;
+/**
+ * Round 7: every lesson's line stays on screen at least this long (seconds it could be seen), however soon its job is
+ * done: the seventh playtest never saw the turn, bugs, forecast or sprinkler lines, yet all four were marked learned.
+ */
+export const MIN_SHOW = 4;
+
+/** Is the farmer standing idle (not walking, working, or on the way to a tap)? Passive lines count only those seconds. */
+export function idleFarmer(s: WorldState): boolean {
+  const f = s.actors[0];
+  return !f.moving && !f.task && !f.path.length && !f.aim && !(s.taps?.length);
+}
 
 export class Tutor {
   private active: Lesson | null = null;
@@ -498,6 +516,8 @@ export class Tutor {
   private base = new Map<string, number>();
   /** Quiet unlocks already sent (the sim adds them to the farm's learning on its next step). */
   private sent = new Set<string>();
+  /** Each lesson's line as last shown: a lesson done but still on screen keeps the words it was read in. */
+  private words = new Map<string, string>();
 
   /** Count the things lessons wait for. */
   onEvent(s: WorldState, e: SimEvent): void {
@@ -511,6 +531,8 @@ export class Tutor {
       case 'refill':
       case 'tend':
         if (e.by === farmerId) bump(e.type);
+        // Next season's seed going in (the turn lesson's own act).
+        if (e.type === 'plant' && e.by === farmerId && sowing(s.day, e.crop).next) bump('plant:next');
         break;
       case 'build':
         if (e.by === farmerId) {
@@ -555,6 +577,7 @@ export class Tutor {
       cmds.push({ type: 'unlock', what: `lesson:${l.id}` });
       s.learn.push(`lesson:${l.id}`);
       s.learnCount[`done:${l.id}`] = s.day;
+      delete s.learnCount[`over:${l.id}`];
       if (this.active === l) this.active = null;
     };
     const awake = s.turnover < 0;
@@ -562,22 +585,31 @@ export class Tutor {
       this.sent.add(q.what);
       cmds.push({ type: 'unlock', what: q.what });
     }
-    // A lesson finished elsewhere (credited to an old save) leaves quietly; one on hold steps aside until it can go on.
+    // A lesson finished elsewhere (credited to an old save) leaves quietly.
     if (this.active && finished(this.active.id)) this.active = null;
-    if (this.active?.hold?.(s)) this.active = null;
-    // Finish the lesson on screen when its condition is met and its line has been seen.
+    // Finish the lesson on screen when it is done and its line has been seen long enough. Round 7: never on a timer
+    // alone: a calm or urgent lesson ends when its job is done, a passive one when its act is done or its line has been
+    // read for its seconds while the farmer stood idle; and every line stays at least MIN_SHOW seconds, its job done or
+    // not (a job done stays done: the line lingers, then goes).
     if (this.active) {
       const l = this.active;
       const seen = n(`seen:${l.id}`);
+      const idle = n(`idle:${l.id}`);
       const acted = !!l.act && n(l.act) > (this.base.get(l.id) ?? Infinity);
       const met = !!l.done && l.done(s, n, acted);
-      // A passive line seen at all goes with its day: it never lingers into the next morning (the forecast's did).
-      const stale = !!l.passive && seen > 0 && s.day > (s.learnCount[`seenOn:${l.id}`] ?? s.day);
-      if (l.passive ? seen >= l.passive || (met && seen > 0) || stale : met) {
-        if (l.passive || (l.urgent ? seen >= SEEN || (acted && seen > 0) : seen > 0)) finish(l);
+      // A passive line read long enough goes with its day: it never lingers into the next morning (the forecast's did).
+      const stale = !!l.passive && seen >= MIN_SHOW && s.day > (s.learnCount[`seenOn:${l.id}`] ?? s.day);
+      const over = !!s.learnCount[`over:${l.id}`] || (l.passive ? idle >= l.passive || acted || met || stale : met);
+      if (over && l.urgent && !acted && seen < SEEN) {
         // Its trouble went before anyone saw the line: not done, and the line steps aside until it comes back.
-        else if (l.urgent) this.active = null;
-      }
+        this.active = null;
+      } else if (over) {
+        // Done: the line stays until it has been up long enough to be read, but never into the next morning (the sleep
+        // line, done by sleeping, must not greet the farmer at dawn).
+        s.learnCount[`over:${l.id}`] ??= s.day;
+        if (seen >= MIN_SHOW || s.day > s.learnCount[`over:${l.id}`]) finish(l);
+      } else if (l.hold?.(s)) this.active = null;
+      // (One on hold steps aside, unfinished, until it can go on.)
     }
     // One new thing on the screen a day: a staggered lesson waits for a day when no other has brought anything.
     const quietDay = (l: Lesson) => LESSONS.every((o) => o === l || !o.stagger || s.learnCount[`arrived:${o.id}`] !== s.day);
@@ -625,10 +657,15 @@ export class Tutor {
     if (l && visible) for (const what of l.unlocks) if (!s.learn.includes(what) && !cmds.some((c) => c.type === 'unlock' && c.what === what)) cmds.push({ type: 'unlock', what });
     if (l && visible && dt > 0) {
       s.learnCount[`seen:${l.id}`] = n(`seen:${l.id}`) + dt;
+      if (idleFarmer(s)) s.learnCount[`idle:${l.id}`] = n(`idle:${l.id}`) + dt;
       s.learnCount[`seenOn:${l.id}`] ??= s.day;
     }
+    // A lesson done but still up (its four seconds not over) keeps its words and points at nothing: its job is done.
+    const done = !!l && !!s.learnCount[`over:${l.id}`];
+    const line = l ? (done ? (this.words.get(l.id) ?? l.text(s, touch)) : l.text(s, touch)) : '';
+    if (l && !done) this.words.set(l.id, line);
     // The lesson's own target, if it has one now.
-    const own = l ? (l.point?.(s) ?? null) : null;
+    const own = l && !done ? (l.point?.(s) ?? null) : null;
     let point = own;
     // After their lessons, crows and bugs still arrive now and then: the pointer keeps finding them, without a word
     // (a crow first: it will not wait).
@@ -637,7 +674,7 @@ export class Tutor {
     if (!point && finished('bugs')) point = theBugs(s);
     // What the pointer builds goes only with the lesson's own target: the sixth playtest's scarecrow lesson, with no
     // bare soil, pointed at a bug and still carried the build, so a tap on the bugged crop asked to build a scarecrow.
-    return { line: l ? l.text(s, touch) : '', cmds, point, build: own && l?.build ? l.build : undefined };
+    return { line, cmds, point, build: own && l?.build ? l.build : undefined };
   }
 }
 

@@ -33,8 +33,8 @@ describe('owning a second field always brings the hoe', () => {
     step(s, 0.016, [{ type: 'buyParcel', id: 1 }]);
     const out = t.update(s, 0.1, true);
     expect(out.line).toBe('Hoe the new field.');
-    // On screen a couple of seconds, so it counts as seen.
-    for (let i = 0; i < 20; i++) t.update(s, 0.1, true);
+    // On screen long enough to be read (round 7: four seconds).
+    for (let i = 0; i < 41; i++) t.update(s, 0.1, true);
     const p = out.point!;
     const field = s.parcels[1];
     expect(p.x).toBeGreaterThan(field.x);

@@ -19,8 +19,8 @@ function farm(seed = 42): WorldState {
   return s;
 }
 
-/** Seconds a line must be on screen to count (lessons.ts SEEN), and the minutes the first crows come in (CROW_FIRST). */
-const SEEN = 1.5;
+/** Seconds a line must be on screen to count (lessons.ts MIN_SHOW since round 7; SEEN was 1.5), and the minutes the first crows come in (CROW_FIRST). */
+const SEEN = 4;
 const CROW_FIRST = [30, 120];
 
 const crow = (s: WorldState, x = 3, y = 6) => s.crows.push({ id: s.nextId++, x, y, fromX: -3, fromY: 4, phase: 'peck', t: 0 });

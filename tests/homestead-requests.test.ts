@@ -36,27 +36,24 @@ describe('the first request', () => {
 });
 
 describe('a request keeps its crops', () => {
-  it('a short order stays in the crate overnight instead of being sold', async () => {
+  // Round 7: every crop is paid for at market the moment it goes into the crate; the crate counts what was sown for a
+  // request, and the request pays its gain over market when it is filled.
+  it('the crate counts what was sown for a request (paid at market as it went in), and the request pays its gain when filled', async () => {
     const { plant } = await import('../src/sim/world');
     const s = onDay3(5);
     // (Round 6: only crops sown for it count; two were, and were picked.)
     s.orders = [{ id: 1, who: 'Mabel', items: [{ crop: 'strawberry', n: 3 }], reward: 190, rep: 1, due: 9, got: 2 }];
-    s.stock.strawberry[0] = 2;
     // The third is growing and will be ripe in time.
     plant(s, 2, 7, 'strawberry', 4);
-    s.stock.radish[0] = 4;
     const coins = s.coins;
     nightfall(s, []);
-    expect(s.stock.strawberry[0]).toBe(2);
-    expect(s.stock.radish[0]).toBe(0);
-    expect(s.coins).toBe(coins + 4 * CROPS.radish.price);
-    expect(s.report!.kept).toEqual([{ crop: 'strawberry', n: 2 }]);
-    // The third arrives: the request is filled from the crate that night.
-    s.stock.strawberry[0] = 3;
+    expect(s.orders.some((o) => o.id === 1)).toBe(true);
+    expect(s.coins).toBe(coins);
+    // The third arrives: the request is filled that night, for its gain (190 less the market value of three strawberries).
     s.orders[0].got = 3;
     nightfall(s, []);
     expect(s.orders.some((o) => o.id === 1)).toBe(false);
-    expect(s.report!.filled).toEqual([{ who: 'Mabel', reward: 190 }]);
+    expect(s.report!.filled).toEqual([{ who: 'Mabel', reward: 190 - 3 * CROPS.strawberry.price }]);
     expect(s.rep).toBe(1);
   });
 

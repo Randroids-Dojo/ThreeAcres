@@ -39,6 +39,9 @@ interface Touch {
 
 const TAP_SLOP = 10;
 
+/** Keys that walk or act on the farm: pressed on a focused HUD button, they take the focus off it and go to the farm. */
+const FARM_KEYS = new Set(['Space', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyB', 'KeyC', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5']);
+
 export class Input {
   /** The tile under the mouse or last finger, for the highlight in point control. */
   aim: { x: number; y: number } | null = null;
@@ -166,9 +169,16 @@ export class Input {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
     this.saw('key');
-    // A button reached with Tab takes Enter and Space itself, as buttons do. (A clicked button gives up its
-    // focus straight away, so Space after a click still harvests.)
-    if (t && t.tagName === 'BUTTON' && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) return;
+    // A button reached with Tab takes Enter itself, as buttons do. On a card (a dialog is open) or with the game paused
+    // it takes Space too. Round 7: a HUD button over the farm never keeps the keyboard from it: Space and E act on the
+    // farm, and any key that walks or acts takes the focus off the button first (the seventh playtest's Tab left the
+    // keyboard on Sleep, WASD walked on, and Space put the farmer to bed at 3:27 pm).
+    if (t && t.tagName === 'BUTTON') {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') return;
+      if (this.host.blocked()) {
+        if (e.code === 'Space') return;
+      } else if (FARM_KEYS.has(e.code)) t.blur?.();
+    }
     // While a picker is open the arrow keys choose in it, so they never walk the farmer (WASD still do).
     const picking = !!this.host.picking?.();
     if (picking && e.code.startsWith('Arrow')) {

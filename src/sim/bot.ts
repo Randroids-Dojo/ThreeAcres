@@ -7,7 +7,7 @@ import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
 import { BUILD_COST, TOOL_UPGRADES } from './constants';
-import { canDeliver, canMeet, gainOf, isTaken, offered, sowByOf, stillToSow } from './goals';
+import { canDeliver, canMeet, gainOf, isTaken, lastSowOf, offered, stillToSow } from './goals';
 import { guarded } from './day';
 import { owned } from './world';
 import type { CropId, Order, RequestKind, ToolId, WorldState } from './types';
@@ -26,6 +26,8 @@ export interface Bot {
   choose: 'gain' | 'bold' | 'safe' | 'none';
   /** A busy player: it goes to bed once the clock passes this many game minutes after 6:00 (undefined: when done). */
   bedtime?: number;
+  /** Sunup: the day it last bought a field, a tool or a sprinkler (one a day, like a person). */
+  bought?: number;
 }
 
 export function newBot(pace = 0.05, opts: Partial<Pick<Bot, 'choose' | 'bedtime'>> = {}): Bot {
@@ -60,10 +62,14 @@ function bestSeed(s: WorldState): CropId {
   // Requests first: whatever a request it took still needs sown and can be grown in time, the one due to be sown
   // soonest first.
   if (homestead(s)) {
-    const open = s.orders.filter((o) => isTaken(o) && canMeet(s, o) && s.day <= sowByOf(o) && stillToSow(s, o) > 0).sort((a, b) => sowByOf(a) - sowByOf(b));
+    const open = s.orders.filter((o) => isTaken(o) && canMeet(s, o) && s.day <= lastSowOf(o) && stillToSow(s, o) > 0).sort((a, b) => lastSowOf(a) - lastSowOf(b));
+    // Round 7: like a person, it keeps enough to plant the rest of its bare soil with the cheapest seed, so no plot sits
+    // bare for want of coins.
+    const cheapest = Math.min(...allowed.map((c) => CROPS[c].seed));
+    const rest = Math.max(0, barePlots(s) - 1);
     for (const o of open) {
       const it = o.items[0];
-      if (allowed.includes(it.crop) && CROPS[it.crop].seed <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
+      if (allowed.includes(it.crop) && CROPS[it.crop].seed + rest * cheapest <= s.coins && s.day + CROPS[it.crop].days <= o.due) return it.crop;
     }
   }
   if (s.rules.goal === 'orders') {
@@ -78,6 +84,15 @@ function bestSeed(s: WorldState): CropId {
   if (s.rules.goal === 'almanac') {
     const affordable = allowed.filter((c) => CROPS[c].seed <= s.coins);
     if (affordable.length) return affordable.reduce((a, b) => (inGround(s, b) < inGround(s, a) ? b : a));
+  }
+  // Sunup: short of the coins to fill the bare soil with anything dearer, a person plants the cheapest seed, so no plot
+  // sits bare for want of coins.
+  if (homestead(s)) {
+    const bare = barePlots(s);
+    const cheap = allowed.reduce<CropId | null>((a, c) => (!a || CROPS[c].seed < CROPS[a].seed ? c : a), null);
+    if (cheap && bare > 0 && s.coins < bare * CROPS[cheap].seed * 1.6) return cheap;
+    // Nothing dearer than leaves the rest of the bare soil its cheapest seed.
+    if (cheap && bare > 0) allowed = allowed.filter((c) => CROPS[c].seed + (bare - 1) * CROPS[cheap].seed <= s.coins || c === cheap);
   }
   let best: CropId = allowed[0];
   let bv = -Infinity;
@@ -120,6 +135,38 @@ function chores(s: WorldState): { x: number; y: number; tool: ToolId }[] {
   return out;
 }
 
+/**
+ * Sunup: the coins a person keeps back for seed before spending on the farm: enough of the cheapest seed that can go
+ * in today to plant every plot again (half of them, for a scarecrow), and `more` plots besides (a field about to be
+ * bought), and never under 150.
+ */
+export function seedReserve(s: WorldState, more: number, share = 1): number {
+  const seeds = CROP_IDS.filter((c) => sowing(s.day, c).ok && CROPS[c].regrow === 0).map((c) => CROPS[c].seed);
+  const cheapest = seeds.length ? Math.min(...seeds) : 10;
+  return Math.max(150, Math.round((farmCount(s).plots + more) * cheapest * share));
+}
+
+/** The farm's plots (owned field, nothing built) and bare ones (hoed, nothing growing), counted once a step. */
+let counted: { s: WorldState | null; time: number; id: number; plots: number; bare: number } = { s: null, time: -1, id: -1, plots: 0, bare: 0 };
+function farmCount(s: WorldState): { plots: number; bare: number } {
+  if (counted.s === s && counted.time === s.time && counted.id === s.nextId) return counted;
+  const built = new Set(s.builds.map((b) => b.y * s.W + b.x));
+  let plots = 0;
+  let bare = 0;
+  for (let i = 0; i < s.plots.length; i++) {
+    if (s.tiles[i] !== 'field' || s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned || built.has(i)) continue;
+    plots++;
+    if (!s.plots[i].crop && s.plots[i].tilled) bare++;
+  }
+  counted = { s, time: s.time, id: s.nextId, plots, bare };
+  return counted;
+}
+
+/** Sunup: bare plots on the farm (hoed, owned, nothing growing or built). */
+function barePlots(s: WorldState): number {
+  return farmCount(s).bare;
+}
+
 export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   const out: Command[] = [];
   if (s.turnover >= 0) return out;
@@ -130,9 +177,17 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   if (homestead(s) && s.learn.includes('build') && !s.learn.includes('sprinkler') && s.parcels.filter((p) => p.owned).length >= 2) out.push({ type: 'unlock', what: 'sprinkler' });
   const f = farmer(s);
 
-  // Spend money now and then.
+  // Spend money now and then. Sunup's bot, like a person, keeps the seed money for its bare soil (and a new field's) and
+  // buys one thing at a time (round 7: it bought a field, a copper can and a copper hoe in one go on Summer 10, and sat
+  // on 25 coins and 29 bare plots for a week).
   const next = s.parcels.find((p) => !p.owned);
-  if (next && s.coins > next.price + 150) out.push({ type: 'buyParcel', id: next.id });
+  // (One big purchase a day: a field, a tool or a sprinkler.)
+  let spent = homestead(s) && bot.bought === s.day;
+  if (!spent && next && s.coins > next.price + (homestead(s) ? seedReserve(s, next.w * next.h) : 150)) {
+    out.push({ type: 'buyParcel', id: next.id });
+    spent = true;
+    bot.bought = s.day;
+  }
   if (s.rules.crew === 'crew' && s.coins > 600 && s.actors.filter((a) => a.role === 'hand').length < 3) out.push({ type: 'hire' });
   for (const o of s.orders) if (canDeliver(s, o)) out.push({ type: 'deliver', id: o.id });
   // Sunup: a request is taken on the board, by the bot's way of choosing; planting never takes one.
@@ -155,15 +210,20 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
       return out;
     }
   }
-  if (homestead(s)) {
+  if (homestead(s) && !spent) {
     for (const t of ['can', 'hoe'] as const) {
       const next = TOOL_UPGRADES[t][s.tools[t]];
-      if (next && s.rep >= next.rep && s.coins > next.cost + 300) out.push({ type: 'upgrade', tool: t });
+      if (next && s.rep >= next.rep && s.coins > next.cost + Math.max(300, seedReserve(s, 0, 0.8))) {
+        out.push({ type: 'upgrade', tool: t });
+        spent = true;
+        bot.bought = s.day;
+        break;
+      }
     }
   }
 
   // Sunup: a scarecrow in the middle of each field, once scarecrows are known (a person builds them after the first crows).
-  if (homestead(s) && s.learn.includes('build') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.scarecrow + 60) {
+  if (homestead(s) && !spent && s.learn.includes('build') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.scarecrow + Math.max(60, seedReserve(s, 0, 0.3))) {
     for (const p of s.parcels) {
       const covered = [[0, 0], [3, 0], [0, 3], [3, 3]].every(([dx, dy]) => guarded(s, p.x + dx, p.y + dy));
       if (!p.owned || covered) continue;
@@ -180,7 +240,7 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   }
   // From the third field the watering outgrows a day's stamina: a sprinkler in each field, beside its scarecrow.
   const fields = s.parcels.filter((p) => p.owned).length;
-  if (homestead(s) && fields >= 3 && s.learn.includes('sprinkler') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.sprinkler + 300) {
+  if (homestead(s) && !spent && fields >= 3 && s.learn.includes('sprinkler') && s.rules.control === 'walk' && !f.task && !f.path.length && !f.aim && s.coins >= BUILD_COST.sprinkler + Math.max(300, seedReserve(s, 0, 0.8))) {
     for (const p of s.parcels) {
       if (!p.owned || s.builds.some((b) => b.kind === 'sprinkler' && b.x >= p.x && b.x < p.x + p.w && b.y >= p.y && b.y < p.y + p.h)) continue;
       const t = { x: p.x + 2, y: p.y + 2 };

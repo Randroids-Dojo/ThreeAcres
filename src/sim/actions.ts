@@ -70,8 +70,28 @@ export function sowing(day: number, crop: CropId): Sowing {
     if (inSeason(crop, next) && left <= SEASON_PREVIEW_DAYS) return { ok: true, next: true, late: false, reason: '' };
     return { ok: false, next: false, late: false, reason: `${name} won\u2019t grow in ${SEASON_NAMES[now].toLowerCase()}` };
   }
-  if (!inSeason(crop, next) && CROPS[crop].days > left) return { ok: false, next: false, late: true, reason: `Too late. ${name} won\u2019t ripen before ${SEASON_NAMES[next].toLowerCase()}` };
+  // Round 7: the word names the crop as the picker shows it ("Carrots won't ripen before summer"; a tap on a seed
+  // marked "Too late" closed the picker with no word).
+  if (!inSeason(crop, next) && CROPS[crop].days > left) return { ok: false, next: false, late: true, reason: `${plural(crop)} won\u2019t ripen before ${SEASON_NAMES[next].toLowerCase()}` };
   return { ok: true, next: false, late: false, reason: '' };
+}
+
+/** A crop's plural with a capital: "Carrots", "Corn". */
+function plural(crop: CropId): string {
+  const p = CROPS[crop].plural;
+  return `${p[0].toUpperCase()}${p.slice(1)}`;
+}
+
+/**
+ * Sunup: a crop that can go in today but only just ripens before the turn,
+ * which takes it: watered every night from tonight, it is ripe on the turn's
+ * morning; one dry night and the turn takes it (round 7: nine lettuces
+ * planted at 6 pm were lost at the turn). The picker warns before it goes in.
+ */
+export function justInTime(day: number, crop: CropId): boolean {
+  const now = season(day);
+  const next = ((now + 1) % 4) as 0 | 1 | 2 | 3;
+  return inSeason(crop, now) && !inSeason(crop, next) && CROPS[crop].days === nightsToTurn(day);
 }
 
 /**
@@ -295,7 +315,13 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       if (!c || c.dead || c.stage !== 4) return false;
       const def = CROPS[c.kind];
       const q = s.rules.growth === 'synergy' ? qualityAt(s, x, y).quality : 0;
-      s.stock[c.kind][q] += 1;
+      // Sunup: a crop sown for a request the player took counts in the crate for that request (round 6: only those count).
+      const forReq = c.for !== undefined ? s.orders.find((r) => r.id === c.for && r.taken !== false) : undefined;
+      // Round 7: every crop is paid for at market the moment it goes into the crate, so a harvest can be planted again
+      // the same day (the seventh playtest picked eleven crops on Summer 5 and still had nothing to plant with); a
+      // request adds its gain when it is filled.
+      if (homestead(s)) payAtCrate(s, c.kind, q, ev);
+      else s.stock[c.kind][q] += 1;
       s.stats.harvested[c.kind] += 1;
       s.almanac.harvested += 1;
       if (!s.almanac.kinds.includes(c.kind)) s.almanac.kinds.push(c.kind);
@@ -306,8 +332,6 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       }
       plot.nutrient = Math.max(0, plot.nutrient - def.feed);
       if (c.kind === 'beans') feedAround(s, x, y);
-      // Sunup: a crop sown for a request the player took waits in the crate for that request (round 6: only those count).
-      const forReq = c.for !== undefined ? s.orders.find((r) => r.id === c.for && r.taken !== false) : undefined;
       if (forReq) forReq.got = (forReq.got ?? 0) + 1;
       ev.push({ type: 'harvest', x, y, crop: c.kind, quality: q, by, req: forReq?.id });
       // Sunup: a regrowing crop kept past its season for its last ripe pick is done after it.
@@ -404,6 +428,45 @@ export function workLeft(s: WorldState): { ripe: number; thirsty: number; bugs: 
   out.crows = s.crows.filter((c) => c.phase === 'in' || c.phase === 'peck').length;
   return out;
 }
+
+/**
+ * Sunup, round 7: a crop paid for as it goes into the crate, at market price.
+ * The coins count at once (a small rise of coins at the crate says so) and
+ * the day's sales are kept for the morning card ("sold 8 for 340").
+ */
+export function payAtCrate(s: WorldState, crop: CropId, quality: number, ev: SimEvent[]): void {
+  const value = priceOf(s, crop, quality);
+  s.coins += value;
+  s.stats.earned += value;
+  s.almanac.earned += value;
+  const today = (s.soldToday ??= []);
+  const row = today.find((r) => r.crop === crop);
+  if (row) {
+    row.n += 1;
+    row.value += value;
+  } else today.push({ crop, n: 1, value });
+  ev.push({ type: 'coins', amount: value, crate: true });
+}
+
+/**
+ * Sunup: what the sleep question has to say. Before evening it always asks
+ * (round 7: Space on a focused Sleep button put the farmer to bed at 3:27
+ * pm, twice); at any hour it asks while something on the farm would be lost
+ * overnight or a request still wants planting today on its last day for it.
+ * `urgent` is the one thing it names, most pressing first. Never while the
+ * first lesson teaches sleep, nor with no stamina left for any job.
+ */
+export function sleepAsk(s: WorldState, opts: { teaching: boolean; flock: boolean; owedToday: number }): { ask: boolean; left: ReturnType<typeof workLeft> } {
+  const left = workLeft(s);
+  if (opts.teaching) return { ask: false, left };
+  const pests = (left.bugs > 0 && s.stamina >= STAMINA_COST.tend) || left.crows > 0;
+  const tired = s.stamina < Math.min(STAMINA_COST.tend, STAMINA_COST.plant, STAMINA_COST.water);
+  const early = s.minute < SLEEP_ASK_BEFORE && !tired;
+  return { ask: early || opts.flock || pests || (opts.owedToday > 0 && s.stamina >= STAMINA_COST.plant), left };
+}
+
+/** Sunup: before this game minute (6 pm), sleep always asks first. */
+export const SLEEP_ASK_BEFORE = 720;
 
 /** Sunup: the reputation the land agent wants before he sells a field (0 under other rules, or when it is owned). */
 export function fieldRep(s: WorldState, id: number): number {

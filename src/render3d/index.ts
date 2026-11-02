@@ -38,6 +38,8 @@ import { clamp, col, lerp, smooth } from './util';
 import { CLOUD_LAYER, buildWeather, type WeatherFx } from './weather';
 
 const WIND: Record<Weather, number> = { sun: 0.6, cloud: 0.85, rain: 1.1, storm: 2.3, heat: 0.3 };
+/** Round 7: the strength of the moonlight on worked soil at full night (`uSoilNight`). */
+const SOIL_NIGHT = 0.12;
 
 /** Debug hooks for the workbench scripts. Not part of the Renderer contract. */
 export interface Renderer3DDebug {
@@ -334,6 +336,8 @@ export async function createRenderer3D(): Promise<Renderer & { debug: Renderer3D
     hemi.color.copy(sky.hemiSky);
     hemi.groundColor.copy(sky.hemiGround);
     hemi.intensity = sky.hemiI + flash * 1.5 * flashK;
+    // Moonlight on worked soil after dusk (more under rain and storm clouds), so a hoed field reads at night.
+    U.uSoilNight.value.w = SOIL_NIGHT * smooth(0.75, 0.2, v.daylight) * (wet ? 1.35 : 1);
     U.uMistColor.value.copy(sky.bgBottom);
     U.uMist.value.set(-0.35, -3.2, weatherNow === 'heat' ? 1 : 0.95, 0);
     const frost = SEASONS[sn].frost;

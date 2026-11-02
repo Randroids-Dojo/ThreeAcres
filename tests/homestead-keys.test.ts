@@ -28,7 +28,12 @@ function fakeBrowser() {
   const up = (code: string) => {
     for (const f of on.keyup ?? []) f({ code });
   };
-  return { key, up, stage: target() as unknown as HTMLElement, restore: () => Object.assign(g, saved) };
+  /** A key with a given focused element as its target. */
+  const keyOn = (code: string, el: Record<string, unknown>, prevent: () => void) => {
+    const e = { code, key: code, repeat: false, shiftKey: false, target: el, preventDefault: prevent };
+    for (const f of on.keydown ?? []) f(e);
+  };
+  return { key, up, keyOn, stage: target() as unknown as HTMLElement, restore: () => Object.assign(g, saved) };
 }
 
 describe('keys while a picker is open', () => {
@@ -72,15 +77,44 @@ describe('keys while a picker is open', () => {
     expect(walk.x).toBe(1);
   });
 
-  it('Enter and Escape go to the game (the picker) first; on a button reached with Tab, Enter and Space press it', () => {
+  it('Enter and Escape go to the game (the picker) first; on a button reached with Tab, Enter presses it', () => {
     const { heard } = input(() => true);
     b.key('Enter');
     b.key('Escape');
     expect(heard).toEqual(['Enter', 'Escape']);
-    // A focused button: the browser presses it, the game hears nothing and Space does not act.
+    // A focused button: the browser presses it with Enter, and the game hears nothing.
     expect(b.key('Enter', 'BUTTON')).toBe(false);
-    expect(b.key('Space', 'BUTTON')).toBe(false);
     expect(heard).toEqual(['Enter', 'Escape']);
+  });
+
+  // Round 7: the seventh playtest's Tab left the keyboard on Sleep, and Space put the farmer to bed at 3:27 pm. A HUD
+  // button over the farm gives Space (and every walking key) to the farm, and loses the focus; on an open card Space
+  // still presses the card's button.
+  it('Space on a focused HUD button acts on the farm and takes the focus off it; on an open card it presses the button', () => {
+    let blocked = false;
+    const heard: string[] = [];
+    const host: InputHost = { rules: () => PRESETS.sunup.rules, pick: () => null, canPaint: () => false, hasJob: () => false, pan: () => undefined, zoom: () => undefined, hotkey: (k) => (heard.push(k), false), blocked: () => blocked, picking: () => false };
+    const inp = new Input(b.stage, host);
+    let blurred = 0;
+    const btn = { tagName: 'BUTTON', blur: () => blurred++ };
+    const press = (code: string) => {
+      let prevented = false;
+      b.keyOn(code, btn, () => (prevented = true));
+      return prevented;
+    };
+    expect(press('Space')).toBe(true);
+    expect(blurred).toBe(1);
+    expect(inp.collect(0.016).some((c) => c.type === 'act')).toBe(true);
+    press('KeyD');
+    expect(blurred).toBe(2);
+    // Enter still presses the focused button (the browser does), and the farm hears nothing of it.
+    expect(press('Enter')).toBe(false);
+    expect(blurred).toBe(2);
+    // A card is open: Space presses its button, the farm does not act.
+    blocked = true;
+    expect(press('Space')).toBe(false);
+    expect(blurred).toBe(2);
+    expect(inp.collect(0.016).some((c) => c.type === 'act')).toBe(false);
   });
 });
 

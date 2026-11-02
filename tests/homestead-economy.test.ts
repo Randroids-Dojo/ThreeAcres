@@ -147,7 +147,9 @@ describe('a bot farm at a person’s pace over thirty days', () => {
       const filled = r.events.filter((e) => (e.type === 'request' || e.type === 'order') && e.done).length;
       // Before (this bot): about 22,000 earned, 4,400 coins on day 30 after buying all six fields by day 22, and 27
       // requests at 1.5 times market.
-      expect(s.stats.earned).toBeLessThan(15000);
+      // (Round 7: every crop is paid for as it goes into the crate, so a harvest is planted again the same day and soil
+      // no longer sits bare for want of coins: about a quarter more by day 30, a twentieth more by day 10.)
+      expect(s.stats.earned).toBeLessThan(17000);
       expect(morning[30]).toBeLessThan(3000);
       expect(s.parcels.filter((p) => p.owned).length).toBeLessThanOrEqual(5);
       expect(s.parcels.filter((p) => p.owned).length).toBeGreaterThanOrEqual(2);
