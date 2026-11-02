@@ -16,7 +16,7 @@ import { PROPS, propAt } from '../../sim/map';
 import type { BuildKind, SimEvent, WorldState } from '../../sim/types';
 import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
-import { Hud, morningNews } from '../../ui/hud';
+import { Hud, pinnedNews } from '../../ui/hud';
 import { Input } from '../../game/input';
 import { Tutor } from './lessons';
 import { pointerTap, type PointerTap } from './pointer';
@@ -92,13 +92,14 @@ export class Director {
       ...host,
       onChange: () => undefined,
       keyboard: () => this.input.lastKind === 'key',
-      // The last morning card, pinned on the board; after a reload, yesterday's report says it again.
+      // The last morning card, pinned on the board; after a reload, yesterday's report says it again. Round 8: read
+      // again as the farm is now (it still said "4 ripe to pick" after they were picked).
       lastCard: () => {
         const s = this.state;
-        if (this.hud.lastCard?.day === s.day) return this.hud.lastCard;
         if (!s.report || s.report.day !== s.day - 1) return null;
-        const news = morningNews(s);
-        return news ? { title: `${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}`, news } : null;
+        const news = pinnedNews(s);
+        const title = this.hud.lastCard?.day === s.day ? this.hud.lastCard.title : `${SEASON_NAMES[season(s.day)]} ${dayOfSeason(s.day)}`;
+        return news ? { title, news } : null;
       },
       pickBuild: (k: BuildKind) => {
         this.input.push({ type: 'buildKind', kind: k });
@@ -205,6 +206,10 @@ export class Director {
    */
   private pickTap(px: number, py: number): { x: number; y: number } | null {
     if (!this.r3d) return null;
+    const ground = this.r3d.pick(px, py);
+    // Round 8: a plot behind the field well, where its drawing overlaps the plot, is still the plot (a tap on the
+    // second field's corner plot fetched water instead of watering it).
+    const plot = !!ground && this.state.tiles[ground.y * this.state.W + ground.x] === 'field';
     for (const p of PROPS) {
       if (p.kind !== 'well' && p.kind !== 'board') continue;
       let x0 = Infinity;
@@ -221,9 +226,9 @@ export class Director {
           y1 = Math.max(y1, q.y);
         }
       }
-      if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return { x: p.x, y: p.y };
+      if (!plot && px >= x0 && px <= x1 && py >= y0 && py <= y1) return { x: p.x, y: p.y };
     }
-    return this.r3d.pick(px, py);
+    return ground;
   }
 
   private hotkey(code: string, shift: boolean): boolean {

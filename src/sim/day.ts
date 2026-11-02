@@ -326,27 +326,35 @@ function morning(s: WorldState, ev: SimEvent[]): void {
 }
 
 /**
- * Sunup must always leave a way to earn. A farm with nothing growing, nothing
- * in the crate and too few coins for any seed that can go in today would be
- * stuck for good, so a neighbour leaves enough for four packets of the
- * cheapest. Returns the coins given (0 when the farm is not stuck).
+ * Sunup must always leave a way to earn. A farm with too few coins for any
+ * seed that can go in today, nothing ripe to pick and nothing in the crate
+ * would wait days for its crops: a neighbour leaves enough for four packets
+ * of the cheapest (or for its bare plots, when fewer). Round 8: also with
+ * crops growing, while there is bare soil (the eighth playtest sat on 10
+ * coins and 7 bare plots for three summer days; it came only with nothing
+ * growing at all). Returns the coins given (0 when the farm is not stuck).
  */
 export function rescue(s: WorldState): number {
-  let living = false;
-  for (let i = 0; i < s.plots.length; i++) {
-    const c = s.plots[i].crop;
-    if (c && !c.dead && s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned) {
-      living = true;
-      break;
-    }
-  }
-  if (living) return 0;
   if (CROP_IDS.some((c) => stockCount(s, c) > 0)) return 0;
   const seeds = CROP_IDS.filter((c) => sowing(s.day, c).ok).map((c) => CROPS[c].seed);
   if (!seeds.length) return 0;
   const cheapest = Math.min(...seeds);
   if (s.coins >= cheapest) return 0;
-  const gift = cheapest * 4 - s.coins;
+  let living = false;
+  let bare = 0;
+  for (let i = 0; i < s.plots.length; i++) {
+    if (s.parcelOf[i] < 0 || !s.parcels[s.parcelOf[i]].owned || s.tiles[i] !== 'field') continue;
+    const p = s.plots[i];
+    const c = p.crop;
+    if (c && !c.dead) {
+      // Something ripe pays at the crate today: not stuck.
+      if (c.stage === 4) return 0;
+      living = true;
+    } else if (p.tilled && !c && !s.builds.some((b) => b.y * s.W + b.x === i)) bare++;
+  }
+  if (living && !bare) return 0;
+  const gift = cheapest * (living ? Math.min(4, bare) : 4) - s.coins;
+  if (gift <= 0) return 0;
   s.coins += gift;
   return gift;
 }

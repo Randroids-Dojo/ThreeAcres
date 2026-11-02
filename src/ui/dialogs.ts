@@ -12,7 +12,7 @@ import { canDeliver, clashOf, gainOf, isShort, isTaken, lastSowOf, MILESTONES, o
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, LossCause, Order, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
-import { townName } from './describe';
+import { repShare, townName } from './describe';
 import { icon } from './icons';
 
 export interface DialogHost {
@@ -221,18 +221,16 @@ export class Dialogs {
       case 'requests': {
         // What is on the board now has been read: the badge counts only notes pinned after this.
         if (homestead(s) && s.orders.some((o) => o.seen === false)) this.host.send({ type: 'readBoard' });
-        // Round 7: the last morning card, pinned here to read again.
-        const card = this.host.lastCard?.();
-        if (card) list.append(el('div', 'morning', `<b>${esc(card.title)}</b>${esc(card.news)}`));
-        list.append(el('p', 'legend', smithLine(s)));
-        if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
-        // A pair still to choose between hangs together, "or" between them: only one of the two can be taken.
+        // Round 8: what is on offer comes first, the pair and what makes it a choice at the top (on a phone the
+        // clash line sat below the fold, under the requests already taken); then the last morning card, pinned here
+        // to read again (round 7), the reputation, and the requests taken.
         const shown = new Set<number>();
         let paired = false;
-        for (const o of s.orders) {
+        const offers = s.orders.filter(offered);
+        for (const o of offers) {
           if (shown.has(o.id)) continue;
           shown.add(o.id);
-          const mate = o.pair !== undefined && offered(o) ? s.orders.find((q) => q !== o && q.pair === o.pair && offered(q) && !shown.has(q.id)) : undefined;
+          const mate = o.pair !== undefined ? offers.find((q) => q !== o && q.pair === o.pair && !shown.has(q.id)) : undefined;
           if (mate) {
             shown.add(mate.id);
             paired = true;
@@ -244,7 +242,15 @@ export class Dialogs {
             if (clash) list.append(el('p', 'clash', clashWords(clash)));
           } else list.append(this.requestNote(s, o));
         }
-        list.append(el('p', 'legend', paired ? 'Accept one of a pair.' : s.orders.some(offered) ? 'Accept a request to take it on.' : 'The crate keeps what requests need.'));
+        if (offers.length) list.append(el('p', 'legend', paired ? 'Accept one of a pair.' : 'Accept a request to take it on.'));
+        const card = this.host.lastCard?.();
+        if (card) list.append(el('div', 'morning', `<b>${esc(card.title)}</b>${esc(card.news)}`));
+        list.append(el('p', 'legend', smithLine(s)));
+        if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
+        const taken = s.orders.filter((o) => !offered(o));
+        for (const o of taken) list.append(this.requestNote(s, o));
+        // (Round 8: it said "The crate keeps what requests need", but every crop pays at the crate at once.)
+        if (taken.length && !offers.length) list.append(el('p', 'legend', 'A request pays its gain once filled.'));
         break;
       }
       case 'fields':
@@ -284,12 +290,13 @@ export class Dialogs {
         }
         break;
       case 'tools': {
-        list.append(el('p', 'legend', `Tools cost coins and reputation. Yours is ${s.rep}.`));
+        list.append(el('p', 'legend', `Tools cost coins and reputation. Yours is ${repText(s)}.`));
         for (const t of ['can', 'hoe'] as const) {
           const level = s.tools[t];
           const now = level === 0 ? (t === 'can' ? 'Watering can' : 'Hoe') : TOOL_UPGRADES[t][level - 1].name;
           const next = TOOL_UPGRADES[t][level];
-          const what = (l: number) => (l === 1 ? 'three plots in a row' : 'a three by three square');
+          // Round 8: a whole row of a field, then two rows (they were three plots in a row and a three by three square).
+          const what = (l: number) => (l === 1 ? 'a whole row' : 'two rows');
           const it = el('div', `item ${next ? '' : 'done'}`, `<span class="ic">${icon(t)}</span><span class="tx"><b>${next ? esc(next.name) : `${esc(now)}, the best there is`}</b><span>${next ? `Works ${what(level + 1)}${t === 'can' ? `, holds ${CAN_WATER[level + 1]}` : ''}. ${fmt(next.cost)} coins, reputation ${next.rep}` : `Works ${what(level)}`}</span></span>`);
           if (next) {
             const b = el('button', 'btn primary', 'Buy');
@@ -470,8 +477,10 @@ export class Dialogs {
     // Buying it should leave coins to sow it: the card says when it would not.
     const left = s.coins - p.price;
     const seed = homestead(s) && left >= 0 && left < 150 ? ` That leaves ${fmt(left)} for seed.` : '';
-    const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${s.rep}.` : ` You have ${fmt(s.coins)} coins.${seed}`;
-    this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${known}`));
+    const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${repText(s)}.` : ` You have ${fmt(s.coins)} coins.${seed}`;
+    // Round 8: the second field comes with the copper can, and its card says so.
+    const can = homestead(s) && s.tools.can < 1 && s.parcels.filter((q) => q.owned).length === 1 ? ' A copper can comes with it: it waters a whole row.' : '';
+    this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${can}${known}`));
     const row = el('div', 'row ask');
     const short = s.coins < p.price || s.rep < rep;
     const buy = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(p.price)}` : `Buy for ${fmt(p.price)}`);
@@ -608,10 +617,16 @@ export function smithLine(s: WorldState): string {
   const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
   const n = (k: number) => words[k] ?? String(k);
   // The smith is not named before his lesson.
-  if (homestead(s) && !s.learn.includes('smith')) return `Reputation ${s.rep}. Each request filled adds one.`;
-  if (!next) return `Reputation ${s.rep}. The smith will make anything.`;
-  const left = next.u!.rep - s.rep;
-  return `Reputation ${s.rep}. ${n(left)} more for a ${next.u!.name.toLowerCase()}.`;
+  if (homestead(s) && !s.learn.includes('smith')) return `Reputation ${repText(s)}. Each request filled adds one.`;
+  if (!next) return `Reputation ${repText(s)}. The smith will make anything.`;
+  // Round 8: requests still to fill: a share of a point earned counts towards the next.
+  const left = Math.max(1, Math.ceil(next.u!.rep - s.rep - (s.repPart ?? 0) - 1e-9));
+  return `Reputation ${repText(s)}. ${n(left)} more for a ${next.u!.name.toLowerCase()}.`;
+}
+
+/** Round 8: the farm's reputation as the board says it, a share of a point in quarters ("2¾"). */
+export function repText(s: WorldState): string {
+  return `${s.rep}${repShare(s.repPart ?? 0)}`;
 }
 
 /** Notes on a corkboard never hang quite straight. */

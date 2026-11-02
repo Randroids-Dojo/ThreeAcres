@@ -42,6 +42,15 @@
 // the farm's own soil and coins, counted here, not by the rules). It reads
 // the rules only through what round 6 had too, so it runs on the committed
 // code for a before.
+// Round 8 adds, for every day, the seconds spent watering (water and refill
+// jobs, and the walks to them with the can in hand) beside the day's active
+// seconds, by fields owned, and the stamina the day used; the days with under
+// 10 s of work by fields owned; for each pair as it is pinned, whether each
+// side's seed could be paid for with the coins in hand that morning and
+// whether the two are within a fifth of each other on what they clear for
+// each plot-day; requests filled short, and the reputation on days 10, 20
+// and 30. It reads the rules only through what round 7 had too, so it runs on
+// the committed code for a before.
 // npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs] [--mornings]
 import * as C from '../src/sim/constants';
 import { sowing } from '../src/sim/actions';
@@ -175,6 +184,15 @@ interface Farm {
   brokeDays: { day: number; bare: number }[];
   /** Round 7: offers as pinned: a pair of two different crops, the same crops as the offer before, and whether the farm could take both. */
   offers: { pair: boolean; differ: boolean; repeat: boolean; both: boolean }[];
+  /** Round 8: each day's watering seconds against its active seconds, by fields, and the stamina it used. */
+  watering: { secs: number; water: number; fields: number; day: number; wet: boolean; used: number }[];
+  /** Round 8: pairs as pinned: each side's seed within the coins in hand, and the two within a fifth on what they clear a plot-day. */
+  pairs8: { affordable: number; today: number; within: boolean; gap: number }[];
+  /** Round 8: requests filled short, and the reputation on the mornings of days 10, 20 and 30. */
+  shortFills: number;
+  repOn: Record<number, number>;
+  /** Round 8: the day the can reached copper and gold (0: never). */
+  canOn: [number, number];
 }
 
 const JOBS = new Set(['till', 'water', 'plant', 'harvest', 'tend', 'refill', 'clear', 'build']);
@@ -289,13 +307,23 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
   const brokeDays: Farm['brokeDays'] = [];
   const offers: Farm['offers'] = [];
   let lastKey = '';
+  const watering: Farm['watering'] = [];
+  const pairs8: Farm['pairs8'] = [];
+  let shortFills = 0;
+  const repOn: Record<number, number> = {};
+  let waterSecs = 0;
+  const canOn: [number, number] = [0, 0];
   const r = play(s, DAYS, {
     pace,
     each: (st: WorldState) => {
       const f = st.actors[0];
       // A player who buys the second field the moment the field lesson says to.
       if (followField && !st.parcels[1].owned && st.coins >= FIELD_LINE && st.turnover < 0) return [{ type: 'buyParcel', id: 1 }];
-      if (st.turnover < 0 && (f.task || f.path.length || f.aim || f.moving)) activeSecs += 1 / 30;
+      if (st.turnover < 0 && (f.task || f.path.length || f.aim || f.moving)) {
+        activeSecs += 1 / 30;
+        // Watering: a water or refill job, or on the way to one with the can in hand.
+        if (f.task ? f.task.verb === 'water' || f.task.verb === 'refill' : st.tool === 'can' || (f.aim && (f.aim.verb === 'water' || f.aim.verb === 'refill'))) waterSecs += 1 / 30;
+      }
       if (st.report && st.report !== seenReport) {
         seenReport = st.report;
         turned += st.report.turned ?? 0;
@@ -330,7 +358,9 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
         if (st.stamina < 4) wasTired = true;
         workEnd.push({ hour: lastJob < 0 ? 6 : 6 + lastJob / 60, low, fields: st.parcels.filter((p) => p.owned).length, day: st.day, wet: st.weather === 'rain' || st.weather === 'storm' });
         active.push({ secs: activeSecs, fields: st.parcels.filter((p) => p.owned).length, day: st.day, wet: st.weather === 'rain' || st.weather === 'storm' });
+        watering.push({ secs: activeSecs, water: waterSecs, fields: st.parcels.filter((p) => p.owned).length, day: st.day, wet: st.weather === 'rain' || st.weather === 'storm', used: st.staminaMax - low });
         activeSecs = 0;
+        waterSecs = 0;
         heatNight = st.weather === 'heat';
         if (heatNight) heatDays++;
         lastJob = -1;
@@ -338,6 +368,7 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
       if (st.turnover < 0 && lastDay === -1) {
         lastDay = st.day;
         morning[st.day] = st.coins;
+        repOn[st.day] = st.rep + ((st as WorldState & { repPart?: number }).repPart ?? 0);
         earnedBy[st.day] = st.stats.earned;
         if (wasTired) tiredDays++;
         wasTired = false;
@@ -375,6 +406,22 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
       const fresh2 = st.orders.filter((o) => !seenOrders.has(o.id) && (o as Order & { pair?: number }).pair !== undefined);
       if (PAIRS && fresh2.length === 2 && pairs.length < 10) pairs.push({ state: structuredClone(st), ids: [fresh2[0].id, fresh2[1].id] });
       if (fresh2.length === 2) pairPins.push(pairCompete(st, fresh2[0], fresh2[1]));
+      if (fresh2.length === 2) {
+        // Round 8: could each be started with the coins in hand, and how far apart are they on what they clear a plot-day?
+        const worth = (o: Order) => (o.reward - o.items[0].n * CROPS[o.items[0].crop].seed) / (o.items[0].n * CROPS[o.items[0].crop].days);
+        const [a, b2] = fresh2.map(worth);
+        const gap = Math.max(a, b2) / Math.max(1e-9, Math.min(a, b2)) - 1;
+        // Today's money: the coins in hand, and what the crops ripe this morning fetch at the crate when picked.
+        let ripe = 0;
+        for (let i = 0; i < st.plots.length; i++) {
+          const c = st.plots[i].crop;
+          if (c && !c.dead && c.stage === 4 && ownedAt(st, i)) ripe += CROPS[c.kind].price;
+        }
+        const seedOf = (o: Order) => o.items[0].n * CROPS[o.items[0].crop].seed;
+        pairs8.push({ affordable: fresh2.filter((o) => seedOf(o) <= st.coins).length, today: fresh2.filter((o) => seedOf(o) <= st.coins + ripe).length, within: gap <= 0.2 + 1e-9, gap });
+      }
+      for (const e of ev) if (e.type === 'request' && e.done && (e as { of?: number }).of) shortFills++;
+      for (const l of [1, 2] as const) if (!canOn[l - 1] && (st.tools?.can ?? 0) >= l) canOn[l - 1] = st.day;
       // Round 7: each new offer (after the first request), a pair or one alone.
       const newOnes = st.orders.filter((o) => !seenOrders.has(o.id));
       if (newOnes.length && (seenOrders.size > 0 || newOnes.length > 1)) {
@@ -489,6 +536,11 @@ function sunupFarm(seed: number, pace?: number, followField = false): Farm {
     goneAll,
     brokeDays,
     offers,
+    watering,
+    pairs8,
+    shortFills,
+    repOn,
+    canOn,
   };
 }
 
@@ -823,6 +875,21 @@ for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the
   const offs = farms.flatMap((f) => f.offers);
   const prs = offs.filter((o) => o.pair);
   console.log(`           offers after the first ${offs.length}, ${pct(prs.length, offs.length)} of them pairs; pairs of two different crops ${pct(prs.filter((o) => o.differ).length, prs.length)}; offers naming the same crops as the offer before ${pct(offs.filter((o) => o.repeat).length, offs.length)}; pairs the farm could take both of ${pct(prs.filter((o) => o.both).length, prs.length)} (so ${pct(prs.filter((o) => !o.both).length, prs.length)} compete)`);
+  // Round 8.
+  const wd = farms.flatMap((f) => f.watering).filter((w) => w.day > 3);
+  const wBy = (lo: number, hi: number, dry = false) => {
+    const xs = wd.filter((w) => w.fields >= lo && w.fields <= hi && (!dry || !w.wet));
+    if (!xs.length) return 'no days';
+    const share = xs.reduce((a, w) => a + w.water, 0) / Math.max(1e-9, xs.reduce((a, w) => a + w.secs, 0));
+    return `work ${med(xs.map((w) => w.secs)).toFixed(0)} s (watering ${med(xs.map((w) => w.water)).toFixed(0)} s, ${Math.round(100 * share)}% of the work), stamina used ${med(xs.map((w) => w.used)).toFixed(0)}, most ${Math.max(...xs.map((w) => w.used)).toFixed(0)}; under 10 s of work ${pct(xs.filter((w) => w.secs < 10).length, xs.length)} (${xs.length} days)`;
+  };
+  console.log(`  round 8: the day, median, 1 field     ${wBy(1, 1)}`);
+  console.log(`                      2 fields          ${wBy(2, 2)}`);
+  console.log(`                      2 fields, dry     ${wBy(2, 2, true)}`);
+  console.log(`                      3 to 6 fields     ${wBy(3, 6)}`);
+  const p8 = farms.flatMap((f) => f.pairs8);
+  console.log(`           pairs ${p8.length}: both sides payable that morning with the coins in hand and what is ripe to pick ${pct(p8.filter((x) => x.today === 2).length, p8.length)}, neither ${pct(p8.filter((x) => x.today === 0).length, p8.length)} (with the coins in hand alone ${pct(p8.filter((x) => x.affordable === 2).length, p8.length)}, neither ${pct(p8.filter((x) => x.affordable === 0).length, p8.length)}); within a fifth on what they clear a plot-day ${pct(p8.filter((x) => x.within).length, p8.length)} (gap median ${Math.round(100 * med(p8.map((x) => x.gap)))}%, largest ${Math.round(100 * Math.max(0, ...p8.map((x) => x.gap)))}%)`);
+  console.log(`           requests filled short ${avg((f) => f.shortFills).toFixed(1)} a farm; reputation on the mornings of days 10, 20, 30: ${[10, 20, 30].map((d) => avg((f) => f.repOn[d] ?? f.rep).toFixed(1)).join(', ')}; copper can on day ${med(farms.map((f) => f.canOn[0]).filter(Boolean)) || 'never'} (${farms.filter((f) => f.canOn[0]).length}/${farms.length}), gold can on day ${med(farms.map((f) => f.canOn[1]).filter(Boolean)) || 'never'} (${farms.filter((f) => f.canOn[1]).length}/${farms.length})`);
   if (PAIRS) {
     // Every pair the bot was offered, played out both ways by a diligent player and a busy one.
     type Out = { kinds: string; bold: number; safe: number; diligent: number; busy: number; scale: number; noise: number; free: number; coins: number };

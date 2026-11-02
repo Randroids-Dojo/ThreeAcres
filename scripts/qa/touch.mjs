@@ -48,6 +48,9 @@
 // late" seed says why in the open picker and keeps the seed in hand; the day
 // card says the season's length; a real tap on a ripe crop pays at once with
 // a rise of coins over the crate; a toast of the day is gone by nightfall.
+// Round 8: a tap with the can on a dry, bugged crop picks the bugs and waters
+// it in one tap; the pointer asks before it builds only with the hands in
+// hand: quick seed taps across its target plant and open no question.
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://localhost:5247';
@@ -611,7 +614,8 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   check('round 7: the day card gives the season’s length ("Spring 8 of 10")', late.day === 'Spring 8 of 10', late.day);
   await p.evaluate(() => window.sunup.hud.closePicker());
 
-  // The can in hand, a dry bugged crop tapped: the bugs come off, nothing is watered.
+  // The can in hand, a dry bugged crop tapped: the bugs come off and it is watered, in one tap (round 8: the can picked
+  // the bugs instead of watering, and on a heat wave four bugged crops were left dry).
   await p.evaluate(() => {
     const st = window.sunup.state;
     st.water = 12;
@@ -632,8 +636,8 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   const bug = await p.evaluate(() => window.sunup.r3d.project(4.5, 6.5, 0));
   await tapAt(bug.x, bug.y, 86);
   await p.waitForTimeout(1800);
-  const bugAfter = await p.evaluate(() => ({ bugs: window.sunup.state.plots[6 * window.sunup.state.W + 4].crop.bugs, events: window.__r4, tool: window.sunup.state.tool }));
-  check('a tap with the can on a dry, bugged crop picks the bugs off and waters nothing', bugAfter.bugs === 0 && bugAfter.events.includes('tend') && !bugAfter.events.includes('water'), JSON.stringify(bugAfter));
+  const bugAfter = await p.evaluate(() => ({ bugs: window.sunup.state.plots[6 * window.sunup.state.W + 4].crop.bugs, wet: window.sunup.state.plots[6 * window.sunup.state.W + 4].wet, events: window.__r4, tool: window.sunup.state.tool }));
+  check('round 8: a tap with the can on a dry, bugged crop picks the bugs off and waters it, in one tap', bugAfter.bugs === 0 && bugAfter.wet && bugAfter.events.includes('tend') && bugAfter.events.includes('water') && bugAfter.tool === 'can', JSON.stringify(bugAfter));
 
   // "Already watered" over a plot at the screen's edge stays whole on screen.
   await p.evaluate(() => {
@@ -716,12 +720,14 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await tapAt(w0.x, w0.y, 90);
   await p.waitForTimeout(2200);
   let w1 = await where();
-  // (Round 7: the radish is paid for as it goes into the crate.)
-  check('P0: a real tap on the plot under the chevron does that plot’s own job: its radish is harvested, no Build tool, no scarecrow, no question', w1.radishes === w0.radishes + 1 && w1.builds.length === 0 && w1.tool !== 'build' && !w1.dialog && w1.coins === w0.coins + 30, JSON.stringify({ before: w0, after: w1 }));
+  // (Round 7: the radish is paid for as it goes into the crate. Round 8: with seeds in hand the tap picks it and sows a
+  // radish there.)
+  check('P0: a real tap on the plot under the chevron does that plot’s own job: its radish is harvested, no Build tool, no scarecrow, no question', w1.radishes === w0.radishes + 1 && w1.builds.length === 0 && w1.tool !== 'build' && !w1.dialog && w1.coins >= w0.coins + 20, JSON.stringify({ before: w0, after: w1 }));
   await p.screenshot({ path: '/tmp/acres-touch-r5-under-chevron.png' });
   // A real tap inside the target tile asks first; Not now does nothing at all. (With the radish picked, its plot is the
-  // nearest bare soil in the field's middle, so the pointer may have moved there: tap wherever it points now.)
-  await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+  // nearest bare soil in the field's middle, so the pointer may have moved there: tap wherever it points now.) Round 8:
+  // with the hands in hand; a tap with the seeds or the can is the plot's own job (checked below).
+  await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'hands' }));
   await p.waitForTimeout(400);
   const aim = (await where()).target;
   const tgt = await tilePt(aim[0], aim[1]);
@@ -731,7 +737,7 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   await p.waitForTimeout(500);
   let w2 = await where();
   const ask = await p.evaluate(() => ({ title: document.querySelector('.dialog.on h2')?.textContent ?? '', text: document.querySelector('.dialog.on p')?.textContent ?? '' }));
-  check('a real tap inside the target tile asks before it builds ("Build a scarecrow?", 40 coins, what it does)', w2.dialog && ask.title === 'Build a scarecrow?' && /^40 coins\. .+You have 250\.$/.test(ask.text) && w2.builds.length === 0, JSON.stringify({ ask, w2 }));
+  check('a real tap inside the target tile asks before it builds ("Build a scarecrow?", 40 coins, what it does)', w2.dialog && ask.title === 'Build a scarecrow?' && /^40 coins\. .+You have [\d,]+\.$/.test(ask.text) && w2.builds.length === 0, JSON.stringify({ ask, w2 }));
   await p.screenshot({ path: '/tmp/acres-touch-r5-ask.png' });
   const no = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog.on .ask .btn')].find((e) => e.textContent === 'Not now'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
   if (no) await tapAt(no[0], no[1], 92);
@@ -746,8 +752,11 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.length)); i++) await p.waitForTimeout(100);
   await p.waitForTimeout(500);
   let w4 = await where();
-  check('yes builds one scarecrow on the target (40 coins), the seeds stay in hand, and the lesson ends', w4.builds.join() === `scarecrow@${aim[0]},${aim[1]}` && w4.coins === w0.coins + 30 - 40 && w4.tool === 'seeds' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), JSON.stringify({ w4, aim }));
-  // Never a chain: five more taps on bare soil plant five radishes and build nothing (five taps built five scarecrows).
+  check('yes builds one scarecrow on the target (40 coins), the hands stay in hand, and the lesson ends', w4.builds.join() === `scarecrow@${aim[0]},${aim[1]}` && w4.coins === w2.coins - 40 && w4.tool === 'hands' && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:scarecrow'))), JSON.stringify({ w4, aim }));
+  // Never a chain: five more taps on bare soil, seeds in hand, plant five radishes and build nothing (five taps built
+  // five scarecrows).
+  await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+  await p.waitForTimeout(200);
   for (const [x, y, id] of [[7, 6, 95], [8, 6, 96], [9, 6, 97], [10, 6, 98], [7, 7, 99]]) {
     const q = await tilePt(x, y);
     await tapAt(q.x, q.y, id);
@@ -758,8 +767,31 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   check('five taps on bare soil after it sow five radishes (50 coins) and build nothing', chain.builds === 1 && chain.sown === 5 && chain.coins === w4.coins - 50 && chain.tool === 'seeds', JSON.stringify(chain));
   await p.screenshot({ path: '/tmp/acres-touch-r5-after.png' });
 
+  // Round 8: seeds in hand, quick real taps along the bare row and on the target: no question, and each plants (the
+  // fourth of seven sunflower taps opened "Build a scarecrow?" and the six after it were lost, twice).
+  await scarecrowMorning(220);
+  await p.evaluate(() => { const st = window.sunup.state; for (const x of [2, 4, 5]) st.plots[7 * st.W + x].crop = null; });
+  await p.waitForTimeout(1200);
+  {
+    const t8 = (await where()).target;
+    const row = [[2, 7], [4, 7], t8, [5, 7]].filter((q, i, a) => q && a.findIndex((r) => r && r[0] === q[0] && r[1] === q[1]) === i);
+    let asked = false;
+    let id = 140;
+    for (const [x, y] of row) {
+      const q = await tilePt(x, y);
+      await tapAt(q.x, q.y, id++);
+      await p.waitForTimeout(130);
+      asked ||= await p.evaluate(() => window.sunup.dialogs.open);
+    }
+    await p.waitForTimeout(4000);
+    const sown = await p.evaluate((row) => row.map(([x, y]) => window.sunup.state.plots[y * window.sunup.state.W + x].crop?.kind ?? '-'), row);
+    check('round 8: seeds in hand, quick taps across the scarecrow lesson’s target: no question, and every one plants', !!t8 && !asked && sown.every((k) => k === 'radish'), JSON.stringify({ t8, asked, sown }));
+    await p.evaluate(() => window.sunup.dialogs.close(true));
+  }
+
   // With no coins, a tap on the pointer says what a scarecrow costs, and nothing else happens: no tool change, no walk.
   await scarecrowMorning(220);
+  await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'hands' }));
   await p.waitForTimeout(1200);
   w0 = await where();
   const tp = await tilePt(3, 7);

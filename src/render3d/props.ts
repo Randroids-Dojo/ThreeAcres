@@ -1,9 +1,10 @@
 // The farm's buildings and fixtures from src/sim/map.ts: the house, the
-// shipping crate, the notice board and the well, with the lanterns, the road
-// out to town and a little yard dressing. Static, merged, rebuilt with the
-// season. Windows and lantern glass share one glowing material. Sunup is
+// shipping crate, the notice board and the wells, with the lanterns, the
+// road out to town and a little yard dressing. Static, merged, rebuilt with
+// the season. Windows and lantern glass share one glowing material. Sunup is
 // farmed alone, so the old crew mode's bunkhouse is not built (its ground is
-// open yard), and there is only the one well, the working one.
+// open yard). Both wells work: the yard's, and (round 8) the one where the
+// paths between the first four fields cross.
 
 import { CanvasTexture, Color, Group, Mesh, MeshLambertMaterial, PlaneGeometry, SRGBColorSpace, Vector3 } from 'three';
 import { PROPS, ROAD } from '../sim/map';

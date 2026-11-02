@@ -273,8 +273,10 @@ describe('the day fits the work', () => {
   });
 });
 
+// Round 8: the can picks the bugs and waters in the same tap (it picked the bugs instead, and on a heat wave four
+// bugged crops were left dry with no word).
 describe('a tap picks bugs before it waters', () => {
-  it('the can in hand, a dry bugged crop tapped: the hands pick the bugs off, nothing is watered', () => {
+  it('the can in hand, a dry bugged crop tapped: the bugs are picked off and it is watered, in one tap', () => {
     const s = farm(5);
     plant(s, 4, 6, 'carrot', 2);
     const c = plots(s, 4, 6);
@@ -283,13 +285,14 @@ describe('a tap picks bugs before it waters', () => {
     c.crop!.bugs = 1;
     s.tool = 'can';
     s.water = 12;
-    expect(tapTool(s, 'can', 4, 6)).toBe('hands');
+    expect(tapTool(s, 'can', 4, 6)).toBe('can');
     stand(s, 4, 5, 's');
     const ev: string[] = [];
     for (let i = 0; i < 40; i++) for (const e of step(s, 1 / 30, i === 0 ? [{ type: 'actAt', x: 4, y: 6 }] : [])) ev.push(e.type);
     expect(c.crop!.bugs).toBe(0);
     expect(ev).toContain('tend');
-    expect(ev).not.toContain('water');
+    expect(ev).toContain('water');
+    expect(c.wet).toBe(true);
   });
 });
 

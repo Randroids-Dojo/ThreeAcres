@@ -12,6 +12,7 @@ import { nightsToTurn, sowing, workLeft } from '../../sim/actions';
 import { guardedSure } from '../../sim/day';
 import { isTaken, offered, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
+import { wellsFrom } from '../../sim/actors';
 import { season, SEASON_NAMES } from '../../sim/world';
 import type { BuildKind, Crop, SimEvent, WorldState } from '../../sim/types';
 
@@ -111,6 +112,17 @@ const prop = (kind: string): Point => {
   const p = PROPS.find((q) => q.kind === kind)!;
   return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
 };
+/**
+ * The well to send the farmer to (round 8: a second one stands where the field paths cross): from the yard and the
+ * path along it, the yard well, which a wide screen's close view can lean to show; from the fields, the nearer, which
+ * is the one by the fields from the first four.
+ */
+const nearWell = (s: WorldState): Point => {
+  const f = s.actors[0];
+  const wells = wellsFrom(f.x, f.y);
+  const w = f.y < 5 ? (wells.find((q) => q.y < 5) ?? wells[0]) : wells[0];
+  return { x: w.x + 0.5, y: w.y + 0.5 };
+};
 
 /** The first request the player took that still wants seed sown for it before its sow-by day. */
 const toSowFor = (s: WorldState) => s.orders.find((o) => isTaken(o) && s.day <= sowByOf(o) && stillToSow(s, o) > 0) ?? null;
@@ -199,7 +211,7 @@ const LESSONS: Lesson[] = [
     ready: (s) => s.water <= 3,
     text: () => 'Fill the can at the well.',
     done: (_s, n) => n('refill') >= 1,
-    point: () => prop('well'),
+    point: (s) => nearWell(s),
   },
   {
     id: 'sleep',
@@ -470,7 +482,7 @@ const NUDGES: { id: string; after: string; ready(s: WorldState): boolean; text: 
     after: 'well',
     ready: (s) => s.water <= 0 && s.tool === 'can' && anyThirsty(s),
     text: 'Can empty. Fill the can at the well.',
-    point: () => prop('well'),
+    point: (s) => nearWell(s),
   },
   {
     // A heat wave withers a crop left dry tonight: while one is still thirsty, the line says so and points at it.

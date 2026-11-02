@@ -5,7 +5,11 @@
 // built a scarecrow with every tap after). Its edge arrow, when the target is
 // out of view, is the pointer itself. A pointer that builds asks first, builds
 // once, and never changes the tool in hand; with too few coins it says so and
-// does nothing else.
+// does nothing else. Round 8: a tap made with the seeds or the can in hand, or
+// while the farmer is busy (a tap that waits its turn), is the plot's own job,
+// never the pointer's question (the eighth playtest's fourth of seven
+// sunflower taps landed on the scarecrow lesson's tile, "Build a scarecrow?"
+// opened, and the six taps after it went on the question instead of the farm).
 
 import { BUILD_COST } from '../../sim/constants';
 import type { BuildKind, WorldState } from '../../sim/types';
@@ -38,7 +42,14 @@ export function pointerTap(s: WorldState, point: { x: number; y: number } | null
   if (tile && !onTarget(point, tile)) return null;
   if (!build) return tile ? null : { do: 'act', x, y };
   if (tile && s.tool === 'build' && s.buildKind === build) return null;
+  if (tile && (s.tool === 'seeds' || s.tool === 'can' || busy(s))) return null;
   const cost = BUILD_COST[build];
   if (s.coins < cost) return { do: 'refuse', text: `A ${build} costs ${cost}. You have ${s.coins}.` };
   return { do: 'ask', build, x, y, cost };
+}
+
+/** Is the farmer at a job, on the way to one, or with taps waiting (a tap now waits its turn)? */
+function busy(s: WorldState): boolean {
+  const f = s.actors[0];
+  return !!(f.task || f.aim || f.path.length || s.taps?.length);
 }

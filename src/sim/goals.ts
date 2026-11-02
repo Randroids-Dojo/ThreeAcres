@@ -1,7 +1,7 @@
 // What the farm is for, per goal rule: market milestones, almanac seasons and
 // town orders. Selling lives here too, because the goal decides how it works.
 
-import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_BOLD, REQUEST_FLOOR, REQUEST_GAIN_PER_PLOT, REQUEST_GRACE, REQUEST_LOOK, REQUEST_MAX, REQUEST_MAX_BIG, REQUEST_MIN, REQUEST_MOST, REQUEST_RATE, REQUEST_RISK, REQUEST_SHARE, REQUEST_SOIL, REQUEST_SOW, REQUEST_SPAN, requestSlots, TOWN } from './constants';
+import { DAYS_PER_SEASON, ORDER_PREMIUM, ORDER_SLOTS, REQUEST_CLOSE, REQUEST_EDGE, REQUEST_FLOOR, REQUEST_GAIN_PER_PLOT, REQUEST_GRACE, REQUEST_LOOK, REQUEST_MAX, REQUEST_MAX_BIG, REQUEST_MIN, REQUEST_MOST, REQUEST_RATE, REQUEST_SHARE, REQUEST_SOW, REQUEST_SPAN, requestSlots, TOWN } from './constants';
 import { CROP_IDS, CROPS, count, inSeason } from './crops';
 import { season } from './world';
 import { nightsToTurn, priceOf, sowing } from './actions';
@@ -112,10 +112,25 @@ function payRequest(s: WorldState, o: Order, ev: SimEvent[], report?: DayReport)
   s.coins += pay;
   s.stats.earned += pay;
   s.almanac.earned += pay;
-  if (full) s.rep += o.rep;
+  // Round 8: a short fill earns the same share of its reputation point, towards the next (a short fill earned none,
+  // and crows that took one crop of each of five requests kept the copper can locked at reputation 2).
+  const rep = full ? o.rep : (o.rep * got) / it.n;
+  addRep(s, rep);
   if (report) (report.filled ??= []).push({ who: o.who, reward: pay, ...(full ? {} : { got, of: it.n }) });
-  ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: pay, crop: it.crop, ...(full ? {} : { got, of: it.n }) });
+  ev.push({ type: 'request', id: o.id, who: o.who, done: true, reward: pay, crop: it.crop, ...(full ? {} : { got, of: it.n }), rep });
   return pay;
+}
+
+/**
+ * Sunup: add reputation, whole points or a share of one. Shares gather
+ * towards the next point (`repPart`, 0 to 1); a whole one moves `rep`.
+ */
+export function addRep(s: WorldState, n: number): void {
+  const total = s.rep + (s.repPart ?? 0) + n;
+  // Counted in hundredths, so shares that make a point make it exactly.
+  const hundredths = Math.round(total * 100);
+  s.rep = Math.floor(hundredths / 100);
+  s.repPart = (hundredths % 100) / 100;
 }
 
 export function deliver(s: WorldState, id: number, ev: SimEvent[]): boolean {
@@ -456,7 +471,8 @@ export function clashOf(s: WorldState, a: Order, b: Order): { kind: 'soil' | 'co
   const room = Math.max(0, roomBy(s, last) - held.plots);
   if (plots > room) return { kind: 'soil', need: plots, have: room };
   const coins = stillToSow(s, a) * CROPS[a.items[0].crop].seed + stillToSow(s, b) * CROPS[b.items[0].crop].seed;
-  const budget = Math.max(0, sowBudget(s, last) - held.coins);
+  // Round 8: counted as the pair was priced, on what the farm can spend now (its coins and what is ripe today).
+  const budget = Math.max(0, Math.min(sowBudget(s, last), sowBudget(s, s.day)) - held.coins);
   if (coins > budget) return { kind: 'coins', need: coins, have: budget };
   return null;
 }
@@ -486,28 +502,23 @@ export function slackOf(o: Order): number {
   return Math.max(0, o.due - sowByOf(o) - CROPS[o.items[0].crop].days);
 }
 
-/** The share of its gain a request counts for in `neutralValue`: one with no day to spare comes through four times in five. */
-function reliability(slack: number): number {
-  return slack <= 0 ? REQUEST_RISK : 1;
-}
-
-/** What a plot-day of soil is worth for a sort of request (`REQUEST_SOIL`). */
-export function soilValue(kind: RequestKind | undefined): number {
-  if (kind === 'rush' || kind === 'easy') return REQUEST_SOIL.risk;
-  if (kind === 'long' || kind === 'quick') return REQUEST_SOIL.time;
-  if (kind === 'big' || kind === 'small') return REQUEST_SOIL.size;
-  return REQUEST_SOIL.single;
+/**
+ * What a crop is worth at market for each plot-day it holds its soil: what
+ * it fetches over its seed, by its days to ripen.
+ */
+export function marketRate(crop: CropId): number {
+  const d = CROPS[crop];
+  return (d.price - d.seed) / d.days;
 }
 
 /**
- * What a request is worth to a typical farm: its gain (one with no day to
- * spare counted at the share that comes through), less what the soil it holds
- * could have earned meanwhile. The two of a pair are priced to match on this,
- * up to rounding; which is really better then turns on the farm (its free
- * soil, coins and stamina, and the forecast), which is the decision.
+ * Round 8: what a request is worth for each plot-day its sowing takes: its
+ * pay less its seed, over its plots and its crop's days (the eighth
+ * playtest's measure: pumpkins about 19, lettuces 12.5).
  */
-export function neutralValue(o: Order): number {
-  return gainOf(o) * reliability(slackOf(o)) - soilValue(o.kind) * plotDays(o);
+export function worthRate(o: Order): number {
+  const it = o.items[0];
+  return (o.reward - it.n * CROPS[it.crop].seed) / plotDays(o);
 }
 
 /** The most a request's gain can be: so much for each plot of owned field, so requests grow with the farm. */
@@ -545,7 +556,9 @@ function offer(s: WorldState, crop: CropId, days: number, held: { plots: number;
       const sowBy = Math.min(s.day + k, last);
       if (sowing(sowBy, crop).ok) {
         const room = roomBy(s, sowBy) - held.plots;
-        const coins = sowBudget(s, sowBy) - held.coins;
+        // Round 8: only what the farm can afford to start now (its coins and what is ripe to pick today): the eighth
+        // playtest was offered seed of 480 or 270 with 255 in hand.
+        const coins = Math.min(sowBudget(s, sowBy), sowBudget(s, s.day)) - held.coins;
         const cap = Math.min(room, Math.floor(coins / d.seed), d.price > 150 ? REQUEST_MAX_BIG : REQUEST_MAX);
         if (cap >= REQUEST_MIN) return { crop, sowBy, due: Math.min(sowBy + d.days + grace, lastDayFor(s, crop)), room, coins, cap };
       }
@@ -603,35 +616,44 @@ function timing(kind: RequestKind, days: number): { days: number; grace: number;
 }
 
 /**
- * Price the two of a pair. The safe one earns `REQUEST_RATE` for each plot
- * and day its sowing takes; the bold one is priced to match it on
- * `neutralValue`. Null when the bold one does not offer clearly more gain
- * (`REQUEST_BOLD`). Round 7: over the cap (`gainCap`) both gains are scaled
- * down together, so the counts that make the two compete stay as they are
- * (round 6 shrank the counts until the pair no longer competed).
+ * Price the two of a pair (round 8). Each is priced on what it is worth for
+ * each plot-day of soil it holds (its pay less its seed, `worthRate`): the
+ * safe one at the two crops' average market rate plus `REQUEST_RATE`, the
+ * bold one `REQUEST_EDGE` more, so the two stay close (within
+ * `REQUEST_CLOSE`) whatever their crops fetch at market, and the choice
+ * turns on risk, timing and plots (round 7 gave both `REQUEST_RATE` over
+ * market, and pumpkins came to 19 a plot-day against 12.5 for lettuces).
+ * Each still gains at least `REQUEST_FLOOR` over market. Over the cap
+ * (`gainCap`) both come down together, so the counts that make the two
+ * compete stay as they are. Null when no such price exists.
  */
-function pricePair(s: WorldState, safe: { o: Offer; n: number }, bold: { o: Offer; n: number }, soil: number): { safe: number; bold: number; nb: number; ns: number } | null {
+function pricePair(s: WorldState, safe: { o: Offer; n: number }, bold: { o: Offer; n: number }, kind: RequestKind): { safe: number; bold: number; nb: number; ns: number } | null {
   // In fives, as the board counts coins, and never over the cap once rounded.
   const cap = Math.floor(gainCap(s) / 5) * 5;
-  const slack = (o: Offer) => Math.max(0, o.due - o.sowBy - CROPS[o.crop].days);
-  const rs = reliability(slack(safe.o));
-  const rb = reliability(slack(bold.o));
   const { n: ns } = safe;
   const { n: nb } = bold;
-  const pdS = ns * CROPS[safe.o.crop].days;
-  const pdB = nb * CROPS[bold.o.crop].days;
-  let gs = REQUEST_RATE * pdS;
-  let gb = (gs * rs - soil * pdS + soil * pdB) / rb;
-  // Over the cap, the bold one is held to it and the safe one priced to match it, so the counts that make the two
-  // compete stay as they are (round 6 shrank the counts until the pair no longer competed).
-  if (gb > cap) {
-    gb = cap;
-    gs = (gb * rb + soil * pdS - soil * pdB) / rs;
-  }
-  if (gs > cap) gs = cap;
-  const fs = fives(gs);
-  const fb = fives(gb);
-  if (fs < 10 || fb < REQUEST_BOLD * fs) return null;
+  const cs = safe.o.crop;
+  const cb = bold.o.crop;
+  const pdS = ns * CROPS[cs].days;
+  const pdB = nb * CROPS[cb].days;
+  const edge = 1 + (REQUEST_EDGE[kind as keyof typeof REQUEST_EDGE] ?? 0);
+  const mS = marketRate(cs);
+  const mB = marketRate(cb);
+  // The least each may be worth a plot-day: its market rate and its floor over market.
+  const floorS = mS + (REQUEST_FLOOR * CROPS[cs].price) / CROPS[cs].days;
+  const floorB = mB + (REQUEST_FLOOR * CROPS[cb].price) / CROPS[cb].days;
+  let w = Math.max((mS + mB) / 2 + REQUEST_RATE, floorS, floorB / edge);
+  // The most: the cap on either gain.
+  const most = Math.min(mS + cap / pdS, (mB + cap / pdB) / edge);
+  if (w > most) w = most;
+  if (w < floorS - 1e-9 || w * edge < floorB - 1e-9) return null;
+  const fs = Math.min(cap, fives((w - mS) * pdS));
+  const fb = Math.min(cap, fives((w * edge - mB) * pdB));
+  if (fs < 10 || fb < 10) return null;
+  // Rounded to fives, the two must still be close, and the bold one the more worth (or the pair does not say what it is).
+  const rs = mS + fs / pdS;
+  const rb = mB + fb / pdB;
+  if (rb < rs || rb > rs * (1 + REQUEST_CLOSE)) return null;
   return { safe: fs, bold: fb, nb, ns };
 }
 
@@ -741,7 +763,7 @@ export function offerRequests(s: WorldState): Order[] {
         const nbk = size(bo, Math.ceil((span * nsk * CROPS[safeCrop].days) / CROPS[boldCrop].days - 1e-9));
         // A big request is half as many again as the small one, or the pair does not say what it is.
         if (c.id === 'size' && nbk < 1.5 * nsk) continue;
-        const p = pricePair(s, { o: so, n: nsk }, { o: bo, n: nbk }, soilValue(c.safe));
+        const p = pricePair(s, { o: so, n: nsk }, { o: bo, n: nbk }, c.bold);
         if (!p || !competes(so, p.ns, bo, p.nb)) continue;
         // Each still pays clearly over market once the cap has scaled it (a big crop on a small farm may not).
         if (p.safe < REQUEST_FLOOR * p.ns * CROPS[safeCrop].price || p.bold < REQUEST_FLOOR * p.nb * CROPS[boldCrop].price) continue;

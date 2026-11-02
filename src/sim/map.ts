@@ -69,6 +69,9 @@ export const PROPS: readonly Prop[] = [
   { kind: 'board', x: 8, y: 2, w: 2, h: 1, doorX: 8, doorY: 3 },
   { kind: 'bunkhouse', x: 13, y: 1, w: 3, h: 2, doorX: 14, doorY: 3 },
   { kind: 'well', x: 11, y: 2, w: 1, h: 1, doorX: 11, doorY: 3 },
+  // Round 8: a second well where the paths between the first four fields cross, a step from each (two trips a day to
+  // the yard well were a third of the watering on two fields, and from the first field a phone could not see it).
+  { kind: 'well', x: 6, y: 9, w: 1, h: 1, doorX: 6, doorY: 8 },
 ];
 
 /** The road off the farm leaves at the east end of the yard path. */

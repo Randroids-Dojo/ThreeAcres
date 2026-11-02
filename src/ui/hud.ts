@@ -15,7 +15,7 @@ import { WEATHER_NAMES } from '../sim/weather';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import { CRATE, propAt } from '../sim/map';
 import type { BuildKind, CropId, RequestFail, SimEvent, ToolId, Verb, Weather, WorldState } from '../sim/types';
-import { brief, canLevel, describe, denyText, seedNote, sentence, townName } from './describe';
+import { brief, canLevel, describe, denyText, repShare, seedNote, sentence, townName } from './describe';
 import { clock, el, esc, fmt, setHtml, setText, toggle } from './dom';
 import { icon, type IconId } from './icons';
 import { buzz, TouchControls } from './touch';
@@ -80,9 +80,11 @@ export function failWords(why: RequestFail | undefined, lost = 0): string {
  * leaves space for a clause said before it ("Summer begins."). Empty when
  * nothing happened worth a card.
  */
-export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
-  const r = s.report;
-  if (!r) return '';
+export function morningNews(s: WorldState, room = MORNING_CLAUSES, ripeNow?: number): string {
+  const r0 = s.report;
+  if (!r0) return '';
+  // Round 8: the card pinned on the board counts what is ripe now (it said "4 ripe to pick" after they were picked).
+  const r = ripeNow === undefined ? r0 : { ...r0, ripe: ripeNow };
   const sold = r.sold.reduce((a, x) => a + x.n, 0);
   const value = r.sold.reduce((a, x) => a + x.value, 0);
   // [priority, reading order, words]: lower priority numbers are kept first.
@@ -136,6 +138,28 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES): string {
   if (r.wages) bits.push([6, 10, `wages ${r.wages}`]);
   const kept = bits.map((b, i) => ({ b, i })).sort((x, y) => x.b[0] - y.b[0] || x.i - y.i).slice(0, Math.max(0, room));
   return sentence(kept.sort((x, y) => x.b[1] - y.b[1] || x.i - y.i).map((x) => x.b[2]));
+}
+
+/** Sunup: crops ripe on the farm right now, to pick. */
+export function ripeNow(s: WorldState): number {
+  let n = 0;
+  for (let i = 0; i < s.plots.length; i++) {
+    const c = s.plots[i].crop;
+    if (c && !c.dead && c.stage === 4 && s.parcelOf[i] >= 0 && s.parcels[s.parcelOf[i]].owned) n++;
+  }
+  return n;
+}
+
+/**
+ * The morning card as the board keeps it pinned (round 7), read again now:
+ * the new season first, if it began today, and what is ripe counted as it is
+ * now. Empty when there is nothing left to say.
+ */
+export function pinnedNews(s: WorldState): string {
+  const turn = homestead(s) && dayOfSeason(s.day) === 1 && s.day > 1 ? `${SEASON_NAMES[season(s.day)]} begins.` : '';
+  let news = morningNews(s, turn ? MORNING_CLAUSES - 1 : MORNING_CLAUSES, homestead(s) ? ripeNow(s) : undefined);
+  if (turn) news = news ? `${turn} ${news}` : turn;
+  return news;
 }
 
 /**
@@ -555,7 +579,7 @@ export class Hud {
       toggle(b, 'gone', gone);
       // Seed the purse cannot pay for looks it: faded, its price in red, a dashed edge.
       toggle(b, 'poor', homestead(s) && !gone && note.state !== 'late' && s.coins < CROPS[c].seed);
-      setText(b.querySelector('.pr')!, note.price);
+      setText(b.querySelector('.pr .prt')!, note.price);
       setText(b.querySelector('.wh')!, note.when);
       // Number keys pick a card: each shown card wears its number while a keyboard or mouse is in use.
       setText(b.querySelector('.key')!, gone ? '' : String(++k));
@@ -605,7 +629,8 @@ export class Hud {
     this.seedbar.append(this.pickMsg);
     for (const c of CROP_IDS) {
       const d = CROPS[c];
-      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"></span><span class="wh"></span><span class="key"></span>`);
+      // Round 8: the price wears the coin, as the coins box does.
+      const b = el('button', 'seed', `<span class="blob">${cropArt(c)}</span><span class="nm">${d.name}</span><span class="pr"><span class="ic cm">${icon('coin')}</span><span class="prt"></span></span><span class="wh"></span><span class="key"></span>`);
       b.dataset.crop = c;
       b.title = `${d.name}: seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, then every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}. ${d.likes}.`;
       b.onclick = () => {
@@ -652,7 +677,7 @@ export class Hud {
     // Only what a lesson has brought in: the sprinkler comes after the scarecrow, with its own line.
     const kinds = (['scarecrow', 'sprinkler'] as BuildKind[]).filter((k) => k === 'scarecrow' || this.knows(this.host.state(), 'sprinkler'));
     kinds.forEach((k, i) => {
-      const b = el('button', 'seed', `<span class="ic" style="width:24px;height:24px">${icon(k)}</span><span class="nm">${k === 'scarecrow' ? 'Scarecrow' : 'Sprinkler'}</span><span class="pr">${BUILD_COST[k]}</span><span class="key">${i + 1}</span>`);
+      const b = el('button', 'seed', `<span class="ic" style="width:24px;height:24px">${icon(k)}</span><span class="nm">${k === 'scarecrow' ? 'Scarecrow' : 'Sprinkler'}</span><span class="pr"><span class="ic cm">${icon('coin')}</span>${BUILD_COST[k]}</span><span class="key">${i + 1}</span>`);
       b.dataset.kind = k;
       b.title = k === 'scarecrow' ? `${scarecrowWords(this.host.state())}.` : `${sprinklerWords(this.host.state())}.`;
       b.onclick = () => {
@@ -715,9 +740,14 @@ export class Hud {
     // The same as a tap on the card: a seed that cannot go in says why.
     const card = shown[cards.findIndex((c) => c.id === id)];
     card?.click();
-    // A tap closes a picker on a phone; the keyboard keeps it open until Enter.
-    if (seeds) this.seedOpen = true;
-    else this.buildOpen = true;
+    // The arrows keep the picker open to move on; a number picks and closes it (round 8: it stayed open on a desktop),
+    // unless the picker has something to say (a seed too late to go in, or one only just in time).
+    const number = /^(?:Digit|Numpad)[1-9]$/.test(code);
+    const word = this.pickMsg.classList.contains('on');
+    const keep = !number || word;
+    if (seeds) this.seedOpen = keep;
+    else this.buildOpen = keep;
+    if (!keep) this.picking = false;
     return true;
   }
 
@@ -799,7 +829,9 @@ export class Hud {
         if (o && e.by === s.actors[0].id) {
           const it = o.items[0];
           const have = Math.min(o.got ?? 0, it.n);
-          this.float(e.x + 0.5, e.y + 0.5, have >= it.n ? `${it.n} ${cropWord(it.crop, it.n)} ready` : `${have} of ${it.n} ${cropWord(it.crop, it.n)}`);
+          // Round 8: one chip a request, its count updated in place over the plot just picked ("3 of 10", "4 of 10",
+          // "5 of 10" and "6 of 10 sunflowers" stacked over the field).
+          this.requestChip(o.id, e.x + 0.5, e.y + 0.5, have >= it.n ? `${it.n} ${cropWord(it.crop, it.n)} ready` : `${have} of ${it.n} ${cropWord(it.crop, it.n)}`);
           break;
         }
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
@@ -813,7 +845,9 @@ export class Hud {
       case 'milestone': {
         // A milestone reads as something won, not a task: "Your first harvest is in".
         const m = MILESTONES.find((x) => x.id === e.id);
-        if (m && s.rules.goal === 'market') this.toast(`<b>${esc(m.done)}</b>`, 'big');
+        // Round 8: the second field comes with the copper can, and says so.
+        if (m && homestead(s) && e.id === 'field2' && s.tools.can >= 1) this.toast(`<b>${esc(m.done)}</b><br>A copper can comes with it. It waters a whole row.`, 'big', 4200);
+        else if (m && s.rules.goal === 'market') this.toast(`<b>${esc(m.done)}</b>`, 'big');
         break;
       }
       case 'goal':
@@ -830,14 +864,17 @@ export class Hud {
       case 'request':
         // Requests filled or gone overnight are on the morning card; this is one handed over by day, or the other of
         // a pair let go because seed went in for this one.
-        if (e.done && s.turnover < 0) this.toast(e.of ? `<b>${esc(e.who)}</b> took ${e.got} of ${e.of}. +${fmt(e.reward)} coins.` : `<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
+        // Round 8: one short earns its share of a reputation point ("+¾ reputation").
+        if (e.done && s.turnover < 0) this.toast(e.of ? `<b>${esc(e.who)}</b> took ${e.got} of ${e.of}. +${fmt(e.reward)} coins${e.rep && repShare(e.rep) ? `, +${repShare(e.rep)} reputation` : ''}.` : `<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
         // Lost by day, with its cause (round 7), or the other of a pair let go.
         else if (!e.done && s.turnover < 0 && e.crop && e.why) this.toast(`${esc(e.who)} gave up on the ${CROPS[e.crop].plural}${failWords(e.why, e.lost) ? ` (${failWords(e.why, e.lost)})` : ''}.`, 'deny', 3200);
         else if (!e.done && s.turnover < 0 && e.crop) this.toast(`${esc(e.who)} will find ${CROPS[e.crop].plural} elsewhere.`, '', 2800);
         break;
       case 'upgrade': {
+        // (The copper can that comes with the second field is told with the field.)
+        if (e.withField) break;
         const u = TOOL_UPGRADES[e.tool][e.level - 1];
-        this.toast(`<b>${esc(u.name)}</b><br>${e.level === 1 ? 'Works three plots in a row.' : 'Works a three by three square.'}`, 'big', 3200);
+        this.toast(`<b>${esc(u.name)}</b><br>${e.level === 1 ? 'Works a whole row.' : 'Works two rows.'}`, 'big', 3200);
         break;
       }
       case 'hire': {
@@ -987,6 +1024,43 @@ export class Hud {
       t.classList.add('out');
       setTimeout(() => t.remove(), 320);
     }, ms);
+  }
+
+  /** Request chips on screen, one a request, by its id. */
+  private chips = new Map<number, { el: HTMLElement; timer: ReturnType<typeof setTimeout> }>();
+
+  /**
+   * Round 8: a request's count over the plot just picked, on one chip for the
+   * request: a quick run of picks moves and updates it, never a stack of
+   * chips over the field.
+   */
+  requestChip(id: number, x: number, y: number, text: string): void {
+    const p = this.host.project(x, y, 0.8);
+    if (!p) return;
+    let c = this.chips.get(id);
+    if (!c || !c.el.isConnected) {
+      const f = el('div', 'floater req');
+      this.floaters.append(f);
+      c = { el: f, timer: setTimeout(() => undefined, 0) };
+      this.chips.set(id, c);
+    }
+    const f = c.el;
+    f.textContent = text;
+    f.style.left = `${p.x}px`;
+    f.style.top = `${p.y}px`;
+    const W = this.root.clientWidth;
+    const half = f.offsetWidth / 2;
+    if (W > 0 && half > 0) f.style.left = `${Math.max(half + 6, Math.min(W - half - 6, p.x))}px`;
+    // Its rise starts again with each pick, so the count stays up to be read.
+    f.style.animation = 'none';
+    void f.offsetWidth;
+    f.style.animation = '';
+    clearTimeout(c.timer);
+    const chip = c;
+    c.timer = setTimeout(() => {
+      chip.el.remove();
+      if (this.chips.get(id) === chip) this.chips.delete(id);
+    }, 2250);
   }
 
   float(x: number, y: number, text: string, deny = false): void {

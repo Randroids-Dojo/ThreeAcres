@@ -118,7 +118,8 @@ export function brief(s: WorldState, x: number, y: number): string {
   if (b) return b.kind === 'sprinkler' ? `<b>Sprinkler</b> <span class="why">${sprinklerLeft(b.left ?? SPRINKLER_MORNINGS)}</span>` : '<b>Scarecrow</b>';
   const plot = plots(s, x, y);
   const c = plot.crop;
-  if (!c) return plot.tilled ? `<b>Bare soil</b>${plot.wet ? ' <span class="why">watered</span>' : ''}` : '<b>Meadow</b> <span class="why">hoe this plot to plant it</span>';
+  // (Round 8: "Meadow hoe this plot to plant it" read as one run of words: the colon says what it is, then what to do.)
+  if (!c) return plot.tilled ? `<b>Bare soil</b>${plot.wet ? ' <span class="why">watered</span>' : ''}` : '<b>Meadow:</b> <span class="why">hoe this plot to plant it</span>';
   const d = CROPS[c.kind];
   let state: string;
   if (c.dead) state = 'withered';
@@ -161,4 +162,15 @@ export function seedNote(s: WorldState, c: CropId): { price: string; when: strin
   // Round 7: a crop that ripens only if watered every night until the turn says so before it goes in.
   if (justInTime(s.day, c)) return { price, when: 'Just in time', state: 'now' };
   return { price, when: `${d.days} days${d.regrow ? `, then ${d.regrow}` : ''}`, state: 'now' };
+}
+
+/**
+ * Round 8: a share of a reputation point in quarters, as the board shows it
+ * ("¾"), or '' under a quarter. A whole number keeps its whole part ("2¾").
+ */
+export function repShare(n: number): string {
+  const whole = Math.floor(n + 1e-9);
+  const q = Math.floor((n - whole) * 4 + 1e-9);
+  const part = ['', '\u00bc', '\u00bd', '\u00be'][q];
+  return whole ? `${whole}${part}` : part;
 }

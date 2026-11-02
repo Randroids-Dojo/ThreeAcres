@@ -55,6 +55,8 @@ export const game: GameModule = {
     // Saves from before the can and the smith.
     s.water ??= 12;
     s.tools ??= { can: 0, hoe: 0 };
+    // Round 8: the copper can comes with the second field, however long ago it was bought.
+    if (s.parcels.filter((p) => p.owned).length >= 2 && s.tools.can < 1) s.tools.can = 1;
     if (s.tool === 'smart') s.tool = 'hands';
     inferLessons(s);
     // Requests are taken on the board now: an old save's pair nobody sowed for is still on offer.

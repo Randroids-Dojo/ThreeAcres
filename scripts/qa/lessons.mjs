@@ -715,9 +715,10 @@ await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + 
     await tap(chev.x, chev.y, 7);
     await p.waitForTimeout(1800);
     const stolen = await p.evaluate((b) => ({ builds: window.sunup.state.builds.length, tool: window.sunup.state.tool, harvested: Object.values(window.sunup.state.stats.harvested).reduce((a, c) => a + c, 0) - b.harvested, dialog: window.sunup.dialogs.open, spent: b.coins - window.sunup.state.coins }), before);
-    check('a tap on the plot under the chevron does that plot\u2019s own job (its radish is harvested): no Build tool, no scarecrow, no question', chev.over && !!under && under.x === at.x && under.y === at.y - 1 && stolen.builds === 0 && stolen.tool !== 'build' && stolen.harvested === 1 && !stolen.dialog && stolen.spent === -30, JSON.stringify({ chev, under, at, stolen }));
-    // (The seeds back in hand, without opening the picker.)
-    await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+    // (Round 8: with the seeds in hand the tap picks the radish, paid 30 at the crate, and sows a radish there for 10.)
+    check('a tap on the plot under the chevron does that plot\u2019s own job (its radish is harvested): no Build tool, no scarecrow, no question', chev.over && !!under && under.x === at.x && under.y === at.y - 1 && stolen.builds === 0 && stolen.tool !== 'build' && stolen.harvested === 1 && !stolen.dialog && stolen.spent === -20, JSON.stringify({ chev, under, at, stolen }));
+    // (The hands in hand: round 8, a tap with the seeds or the can is the plot's own job, never the pointer's question.)
+    await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'hands' }));
     await frames(5);
     // A real tap inside the target tile asks before it builds.
     const tp = await project(at.x + 0.5, at.y + 0.5, 0);
@@ -729,8 +730,10 @@ await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + 
     for (let i = 0; i < 40 && !(await p.evaluate(() => window.sunup.state.builds.length)); i++) await p.waitForTimeout(100);
     await p.waitForTimeout(400);
     const built = await p.evaluate((b) => ({ builds: window.sunup.state.builds.map((x) => `${x.kind}@${x.x},${x.y}`), spent: b.coins - window.sunup.state.coins, watered: window.__water, done: window.sunup.state.learn.includes('lesson:scarecrow'), tool: window.sunup.state.tool }), before);
-    check('yes builds one scarecrow there (40 coins, nothing watered), the tool in hand stays in hand, and the lesson ends', built.builds.join() === `scarecrow@${at.x},${at.y}` && built.spent === 40 - 30 && built.watered === 0 && built.done && built.tool === 'seeds', JSON.stringify(built));
-    // Never a chain: the next taps on bare soil plant, they build nothing.
+    check('yes builds one scarecrow there (40 coins, nothing watered), the tool in hand stays in hand, and the lesson ends', built.builds.join() === `scarecrow@${at.x},${at.y}` && built.spent === stolen.spent + 40 && built.watered === 0 && built.done && built.tool === 'hands', JSON.stringify(built));
+    // Never a chain: the next taps on bare soil, seeds in hand, plant; they build nothing.
+    await p.evaluate(() => window.sunup.input.push({ type: 'tool', tool: 'seeds' }));
+    await frames(5);
     const other = await p.evaluate(() => { const st = window.sunup.state; const i = st.plots.findIndex((q, k) => !q.crop && q.tilled && st.parcelOf[k] === 0 && !st.builds.some((b) => b.y * st.W + b.x === k)); return i < 0 ? null : { x: i % st.W, y: Math.floor(i / st.W) }; });
     if (other) {
       const op = await project(other.x + 0.5, other.y + 0.5, 0);

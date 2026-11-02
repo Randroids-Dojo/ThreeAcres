@@ -130,8 +130,12 @@ export interface Actor {
   path: { x: number; y: number }[];
   /** Job the actor is working towards. */
   job: number | null;
-  /** Hands only: the chore picked for itself (not a painted job). Sunup's farmer: the job a tap walks to; `build` is a one-off build there. */
-  aim: { verb: Verb; x: number; y: number; build?: BuildKind } | null;
+  /**
+   * Hands only: the chore picked for itself (not a painted job). Sunup's farmer: the job a tap walks to, with the
+   * tool and seed it was tapped with (round 8: the job is the one tapped, whatever is in hand when the farmer gets
+   * there); `build` is a one-off build there.
+   */
+  aim: { verb: Verb; x: number; y: number; build?: BuildKind; tool?: ToolId; seed?: CropId } | null;
   /** Short hop in turns mode: renderers lift the actor by sin(PI * hop). 0..1, 0 when idle. */
   hop: number;
   /** Hands only: shirt colour index 0..5. */
@@ -151,6 +155,22 @@ export interface Crow {
   phase: 'in' | 'peck' | 'flee' | 'gone';
   /** Seconds in the phase (in, flee) or game minutes pecked (peck). */
   t: number;
+}
+
+/**
+ * Sunup: one tap on the farm, waiting its turn. The tool and the seed are
+ * fixed the moment it is tapped (round 8: a seed picked while taps waited
+ * changed what they planted, and eight of twelve corn went in as
+ * sunflowers).
+ */
+export interface Tap {
+  x: number;
+  y: number;
+  tool: ToolId;
+  /** The seed in hand when it was tapped, for a tap with the seeds. */
+  seed?: CropId;
+  /** A one-off build from the lesson pointer. */
+  build?: BuildKind;
 }
 
 export interface Job {
@@ -350,11 +370,18 @@ export interface WorldState {
   /** Sunup: town requests pinned so far (the first is always a cheap one). Missing in older saves. */
   requested?: number;
   /**
-   * Sunup: plots tapped while the farmer was busy, each with the tool it
-   * wants, done in order once the job in hand is finished. Missing in older saves.
+   * Sunup: plots tapped while the farmer was busy, each with the tool and
+   * seed it was tapped with, done in order once the job in hand is finished
+   * (a crow or bugs first). Missing in older saves.
    */
-  taps?: { x: number; y: number; tool: ToolId; build?: BuildKind }[];
+  taps?: Tap[];
   rep: number;
+  /**
+   * Sunup, round 8: a share of a reputation point earned towards the next
+   * (0 to 1): a request filled short earns its share of a point. Missing in
+   * older saves.
+   */
+  repPart?: number;
   almanac: Almanac;
   milestones: Record<string, boolean>;
   stats: Stats;
@@ -431,6 +458,6 @@ export type SimEvent =
   | { type: 'tired' }
   | { type: 'hire'; id: number }
   | { type: 'refill'; x: number; y: number; by: number }
-  | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number }
-  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId; /** Paid in part: what it got of its count. */ got?: number; of?: number; /** Lost: what took its crops, or why it could not be met. */ why?: RequestFail; lost?: number }
+  | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number; /** Sunup: it came with the second field, not from the smith. */ withField?: boolean }
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId; /** Paid in part: what it got of its count. */ got?: number; of?: number; /** Lost: what took its crops, or why it could not be met. */ why?: RequestFail; lost?: number; /** Filled: the reputation it earned (a share of a point when short). */ rep?: number }
   | { type: 'unlock'; what: string };

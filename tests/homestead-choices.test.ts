@@ -184,17 +184,20 @@ describe('a morning offers two requests, and only one can be taken', () => {
 });
 
 describe('each request needs fresh sowing, fits the purse, says when to sow and pays well', () => {
-  it('neither of a pair is simply the better deal: what each clears over its seed is within a factor of two of the other', () => {
+  // Round 8: measured on what each clears over its seed for each plot-day it holds (the eighth playtest's measure:
+  // pumpkins 19 a plot-day against 12.5 for lettuces); a long or big one holds about twice the plot-days, so clears
+  // about twice as much in all, and that is the choice, not a better deal.
+  it('neither of a pair is simply the better deal: what each clears over its seed for each plot-day is within a fifth of the other', () => {
     let pairs = 0;
     let even = 0;
     for (const s of farms()) {
       fillRequests(s, true);
       if (s.orders.length !== 2) continue;
       pairs++;
-      const [a, b] = s.orders.map((o) => o.reward - fresh(s, o) * seedOf(o));
-      if (Math.max(a, b) <= 2 * Math.min(a, b)) even++;
+      const [a, b] = s.orders.map((o) => (o.reward - fresh(s, o) * seedOf(o)) / (fresh(s, o) * CROPS[o.items[0].crop].days));
+      if (Math.max(a, b) <= 1.2 * Math.min(a, b) + 1e-9) even++;
     }
-    expect(even / pairs).toBeGreaterThan(0.85);
+    expect(even / pairs).toBeGreaterThan(0.98);
   });
 
   it('is never for a crop that regrows: its seed pays back over many picks, so one pick would read as a poor deal', () => {

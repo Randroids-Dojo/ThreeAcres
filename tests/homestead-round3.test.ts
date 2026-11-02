@@ -31,6 +31,7 @@ function run(s: WorldState, seconds: number, first: Command[] = []): string[] {
   return out;
 }
 
+// (Round 8: the copper can and hoe work the whole row of the field; they worked three plots of it.)
 describe('the copper can and hoe work along the row, inside the field', () => {
   it('a tap at the field’s edge waters that row’s plots, never the path or the next field, and skips bare soil', () => {
     const s = farm();
@@ -43,12 +44,12 @@ describe('the copper can and hoe work along the row, inside the field', () => {
     stand(s, 6, 6, 'w');
     const ev = run(s, 0.1, [{ type: 'act' }]);
     const watered = ev.filter((e) => e.startsWith('water:')).map((e) => e.slice(6)).sort();
-    expect(watered).toEqual(['4,6', '5,6']);
+    expect(watered).toEqual(['2,6', '4,6', '5,6']);
     expect(plots(s, 7, 6).wet).toBe(false);
     expect(plots(s, 3, 6).wet).toBe(false);
   });
 
-  it('wherever the farmer stands, the reach is the aimed plot and its neighbours in the row', () => {
+  it('wherever the farmer stands, the reach is the aimed plot’s whole row in its field', () => {
     const s = farm();
     s.tools.can = 1;
     for (let x = 2; x < 6; x++) for (let y = 5; y < 9; y++) plant(s, x, y, 'carrot', 1);
@@ -61,7 +62,7 @@ describe('the copper can and hoe work along the row, inside the field', () => {
       const ev = run(s, 0.1, [{ type: 'actAt', x: ax, y: ay }]);
       const rows = new Set(ev.filter((e) => e.startsWith('water:')).map((e) => e.split(',')[1]));
       expect([...rows], `from ${fx},${fy}`).toEqual([String(ay)]);
-      expect(ev.filter((e) => e.startsWith('water:')).length).toBe(3);
+      expect(ev.filter((e) => e.startsWith('water:')).length).toBe(4);
     }
   });
 
@@ -72,14 +73,14 @@ describe('the copper can and hoe work along the row, inside the field', () => {
     expect(resolve(s, 'can', 3, 6).ok).toBe(false);
   });
 
-  it('the copper hoe turns three of the new field’s row, never the path', () => {
+  it('the copper hoe turns the new field’s whole row, never the path', () => {
     const s = farm();
     s.tools.hoe = 1;
     s.parcels[1].owned = true;
     s.tool = 'hoe';
     stand(s, 6, 6, 'e');
     const ev = run(s, 0.1, [{ type: 'act' }]);
-    expect(ev.filter((e) => e.startsWith('till:')).map((e) => e.slice(5)).sort()).toEqual(['7,6', '8,6', '9,6']);
+    expect(ev.filter((e) => e.startsWith('till:')).map((e) => e.slice(5)).sort()).toEqual(['10,6', '7,6', '8,6', '9,6']);
   });
 });
 

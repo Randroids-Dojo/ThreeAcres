@@ -62,11 +62,15 @@ export const CAN_MOISTURE = 2;
 /** Water the can holds at each level. */
 export const CAN_WATER = [12, 24, 40] as const;
 
-/** Tool upgrades: coins, and the town reputation needed before the smith will make them. */
+/**
+ * Tool upgrades: coins, and the town reputation needed before the smith will make them. Round 8: Sunup's copper can
+ * comes with the second field, so the gold can (two rows a tap) is something to buy in the middle of the game: it
+ * wanted reputation 8 and 1,500, and the eighth playtest sat on 1,590 coins by Summer 9 with nothing worth buying.
+ */
 export const TOOL_UPGRADES: Record<'can' | 'hoe', { cost: number; rep: number; name: string }[]> = {
   can: [
     { cost: 400, rep: 3, name: 'Copper can' },
-    { cost: 1500, rep: 8, name: 'Gold can' },
+    { cost: 1200, rep: 4, name: 'Gold can' },
   ],
   hoe: [
     { cost: 300, rep: 2, name: 'Copper hoe' },
@@ -80,28 +84,25 @@ export function requestSlots(rep: number): number {
   return rep >= 1 ? REQUEST_SLOTS : 1;
 }
 /**
- * What a request pays over market (its gain), round 5. The fourth playtest's
- * pairs were priced to earn the same for each plot and day, and the fifth
- * found them identical ("corn 675 over 42 against sunflower 675 over 42"):
- * no decision. Now the two of a pair differ in kind (`RequestKind`): a bold
- * one (more gain, and more soil, more days or no day to spare) against a safe
- * one. The safe one pays `REQUEST_RATE` for each plot and day its sowing
- * takes; the bold one is priced so the two come out alike for a typical farm
- * (each plot-day of soil worth `REQUEST_SOIL`, and one request in five that
- * has no day to spare lost, `REQUEST_RISK`). Which is better then turns on
- * the farm: its free soil, coins, stamina and the forecast.
+ * What a request pays over market (its gain) for each plot and day its sowing
+ * takes, on average across a pair. Round 8: the two of a pair are priced on
+ * what each is worth for each plot-day of soil it holds (its pay less its
+ * seed), not on their gain alone: the eighth playtest's pumpkins came to
+ * about 19 a plot-day against 12.5 for the lettuces beside them, because
+ * pumpkins are worth more at market, and the choice was a sum. Now the safe
+ * one is worth the pair's average market rate plus this, and the bold one
+ * (rush, long or big) a little more (`REQUEST_EDGE`), so the choice turns on
+ * risk, timing and plots.
  */
 export const REQUEST_RATE = 5;
 /**
- * What a plot-day of soil is worth to a typical farm, by the sort of pair: a plot held days longer (long against
- * quick) ties up coins and soil that would have been sown again, so it is worth more than one more plot held for the
- * same days (big against small). Tuned on `scripts/balance.ts --pairs`: with one value for both (3), the quick one
- * beat the long one in 71% of the play-outs that were not a wash, and the big one beat the small one in 69%.
+ * Round 8: how much more the bold one of a pair is worth for each plot-day
+ * than the safe one: a rush has no day to spare and cannot be replanted, a
+ * long crop holds its soil a week, a big one wants many plots watered. The
+ * two stay within a fifth of each other (`REQUEST_CLOSE`).
  */
-export const REQUEST_SOIL = { risk: 3, time: 5, size: 2, single: 3 } as const;
-export const REQUEST_RISK = 0.8;
-/** The bold one of a pair offers at least this much more gain than the safe one, or the pair is not offered. */
-export const REQUEST_BOLD = 1.2;
+export const REQUEST_EDGE = { rush: 0.15, long: 0.1, big: 0.1 } as const;
+export const REQUEST_CLOSE = 0.2;
 /** Round 7: a request pays at least this share over what its crops fetch at market, once the gain cap has scaled it. */
 export const REQUEST_FLOOR = 0.15;
 /** The most a request's gain over market can be: this much for each plot of owned field, so requests grow with the farm. */

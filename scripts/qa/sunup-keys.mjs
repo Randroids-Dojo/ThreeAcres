@@ -13,7 +13,7 @@
 //   - the sleep question is short (eleven words or fewer) and asks before evening with nothing left to do;
 //     after 6 pm with nothing to do, Enter sleeps without a question;
 //   - Space facing the well with the hands in hand fills the can;
-//   - from the house, with the well lesson up, the well is on screen.
+//   - from the house, with the well lesson up, the well it points at is on screen.
 // node scripts/qa/sunup-keys.mjs [url]
 import { chromium } from 'playwright-core';
 
@@ -243,8 +243,10 @@ await p.evaluate(() => {
   f.y = 3.5;
 });
 await p.waitForTimeout(2500);
-const well = await p.evaluate(() => ({ at: window.sunup.r3d.project(11.5, 2.5, 0.6), line: document.querySelector('.hint.on')?.textContent ?? '', w: innerWidth, h: innerHeight }));
-check('from the house, with "Fill the can at the well." up, the well is on screen', well.line === 'Fill the can at the well.' && well.at.x > 40 && well.at.x < well.w - 40 && well.at.y > 60 && well.at.y < well.h - 120, JSON.stringify(well));
+// (Round 8: there are two wells; the check reads the one the line points at, from the house the yard well.)
+const well = await p.evaluate(() => { const t = window.sunup.hud['pointAt']; return { t, at: t ? window.sunup.r3d.project(t.x, t.y, 0.6) : null, line: document.querySelector('.hint.on')?.textContent ?? '', w: innerWidth, h: innerHeight }; });
+const isWell = !!well.t && ((Math.floor(well.t.x) === 11 && Math.floor(well.t.y) === 2) || (Math.floor(well.t.x) === 6 && Math.floor(well.t.y) === 9));
+check('from the house, with "Fill the can at the well." up, the well it points at is on screen', well.line === 'Fill the can at the well.' && isWell && well.at.x > 40 && well.at.x < well.w - 40 && well.at.y > 60 && well.at.y < well.h - 120, JSON.stringify(well));
 await p.screenshot({ path: '/tmp/acres-sunup-keys-well.png' });
 
 console.log(errs.length ? `FAIL page errors: ${errs.join(' | ')}` : 'ok   no page errors');

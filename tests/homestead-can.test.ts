@@ -29,7 +29,8 @@ describe('the can says how much water is left', () => {
 });
 
 describe('the upgraded can works its whole reach', () => {
-  it('aimed at a wet plot, the gold can still waters the dry plots around it, and wastes no water on wet ones', () => {
+  // (Round 8: the gold can works the aimed row and the one beside it; it was a three by three square.)
+  it('aimed at a wet plot, the gold can still waters the dry plots in its two rows, and wastes no water on wet ones', () => {
     const s = teach(world('sunup'), EARLY, EARLY_FEATURES);
     s.tools.can = 2;
     s.water = 40;
@@ -43,8 +44,9 @@ describe('the upgraded can works its whole reach', () => {
     stand(s, 3, 6, 's');
     const ev = step(s, 0.016, [{ type: 'act' }]);
     const watered = ev.filter((e) => e.type === 'water').length;
-    expect(watered).toBe(8);
-    expect(s.water).toBe(32);
+    // Rows 7 and 8 of the first field: six carrots, one of them (the aimed one) wet already.
+    expect(watered).toBe(5);
+    expect(s.water).toBe(35);
   });
 
   it('aimed where every plot in reach is wet, it says so', () => {

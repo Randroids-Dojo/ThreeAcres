@@ -39,6 +39,8 @@ describe('only a tap inside the target tile is a tap on the pointer', () => {
 
   it('a tap inside the target tile asks before it builds (it never just builds, or takes the Build tool)', () => {
     const { s, out } = scarecrowMorning(220);
+    // (Round 8: with the hands in hand; a tap with the seeds or the can is the plot's own job.)
+    s.tool = 'hands';
     expect(pointerTap(s, out.point, out.build, { x: 4, y: 7 })).toEqual({ do: 'ask', build: 'scarecrow', x: 4, y: 7, cost: 40 });
     // The edge arrow, when the target is off screen, is the pointer itself: it asks too.
     expect(pointerTap(s, out.point, out.build, null)).toEqual({ do: 'ask', build: 'scarecrow', x: 4, y: 7, cost: 40 });
@@ -46,6 +48,7 @@ describe('only a tap inside the target tile is a tap on the pointer', () => {
 
   it('with no coins, a tap on the pointer says what it costs and does nothing else', () => {
     const { s } = scarecrowMorning(220);
+    s.tool = 'hands';
     s.coins = 0;
     const t = pointerTap(s, { x: 4.5, y: 7.5 }, 'scarecrow', { x: 4, y: 7 });
     expect(t).toEqual({ do: 'refuse', text: 'A scarecrow costs 40. You have 0.' });

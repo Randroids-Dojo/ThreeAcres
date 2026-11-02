@@ -163,8 +163,12 @@ export function resolveBuild(s: WorldState, kind: BuildKind, x: number, y: numbe
   return buildCheck(s, kind);
 }
 
-/** What `tool` would do at (x, y), and whether it can. */
-export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Resolved {
+/**
+ * What `tool` would do at (x, y), and whether it can. `seed` is the seed the
+ * seeds would plant: the one in hand, or (round 8) the one a waiting tap was
+ * tapped with.
+ */
+export function resolve(s: WorldState, tool: ToolId, x: number, y: number, seed: CropId = s.seed): Resolved {
   // The can fills at the well or from the pond: with the can in hand, or in
   // Sunup with anything in hand once the can is yours (it is on your belt).
   const canInHand = tool === 'can' || (homestead(s) && (s.learn ?? []).includes('can'));
@@ -191,7 +195,7 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
         return NONE('Growing');
       }
       if (!plot.tilled) return { verb: 'till', ok: true, reason: '' };
-      return plantCheck(s, s.seed);
+      return plantCheck(s, seed);
     }
     case 'hoe':
       if (build) return { verb: 'clear', ok: true, reason: '', build: build.kind };
@@ -214,7 +218,7 @@ export function resolve(s: WorldState, tool: ToolId, x: number, y: number): Reso
       if (build) return NO('plant', 'Something is built here');
       if (!plot.tilled) return NO('plant', 'Hoe this plot first');
       if (crop) return NO('plant', 'Already planted');
-      return plantCheck(s, s.seed);
+      return plantCheck(s, seed);
     case 'hands':
       if (crow) return { verb: 'scare', ok: true, reason: '' };
       if (!crop) return NO('harvest', 'Nothing to pick');
@@ -281,6 +285,16 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       const limited = isFarmer && homestead(s);
       const tiles = limited ? area(s, x, y, s.tools.can) : [{ x, y }];
       let n = 0;
+      let picked = 0;
+      // Round 8: Sunup's can picks the bugs off what it waters, and off the plot it was aimed at, in the same tap (the
+      // can used to pick the bugs instead of watering, and on a heat wave four bugged crops were left dry unsaid).
+      const pick = (tx: number, ty: number) => {
+        const c = plots(s, tx, ty).crop;
+        if (!limited || !c || c.dead || c.bugs === 0) return;
+        c.bugs = 0;
+        ev.push({ type: 'tend', x: tx, y: ty, by });
+        picked++;
+      };
       for (const t of tiles) {
         if (limited && s.water <= 0) break;
         if (!owned(s, t.x, t.y)) continue;
@@ -292,10 +306,14 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
         soak(p, limited && s.rules.growth === 'classic' ? CAN_MOISTURE : 3);
         if (limited) s.water -= 1;
         ev.push({ type: 'water', x: t.x, y: t.y, by });
+        pick(t.x, t.y);
         n++;
       }
       if (!n) return false;
-      extra = n - 1;
+      pick(x, y);
+      // Round 8: the upgraded can charges half a watering for each plot past the first (30 plots cost 60 of 100
+      // stamina with the old can), and a picking for each crop it took bugs off.
+      extra = (limited ? Math.ceil((n - 1) / 2) : n - 1) + picked * STAMINA_COST.tend;
       break;
     }
     case 'refill':
@@ -391,24 +409,40 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
 }
 
 /**
- * Plots an upgraded tool works. Level 1: three in a row along the field's
- * row (east to west, the way the crops are sown), the aimed plot in the
- * middle, slid along so all three stay in its field: wherever the farmer
- * stands, it never reaches past the field onto the path or into the next
- * field. Level 2: the three by three square around the aimed plot.
+ * Plots an upgraded tool works, all in the aimed plot's own field (never the
+ * path or the next field). Round 8: level 1 works the whole row of the field
+ * (east to west, the way the crops are sown), the aimed plot first; level 2
+ * that row and the one beside it (the one below, or above on the field's
+ * last row). It was three in a row and a three by three square: a four-wide
+ * row still took two taps, and the gold square covered no more of a field in
+ * four taps than the copper rows.
  */
 export function area(s: WorldState, x: number, y: number, level: number): { x: number; y: number }[] {
   if (level <= 0) return [{ x, y }];
-  if (level >= 2) {
-    const out = [{ x, y }];
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) out.push({ x: x + dx, y: y + dy });
-    return out.filter((t) => inMap(t.x, t.y));
-  }
+  if (!homestead(s)) return level >= 2 ? square(x, y) : three(s, x, y);
+  const field = inMap(x, y) ? s.parcelOf[idx(x, y)] : -1;
+  const p = field >= 0 && s.tiles[idx(x, y)] === 'field' ? s.parcels[field] : null;
+  if (!p) return [{ x, y }];
+  const rows = level >= 2 ? [y, y + 1 < p.y + p.h ? y + 1 : y - 1] : [y];
+  const out = [{ x, y }];
+  for (const ry of rows) for (let tx = p.x; tx < p.x + p.w; tx++) if (tx !== x || ry !== y) out.push({ x: tx, y: ry });
+  return out;
+}
+
+/** The older rule sets' upgraded tools: three in a row, slid to stay in the field. */
+function three(s: WorldState, x: number, y: number): { x: number; y: number }[] {
   const field = inMap(x, y) ? s.parcelOf[idx(x, y)] : -1;
   const inField = (tx: number) => field >= 0 && inMap(tx, y) && s.tiles[idx(tx, y)] === 'field' && s.parcelOf[idx(tx, y)] === field;
   if (!inField(x)) return [{ x, y }];
   const from = !inField(x - 1) ? x : !inField(x + 1) ? x - 2 : x - 1;
   return [from, from + 1, from + 2].filter(inField).map((tx) => ({ x: tx, y }));
+}
+
+/** The older rule sets' gold tools: the three by three square around the aimed plot. */
+function square(x: number, y: number): { x: number; y: number }[] {
+  const out = [{ x, y }];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) out.push({ x: x + dx, y: y + dy });
+  return out.filter((t) => inMap(t.x, t.y));
 }
 
 /**

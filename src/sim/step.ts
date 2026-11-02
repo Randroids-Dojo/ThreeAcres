@@ -2,7 +2,7 @@
 // current clock rule, runs people and crows, and returns what happened.
 
 import { canAfford, daySeconds, fieldRep, homestead, resolve, resolveBuild } from './actions';
-import { doTap, dropJobsOf, facingTile, farmer, hands, snapAim, startAction, tapTool, TAP_QUEUE, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
+import { dropJobsOf, facingTile, farmer, hands, queueTap, snapAim, startAction, tapTool, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
 import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
@@ -214,17 +214,17 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         break;
       }
       if (homestead(s)) {
-        // Sunup: a tap beside the well means the well, and a tap is for the job on its plot, with the tool for it.
-        // Taps made while the farmer is busy wait their turn, so quick taps on three radishes harvest three.
+        // Sunup: a tap beside a well means the well, and a tap is for the job on its plot, with the tool for it.
+        // Taps made while the farmer is busy wait their turn, so quick taps on three radishes harvest three. Round 8:
+        // each keeps the tool and seed it was tapped with, and the hand takes that tool now, as it is tapped (it used
+        // to change when the tap's turn came, under a player who had picked another tool since).
         const t = wellTap(s, c.x, c.y) ?? { x: c.x, y: c.y };
-        const tap = { x: t.x, y: t.y, tool: tapTool(s, s.tool, t.x, t.y) };
-        const queue = (s.taps ??= []);
-        if (f.task || f.path.length || f.aim || queue.length) {
-          if (queue.some((q) => q.x === tap.x && q.y === tap.y)) break;
-          if (queue.length < TAP_QUEUE) queue.push(tap);
-          // A full queue never drops a tap without a word.
-          else ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: 'Busy. Tap it again soon' });
-        } else doTap(s, f, tap, ev);
+        const tool = tapTool(s, s.tool, t.x, t.y);
+        if (tool !== s.tool) {
+          s.tool = tool;
+          s.kitTool = tool;
+        }
+        queueTap(s, f, { x: t.x, y: t.y, tool, ...(tool === 'seeds' ? { seed: s.seed } : {}) }, ev);
         break;
       }
       if (f.task) return;
@@ -294,6 +294,13 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         s.learn.push('hoe');
         ev.push({ type: 'unlock', what: 'hoe' });
       }
+      // Round 8: the second field comes with the copper can, which waters a whole row a tap (the eighth playtest's
+      // daily loop was thirty identical watering taps; two fields overflowed the day while spring was slack).
+      if (homestead(s) && s.tools.can < 1 && s.parcels.filter((q) => q.owned).length >= 2) {
+        s.tools.can = 1;
+        s.water = CAN_WATER[1];
+        ev.push({ type: 'upgrade', tool: 'can', level: 1, withField: true });
+      }
       break;
     }
     case 'hire':
@@ -335,11 +342,7 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         if (r.reason) ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
         return;
       }
-      const tap = { x: c.x, y: c.y, tool: s.tool, build: c.kind };
-      const queue = (s.taps ??= []);
-      if (f.task || f.path.length || f.aim || queue.length) {
-        if (!queue.some((q) => q.x === tap.x && q.y === tap.y) && queue.length < TAP_QUEUE) queue.push(tap);
-      } else doTap(s, f, tap, ev);
+      queueTap(s, f, { x: c.x, y: c.y, tool: s.tool, build: c.kind }, ev);
       break;
     }
     case 'sell': {

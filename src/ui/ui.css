@@ -679,3 +679,11 @@ svg { width: 100%; height: 100%; display: block; }
 /* What makes a pair a choice, under it. */
 .list .clash { grid-column: 1 / -1; justify-self: center; margin: -6px 0 0; background: #2a2116; color: var(--paper3); padding: 3px 11px 5px; border-radius: 3px; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
 .req.short .when { color: #8a3a12; }
+
+/* ---------------------------------------------------------------- Sunup, after the eighth playtest */
+/* A seed's price wears the coin, as the coins box does (it was a bare number). */
+.seed .pr { display: inline-flex; align-items: center; gap: 2px; }
+.seed .pr .cm { display: inline-block; width: 11px; height: 11px; flex: none; color: #9a7a2e; }
+.seed .pr .cm svg { width: 100%; height: 100%; display: block; }
+.seed.poor .pr .cm { color: #9a3b26; }
+@media (min-width: 900px) and (min-height: 640px) { .seed .pr .cm { width: 12px; height: 12px; } }

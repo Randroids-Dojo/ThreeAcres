@@ -105,9 +105,19 @@ describe('there is always a way to earn', () => {
     s.coins = 3;
     expect(rescue(s)).toBe(37);
     expect(s.coins).toBe(40);
-    // Not when anything is growing or waiting in the crate.
+    // Round 8: with crops growing too, while there is bare soil and nothing ripe to pick (the eighth playtest sat on
+    // 10 coins and 7 bare plots for three summer days), enough for the bare plots, four at most.
     s.coins = 0;
     plant(s, 2, 5, 'radish', 1);
+    expect(rescue(s)).toBe(40);
+    // Not when every plot is sown, something is ripe, or the crate holds something.
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) if (!plots(s, x, y).crop) plant(s, x, y, 'radish', 1);
+    s.coins = 0;
+    expect(rescue(s)).toBe(0);
+    plots(s, 2, 5).crop = null;
+    plant(s, 3, 5, 'radish', 3);
+    plots(s, 3, 5).crop = null;
+    plant(s, 3, 5, 'radish', 3);
     expect(rescue(s)).toBe(0);
   });
 

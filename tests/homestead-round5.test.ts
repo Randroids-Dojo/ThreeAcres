@@ -61,13 +61,6 @@ const gain = (o: Order) => o.reward - o.items[0].n * CROPS[o.items[0].crop].pric
 const sowBy = (o: Order) => (o as Order & { sowBy?: number }).sowBy ?? o.due - CROPS[o.items[0].crop].days;
 const spare = (o: Order) => o.due - sowBy(o) - CROPS[o.items[0].crop].days;
 const plotDays = (o: Order) => o.items[0].n * CROPS[o.items[0].crop].days;
-/**
- * What a request is worth to a typical farm: its gain, one with no day to spare counted at four in five, less its
- * soil (a plot-day worth 3 coins for rush and easy, 5 for long and quick, held longer, 2 for big and small).
- */
-const SOIL: Record<string, number> = { rush: 3, easy: 3, long: 5, quick: 5, big: 2, small: 2 };
-const soil = (o: Order) => SOIL[kindOf(o) ?? ''] ?? 3;
-const neutral = (o: Order) => gain(o) * (spare(o) <= 0 ? 0.8 : 1) - soil(o) * plotDays(o);
 /** Net over seed for each plot-day: the measure the fifth playtest found identical within 3% in every pair. */
 const netPerPlotDay = (o: Order) => (o.reward - o.items[0].n * CROPS[o.items[0].crop].seed) / plotDays(o);
 
@@ -142,10 +135,13 @@ describe('P1: the two of a pair differ in kind, with similar expected value', ()
     expect([...kinds.keys()].sort()).toEqual(['big/small', 'easy/rush', 'long/quick']);
   });
 
-  it('the bold one offers clearly more gain, and the two come out alike for a typical farm (within 15% of the gain)', () => {
+  // Round 8: the two are priced on what each clears over its seed for each plot-day it holds, not on their gain alone
+  // (round 5 gave the bold one 1.2 times the gain, and a crop worth more at market made one side the better sum:
+  // pumpkins 19 a plot-day against 12.5 for lettuces). The bold one is worth a little more for its risk, its days or
+  // its plots, within a fifth; the two are still not identical.
+  it('the bold one is worth a little more for each plot-day than the safe one, within a fifth, and the two are not identical', () => {
     let pairs = 0;
     const off: string[] = [];
-    let unlike = 0;
     let same = 0;
     for (const s of farms()) {
       const offer = offerRequests(s);
@@ -153,16 +149,16 @@ describe('P1: the two of a pair differ in kind, with similar expected value', ()
       pairs++;
       const bold = offer.find((o) => ['rush', 'long', 'big'].includes(kindOf(o) ?? ''))!;
       const safe = offer.find((o) => o !== bold)!;
-      expect(gain(bold), `${kindOf(bold)} +${gain(bold)} against ${kindOf(safe)} +${gain(safe)}`).toBeGreaterThanOrEqual(1.2 * gain(safe));
-      if (Math.abs(neutral(bold) - neutral(safe)) > 0.15 * gain(bold)) off.push(`${kindOf(bold)} ${neutral(bold)} and ${kindOf(safe)} ${neutral(safe)}`);
-      // Not identical on the round 4 measure: the fifth playtest's pairs matched within 3% on net per plot-day.
-      const [a, b] = offer.map(netPerPlotDay);
-      if (Math.abs(a - b) > 0.1 * Math.max(a, b)) unlike++;
+      const b = netPerPlotDay(bold);
+      const a = netPerPlotDay(safe);
+      if (b < a || b > 1.2 * a + 1e-9) off.push(`${kindOf(bold)} ${b.toFixed(1)} against ${kindOf(safe)} ${a.toFixed(1)}`);
       if (Math.abs(a - b) <= 0.03 * Math.max(a, b)) same++;
+      // Each still gains over market.
+      expect(gain(bold)).toBeGreaterThan(0);
+      expect(gain(safe)).toBeGreaterThan(0);
     }
     expect(pairs).toBeGreaterThan(60);
     expect(off, off.slice(0, 3).join('; ')).toEqual([]);
-    expect(unlike / pairs).toBeGreaterThan(0.5);
     expect(same / pairs).toBeLessThan(0.25);
   });
 

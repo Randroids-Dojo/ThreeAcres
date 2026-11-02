@@ -42,6 +42,9 @@
 // stays on the screen and either fits or scrolls, with a fade while there is
 // more below; scrolled by a real thumb (or the wheel) its last stamp comes
 // into view and takes a tap.
+// Round 8: a quick run of picks for one request shows one chip at a time
+// (four stacked over the field); a number key in the seed picker picks and
+// closes it; the pinned morning card is read again as the farm is now.
 // node scripts/qa/overlap.mjs [base url]
 import { chromium } from 'playwright-core';
 import { strikeScan } from './strike.mjs';
@@ -216,6 +219,8 @@ async function run(label, viewport, touch) {
         for (let k = 0; k < r.grow; k++) { const [x, y] = tiles[tile++]; st.plots[y * st.W + x].crop = { id: st.nextId++, kind: r.crop, age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: 4, for: o.id }; }
       }
       window.sunup.pinRequests();
+      // (Round 8: the board reads the card again from the night's report, as the farm is now.)
+      st.report = { day: st.day - 1, sold: [{ crop: 'radish', n: 8, value: 340 }], wages: 0, grew: 0, withered: 0, eaten: 0, crewWork: 0, income: 340, filled: [{ who: 'Old Tamsin', reward: 145 }], ripe: 6 };
       window.sunup.hud.lastCard = { day: st.day, title: 'Spring 4, cloudy', news: 'Old Tamsin paid 145, sold 8 for 340, 6 ripe to pick.' };
       window.sunup.dialogs.board('requests');
       await new Promise((r) => setTimeout(r, 300));
@@ -350,6 +355,15 @@ async function run(label, viewport, touch) {
         };
       });
       if (q.notes !== 5) hits.push(`the full board shows ${q.notes} notes, not 5`);
+      // Round 8: the pair's Accept stamps and its clash line are on the board's first screen, before the notes taken.
+      const first = await p.evaluate(() => {
+        const body = document.querySelector('.dialog.on .body');
+        const br = body.getBoundingClientRect();
+        const stamps = [...body.querySelectorAll('.item.req.offer .btn')].map((btn) => { const r = btn.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return r.bottom <= br.bottom + 1 && !!hit && btn.contains(hit); });
+        const clash = body.querySelector('.clash')?.getBoundingClientRect();
+        return { stamps, clash: !!clash && clash.bottom <= br.bottom + 1 };
+      });
+      if (first.stamps.length !== 2 || !first.stamps.every(Boolean) || !first.clash) hits.push(`the pair is not all on the board's first screen ${JSON.stringify(first)}`);
       if (!/^Spring 4, cloudyOld Tamsin paid 145/.test(q.card)) hits.push(`no morning card pinned on the board (${q.card})`);
       if (!/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8) hits.push(`the pair's clash line reads "${q.clash}"`);
       if (!q.onScreen) hits.push('the board runs off the screen');
@@ -376,10 +390,12 @@ async function run(label, viewport, touch) {
           const br = body.getBoundingClientRect();
           const last = [...body.querySelectorAll('.item.req')].pop();
           const lr = last.getBoundingClientRect();
+          // (Round 8: the offers come first now, so the last note is a request already taken, which has a stamp only to
+          // hand it over.)
           const btn = last.querySelector('.btn');
           const r = btn?.getBoundingClientRect();
           const hit = r ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) : null;
-          return { inView: lr.bottom <= br.bottom + 1 && lr.top >= br.top - 1, takes: !!btn && !!hit && btn.contains(hit), end: body.classList.contains('end'), top: Math.round(body.scrollTop) };
+          return { inView: lr.bottom <= br.bottom + 1 && lr.top >= br.top - 1, takes: !btn || (!!hit && btn.contains(hit)), end: body.classList.contains('end'), top: Math.round(body.scrollTop) };
         });
         if (!end.inView || !end.takes) hits.push(`scrolled to its end, the board's last note is not wholly in view or its stamp takes no tap ${JSON.stringify(end)}`);
         if (!end.end) hits.push('at its end the board still wears the fade');
@@ -478,6 +494,7 @@ async function run(label, viewport, touch) {
   }
   if (!touch) await keyboardChecks(p, label);
   if (!touch) await pickerMouseCheck(p, label);
+  await chipCheck(p, label);
   if (touch) {
     // Harvest words over a plot stay narrow, even for a long request.
     const w = await p.evaluate(() => {
@@ -501,6 +518,47 @@ async function run(label, viewport, touch) {
   if (!still) failed++;
   console.log(`${still ? 'ok  ' : 'FAIL'} ${label} the board's tabs stay put from tab to tab  (${tops.join(', ')})`);
   await ctx.close();
+}
+
+/**
+ * Round 8: a quick run of picks for one request ("3 of 10", "4 of 10", "5 of 10" and "6 of 10 sunflowers" stacked over
+ * the field). Eight ripe radishes sown for a request, tapped one after another through the game's own input; every
+ * 40 ms the words over the field are collected, and any two chips that cover each other fail.
+ */
+async function chipCheck(p, label) {
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.dialogs.close(true);
+    for (const w of ['coins', 'board', 'requests']) if (!st.learn.includes(w)) st.learn.push(w);
+    const o = { id: st.nextId++, who: 'Old Tamsin', items: [{ crop: 'radish', n: 8 }], reward: 8 * 30 + 120, rep: 1, due: st.day + 2, sowBy: st.day, made: st.day - 3, seen: true, kind: 'easy', taken: true, got: 0 };
+    st.orders = [o];
+    for (let x = 2; x < 6; x++) for (const y of [5, 6]) {
+      const q = st.plots[y * st.W + x];
+      q.tilled = true;
+      q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day - 3, for: o.id };
+    }
+    st.stamina = 100;
+    st.minute = 120;
+    window.sunup.hud.pickTool('hands');
+    Object.assign(st.actors[0], { x: 1.5, y: 5.5, facing: 'e', task: null, path: [], aim: null });
+    window.__chips = { most: 0, overlap: 0 };
+    window.__chipProbe = setInterval(() => {
+      const els = [...document.querySelectorAll('.floaters .floater:not(.no):not(.coin)')].filter((e) => parseFloat(getComputedStyle(e).opacity) > 0.05);
+      window.__chips.most = Math.max(window.__chips.most, els.length);
+      const rs = els.map((e) => e.getBoundingClientRect());
+      for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) if (rs[i].left < rs[j].right && rs[j].left < rs[i].right && rs[i].top < rs[j].bottom && rs[j].top < rs[i].bottom) window.__chips.overlap++;
+    }, 40);
+  });
+  for (const y of [5, 6]) for (let x = 2; x < 6; x++) {
+    await p.evaluate(([x, y]) => window.sunup.input.push({ type: 'actAt', x, y }), [x, y]);
+    await p.waitForTimeout(90);
+  }
+  await p.waitForTimeout(4500);
+  const c = await p.evaluate(() => { clearInterval(window.__chipProbe); return { ...window.__chips, got: window.sunup.state.orders[0]?.got ?? -1 }; });
+  const ok = c.overlap === 0 && c.most <= 1 && c.got === 8;
+  if (!ok) failed++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} a quick run of picks for one request shows one chip at a time, never two over each other  (${JSON.stringify(c)})`);
+  await p.evaluate(() => { const st = window.sunup.state; st.orders = []; });
 }
 
 /** Desktop: the keys show on the buttons, and the keyboard alone opens, works and closes the seed picker. */
@@ -535,7 +593,10 @@ async function keyboardChecks(p, label) {
   await p.keyboard.press('Digit3');
   await p.waitForTimeout(200);
   b = await st();
-  report('a number key picks that seed', b.seed === 'carrot' && b.picker, JSON.stringify(b));
+  // Round 8: and closes the picker (it stayed open on a desktop after a number key).
+  report('a number key picks that seed and closes the picker', b.seed === 'carrot' && !b.picker && !b.dialog, JSON.stringify(b));
+  await p.keyboard.press('Digit3');
+  await p.waitForTimeout(250);
   await p.keyboard.press('Enter');
   await p.waitForTimeout(300);
   b = await st();

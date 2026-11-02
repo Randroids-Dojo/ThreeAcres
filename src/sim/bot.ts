@@ -2,7 +2,7 @@
 // person would. Used by the tests and by ?autoplay in the browser.
 
 import { resolve, sowing } from './actions';
-import { farmer } from './actors';
+import { farmer, wellsFrom } from './actors';
 import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
@@ -206,7 +206,9 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
     const thirsty = s.plots.some((p) => p.crop && !p.crop.dead && p.crop.stage < 4 && !p.wet);
     if (thirsty) {
       if (s.tool !== 'can') out.push({ type: 'tool', tool: 'can' });
-      out.push({ type: 'actAt', x: 11, y: 2 });
+      // The nearest well (round 8: there is one where the field paths cross, too).
+      const w = wellsFrom(f.x, f.y)[0];
+      out.push({ type: 'actAt', x: w.x, y: w.y });
       return out;
     }
   }

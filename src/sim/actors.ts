@@ -2,14 +2,14 @@
 // control and the hands, actions in progress, footsteps, and the hands' own
 // choice of chores.
 
-import { canAfford, crowAt, homestead, perform, resolve, resolveBuild, type Resolved } from './actions';
+import { canAfford, crowAt, homestead, perform, resolve, resolveBuild, sowing, type Resolved } from './actions';
 import { ACTION_SECONDS, BUILD_COST, HAND_SLOWER, HAND_SPEED, HOP_SECONDS, WALK_SPEED } from './constants';
 import { CROPS } from './crops';
 import { BUNK, PROPS, propAt } from './map';
 import { pathNextTo, pathTo } from './path';
 import { needsWater } from './soil';
-import { idx, inMap, owned, walkable } from './world';
-import type { Actor, BuildKind, Facing, Job, SimEvent, ToolId, Verb, WorldState } from './types';
+import { idx, inMap, isField, owned, walkable } from './world';
+import type { Actor, CropId, Facing, Job, SimEvent, Tap, ToolId, Verb, WorldState } from './types';
 
 const RADIUS = 0.28;
 const STEP_EVERY = 0.55;
@@ -464,14 +464,18 @@ export function tickActors(s: WorldState, dt: number, ev: SimEvent[]): void {
   }
 }
 
-/** Walk control: a tap on a far tile walks there, then acts if it still makes sense. */
+/**
+ * Walk control: a tap on a far tile walks there, then acts if it still makes
+ * sense. Sunup's tap does the job it was tapped as, with the tool and seed
+ * it was tapped with, whatever is in hand by the time the farmer gets there.
+ */
 function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
   const aim = a.aim!;
   a.aim = null;
   const t = tileOf(a);
   if (Math.max(Math.abs(t.x - aim.x), Math.abs(t.y - aim.y)) > 1) return;
-  // A one-off build from the lesson pointer builds that; anything else is the tool in hand's job.
-  const r = aim.build ? resolveBuild(s, aim.build, aim.x, aim.y) : resolve(s, s.tool, aim.x, aim.y);
+  // A one-off build from the lesson pointer builds that; anything else is the tapped tool's job.
+  const r = aim.build ? resolveBuild(s, aim.build, aim.x, aim.y) : homestead(s) && aim.tool ? tapJob(s, { x: aim.x, y: aim.y, tool: aim.tool, seed: aim.seed }).r : resolve(s, s.tool, aim.x, aim.y);
   if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
 }
 
@@ -482,64 +486,116 @@ export const TAP_QUEUE = 48;
 const TAP_JOBS = new Set<Verb>(['harvest', 'tend', 'scare', 'clear', 'water']);
 
 /**
+ * Sunup: does the plot hold a crop the hands would take away first, so seed
+ * can go in after: a ripe crop that is picked once, or a withered one?
+ */
+function clearsFor(s: WorldState, x: number, y: number, seed: CropId): boolean {
+  const c = s.plots[idx(x, y)]?.crop;
+  if (!c || !homestead(s) || !sowing(s.day, seed).ok || s.builds.some((b) => b.x === x && b.y === y)) return false;
+  return c.dead || (c.stage === 4 && CROPS[c.kind].regrow === 0);
+}
+
+/**
  * Sunup: the tool for a tapped plot. The tool in hand when it can do the job
  * there; otherwise, when a free job waits there for the hands or the can (a
  * ripe crop, bugs, a crow, a withered crop, a thirsty one), the tool for it.
- * Bugs and a crow come before water: watering a bugged crop leaves the bugs
- * on it (and a bugged crop does not grow), so a tap with the can on a dry,
- * bugged crop picks the bugs off. Never seeds or the hoe: a stray tap must
- * not spend coins or turn meadow.
+ * A crow comes before water. Never seeds or the hoe: a stray tap must not
+ * spend coins or turn meadow. Round 8: seeds in hand on a ripe crop that is
+ * picked once (or a withered one) stay seeds: the tap picks it, then plants
+ * there (the eighth playtest's seed taps on a row not yet harvested became
+ * harvest taps, and seven of ten plots stayed bare); and the can on a dry,
+ * bugged crop stays the can, which picks the bugs as it waters.
  */
-export function tapTool(s: WorldState, inHand: ToolId, x: number, y: number): ToolId {
-  const r = resolve(s, inHand, x, y);
+export function tapTool(s: WorldState, inHand: ToolId, x: number, y: number, seed: CropId = s.seed): ToolId {
+  const r = resolve(s, inHand, x, y, seed);
   if (!homestead(s)) return inHand;
-  if (r.verb === 'water' && inHand !== 'hands') {
-    const h = resolve(s, 'hands', x, y);
-    if (h.ok && (h.verb === 'tend' || h.verb === 'scare')) return 'hands';
-  }
+  if (r.verb === 'water' && inHand !== 'hands' && crowAt(s, x, y)) return 'hands';
   if (r.verb && r.ok) return inHand;
+  if (inHand === 'seeds' && clearsFor(s, x, y, seed)) return 'seeds';
   for (const t of ['hands', 'can'] as ToolId[]) {
     if (t === inHand || (t !== 'hands' && !s.learn.includes(t))) continue;
-    const q = resolve(s, t, x, y);
+    const q = resolve(s, t, x, y, seed);
     if (q.verb && q.ok && TAP_JOBS.has(q.verb)) return t;
   }
   return inHand;
 }
 
-/** Sunup: a tap on the ground beside the well, with nothing to do there, is a tap on the well (it fills the can). */
-export function wellTap(s: WorldState, x: number, y: number): { x: number; y: number } | null {
-  const w = PROPS.find((p) => p.kind === 'well');
-  if (!w || !homestead(s) || propAt(x, y) === w) return null;
-  if (Math.max(Math.abs(x - w.x), Math.abs(y - w.y)) > 1) return null;
-  const here = resolve(s, s.tool, x, y);
-  if (here.verb && here.ok) return null;
-  const r = resolve(s, s.tool, w.x, w.y);
-  return r.verb === 'refill' && r.ok ? { x: w.x, y: w.y } : null;
+/** Sunup: the wells, nearest first from a point. */
+export function wellsFrom(x: number, y: number): { x: number; y: number }[] {
+  return PROPS.filter((p) => p.kind === 'well')
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => Math.hypot(a.x + 0.5 - x, a.y + 0.5 - y) - Math.hypot(b.x + 0.5 - x, b.y + 0.5 - y));
 }
 
 /**
- * Sunup: do one tap now, with its tool: act on it from beside it, or walk
- * there and then act. A tap carrying `build` is the lesson pointer's one-off
- * build: it builds that, once, and leaves the tool in hand alone. Too tired
- * for the job: one refusal, and the taps still waiting are dropped (the
- * fifth playtest drew two refusals on top of each other).
+ * Sunup: a tap on the ground beside a well, with nothing to do there, is a
+ * tap on the well (it fills the can), even while the can is still full from
+ * a watering not yet done: the waterings tapped before it empty it first.
+ * Round 8: never a plot of a field (the field well stands among four of
+ * them): a tap on a plot is for the plot, whatever the can holds just then.
  */
-export function doTap(s: WorldState, a: Actor, tap: { x: number; y: number; tool: ToolId; build?: BuildKind }, ev: SimEvent[]): void {
-  let r: Resolved;
-  if (tap.build) r = resolveBuild(s, tap.build, tap.x, tap.y);
-  else {
-    // The tool chosen when it was tapped, if it still does the job; else whatever does it now.
-    const fits = (t: ToolId) => {
-      const q = resolve(s, t, tap.x, tap.y);
-      return !!(q.verb && q.ok);
-    };
-    const tool = fits(tap.tool) ? tap.tool : tapTool(s, s.tool, tap.x, tap.y);
-    if (tool !== s.tool) {
-      s.tool = tool;
-      s.kitTool = tool;
-    }
-    r = resolve(s, s.tool, tap.x, tap.y);
+export function wellTap(s: WorldState, x: number, y: number): { x: number; y: number } | null {
+  if (!homestead(s) || isField(s, x, y)) return null;
+  const at = propAt(x, y);
+  if (at?.kind === 'well') return null;
+  const w = wellsFrom(x + 0.5, y + 0.5).find((q) => Math.max(Math.abs(x - q.x), Math.abs(y - q.y)) <= 1);
+  if (!w) return null;
+  const here = resolve(s, s.tool, x, y);
+  if (here.verb && here.ok) return null;
+  return resolve(s, s.tool, w.x, w.y).verb === 'refill' ? w : null;
+}
+
+/** Is a tile a place to fill the can (a well, or the pond)? */
+function refillAt(s: WorldState, x: number, y: number): boolean {
+  return inMap(x, y) && (propAt(x, y)?.kind === 'well' || s.tiles[idx(x, y)] === 'water');
+}
+
+/** Does a tapped plot hold trouble that will not wait: a crow, or bugs on a living crop? */
+export function urgentAt(s: WorldState, x: number, y: number): boolean {
+  if (!inMap(x, y)) return false;
+  const c = s.plots[idx(x, y)].crop;
+  return !!crowAt(s, x, y) || (!!c && !c.dead && c.bugs > 0 && c.stage < 4);
+}
+
+/**
+ * What a tap does now, with the tool and seed it was tapped with: that
+ * tool's job if it still has one there; else the job its plot holds now (a
+ * crop that got bugs since, say), never the tool in hand's. Seeds on a plot
+ * not yet free pick (or clear) what is there first: `then` is the seeds tap
+ * to do next, on the same plot.
+ */
+function tapJob(s: WorldState, tap: Tap): { r: Resolved; tool: ToolId; then?: Tap } {
+  let tool = tap.tool;
+  const fits = (t: ToolId) => {
+    const q = resolve(s, t, tap.x, tap.y, tap.seed);
+    return !!(q.verb && q.ok);
+  };
+  if (!fits(tool)) tool = tapTool(s, tool, tap.x, tap.y, tap.seed);
+  const r = resolve(s, tool, tap.x, tap.y, tap.seed);
+  if (tool === 'seeds' && !r.ok && tap.seed && clearsFor(s, tap.x, tap.y, tap.seed)) {
+    const h = resolve(s, 'hands', tap.x, tap.y);
+    if (h.verb && h.ok) return { r: h, tool: 'hands', then: { ...tap } };
   }
+  return { r, tool };
+}
+
+/**
+ * Sunup: do one tap now: act on it from beside it, or walk there and then
+ * act. A tap carrying `build` is the lesson pointer's one-off build: it
+ * builds that, once, and leaves the tool in hand alone. Round 8: the job is
+ * the one tapped, with the tool and seed it was tapped with (a seed picked
+ * while taps waited changed what they planted); the tool in hand is left as
+ * the player last chose it. Too tired for the job: one refusal, and the taps
+ * still waiting are dropped (the fifth playtest drew two refusals on top of
+ * each other).
+ */
+export function doTap(s: WorldState, a: Actor, tap: Tap, ev: SimEvent[]): void {
+  let r: Resolved;
+  let then: Tap | undefined;
+  let tool = tap.tool;
+  if (tap.build) r = resolveBuild(s, tap.build, tap.x, tap.y);
+  else if (homestead(s)) ({ r, tool, then } = tapJob(s, tap));
+  else r = resolve(s, s.tool, tap.x, tap.y);
   if (r.verb && r.ok && homestead(s)) {
     const tired = canAfford(s, r.verb);
     if (tired) {
@@ -549,20 +605,90 @@ export function doTap(s: WorldState, a: Actor, tap: { x: number; y: number; tool
       return;
     }
   }
+  // Seeds on a plot not yet free: the crop there is picked first, and the seed goes in straight after.
+  if (then) (s.taps ??= []).unshift(then);
+  // A well with the can still full says so at once, rather than walking there for nothing.
+  if (!r.ok && r.verb === 'refill' && r.reason) {
+    ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
+    return;
+  }
   const t = tileOf(a);
   if (Math.max(Math.abs(t.x - tap.x), Math.abs(t.y - tap.y)) <= 1) {
     if (r.verb && r.ok) startAction(s, a, r, tap.x, tap.y, ev);
     else if (r.reason) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
   } else {
-    walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok));
-    if (tap.build && a.aim) a.aim.build = tap.build;
+    walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok), r.verb ?? undefined);
+    if (a.aim) {
+      if (tap.build) a.aim.build = tap.build;
+      // The tool for the job found now (the hands, to pick a ripe crop before its plot is sown), and the seed tapped.
+      a.aim.tool = tool;
+      if (tap.seed) a.aim.seed = tap.seed;
+    }
   }
 }
 
-export function walkTo(s: WorldState, a: Actor, x: number, y: number, thenAct: boolean): void {
+/** The job under way as a tap: the one the farmer is walking to. */
+function inFlight(a: Actor): Tap | null {
+  return a.aim?.tool ? { x: a.aim.x, y: a.aim.y, tool: a.aim.tool, seed: a.aim.seed, build: a.aim.build } : null;
+}
+
+/** The same tap: tile, tool, seed and build. */
+function sameTap(a: Tap, b: Tap): boolean {
+  return a.x === b.x && a.y === b.y && a.tool === b.tool && a.seed === b.seed && a.build === b.build;
+}
+
+/**
+ * Sunup: a tap while the farmer is busy waits its turn, in the order tapped
+ * (up to `TAP_QUEUE`; one more is refused with a word, never dropped
+ * silently). Round 8: only a true duplicate is merged: the same tile, tool
+ * and seed as the tap just before it (or the walk under way), with nothing
+ * between, and never a trip to a well (a second well trip in one queue was
+ * dropped, the can ran dry, and on a heat day the crops after it withered).
+ * A crow or bugs go first, after any other crow or bugs already waiting, and
+ * even before a walk under way to a calmer job, which waits its turn after
+ * them (a crow tapped during a 24-tap watering pass waited at the back and
+ * ate five request crops).
+ */
+export function queueTap(s: WorldState, a: Actor, tap: Tap, ev: SimEvent[]): void {
+  const queue = (s.taps ??= []);
+  if (!a.task && !a.path.length && !a.aim && !queue.length) {
+    doTap(s, a, tap, ev);
+    return;
+  }
+  const urgent = homestead(s) && !tap.build && urgentAt(s, tap.x, tap.y);
+  if (urgent) {
+    // The same job already waiting further back (tapped before the crow came, say) moves up with it.
+    for (let k = queue.length - 1; k >= 0; k--) if (sameTap(queue[k], tap)) queue.splice(k, 1);
+    const now = inFlight(a);
+    if (now && sameTap(now, tap)) return;
+  } else {
+    const last = queue.length ? queue[queue.length - 1] : inFlight(a);
+    if (last && sameTap(last, tap) && !refillAt(s, tap.x, tap.y)) return;
+  }
+  if (queue.length >= TAP_QUEUE) {
+    ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: 'Busy. Tap it again soon' });
+    return;
+  }
+  if (!urgent) {
+    queue.push(tap);
+    return;
+  }
+  let i = 0;
+  while (i < queue.length && !queue[i].build && urgentAt(s, queue[i].x, queue[i].y)) i++;
+  queue.splice(i, 0, tap);
+  const aim = a.aim;
+  if (!a.task && aim && a.path.length && !urgentAt(s, aim.x, aim.y)) {
+    const back = inFlight(a);
+    if (back) queue.splice(i + 1, 0, back);
+    a.aim = null;
+    a.path = [];
+  }
+}
+
+export function walkTo(s: WorldState, a: Actor, x: number, y: number, thenAct: boolean, verb: Verb = 'harvest'): void {
   const t = tileOf(a);
   const p = thenAct ? pathNextTo(s, t.x, t.y, x, y) : pathTo(s, t.x, t.y, x, y) ?? pathNextTo(s, t.x, t.y, x, y);
   if (!p) return;
   a.path = p;
-  a.aim = thenAct ? { verb: 'harvest', x, y } : null;
+  a.aim = thenAct ? { verb, x, y } : null;
 }

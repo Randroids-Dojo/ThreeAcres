@@ -434,11 +434,13 @@ describe('P3: the small things', () => {
   it('the smith line counts the gold tools: reputation 3 is three short of a gold hoe, not "anything"', () => {
     const s = farm(61);
     // The tester's farm: no copper tools yet (both within reach), so the next the smith wants more for is gold.
+    // (Round 8: the gold can wants reputation 4, so it is the next; it wanted 8.)
     s.rep = 3;
     s.tools = { can: 0, hoe: 0 };
-    expect(smithLine(s)).toBe('Reputation 3. Three more for a gold hoe.');
+    expect(smithLine(s)).toBe('Reputation 3. One more for a gold can.');
+    s.rep = 4;
     s.tools = { can: 1, hoe: 1 };
-    expect(smithLine(s)).toBe('Reputation 3. Three more for a gold hoe.');
+    expect(smithLine(s)).toBe('Reputation 4. Two more for a gold hoe.');
     s.rep = 8;
     s.tools = { can: 1, hoe: 2 };
     expect(smithLine(s)).toBe('Reputation 8. The smith will make anything.');
