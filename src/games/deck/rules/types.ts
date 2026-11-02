@@ -8,19 +8,54 @@ export type WeatherId = 'rain' | 'sun' | 'storm';
 export type CardId = SeedId | ToolId | ObjectId | WeatherId;
 export type CardType = 'seed' | 'tool' | 'object' | 'weather';
 export type Rarity = 'common' | 'uncommon' | 'rare';
-export type PageId = 'barrel' | 'cellar' | 'bees' | 'thumb' | 'basket' | 'rotation' | 'market' | 'clover' | 'furrow' | 'coldframe';
+export type PageId = 'barrel' | 'cellar' | 'bees' | 'thumb' | 'basket' | 'rotation' | 'market' | 'clover' | 'furrow' | 'coldframe' | 'hot' | 'vines' | 'tall';
+
+/**
+ * An engine: a card and the almanac page that multiplies it, picked free at a run's first stall (round 7). The seventh
+ * playtest's year 2 was a walkover with beehives and Busy Bees and a wall without them, and the beehive was a rare
+ * roll at the stall: now every run starts building one of these, and the stall keeps its cards in stock.
+ */
+export type EngineId = 'bees' | 'hot' | 'vines' | 'tall';
 
 /**
  * A season's twist: one plain rule for the coming season, picked at the stall from two. Boons nudge the plot one way
  * (a buyer for one crop, good company, no pests, longer picks, sunflowers all round), hitches another (frost on the
  * bottom row, a glut of one crop, sunflowers facing up, crows twice as often).
  */
-export type TwistId = 'buyer' | 'company' | 'calm' | 'picks' | 'sunall' | 'frost' | 'glut' | 'sunup' | 'crows';
+export type TwistId = 'buyer' | 'company' | 'calm' | 'picks' | 'sunall' | 'frost' | 'glut' | 'sunup' | 'crows' | 'rest';
 
 export interface Twist {
   id: TwistId;
-  /** The crop a buyer or a glut is about. */
+  /** The crop a buyer or a glut is about, or the crop frost falls on (the one sown most on its row). */
   crop?: SeedId;
+  /** The row frost falls on (0 is the top row); the bottom row in a save from before round 7. */
+  row?: number;
+  /** The page a rest puts to sleep for the season. */
+  page?: PageId;
+  /** A hitch: the share it takes off the season's quota, what it is expected to cost this run (round 7). */
+  ease?: number;
+}
+
+/**
+ * What a season took and where it came from, kept as it goes: the stall reads the season just played to aim its
+ * twists at what the run relies on and to price them (round 7). Coins are harvest coins, the carry left out.
+ */
+export interface Tally {
+  take: number;
+  harvests: number;
+  /** Coins each crop took. */
+  kinds: Partial<Record<SeedId, number>>;
+  /** Coins of crops pulled up (sown crops, not a perennial's earlier picks), by row; and by crop on each row. */
+  rows: number[];
+  rowKinds: Partial<Record<SeedId, number>>[];
+  /** What each bonus added to the pay, by where it came from (its icon: a page, a sunflower, a beehive, beans...). */
+  from: Record<string, number>;
+  /** Coins pests took: half of each pested harvest. */
+  pests: number;
+  /** What good company would have added: a yield for each crop beside a harvest, times its bloom. */
+  company: number;
+  /** Perennials' last picks: what one more pick of each would have paid. */
+  last: number;
 }
 
 /** 0 spring, 1 summer, 2 autumn, 3 winter. */
@@ -124,6 +159,9 @@ export interface Shop {
   /** The two twists offered for the coming season (from year 2), and the one picked. */
   twists?: Twist[];
   twist?: number;
+  /** A run's first stall: the engines on offer, and the one picked (free; it can be changed until the stall is left). */
+  engines?: EngineId[];
+  engine?: number;
 }
 
 export interface RunStats {
@@ -223,6 +261,10 @@ export interface RunState {
   carried?: number;
   /** The first run after the guided one: its first spring asks less. */
   soft?: boolean;
+  /** The engine picked at the run's first stall, if any. */
+  engine?: EngineId | null;
+  /** This season's take so far and where it came from (kept until the next season starts, for the stall's twists). */
+  tally?: Tally;
   /** This year's new stock, laid on the year's first tray. */
   stock?: { card: CardId; up: boolean }[];
   /** Cards the merchant sells improved, once the catalogue holds every card (new stock never runs dry). */
@@ -300,6 +342,7 @@ export type Ev =
   /** The merchant has new stock this year, for this run: cards the catalogue does not hold yet. */
   | { t: 'stock'; cards: CardId[]; select: CardId[] }
   | { t: 'twist'; i: number }
+  | { t: 'engine'; i: number }
   | { t: 'buy'; card: CardId }
   | { t: 'page'; page: PageId }
   | { t: 'remove'; card: Card }

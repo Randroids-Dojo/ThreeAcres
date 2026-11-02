@@ -32,6 +32,8 @@ interface Tally {
   /** Stalls offering two twists, and those where the bot took the hitch. */
   twists: number;
   hitches: number;
+  /** Round 7: seasons played after a hitch and after a help, and those met. */
+  after: { hitch: [number, number]; boon: [number, number] };
   slots: number[];
   pages: number[];
   kept: number[];
@@ -54,6 +56,7 @@ function play(noise: number, guided: boolean, second = false): Tally {
     quota: Array.from({ length: K }, () => []),
     twists: 0,
     hitches: 0,
+    after: { hitch: [0, 0], boon: [0, 0] },
     slots: [],
     pages: [],
     kept: [],
@@ -103,6 +106,12 @@ function play(noise: number, guided: boolean, second = false): Tally {
         t.played[k]++;
         if (end.cleared) t.cleared[k]++;
         t.ratio[k].push(end.earned / end.quota);
+        const tw = s.stats.log[s.stats.log.length - 1]?.twist;
+        if (tw) {
+          const a = t.after[(BOONS as readonly string[]).includes(tw.id) ? 'boon' : 'hitch'];
+          a[0]++;
+          if (end.cleared) a[1]++;
+        }
         t.take[k].push(end.earned);
         t.quota[k].push(end.quota);
       }
@@ -147,6 +156,7 @@ for (const [name, noise, guided, second] of bots) {
   console.log(`coins unspent when the run ends: median ${med(t.unspent)}, mean ${mean(t.unspent).toFixed(0)}, max ${Math.max(...t.unspent)}`);
   console.log(`coins left on leaving a stall from year 2 summer on: median ${med(t.kept)}, p90 ${[...t.kept].sort((a, b) => a - b)[Math.floor(t.kept.length * 0.9)] ?? 0}`);
   console.log(`pages kept at the end: mean ${mean(t.pages).toFixed(1)}, max ${Math.max(...t.pages)}; page slots bought: ${t.slots.filter((n) => n > 0).length} runs, max ${Math.max(...t.slots)}`);
-  console.log(`twists: the hitch picked at ${t.twists ? Math.round((t.hitches / t.twists) * 100) : 0}% of ${t.twists} stalls`);
+  const pc = ([n, m]: [number, number]) => `${n ? Math.round((m / n) * 100) : 0}% of ${n}`;
+  console.log(`twists: the hitch picked at ${t.twists ? Math.round((t.hitches / t.twists) * 100) : 0}% of ${t.twists} stalls; seasons met after the hitch ${pc(t.after.hitch)}, after the help ${pc(t.after.boon)}`);
   console.log(`stall variety: ${mean(t.offered).toFixed(1)} different cards on the stalls' trays in a run (median ${med(t.offered)}); ${((t.repeats / Math.max(1, t.traySlots)) * 100).toFixed(0)}% of tray slots repeat the stall before`);
 }

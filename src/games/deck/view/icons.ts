@@ -175,7 +175,7 @@ export type Diagram = 'next' | 'alone' | 'spread' | 'guard' | 'row' | 'rowcol' |
  * (dark), the plots a rule reaches (lit). 'next' is the four neighbours,
  * 'area' the 3 by 3, 'row' a row, 'all' the whole plot.
  */
-export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, lit = '#e9c46a'): void {
+export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, lit = '#e9c46a', row = 3): void {
   const four = kind === 'row' || kind === 'rowcol' || kind === 'all' || kind === 'frost';
   const n = four ? 4 : 3;
   const c = s / n;
@@ -190,7 +190,7 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
       if (kind === 'next' || kind === 'spread' || kind === 'guard') on = edge;
       else if (kind === 'below') on = r === 2 && k === 1;
       else if (kind === 'above') on = r === 0 && k === 1;
-      else if (kind === 'frost') on = r === 3;
+      else if (kind === 'frost') on = r === row;
       else if (kind === 'area' || kind === 'scare') on = !centre;
       else if (kind === 'row') on = r === 1;
       else if (kind === 'rowcol') on = r === 1 || k === 1;
@@ -240,10 +240,10 @@ export function diagram(g: Ctx, kind: Diagram, x: number, y: number, s: number, 
     // A frosted bottom row, crossed out: nothing sown there.
     g.beginPath();
     for (let k = 0; k < 4; k++) {
-      g.moveTo(cx(k) - c * 0.24, cy(3) - c * 0.24);
-      g.lineTo(cx(k) + c * 0.24, cy(3) + c * 0.24);
-      g.moveTo(cx(k) + c * 0.24, cy(3) - c * 0.24);
-      g.lineTo(cx(k) - c * 0.24, cy(3) + c * 0.24);
+      g.moveTo(cx(k) - c * 0.24, cy(row) - c * 0.24);
+      g.lineTo(cx(k) + c * 0.24, cy(row) + c * 0.24);
+      g.moveTo(cx(k) + c * 0.24, cy(row) - c * 0.24);
+      g.lineTo(cx(k) - c * 0.24, cy(row) + c * 0.24);
     }
     ink(g, '#3a6a9a', Math.max(0.6, c * 0.12), 1);
   }
@@ -345,7 +345,8 @@ export type Bit =
   | { t: 'moon' }
   | { t: 'basket' }
   | { t: 'bloom' }
-  | { t: 'map'; k: Diagram }
+  | { t: 'map'; k: Diagram; row?: number }
+  | { t: 'leaf'; out?: boolean }
   | { t: 'nocrow' }
   | { t: 'crow' }
   | { t: 'nobug' }
@@ -474,7 +475,10 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
         bloom(g, mx, cy, h * 0.78);
         break;
       case 'map':
-        diagram(g, b.k, mx, cy, h);
+        diagram(g, b.k, mx, cy, h, undefined, b.row);
+        break;
+      case 'leaf':
+        leaf(g, mx, cy, h, b.out);
         break;
       case 'nocrow':
         crow(g, mx, cy, h, true);
@@ -530,11 +534,42 @@ export function twistBits(t: Twist): Bit[] {
     case 'sunall':
       return [prod('sunflower'), map('next'), B(`+${TUNING.sunAll}`), BLOOMB];
     case 'frost':
-      return [map('frost')];
+      return t.crop ? [{ t: 'map', k: 'frost', row: t.row ?? 3 }, prod(t.crop)] : [{ t: 'map', k: 'frost', row: t.row ?? 3 }];
     case 'sunup':
       return [prod('sunflower'), map('above'), B(`+${TUNING.sunBloom}`), BLOOMB];
     case 'crows':
-      return [{ t: 'crow' }, I('×2')];
+      // A crow every night of the six.
+      return [{ t: 'crow' }, MOON, I(`×${TUNING.days}`)];
+    case 'rest':
+      // The page, crossed out for the season.
+      return [{ t: 'leaf', out: true }];
+  }
+}
+
+/** An almanac page: a ruled leaf with a red ribbon, s tall; crossed out in red with `out` (a page resting). */
+export function leaf(g: Ctx, x: number, y: number, s: number, out = false): void {
+  g.save();
+  g.translate(x, y);
+  g.rotate(-0.12);
+  g.beginPath();
+  g.rect(-s * 0.3, -s * 0.38, s * 0.6, s * 0.76);
+  fill(g, '#f3e9cf');
+  ink(g, INK, s * 0.04, 1);
+  g.beginPath();
+  for (let i = 0; i < 4; i++) {
+    g.moveTo(-s * 0.2, -s * 0.18 + i * s * 0.13);
+    g.lineTo(s * 0.2, -s * 0.18 + i * s * 0.13);
+  }
+  ink(g, INK, s * 0.025, 0.6);
+  g.beginPath();
+  g.rect(s * 0.1, -s * 0.42, s * 0.08, s * 0.3);
+  fill(g, '#9a2a2a');
+  g.restore();
+  if (out) {
+    g.beginPath();
+    g.moveTo(x - s * 0.34, y + s * 0.34);
+    g.lineTo(x + s * 0.34, y - s * 0.34);
+    ink(g, BLOOM, Math.max(0.8, s * 0.09), 1);
   }
 }
 
@@ -542,7 +577,7 @@ const twistUrls = new Map<string, string>();
 
 /** A twist's picture as an image, h CSS px tall (painted at twice that for sharpness). */
 export function twistUrl(t: Twist, h = 30): string {
-  const key = `${t.id}:${t.crop ?? ''}:${h}`;
+  const key = `${t.id}:${t.crop ?? ''}:${t.row ?? ''}:${h}`;
   let u = twistUrls.get(key);
   if (u) return u;
   const bits = twistBits(t);
@@ -593,26 +628,7 @@ export function iconUrl(key: string, size = 40): string {
   else if (key === 'scoop') scoop(g, m, m, size * 0.95, true);
   else if (key === 'buyer' || key === 'glut') coin(g, m, m, size * 0.8, key === 'glut');
   else if (key === 'company') diagram(g, 'next', m, m, size * 0.9);
-  else {
-    // An almanac page: a ruled leaf with a red ribbon.
-    g.save();
-    g.translate(m, m);
-    g.rotate(-0.12);
-    g.beginPath();
-    g.rect(-size * 0.3, -size * 0.38, size * 0.6, size * 0.76);
-    fill(g, '#f3e9cf');
-    ink(g, INK, size * 0.04, 1);
-    g.beginPath();
-    for (let i = 0; i < 4; i++) {
-      g.moveTo(-size * 0.2, -size * 0.18 + i * size * 0.13);
-      g.lineTo(size * 0.2, -size * 0.18 + i * size * 0.13);
-    }
-    ink(g, INK, size * 0.025, 0.6);
-    g.beginPath();
-    g.rect(size * 0.1, -size * 0.42, size * 0.08, size * 0.3);
-    fill(g, '#9a2a2a');
-    g.restore();
-  }
+  else leaf(g, m, m, size);
   u = c.toDataURL();
   urls.set(k, u);
   return u;

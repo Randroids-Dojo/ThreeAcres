@@ -18,7 +18,10 @@ import {
   canUpgrade,
   CARDS,
   cardText,
+  chooseEngine,
   chooseTwist,
+  ENGINES,
+  engineText,
   costOf,
   isFinal,
   leaveShop,
@@ -79,6 +82,8 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const scoops = (n: number) => (n === 0 ? 'free' : `${n} ${n === 1 ? 'scoop' : 'scoops'}`);
 const lower = (id: CardId) => CARDS[id].name.toLowerCase();
 const lowerFirst = (s: string) => s[0].toLowerCase() + s.slice(1);
+/** Cards whose name is a plural: "The beans go in your tin." (round 7: "The ladybirds goes"). */
+const plural = (id: CardId) => /s$/.test(CARDS[id].name) && id !== 'compost';
 /** "pumpkin, shears and mint": a list said the way a person would. */
 export const listOf = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
@@ -193,6 +198,7 @@ export class Sheets {
     this.picked = null;
     this.done = null;
     this.needTwist = false;
+    this.needEngine = false;
   }
 
   private get touch(): boolean {
@@ -268,7 +274,8 @@ export class Sheets {
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
-      'From year 2, the stall offers two twists for the season ahead: one that helps, such as a buyer for one crop, and one that gets in the way, such as frost on the bottom row. The one that gets in the way asks a smaller quota. Pick one; it holds all season.',
+      'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on.',
+      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you sow most. The one that gets in the way asks a smaller quota, about what it would cost you. Pick one; it holds all season.',
       'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
       'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
@@ -349,7 +356,8 @@ export class Sheets {
     let groups: { head: string | null; cards: Card[]; mark: string }[];
     if (pick) {
       wrap.append(el('h2', '', pick === 'remove' ? `Throw out a card, ${removePrice(s)} coins` : `Improve a card, ${upgradePrice(s)} coins`));
-      const read = el('p', 'sb-sub sb-pickline', pick === 'remove' ? 'Tap a card to see it, then tap it again to throw it out.' : 'Tap a card to see what improving does, then tap it again.');
+      const tp = this.touch ? 'Tap' : 'Click';
+      const read = el('p', 'sb-sub sb-pickline', pick === 'remove' ? `${tp} a card to see it, then ${tp.toLowerCase()} it again to throw it out.` : `${tp} a card to see what improving does, then ${tp.toLowerCase()} it again.`);
       wrap.append(read);
       groups = [{ head: null, cards: sort(s.draw), mark: '' }];
     } else if (which === 'spent') {
@@ -390,8 +398,8 @@ export class Sheets {
             const line = wrap.querySelector('.sb-pickline') as HTMLElement;
             line.innerHTML =
               pick === 'remove'
-                ? `Throw out this ${esc(lower(c.id))}? <b>Tap it again.</b>`
-                : `${esc(CARDS[c.id].name)}: ${esc(lowerFirst(upgradeNote(c.id, s.pages)))} <b>Tap it again to improve it.</b>`;
+                ? `Throw out ${plural(c.id) ? 'these' : 'this'} ${esc(lower(c.id))}? <b>${this.touch ? 'Tap' : 'Click'} again.</b>`
+                : `${esc(CARDS[c.id].name)}: ${esc(lowerFirst(upgradeNote(c.id, s.pages)))} <b>${this.touch ? 'Tap' : 'Click'} again to improve it.</b>`;
             this.ctx.audio.cue('deck.pick');
             return;
           }
@@ -400,7 +408,7 @@ export class Sheets {
             this.t.tutor.count('service');
             if (pick === 'upgrade') this.t.tutor.count('improve');
             this.ctx.audio.cue(pick === 'remove' ? 'deck.remove' : 'deck.buy');
-            this.done = pick === 'remove' ? `The ${lower(c.id)} is thrown out.` : `${CARDS[c.id].name} improved. ${upgradeNote(c.id, s.pages)}`;
+            this.done = pick === 'remove' ? `The ${lower(c.id)} ${plural(c.id) ? 'are' : 'is'} thrown out.` : `${CARDS[c.id].name} improved. ${upgradeNote(c.id, s.pages)}`;
             this.doneCard = pick === 'upgrade' ? c : null;
             this.t.save();
             this.t.syncPurse();
@@ -473,7 +481,8 @@ export class Sheets {
     head.append(el('div', 'sb-sign', '<span>Seed merchant</span>'));
     // The season just closed, and the share of its surplus that carries into the next one.
     const carry = nextCarry(s);
-    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}: ${last.earned} of ${last.quota}.${carry ? ` ${carry} carries over.` : ''}`));
+    // What carries over is said as where the next season starts: "Summer starts with 8." ("8 carries over" was never explained.)
+    if (last) head.append(el('p', 'sb-closed', `${cap(SEASON_NAMES[last.season])}: ${last.earned} of ${last.quota}.${carry ? ` ${cap(SEASON_NAMES[nextSeason(s).season])} starts with ${carry}.` : ''}`));
     const coming = nextSeason(s);
     head.append(el('p', 'sb-purse-line', `You have <b>${s.coins}</b> coins. ${cap(SEASON_NAMES[coming.season])} asks ${nextQuota(s)}.`));
     // Each new year the merchant brings new stock for this run, laid on the year's first tray: said at that stall.
@@ -485,6 +494,33 @@ export class Sheets {
     }
     head.append(btn('sb-stall-book', '<span>Almanac</span>', () => this.menu()));
     wrap.append(head);
+    // A run's first stall: an engine to take home, free (a card and the page that multiplies it). Pick one; it can be
+    // changed until the stall is left.
+    if (sh.engines?.length) {
+      const row = el('div', `sb-engines${this.needEngine ? ' ask' : ''}`);
+      row.setAttribute('role', 'radiogroup');
+      row.setAttribute('aria-label', 'Take one home, free');
+      sh.engines.forEach((id, i) => {
+        const on = sh.engine === i;
+        const e = ENGINES[id];
+        const b = btn(
+          `sb-enginecard${on ? ' picked' : sh.engine !== undefined ? ' other' : ''}`,
+          `<img src="${faceUrl(e.gift[0], false)}" alt=""><span><b>${esc(engineText(id).replace(/\.$/, ''))}</b> ${esc(PAGES[e.page].text)}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`,
+          () => {
+            if (!chooseEngine(s, i)) return;
+            this.t.tutor.count('engine');
+            this.needEngine = false;
+            this.ctx.audio.cue('deck.page', { gain: 0.6 });
+            this.t.save();
+            this.stall();
+          },
+        );
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(on));
+        row.append(b);
+      });
+      wrap.append(row);
+    }
     // The season ahead: two twists, pick one. It holds all season; it can be changed until the stall is left.
     if (sh.twists?.length) {
       const row = el('div', `sb-twists${this.needTwist ? ' ask' : ''}`);
@@ -603,7 +639,7 @@ export class Sheets {
       }
       b.onclick = () =>
         this.lift(key, () => {
-          if (buyCard(s, i)) this.bought('buy', `The ${o.up ? 'improved ' : ''}${lower(o.card)} goes in your tin.`);
+          if (buyCard(s, i)) this.bought('buy', `The ${o.up ? 'improved ' : ''}${lower(o.card)} ${plural(o.card) ? 'go' : 'goes'} in your tin.`);
           else this.ctx.audio.cue('deck.deny');
           this.stall();
         });
@@ -663,6 +699,7 @@ export class Sheets {
     // The slip's own place: what the lifted thing is, else what was just done, else the stall's lesson.
     const foot = el('div', 'sb-stall-foot');
     const spot = el('div', 'sb-slipspot');
+    if (!read && this.needEngine && sh.engines?.length && sh.engine === undefined) read = '<em>Pick one to take home first.</em>';
     if (!read && this.needTwist && sh.twists?.length && sh.twist === undefined) read = `<em>Pick one of the two for ${SEASON_NAMES[coming.season]} first.</em>`;
     if (read) spot.append(this.readSlip(read));
     else if (this.done) {
@@ -675,6 +712,15 @@ export class Sheets {
     const next = s.season === 3 ? `On to spring, year ${s.year + 1}` : isFinal(nextSeason(s)) ? 'On to the last winter' : `On to ${SEASON_NAMES[s.season + 1]}`;
     foot.append(
       btn('sb-signpost', `<span>${next}</span>`, () => {
+        // The run's engine is a choice: the way on asks for one first.
+        if (sh.engines?.length && sh.engine === undefined) {
+          this.needEngine = true;
+          this.picked = null;
+          this.done = null;
+          this.ctx.audio.cue('deck.deny');
+          this.stall();
+          return;
+        }
         // The season's twist is a choice: the way on asks for one first.
         if (sh.twists?.length && sh.twist === undefined) {
           this.needTwist = true;
@@ -698,9 +744,9 @@ export class Sheets {
     const scroll = this.el.querySelector('.sb-stall-body')?.scrollTop ?? 0;
     // Keep the keyboard where it was: on the lifted thing, or on what was focused before.
     const was = document.activeElement?.closest('.sb-stall') ? [...this.el.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement) : -1;
-    this.show('stall', wrap, this.picked ? '.lifted' : this.needTwist ? '.sb-twistcard' : undefined);
+    this.show('stall', wrap, this.picked ? '.lifted' : this.needEngine ? '.sb-enginecard' : this.needTwist ? '.sb-twistcard' : undefined);
     this.fitGoods(wrap);
-    if (!this.picked && !this.needTwist && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
+    if (!this.picked && !this.needTwist && !this.needEngine && was >= 0 && this.ctx.device() === 'key') (wrap.querySelectorAll('button')[was] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
     body.scrollTop = scroll;
     // A body that scrolls says so: a soft shade at its foot while there is more below (it scrolled 16 px with no sign).
     const more = () => body.classList.toggle('more', body.scrollHeight - body.clientHeight - body.scrollTop > 2);
@@ -740,6 +786,8 @@ export class Sheets {
   }
   /** The way on was tried with no twist picked: the slip asks for one and the two clippings call for a tap. */
   private needTwist = false;
+  /** The same for the engine at a run's first stall. */
+  private needEngine = false;
 
   /** After a purchase: count it for the lessons, voice it, save, and tick the purse down. */
   private bought(kind: 'buy' | 'page' | 'service', words: string): void {
@@ -819,7 +867,18 @@ export class Sheets {
     if (end?.won) foot.append(el('div', 'sb-seal', '<span>Won</span>'));
     sheet.append(foot);
     this.show('entry', sheet);
+    this.shadeMore(page);
     this.ctx.audio.cue(end?.won ? 'deck.big' : 'deck.fail');
+  }
+
+  /** A body that scrolls says so: a soft shade at its foot while there is more below. */
+  private shadeMore(body: HTMLElement): void {
+    const more = () => body.classList.toggle('more', body.scrollHeight - body.clientHeight - body.scrollTop > 2);
+    body.addEventListener('scroll', more, { passive: true });
+    more();
+    requestAnimationFrame(more);
+    // Card faces load after the first layout: measure again once they have.
+    for (const img of body.querySelectorAll('img')) if (!img.complete) img.addEventListener('load', more, { once: true });
   }
 
   /**
@@ -897,6 +956,7 @@ export class Sheets {
     foot.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
     sheet.append(foot);
     this.show('entry', sheet);
+    this.shadeMore(page);
     this.ctx.audio.cue('deck.big');
   }
 

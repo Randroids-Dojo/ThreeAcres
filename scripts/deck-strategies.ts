@@ -32,8 +32,15 @@ const runs = Number(args[0] ?? 30);
 const first = Number(process.argv.find((a) => a.startsWith('--first='))?.split('=')[1] ?? 0);
 const policies = args.slice(1);
 const perSeason = process.argv.includes('--seasons');
-const tuning = R.TUNING as typeof R.TUNING & { twists?: boolean };
+const tuning = R.TUNING as typeof R.TUNING & { twists?: boolean; engineChoices?: number; engines?: boolean };
 if (process.argv.includes('--noTwists')) tuning.twists = false;
+// Round 7: the run's first stall offers all four engines here, so a policy committed to one can always take it.
+if (tuning.engineChoices !== undefined) tuning.engineChoices = 4;
+if (process.argv.includes('--noEngines')) tuning.engines = false;
+for (const a of process.argv.filter((x) => x.startsWith('--tune='))) {
+  const [k, v] = a.slice(7).split(':');
+  (tuning as unknown as Record<string, number>)[k] = Number(v);
+}
 
 const med = (a: number[]) => {
   const b = [...a].sort((x, y) => x - y);
@@ -50,6 +57,50 @@ function recipe(h: Harvest): string {
   const skip = ['market', 'clover', 'pest', 'sun', 'company', 'buyer', 'glut'];
   const from = [...new Set([...h.chips, ...h.mult].filter((st) => !skip.includes(st.icon)).map((st) => (st.icon === 'sunflower' ? st.label : st.icon)))].sort();
   return `${h.kind}<${from.join(',')}>`;
+}
+
+/** What one bonus on a harvest added to its pay: a + to yield or bloom, or a x. */
+function stepCoins(h: Harvest, st: Harvest['mult'][number], yieldStep: boolean): number {
+  if (yieldStep) return st.op === '+' ? st.v * h.multTotal : 0;
+  if (st.op === 'x') return h.score * (1 - 1 / st.v);
+  const times = h.mult.filter((x) => x.op === 'x').reduce((a, x) => a * x.v, 1);
+  return h.chipsTotal * st.v * times;
+}
+
+/**
+ * Round 7: how hard a hitch on offer would hit the season just played, as a share of its take, read from that
+ * season's harvests alone (so it runs on any build): a glut on its crop's coins (half of them), frost on the coins of
+ * crops pulled up on the frosted row (they were sown there), sunflowers facing up on what the sunflowers' bloom added,
+ * a page resting on what its bonuses added, and crows on the share of the take a scarecrow did not guard. A hitch
+ * under 5% misses the build: a free quota cut.
+ */
+function hitchHit(t: { id: string; crop?: string; row?: number; page?: string }, season: Harvest[], s: R.RunState): number {
+  const take = season.reduce((a, h) => a + h.score, 0) || 1;
+  const sum = (f: (h: Harvest) => number) => season.reduce((a, h) => a + f(h), 0) / take;
+  const steps = (icon: string) => sum((h) => h.mult.filter((st) => st.icon === icon).reduce((a, st) => a + stepCoins(h, st, false), 0) + h.chips.filter((st) => st.icon === icon).reduce((a, st) => a + stepCoins(h, st, true), 0));
+  switch (t.id) {
+    case 'glut':
+      return 0.5 * sum((h) => (h.kind === t.crop ? h.score : 0));
+    case 'frost': {
+      const row = t.row ?? s.rows - 1;
+      return sum((h) => (h.leaves && Math.floor(h.plot / s.cols) === row ? h.score : 0));
+    }
+    case 'sunup':
+      return steps('sunflower');
+    case 'rest':
+      return steps(t.page ?? '');
+    case 'crows': {
+      // The extra crows a season of them brings, each taking one ripe crop no scarecrow guards: the mean of those.
+      const open = season.filter((h) => !R.guarded(s, h.plot));
+      if (!open.length) return 0;
+      const n = R.nextSeason(s);
+      const p = R.bySeason(R.TUNING.crowChance, n);
+      const tune = R.TUNING as unknown as { crowTimes?: number; crowEvery?: number };
+      const extra = R.TUNING.days * (Math.min(0.9, tune.crowEvery ?? p * (tune.crowTimes ?? 2)) - p);
+      return (extra * (open.reduce((a, h) => a + h.score, 0) / open.length)) / take;
+    }
+  }
+  return 1;
 }
 
 for (const name of policies.length ? policies : Object.keys(POL)) {
@@ -76,6 +127,9 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
   const bought = new Map<number, [number, number, number, number]>();
   // Scoops and cards left at dusk, by scoops above the usual refill: [days, scoops idle, cards left, days with 2 or more idle].
   const idle = new Map<number, [number, number, number, number]>();
+  // Round 7: seasons after a hitch and after a help, [played, met]; hitches offered that miss the build, by hitch.
+  const after = { hitch: [0, 0], boon: [0, 0] };
+  const miss = new Map<string, [number, number]>();
   const t0 = performance.now();
   for (let i = first; i < first + runs; i++) {
     const meta = newMeta();
@@ -87,8 +141,15 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     let coins: Record<string, number> = {};
     let best: Harvest | null = null;
     let prev: { kind: string; recipe: string } | null = null;
+    let season: Harvest[] = [];
+    let lastSeason: Harvest[] = [];
     const tally = (ev: Ev[]) => {
       for (const e of ev) {
+        if (e.t === 'harvest') season.push(e.h);
+        if (e.t === 'seasonEnd') {
+          lastSeason = season;
+          season = [];
+        }
         if (e.t === 'harvest') {
           coins[e.h.kind] = (coins[e.h.kind] ?? 0) + e.h.score;
           if (!best || e.h.score > best.score) best = e.h;
@@ -118,6 +179,11 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
         const by = s.stats.byKind ?? {};
         const all = Object.values(by).reduce((a, b) => a + (b ?? 0), 0);
         const lean = !!glutCrop && (by[glutCrop] ?? 0) >= all / 3;
+        const hitchOn = s.shop?.twists?.find((t) => !(R.BOONS as readonly string[]).includes(t.id));
+        if (hitchOn && lastSeason.length) {
+          const m = miss.get(hitchOn.id) ?? [0, 0];
+          miss.set(hitchOn.id, [m[0] + 1, m[1] + (hitchHit(hitchOn, lastSeason, s) < 0.05 ? 1 : 0)]);
+        }
         shop(s, dice);
         if (offer.length === 2 && s.twist) {
           const boon = offer.find((id) => (R.BOONS as readonly string[]).includes(id))!;
@@ -169,6 +235,11 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
         if (k < 12) {
           played[k]++;
           if (l.cleared) met[k]++;
+          if (l.twist) {
+            const a = after[(R.BOONS as readonly string[]).includes(l.twist.id) ? 'boon' : 'hitch'];
+            a[0]++;
+            if (l.cleared) a[1]++;
+          }
           ratio[l.year - 1].push(l.earned / l.quota);
         }
       }
@@ -185,6 +256,9 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     const often = [...byPair.values()].filter(([n]) => n >= 4).length;
     const hs = [...byHitch.entries()].sort().map(([id, [n, h]]) => `${id} ${pct(h, n)}`).join(', ');
     const cp = (k: string) => `${pct(cond[k][1], cond[k][0])} of ${cond[k][0]}`;
+    const ms = [...miss.entries()].sort().map(([id, [n, m]]) => `${id} ${pct(m, n)} of ${n}`).join(', ');
+    const mAll = [...miss.values()].reduce((a, [n, m]) => [a[0] + n, a[1] + m], [0, 0]);
+    console.log(`${''.padEnd(17)} round 7: seasons met after the hitch ${pct(after.hitch[1], after.hitch[0])} of ${after.hitch[0]}, after the help ${pct(after.boon[1], after.boon[0])} of ${after.boon[0]}; hitches offered that miss the build (under 5% of last season's take) ${pct(mAll[1], mAll[0])} of ${mAll[0]} (${ms})`);
     console.log(`${''.padEnd(17)} twists: the hitch picked at ${pct(hitches, stalls)} of ${stalls} stalls (${hs}); pairs picked both ways ${mixed} of ${often} seen 4+ times; crows with a scarecrow standing ${cp('crowsGuarded')}, without ${cp('crowsBare')}; a glut of a crop with a third of the coins ${cp('glutLean')}, less ${cp('glutLight')}`);
     const days = (m: Map<number, [number, number, number, number]>, k: number) => {
       const d = m.get(k);

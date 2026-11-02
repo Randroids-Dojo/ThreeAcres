@@ -20,6 +20,8 @@ import {
   canRemove,
   canUpgrade,
   CARDS,
+  chooseEngine,
+  ENGINES,
   cloneRun,
   endDay,
   isFinal,
@@ -38,6 +40,7 @@ import {
   UNLOCK_ORDER,
   upgradeCard,
   type CardId,
+  type EngineId,
   type Ev,
   type Meta,
   type PageId,
@@ -56,6 +59,8 @@ export interface BotOpts {
   shopNoise?: number;
   /** Play the guided first season's set hands. */
   guided?: boolean;
+  /** The engine to take at a run's first stall, if it is on offer ('none' takes none); else one at random. */
+  engine?: EngineId | 'none';
 }
 
 export { cloneRun };
@@ -216,10 +221,12 @@ const CARD_VALUE: Record<CardId, number> = {
   garlic: 4, ladybirds: 3, scarecrow: 3, sun: 5, shears: 3, trowel: 2, storm: 5, mint: 3, radish: 3, carrot: 4, lettuce: 2, can: 3,
 };
 
-const PAGE_VALUE: Record<PageId, number> = { thumb: 10, basket: 8, market: 7, clover: 6, cellar: 6, furrow: 7, bees: 5, rotation: 5, barrel: 6, coldframe: 4 };
+const PAGE_VALUE: Record<PageId, number> = { thumb: 10, basket: 8, market: 7, clover: 6, cellar: 6, furrow: 7, bees: 5, rotation: 5, barrel: 6, coldframe: 4, hot: 4, vines: 4, tall: 4 };
 
 function cardValue(s: RunState, id: CardId): number {
   let v = CARD_VALUE[id];
+  // The run's engine: its cards are what the run builds on.
+  if (s.engine && ENGINES[s.engine].cards.includes(id)) v += 3;
   // Hazard answers matter once hazards are on.
   if ((id === 'garlic' || id === 'ladybirds' || id === 'scarecrow') && (s.season >= 1 || s.year > 1)) v += 2;
   // Enough of one thing.
@@ -229,6 +236,8 @@ function cardValue(s: RunState, id: CardId): number {
 
 function pageValue(s: RunState, id: PageId): number {
   const cards = allCards(s);
+  // The engine's own page is never the one swapped out.
+  if (s.engine && ENGINES[s.engine].page === id) return 14;
   if (id === 'cellar') return 3 + cards.filter((c) => c.id === 'radish' || c.id === 'carrot').length * 0.6;
   if (id === 'bees') return 2 + cards.filter((c) => c.id === 'sunflower' || c.id === 'beehive').length * 1.5;
   if (id === 'coldframe') return s.season === 2 ? 8 : 4;
@@ -275,6 +284,11 @@ export function botTwist(s: RunState, seed = 1): void {
 export function botShop(s: RunState, o: BotOpts, dice: Dice): void {
   const sh = s.shop;
   if (!sh) return;
+  // A run's first stall: take an engine (the one asked for if it is on offer, else one at random).
+  if (sh.engines?.length && sh.engine === undefined && o.engine !== 'none') {
+    const i = o.engine ? sh.engines.indexOf(o.engine) : -1;
+    chooseEngine(s, i >= 0 ? i : Math.floor(dice.next() * sh.engines.length));
+  }
   const fuzz = (v: number) => v * (1 + (dice.next() * 2 - 1) * (o.shopNoise ?? o.noise));
   for (let guard = 0; guard < 12; guard++) {
     let did = false;

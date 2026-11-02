@@ -2,26 +2,32 @@
 // reading order: row by row, left to right, which is also the harvest order.
 
 import { CELLAR_YIELD, SEEDS } from './cards';
-import type { Crop, PageId, Plot, RunState, Season, SeedId, Twist, TwistId } from './types';
+import type { Crop, PageId, Plot, RunState, Season, SeedId, Tally, Twist, TwistId } from './types';
 
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
 export const TUNING = {
-  /** Year 1's quotas, spring to winter. */
-  quotas: [170, 260, 300, 350] as number[],
+  /**
+   * Year 1's quotas, spring to winter. Round 7 raised summer to winter (260, 300, 350): every run takes an engine at its
+   * first stall, and at the old row the decent bot met year 1 97% of the time at 1.6 to 2 times the quota.
+   */
+  quotas: [170, 320, 400, 470] as number[],
   /**
    * Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. Round 4 set years 2 and 3 against
    * the strong builds (roots with the Cellar, bloom with Busy Bees, perennials), which ran at 1.8 to 2.5 times the old
    * quotas: a run that clears year 2 no longer all but surely clears year 3, and the combos are needed to win. Round 6
    * raised summer to winter (600, 710, 790 before): the sixth playtest called year 2 a walkover once a build exists.
+   * Round 7 (430, 620, 740, 830 before) prices them against the four engines every run now builds (deck-fit): each
+   * engine wins 31 to 40% at these rows.
    */
-  quotas2: [430, 620, 740, 830] as number[],
+  quotas2: [540, 860, 1060, 1200] as number[],
   /**
    * Year 3's, the last: its winter is the finish line. A fixed row that grows through the year, so earning more never
    * makes the game harder: round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter, which pushed
    * the sixth playtest's every year 3 quota to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given),
-   * and every extra coin earned in year 2 raised next year's quotas, so holding back paid.
+   * and every extra coin earned in year 2 raised next year's quotas, so holding back paid. Round 7: 900, 980, 1,060,
+   * 1,140 before the engines.
    */
-  quotas3: [900, 980, 1060, 1140] as number[],
+  quotas3: [1250, 1350, 1450, 1550] as number[],
   /** Each year after the third multiplies year 3's quotas by this (checks and the balance scripts only: a run ends after year 3). */
   yearMult: 1.3,
   /**
@@ -32,14 +38,20 @@ export const TUNING = {
    * engine is built, so the run ends there.
    */
   years: 3,
-  /** The guided first season's quota: its first three days are set hands, so it takes less. */
-  guidedQuota: 70,
+  /**
+   * The guided first season's quota: its days are set hands, so it takes less. It was 70, met on day 5 every time
+   * (the bot took 85 to 89 by then, the seventh playtest 88), so day 6 did nothing; at 90 a careful line (89 by day 5,
+   * then 106 with day 6's second radish) meets it on the last night.
+   */
+  guidedQuota: 90,
   /**
    * The guided run's summer, its first season played without set hands. At 88% of the usual (230) it was the
    * tightest season of year 1 for the bot (a median take of 1.19 times it, against 1.40 to 1.59 for the rest), and the
    * sixth playtest missed it by 5 playing carefully with every preview: the run ended in its first season on its own.
+   * Round 7: 240 (180 before), since the guided run takes an engine at its first stall: at 180 the guided bot took a
+   * median 2.3 times it (its takes: 5% under 297, 10% under 314, median 416).
    */
-  guidedSummer: 180,
+  guidedSummer: 240,
   /** A guided first run's year 1 autumn and winter are this much of the usual: its first stall had fewer coins to spend. */
   firstYear: 0.88,
   /**
@@ -93,11 +105,17 @@ export const TUNING = {
    */
   cellarCap: 1,
   /**
-   * Busy Bees' one multiplier for a crop a sunflower or a beehive blooms, however
-   * many. At x2 the bloom build took about 1,600 a season in year 3, a half again
-   * as much as any other strong build, once the quotas were set against them.
+   * Busy Bees' one multiplier for a crop near a beehive, however many. At x2 the
+   * bloom build took about 1,600 a season in year 3, a half again as much as any
+   * other strong build, once the quotas were set against them. Round 7: x1.3,
+   * since every run now takes an engine at its first stall and the bee engine,
+   * at x1.5, took 2.4 times its year 2 quotas against 1.8 to 1.9 for the others
+   * (priced with deck-fit at round 7's rows it won 77% at x1.5, 54% at x1.35,
+   * 30% at x1.25, the other engines 24 to 47%).
    */
-  beesTimes: 1.5,
+  beesTimes: 1.3,
+  /** Busy Bees reaches the crop below a sunflower too (round 7: only crops near a beehive, the engine's own card). */
+  beesSun: false,
   /**
    * Almanac pages kept before any slot is bought. Four, not five: buying only
    * pages cleared year 2 more often than buying good cards (the tester's 40%
@@ -167,6 +185,64 @@ export const TUNING = {
   selectPrice: 25,
   /** Won runs the record keeps, latest last. */
   winsKept: 6,
+  /** Round 7: a run's first stall offers an engine, free (checks only: false for none). */
+  engines: true,
+  /** Engines the first stall offers, of the four (checks set four, so a policy can always take its own). */
+  engineChoices: 3,
+  /** Hot Beds: the picks a chili gives. */
+  hotPicks: 3,
+  /**
+   * Trellis: the bloom beans and strawberries give each other crop beside them, from this many of them at most. Round 7
+   * measured +1 to every crop beside them, beans and strawberries too: bean beds bloomed each other and the vines engine
+   * took 2.1 times its year 2 quotas against 1.8 to 2.0 for the others; without that, at +1, 1.5.
+   */
+  vinesBloom: 2,
+  vinesCap: 1,
+  /** Strawberries bloom their neighbours with Trellis too. */
+  vinesBerry: true,
+  /** Beans and strawberries take Trellis' bloom from each other too (round 7: no). */
+  vinesSelf: false,
+  /** Checks only: the vines engine's stock holds strawberries; its pick brings beans. */
+  vinesStockBerry: true,
+  vinesGift: true,
+  /**
+   * Nights sooner Tall Rows brings corn in (round 7: corn's four nights and three scoops held the tall engine back; at
+   * one night sooner it won 24% at round 7's rows, at two 43%, the other engines 40 to 47%).
+   */
+  tallFast: 2 as number | boolean,
+  /** The beehives a crop takes bloom from, at most. */
+  hiveCap: 1,
+  /** Tall Rows: the bloom corn and sunflowers get for each crop beside them. */
+  tallBloom: 1,
+  /**
+   * Round 7: a hitch is aimed at what the run relies on and offered only if it would cost this run at least this share
+   * of a season's take, read from the season just played. The seventh playtest took "sunflowers face up" with no
+   * sunflower planted and crows with a scarecrow standing, each 60 to 70 off the quota for nothing.
+   */
+  minHit: 0.06,
+  /** A help is offered only if it would bring this run at least this share of a season's take. */
+  minWorth: 0.04,
+  /** A hitch's expected cost, times this, is the share it takes off the quota, within these bounds (a heavier one is not offered). */
+  easeTimes: { glut: 1, frost: 1, crows: 1, rest: 1 } as Partial<Record<TwistId, number>>,
+  easeMin: 0.05,
+  easeMax: 0.35,
+  /**
+   * The share of a hitch's expected cost a careful player still pays after playing round it (measured with
+   * deck-twists: the decent bot sows elsewhere under frost and grows other crops in a glut, and can do little about a
+   * page at rest). What is left of the quota cut is the hitch's worth, and the help offered beside it is the one whose
+   * worth is nearest.
+   */
+  adapt: { glut: 0.8, frost: 0.6, crows: 1, rest: 0.85 } as Partial<Record<TwistId, number>>,
+  /**
+   * A help's estimate from the season just played, times this, is what it brought when played ahead (deck-twists, the
+   * bot's own buying with every card: a buyer brought about half its crop's coins, since the crop is grown less once
+   * the season has a new top crop; long picks more than one last pick each, since the perennial stands longer).
+   */
+  worthTimes: { buyer: 0.5, company: 1.05, calm: 0.15, picks: 1.4, sunall: 0.45 } as Partial<Record<TwistId, number>>,
+  /** Helps within this much of the nearest worth are offered at random, for variety. */
+  pairSlack: 0.03,
+  /** In a season of crows a crow comes every morning (round 6: twice as often, which cost a few coins). */
+  crowEvery: 1,
 };
 
 /** The run's last season: its winter is the finish line. */
@@ -209,9 +285,13 @@ export interface QuotaOpts {
   twist?: Twist | null;
 }
 
-/** The share a twist takes off its season's quota: a hitch pays for itself; a help takes nothing off. */
+/**
+ * The share a twist takes off its season's quota: a hitch pays for itself, by what it is expected to cost this run
+ * (set when it is offered); a help takes nothing off. A save from before round 7 has the old fixed shares.
+ */
 export function twistEase(t: Twist | null | undefined): number {
-  return t ? (TUNING.hitchEase[t.id] ?? 0) : 0;
+  if (!t) return 0;
+  return t.ease ?? TUNING.hitchEase[t.id] ?? 0;
 }
 
 /**
@@ -241,15 +321,36 @@ export function twistOn(s: Pick<RunState, 'twist' | 'day'>, n = 0): Twist | null
   return t && n <= TUNING.days - s.day ? t : null;
 }
 
-/** Frost on the bottom row: nothing can be sown there this season. */
+/** Frost on a row (the one the run sowed most, named by the twist): nothing can be sown there this season. */
 export function frosted(s: Pick<RunState, 'twist' | 'cols' | 'rows'>, i: number): boolean {
-  return s.twist?.id === 'frost' && Math.floor(i / s.cols) === s.rows - 1;
+  return s.twist?.id === 'frost' && Math.floor(i / s.cols) === (s.twist.row ?? s.rows - 1);
 }
 
-/** Picks a crop gives before it leaves: one more for beans and strawberries in a season of long picks. */
-export function picksOf(s: Pick<RunState, 'twist' | 'day'>, kind: SeedId, n = 0): number {
-  const p = SEEDS[kind].picks;
+/** Is this page at work on night n from tonight: kept, and not resting this season (a twist)? */
+export function pageOn(s: Pick<RunState, 'pages' | 'twist' | 'day'>, id: PageId, n = 0): boolean {
+  if (!s.pages.includes(id)) return false;
+  const t = twistOn(s, n);
+  return !(t?.id === 'rest' && t.page === id);
+}
+
+/**
+ * Picks a crop gives before it leaves: one more for beans and strawberries in a season of long picks; a chili picks
+ * for three nights with Hot Beds.
+ */
+export function picksOf(s: Pick<RunState, 'twist' | 'day'> & Partial<Pick<RunState, 'pages'>>, kind: SeedId, n = 0): number {
+  let p = SEEDS[kind].picks;
+  if (kind === 'chili' && s.pages && pageOn(s as Pick<RunState, 'pages' | 'twist' | 'day'>, 'hot', n)) p = TUNING.hotPicks;
   return p > 1 && twistOn(s, n)?.id === 'picks' ? p + 1 : p;
+}
+
+/** A season's tally, empty. */
+export function newTally(rows: number): Tally {
+  return { take: 0, harvests: 0, kinds: {}, rows: new Array(rows).fill(0), rowKinds: Array.from({ length: rows }, () => ({})), from: {}, pests: 0, company: 0, last: 0 };
+}
+
+/** Is this crop a perennial (it picks more than once, as things stand)? */
+export function perennial(kind: SeedId): boolean {
+  return SEEDS[kind].picks > 1;
 }
 
 /** The bench's morning refill: three scoops, one more for Green Thumb, one for the Long Furrow, and any bought for good. */

@@ -7,7 +7,7 @@
 // will be gone by then. Nothing here touches the real run or its rng.
 
 import { CARDS, isSeed } from './cards';
-import { forecast, isFinal, isRipe, type Fate } from './board';
+import { forecast, isFinal, isRipe, pageOn, type Fate } from './board';
 import { scoreHarvest, snapshot, type Snapshot } from './night';
 import { cloneRun, playCard } from './run';
 import type { Harvest, RunState } from './types';
@@ -86,7 +86,7 @@ export function harvestIndex(s: RunState, fates: readonly (Fate | null)[], i: nu
 
 /** With Market Day kept, the plots whose harvest tonight is a fifth (or tenth, or fifteenth): they pay x2. */
 export function marketTonight(s: RunState, fates: readonly (Fate | null)[] = forecast(s)): number[] {
-  if (!s.pages.includes('market')) return [];
+  if (!pageOn(s, 'market')) return [];
   const out: number[] = [];
   s.plots.forEach((_, i) => {
     if (pickedOn(fates[i], 0) && harvestIndex(s, fates, i, 0) % 5 === 0) out.push(i);
@@ -177,7 +177,10 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     if (j < 0 && final && late1) return;
     const nights = isRipe(crop) || j < 0 ? 0 : Math.max(0, Math.min(f0[j]!.ripeIn, 40) - Math.min(f1[i]!.ripeIn, 40));
     const m: Mark = { plot: i, yield: pay.yield, bloom: pay.bloom, times: pay.times, nights };
-    if (j >= 0 && (pay.yield || pay.bloom || !near(pay.times, 1))) m.total = paid1.score;
+    // A crop the play brings in tonight (the can, the fertiliser) shows what it will pay tonight too: the seventh
+    // playtest watered a carrot that then paid 21 and saw only "+1 moon".
+    const comes = f1[i]!.ripeIn === 0 && j >= 0 && f0[j]!.ripeIn !== 0;
+    if (j >= 0 && (pay.yield || pay.bloom || !near(pay.times, 1) || comes)) m.total = paid1.score;
     const lost = { yield: shown.yield - pay.yield, bloom: shown.bloom - pay.bloom, times: shown.times / pay.times };
     if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1) };
     if (m.yield || m.bloom || !near(m.times, 1) || m.nights || m.lost) marks.push(m);

@@ -57,6 +57,7 @@ import {
   type Ev,
   type Harvest,
   type RunState,
+  type Tally,
   type Twist,
 } from '../src/games/deck/rules';
 
@@ -278,7 +279,8 @@ describe('the night', () => {
     expect(beside.multTotal).toBe(1);
     expect(below.multTotal).toBe(3);
     expect(below.score).toBe(24);
-    // A beehive's 3 by 3 adds +1 each; with Busy Bees a crop with bees about gets one x1.5 (round 4: it was x2), not one per bee.
+    // A beehive's 3 by 3 adds +1 (round 7: from one hive, however many stand round it); with Busy Bees a crop near a
+    // beehive gets one x1.5 (round 4: it was x2), not one per bee (round 7: not for a sunflower's bloom alone).
     const t = table(['sunflower', 'lettuce', 'beehive', 'beehive']);
     t.pages.push('bees');
     play(t, 'sunflower', 0);
@@ -288,8 +290,8 @@ describe('the night', () => {
     t.plots[4].crop!.age = 2;
     const l = harvests(endDay(t))[0];
     expect(l.mult.filter((st) => st.icon === 'bees')).toHaveLength(1);
-    // 1 + 2 (sunflower) + 1 + 1 (two hives), then x1.5 once.
-    expect(l.multTotal).toBe(7.5);
+    // 1 + 2 (sunflower) + 1 (the hives), then Busy Bees once.
+    expect(l.multTotal).toBe(4 * TUNING.beesTimes);
   });
 
   it('a chili gives its neighbours x1.5 bloom, not the crop pulled after it', () => {
@@ -1566,6 +1568,29 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
   });
 
   it('from year 2 each stall offers two twists for the season ahead, one that helps and one that gets in the way; the one picked holds all season', () => {
+    /**
+     * A season's tally where every twist would bite or help (round 7 aims them at what the season just played took):
+     * carrots took the most, beans and strawberries pick, the bottom row's sowings paid most, Busy Bees added a share.
+     */
+    const rich = (): Tally => ({
+      take: 1000,
+      harvests: 40,
+      kinds: { carrot: 400, beans: 150, strawberry: 140, sunflower: 120, radish: 100, lettuce: 90 },
+      rows: [100, 150, 200, 300],
+      rowKinds: [{ radish: 100 }, { beans: 150 }, { lettuce: 200 }, { carrot: 300 }],
+      from: { bees: 150, sunflower: 90 },
+      pests: 800,
+      company: 140,
+      last: 90,
+    });
+    /** Play to the stall, the season's tally set before its last night. */
+    const toStallWith = (s: RunState, t: Tally) => {
+      for (let g = 0; g < 10 && s.phase === 'day'; g++) {
+        s.earned = Math.max(s.earned, s.quota);
+        if (s.day === TUNING.days) s.tally = t;
+        endDay(s);
+      }
+    };
     let offers = 0;
     const seen = new Set<string>();
     for (let seed = 1; seed <= 40; seed++) {
@@ -1573,12 +1598,11 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       // Year 1's stalls have none.
       toStall(s);
       expect(s.shop!.twists).toBeUndefined();
-      s.season = 3;
-      s.stats.log.at(-1)!.season = 3;
       // The stall after year 1 winter leads to year 2 spring: it offers two.
       const t = newRun(seed, null).s;
       t.season = 3;
-      toStall(t);
+      t.pages = ['bees'];
+      toStallWith(t, rich());
       const tw = t.shop!.twists!;
       expect(tw).toHaveLength(2);
       offers++;
@@ -1587,7 +1611,7 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       for (const x of tw) {
         seen.add(x.id);
         expect(twistText(x).split(/\s+/).length).toBeLessThanOrEqual(10);
-        if (x.id === 'buyer' || x.id === 'glut') expect(allCards(t).some((c) => c.id === x.crop)).toBe(true);
+        if (x.id === 'buyer' || x.id === 'glut') expect(x.crop).toBeDefined();
       }
       expect(chooseTwist(t, 1)).not.toBeNull();
       expect(t.shop!.twist).toBe(1);
@@ -1596,25 +1620,26 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       expect(t.twist).toEqual(picked);
       expect(ev.find((e) => e.t === 'season')).toMatchObject({ twist: picked });
       // It holds all season and goes in the log; the next stall offers two more, never the same one again at once.
-      toStall(t);
+      toStallWith(t, rich());
       expect(t.stats.log.at(-1)!.twist).toEqual(picked);
       expect(t.twist).toBeNull();
       expect(t.shop!.twists!.some((x) => x.id === picked.id)).toBe(false);
     }
     expect(offers).toBe(40);
-    // A buyer is for a crop the run has not leaned on; a glut hits the one that has taken the most.
+    // A buyer is for a crop the run has not leaned on; a glut hits the one that has taken the most (round 7: in the
+    // season just played).
     for (let seed = 1; seed <= 30; seed++) {
       const t = newRun(seed, null).s;
       t.season = 3;
-      t.stats.byKind = { carrot: 900, beans: 200, radish: 50 };
-      toStall(t);
+      toStallWith(t, { ...rich(), kinds: { carrot: 900, beans: 200, radish: 50 }, take: 1150 });
       for (const x of t.shop!.twists!) {
         if (x.id === 'buyer') expect(x.crop).not.toBe('carrot');
         if (x.id === 'glut') expect(x.crop).toBe('carrot');
       }
     }
-    // Across 40 runs every twist shows up.
-    expect(seen.size).toBe(BOONS.length + HITCHES.length);
+    // Across 40 runs every twist shows up, but sunflowers facing up (round 7: played ahead they cost nothing).
+    expect(seen.size).toBe(BOONS.length + HITCHES.length - 1);
+    expect(seen.has('sunup')).toBe(false);
   });
 
   it('each twist does what it says, and the previews count it', () => {
@@ -1776,8 +1801,11 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     s.day = 6;
     const t = new Tutor(learn);
     expect(t.update(s, 'touch', null, 0.1, false).line?.id).not.toBe('spent');
-    // A card the scoops cannot pay for is spare: now it comes.
+    // Round 7: a card the scoops cannot pay for today is not spare (the playtest tossed a strawberry it would sow the
+    // next morning); a card with nowhere to go is: now it comes.
     s.energy = 1;
+    expect(t.update(s, 'touch', null, 0.1, false).line?.id).not.toBe('spent');
+    s.plots.forEach((p, i) => (p.crop = { uid: 700 + i, kind: 'radish', age: 0, days: 1, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false }));
     expect(t.update(s, 'touch', null, 0.1, false).line?.id).toBe('spent');
     // Played out (the hand empty): it goes away, unfinished, and is not marked done.
     s.hand = [];
@@ -1855,7 +1883,9 @@ describe('round 6: twists that trade, a gentler guided summer, fixed year 3 rows
         else expect(s.quota).toBe(quotaFor(2, 0, s.pages));
       }
     }
-    for (const id of HITCHES) expect(twistEase({ id })).toBeGreaterThan(0.05);
+    // Round 7: a hitch carries its own share, what it would cost this run; a save from before has the old fixed shares.
+    for (const id of HITCHES) expect(twistEase({ id, ease: 0.12 })).toBe(0.12);
+    for (const id of ['frost', 'glut', 'crows', 'sunup'] as const) expect(twistEase({ id })).toBeGreaterThan(0.05);
     for (const id of BOONS) expect(twistEase({ id })).toBe(0);
     for (let seed = 1; seed <= 8; seed++) {
       const { s } = newRun(seed, null);
@@ -1889,32 +1919,45 @@ describe('round 6: twists that trade, a gentler guided summer, fixed year 3 rows
   it('the bot\'s pick follows its deck and plot, not the kind of twist: a hitch at some stalls, a help at others', () => {
     let hitch = 0;
     let help = 0;
-    for (let seed = 1; seed <= 16; seed++) {
-      const { s } = newRun(seed, null);
-      s.season = 3;
-      toStall(s);
-      botTwist(s, seed);
-      const t = s.shop!.twists![s.shop!.twist ?? 0];
-      if (HITCHES.includes(t.id)) hitch++;
-      else help++;
+    const was = TUNING.noEnd;
+    TUNING.noEnd = true;
+    onTestFinished(() => {
+      TUNING.noEnd = was;
+    });
+    // Round 7: twists are aimed at the season just played, so the runs are played, not skipped to the stall.
+    for (let seed = 1; seed <= 4; seed++) {
+      const { s } = newRun(seed * 101, null);
+      const dice = new Dice(seed);
+      const o = { noise: 0.15, seed, depth: 1 };
+      for (let g = 0; g < 300 && s.phase !== 'over' && (s.year - 1) * 4 + s.season < 9; g++) {
+        if (s.phase === 'shop' && s.shop?.twists?.length) {
+          botTwist(s, seed);
+          const t = s.shop.twists[s.shop.twist ?? 0];
+          if (HITCHES.includes(t.id)) hitch++;
+          else help++;
+        }
+        if (s.phase === 'shop') botShop(s, o, dice);
+        else botDay(s, o, dice);
+      }
     }
     // Round 5 scored every help above every hitch: the bot, like the sixth playtest, never took a hitch.
     expect(hitch).toBeGreaterThan(0);
     expect(help).toBeGreaterThan(0);
-  });
+  }, 120000);
 
-  it('the guided run\'s summer, its first season on its own, asks 180, not 230', () => {
+  it('the guided run\'s summer, its first season on its own, asks less than the usual summer (180, not 230; round 7: 240 of 320)', () => {
     const g = newRun(4, null, true).s;
     expect(g.quota).toBe(TUNING.guidedQuota);
     toStall(g);
     leaveShop(g);
     expect(g.season).toBe(1);
-    expect(g.quota).toBe(180);
+    expect(g.quota).toBe(TUNING.guidedSummer);
+    expect(g.quota).toBeLessThan(TUNING.quotas[1] * TUNING.firstYear);
     // Autumn keeps the guided year's 88%, and asks more than summer: no cliff, no dip.
     toStall(g);
     leaveShop(g);
     expect(g.quota).toBe(Math.round((TUNING.quotas[2] * TUNING.firstYear) / 10) * 10);
-    expect(g.quota).toBeGreaterThan(180);
+    expect(g.quota).toBeGreaterThan(TUNING.guidedSummer);
     // Its year 2 asks a share less than the raised row, about round 5's.
     for (let k = 0; k < 3; k++) {
       toStall(g);

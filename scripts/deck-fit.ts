@@ -58,6 +58,9 @@ if (args[0] === 'play') {
   }
   // The real quotas stay in play (the bot's worth of a scoop reads them); a missed season just goes on.
   TUNING.noEnd = true;
+  // Round 7: a stall policy committed to an engine can always take its own at the run's first stall (all four on offer).
+  const tn = TUNING as unknown as { engineChoices?: number };
+  if (!BOTS[who] && tn.engineChoices !== undefined) tn.engineChoices = 4;
   const out: Run[] = [];
   for (let i = 0; i < runs; i++) {
     const bot = BOTS[who];

@@ -89,6 +89,8 @@ interface Sprite {
   y0: number;
   w: number;
   h: number;
+  /** The highest painted pixel, in plot units from the base (negative is up): measured once, for crops. */
+  top?: number;
 }
 
 export class Board {
@@ -411,12 +413,14 @@ export class Board {
   }
 
   private cropSprite(kind: SeedId, stage: number, variant: number): Sprite {
-    return this.sprite(`${kind}:${stage}:${variant}`, -0.8, -2.05, 0.8, 0.35, (g, px) => {
+    const s = this.sprite(`${kind}:${stage}:${variant}`, -0.8, -2.05, 0.8, 0.35, (g, px) => {
       g.save();
       paintSeedCrop(g, kind, stage, this.pal, px, 1000 + variant * 37 + stage);
       g.restore();
       if (stage === 0) this.paintPacket(g, kind, px);
     });
+    if (s.top === undefined) s.top = paintedTop(s);
+    return s;
   }
 
   /**
@@ -492,7 +496,7 @@ export class Board {
 
     this.drawHighlights(plots);
 
-    // Frost on the bottom row (a twist): an icy wash and rime on its bare plots; nothing can be sown there.
+    // Frost on a row (a twist): an icy wash and rime on its bare plots; nothing can be sown there.
     if (this.twist?.id === 'frost') this.drawFrost(plots);
     // The soil's washes first: a passing splash, and the sickly wash of pests.
     for (let i = 0; i < plots.length; i++) {
@@ -522,6 +526,7 @@ export class Board {
       for (let i = 0; i < plots.length; i++) {
         const p = plots[i];
         if (!p.obj && (!p.crop || loose(p.crop))) continue;
+        if (part === 'over' && !p.obj) continue;
         const col = i % this.cols;
         const row = Math.floor(i / this.cols);
         const x0 = this.bx + col * T;
@@ -683,10 +688,10 @@ export class Board {
     ctx.restore();
   }
 
-  /** The bottom row under frost: a pale icy wash and a few rime stars, so it reads as no place to sow. */
+  /** The frosted row (the one the run sowed most): a pale icy wash and a few rime stars, so it reads as no place to sow. */
   private drawFrost(plots: readonly Plot[]): void {
     const { ctx, T } = this;
-    const r = this.rows - 1;
+    const r = Math.min(this.rows - 1, this.twist?.row ?? this.rows - 1);
     for (let c = 0; c < this.cols; c++) {
       const i = r * this.cols + c;
       const x = this.bx + c * T;
@@ -818,11 +823,15 @@ export class Board {
         if (l.bloom) y += chip(x, y, sign(l.bloom), BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
         if (l.times > 1 + 1e-6) y += chip(x, y, `×${fmt(l.times)}`, BLOOM, (cx, cy) => bloom(ctx, cx, cy, size * 1.05), true);
       }
-      // A neighbour the play changes shows what it will pay now, on a dark chip like the aimed seed's own slip.
-      if (m.total !== undefined) y += chip(x, y, String(m.total), '#f6ecd0', (cx, cy) => basket(ctx, cx, cy, size * 1.05, '#f6ecd0'), false, true);
+      // A neighbour the play changes shows what it will pay now, on a dark chip like the aimed seed's own slip, by a
+      // coin: the basket means yield everywhere else (the seventh playtest read "14 basket" as yield).
+      if (m.total !== undefined) y += chip(x, y, String(m.total), '#f6ecd0', (cx, cy) => coin(ctx, cx, cy, size * 0.95), false, true);
     }
     const t = pv.total && !pv.total.never ? pv.total : null;
     let under = -1;
+    let slip: { x: number; y: number; w: number; h: number } | null = null;
+    this.totalSlip = null;
+    this.reasonBox = null;
     if (t) {
       const c = this.centre(t.plot);
       // The arithmetic only when bloom changes the total; otherwise just what it pays. A crop pulled
@@ -832,7 +841,8 @@ export class Board {
       const parts = showBloom ? [fmt(t.yield), '×', fmt(t.bloom), '=', String(t.score)] : [String(t.score)];
       const widths = parts.map((s) => numWidth(ctx, s, big));
       const icon = big * 1.1;
-      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon + 12;
+      // The yield by its basket when the arithmetic shows, and the coins it pays by a coin.
+      const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon * (showBloom ? 2 : 1) + 12 + (showBloom ? 3 : 0);
       const h = big + 8;
       // Straddling the plot's bottom edge, clear of a thumb on the plot.
       const x0 = c.x - w / 2;
@@ -842,13 +852,21 @@ export class Board {
       ctx.fillStyle = t.late ? 'rgba(90, 84, 72, 0.92)' : 'rgba(42, 30, 18, 0.92)';
       ctx.fill();
       let x = x0 + 6;
-      basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, '#f6ecd0');
-      x += icon + 2;
+      if (showBloom) {
+        basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, '#f6ecd0');
+        x += icon + 2;
+      }
       parts.forEach((s, k) => {
         const col = showBloom && k === 2 ? '#f39aa8' : '#f6ecd0';
+        if (k === parts.length - 1) {
+          coin(ctx, x + icon / 2, y0 + h / 2, icon * 0.85);
+          x += icon + 2;
+        }
         num(ctx, s, x, y0 + h / 2, big, col);
         x += widths[k] + 3;
       });
+      slip = { x: x0, y: y0, w, h };
+      this.totalSlip = { ...slip, text: parts.join(' '), coin: true };
       under = y0 + h + 3;
     }
     // Why: one plain line under the aimed plot.
@@ -861,9 +879,16 @@ export class Board {
       const w = tw + 14;
       const h = fs + 9;
       const x0 = Math.max(this.px0 + 4, Math.min(this.px0 + this.pw - 4 - w, at.x - w / 2));
-      const y0 = under >= 0 ? under : at.y + T / 2 + 2;
+      // Round 7: where it covers no chip and not the aimed seed's slip (the seventh playtest's reason hid the beans'
+      // +2 bloom and their new total). Under the slip first, then above the aimed plot, then the plate's foot.
+      const clampY = (y: number) => Math.max(this.py0 + 2, Math.min(y, this.py0 + this.ph - h - 4));
+      const bedTop = this.by;
+      const bedFoot = this.by + this.rows * T;
+      const tries = [under >= 0 ? under : at.y + T / 2 + 2, at.y - T / 2 - h - 2, bedFoot + 2, bedTop - h - 2, at.y - h / 2].map(clampY);
+      const hits = (y: number) => [...this.chips, ...(slip ? [slip] : [])].some((r) => x0 < r.x + r.w && x0 + w > r.x && y < r.y + r.h && y + h > r.y);
+      const y0 = tries.find((y) => !hits(y)) ?? tries[0];
       ctx.beginPath();
-      ctx.roundRect(x0, Math.min(y0, this.py0 + this.ph - h - 4), w, h, 3);
+      ctx.roundRect(x0, y0, w, h, 3);
       ctx.fillStyle = 'rgba(246, 238, 214, 0.97)';
       ctx.fill();
       ctx.strokeStyle = 'rgba(58, 38, 20, 0.7)';
@@ -871,8 +896,9 @@ export class Board {
       ctx.stroke();
       ctx.fillStyle = '#3a2614';
       ctx.textBaseline = 'middle';
-      ctx.fillText(why.text, x0 + 7, Math.min(y0, this.py0 + this.ph - h - 4) + h / 2 + 0.5);
+      ctx.fillText(why.text, x0 + 7, y0 + h / 2 + 0.5);
       ctx.textBaseline = 'alphabetic';
+      this.reasonBox = { x: x0, y: y0, w, h, text: why.text };
     }
   }
 
@@ -890,7 +916,8 @@ export class Board {
         : this.sprite('beehive', -0.6, -1.0, 0.6, 0.25, (g, px) => paintHiveOnPlot(g, px, this.pal.ink));
       ctx.drawImage(s.c, b.x + s.x0 * T + shake, b.y + s.y0 * T, s.w * T, s.h * T);
     }
-    if (p.crop) this.drawCrop(p.crop, i, b.x + shake, b.y, part);
+    // A crop is drawn whole inside its plot (fitted); only an object's top (a scarecrow's hat) reaches above it.
+    if (p.crop && part === 'in') this.drawCrop(p.crop, i, b.x + shake, b.y, part);
   }
 
   /** Checks only: the plot rect a crop is kept inside, CSS px from the canvas top left. */
@@ -911,7 +938,10 @@ export class Board {
     ctx.globalAlpha *= alpha;
     ctx.translate(x, y - lift);
     if (a?.tilt) ctx.rotate(a.tilt);
-    if (sc !== 1) ctx.scale(sc, sc);
+    // Round 7: a tall crop (beans on their pole, a sunflower, corn) is drawn to fit its own plot, so it never reaches
+    // over the plot above or the key letters (the seventh playtest's bean pole stood over row 1 and the letter D).
+    const fit = s.top !== undefined && s.top < PLOT_TOP ? PLOT_TOP / s.top : 1;
+    if (sc * fit !== 1) ctx.scale(sc * fit, sc * fit);
     if (a && a.glow > 0.01) {
       const gr = ctx.createRadialGradient(0, -T * 0.3, 2, 0, -T * 0.3, T * 0.7);
       gr.addColorStop(0, `rgba(255, 226, 140, ${0.6 * a.glow})`);
@@ -960,6 +990,10 @@ export class Board {
 
   /** Select stakes painted this frame, for checks. */
   stakes: { x: number; y: number; w: number; h: number }[] = [];
+
+  /** The aimed seed's slip and the reason line painted this frame, for checks (canvas CSS px). */
+  totalSlip: { x: number; y: number; w: number; h: number; text: string; coin: boolean } | null = null;
+  reasonBox: { x: number; y: number; w: number; h: number; text: string } | null = null;
 
   /** Preview chips painted this frame, for checks: a gain, a greyed bonus, or a neighbour's new total (canvas px). */
   chips: { plot: number; text: string; kind: 'gain' | 'lost' | 'total'; x: number; y: number; w: number; h: number }[] = [];
@@ -1144,6 +1178,20 @@ export class Board {
 const FRAME_M = 9;
 /** How much of a tall crop shows where it reaches up behind a plot that holds a crop or an object. */
 const OVERHANG_FADE = 0.28;
+/** The top of a plot, in plot units from a crop's base (0.74 down the plot), less a hair: a crop is fitted under it. */
+const PLOT_TOP = -0.7;
+
+/** The highest painted pixel of a sprite, in plot units from its base (negative is up). */
+function paintedTop(s: Sprite): number {
+  const g = s.c.getContext('2d', { willReadFrequently: true });
+  if (!g || !s.c.width || !s.c.height) return s.y0;
+  const d = g.getImageData(0, 0, s.c.width, s.c.height).data;
+  const w = s.c.width;
+  for (let y = 0; y < s.c.height; y++) {
+    for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 24) return s.y0 + (y / s.c.height) * s.h;
+  }
+  return 0;
+}
 
 function frameW(T: number): number {
   return Math.max(5, T * 0.09);

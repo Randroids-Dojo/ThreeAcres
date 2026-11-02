@@ -75,11 +75,13 @@ const seedKey = (v: View, c: Card) => `Press ${v.s.hand.indexOf(c) + 1} to take 
  */
 const toHand = (s: RunState, id: CardId) => s.hand.some((c) => c.id === id);
 /**
- * A card in hand with no use today: nowhere it can go, or more scoops than are left. The spent lesson waits for one
- * (guided day 6 said "Drag a spare card to Spent." with all three cards needed, and stayed up with the hand empty).
+ * A card in hand with nowhere to go: no plot it can be played on today. The spent lesson waits for one (guided day 6
+ * said "Drag a spare card to Spent." with all three cards needed, and stayed up with the hand empty). Round 7: not a
+ * card that is only dear today: the seventh playtest was told to toss a strawberry the scoops could not pay for that
+ * day, and threw out a good card that would have been sown the next morning.
  */
 export function spareCard(s: RunState): Card | undefined {
-  return s.hand.find((c, i) => costOf(c.id, c.up) > s.energy || (CARDS[c.id].target !== 'board' && targetsFor(s, i).length === 0));
+  return s.hand.find((c, i) => CARDS[c.id].target !== 'board' && targetsFor(s, i).length === 0);
 }
 const standing = (s: RunState, obj: 'scarecrow' | 'beehive') => s.plots.some((p) => p.obj === obj);
 /** A dear card in hand the scoops can pay for: two scoops or more. */
@@ -313,11 +315,23 @@ const LESSONS: Lesson[] = [
     done: (v) => v.s.shop?.twist !== undefined || v.n('leave') > v.n('at:twist:leave'),
   },
   {
+    // Round 7: a run's first stall offers an engine to take home, free. Its pick comes before the purse's lesson.
+    id: 'engine',
+    after: [],
+    unlocks: [],
+    where: 'stall',
+    ready: (v) => v.s.phase === 'shop' && !!v.s.shop?.engines?.length && v.s.shop.engine === undefined,
+    text: () => 'Pick one to take home.',
+    point: () => 'stall',
+    done: (v) => v.s.shop?.engine !== undefined || v.n('leave') > v.n('at:engine:leave'),
+  },
+  {
     id: 'coins',
     after: [],
     unlocks: ['coins'],
     where: 'stall',
-    ready: (v) => v.s.phase === 'shop',
+    // After the engine's pick, at a stall that offers one.
+    ready: (v) => v.s.phase === 'shop' && !(v.s.shop?.engines?.length && v.s.shop.engine === undefined),
     text: () => 'Buy a seed with your coins.',
     point: () => 'stall',
     done: (v) => v.n('buy') >= 1 || v.n('leave') > v.n('at:coins:leave'),
@@ -347,7 +361,7 @@ const LESSONS: Lesson[] = [
 export const LESSON_IDS = LESSONS.map((l) => l.id);
 
 /** Lessons a returning player sees again: the watering can and the weather no longer work as they did, and scoops come back from pulled crops. */
-export const REFRESH = ['can', 'weather', 'saved', 'twist'];
+export const REFRESH = ['can', 'weather', 'saved', 'twist', 'engine'];
 
 export function newLearn(): Learn {
   return { seen: [], done: [], n: {}, cards: [] };

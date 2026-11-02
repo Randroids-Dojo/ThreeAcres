@@ -11,7 +11,7 @@
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
 import { Rng } from '../../../render2d/rng';
-import { baseChips, CARDS, CELLAR_YIELD, costOf, SEEDS, type CardId, type SeedId } from '../rules';
+import { baseChips, CARDS, CELLAR_YIELD, costOf, SEEDS, TUNING, type CardId, type SeedId } from '../rules';
 import { CROP_COLOR, paintSeedCrop, paintSeedProduce, TOP } from './crops';
 import { paintGlyph } from './glyphs';
 import { basket, drawBits, loop, moon, num, pictogram, scoop, tall, type Bit } from './icons';
@@ -666,10 +666,10 @@ function faceKey(id: CardId, up: boolean, cost: boolean, bonus: FaceBonus | null
   return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? 'b' : ''}` : ''}`;
 }
 
-/** What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x2 on the sunflower and the beehive. */
+/** What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x1.5 on the beehive (and the sunflower, while it reaches it). */
 export function faceBonus(id: CardId, pages: readonly string[]): FaceBonus | null {
   const y = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? CELLAR_YIELD : 0;
-  const bees = (id === 'sunflower' || id === 'beehive') && pages.includes('bees');
+  const bees = (id === 'beehive' || (id === 'sunflower' && TUNING.beesSun)) && pages.includes('bees');
   return y || bees ? { yield: y, bees } : null;
 }
 

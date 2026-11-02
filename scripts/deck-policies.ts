@@ -4,6 +4,7 @@
 // runs against an older build too (one without twists picks none).
 import * as Bot from '../src/games/deck/bot';
 import { botShop, Dice } from '../src/games/deck/bot';
+import * as Rules from '../src/games/deck/rules';
 import {
   allCards,
   buyCard,
@@ -76,6 +77,60 @@ function prefShop(cardsWant: CardId[], pagesWant: PageId[], improve: CardId[], t
     leaveShop(s);
   };
 }
+/**
+ * Round 7: a decent bot committed to one engine. Where the build offers an engine at the run's first stall it takes
+ * this one; at every stall it pins the engine's page and buys the engine's cards first (up to a few of each), then
+ * shops as the bot does. On a build without engine picks the same policy is the same commitment with the cards and
+ * pages that build has, so it runs against an older build too.
+ */
+type EngineRules = { chooseEngine?: (s: RunState, i: number) => unknown };
+export function engineShop(id: string | null, cards: [CardId, number][], pages: PageId[]): Shop {
+  return (s, dice) => {
+    const sh = s.shop as (RunState['shop'] & { engines?: string[] }) | null;
+    if (!sh) return;
+    const pickEngine = (Rules as unknown as EngineRules).chooseEngine;
+    if (id && pickEngine && sh.engines?.length) {
+      const i = sh.engines.indexOf(id);
+      if (i >= 0) pickEngine(s, i);
+    }
+    // No engine: a pick on offer is left alone (the run goes on without one).
+    for (let g = 0; g < 12; g++) {
+      let did = false;
+      for (const pid of pages) {
+        const i = sh.pages.findIndex((p) => !p.sold && p.page === pid);
+        if (i < 0 || sh.pages[i].price > s.coins || s.pages.includes(pid)) continue;
+        const full = s.pages.length >= maxPages(s);
+        const out = full ? s.pages.find((p) => !pages.includes(p) && p !== 'thumb') : undefined;
+        if (full && !out) continue;
+        if (buyPage(s, i, out)) {
+          did = true;
+          break;
+        }
+      }
+      if (!did) {
+        for (const [cid, most] of cards) {
+          if (allCards(s).filter((c) => c.id === cid).length >= most) continue;
+          const i = sh.cards.findIndex((c) => !c.sold && c.card === cid && c.price <= s.coins);
+          if (i >= 0 && buyCard(s, i)) {
+            did = true;
+            break;
+          }
+        }
+      }
+      if (!did) break;
+    }
+    botShop(s, { ...o, engine: (id ?? 'none') as never }, dice);
+  };
+}
+const ENGINE_POL: Record<string, Shop> = {
+  eBees: engineShop('bees', [['beehive', 3], ['sunflower', 3]], ['bees' as PageId]),
+  eHot: engineShop('hot', [['chili', 4]], ['hot' as PageId]),
+  eVines: engineShop('vines', [['beans', 4], ['strawberry', 3]], ['vines' as PageId]),
+  eTall: engineShop('tall', [['corn', 3], ['sunflower', 3]], ['tall' as PageId]),
+  eRoots: engineShop('roots', [['carrot', 5], ['radish', 6]], ['cellar' as PageId]),
+  eNone: engineShop(null, [], []),
+};
+
 const C = (...a: string[]) => a as CardId[];
 const Pg = (...a: string[]) => a as PageId[];
 export const POL: Record<string, Shop> = {
@@ -100,4 +155,5 @@ export const POL: Record<string, Shop> = {
   rootsPlain: prefShop(C('carrot', 'radish'), Pg('cellar', 'barrel', 'thumb', 'basket', 'market', 'rotation'), C('carrot', 'radish'), C('lettuce', 'sunflower', 'strawberry', 'can'), 8, 0, false),
   bloomPlain: prefShop(C('sunflower', 'beehive', 'chili', 'strawberry', 'beans'), Pg('bees', 'barrel', 'thumb', 'basket', 'market'), C('strawberry', 'beans', 'sunflower'), C('radish', 'lettuce', 'can'), 8, 0, false),
   perennialPlain: prefShop(C('beans', 'strawberry', 'corn', 'sunflower', 'chili'), Pg('thumb', 'basket', 'bees', 'market', 'clover'), C('beans', 'strawberry', 'corn'), C('radish', 'lettuce', 'carrot'), 8, 0, false),
+  ...ENGINE_POL,
 };

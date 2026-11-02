@@ -1,7 +1,7 @@
 // Every card and almanac page: cost, rarity, target and the short rule text the
 // card face shows. The rules themselves live in run.ts and night.ts.
 
-import type { CardId, CardType, PageId, Rarity, SeedId, Target, Twist } from './types';
+import type { CardId, CardType, EngineId, PageId, Rarity, SeedId, Target, Twist } from './types';
 
 export interface CardDef {
   id: CardId;
@@ -153,7 +153,7 @@ export interface PageDef {
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
   cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops below a sunflower or near a beehive get x1.5 bloom.' },
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.3 bloom.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Sow a different crop where one was just pulled: +4 yield.' },
@@ -161,13 +161,56 @@ export const PAGES: Record<PageId, PageDef> = {
   clover: { id: 'clover', name: 'Four-Leaf Clover', price: 140, text: 'One harvest in eight comes up golden, x3.' },
   furrow: { id: 'furrow', name: 'Long Furrow', price: 150, text: 'The plot gains a fifth column, and one more scoop a day.' },
   coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
+  // Round 7: the pages that multiply the engines a run's first stall offers (Busy Bees is the beehive's).
+  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies stay and pick for 3 nights.' },
+  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'Beans and strawberries give the other crops beside them +2 bloom.' },
+  tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'Corn ripens two nights sooner. Tall crops get +1 bloom for each neighbour.' },
 };
 
+export interface EngineDef {
+  id: EngineId;
+  /** The page that multiplies it. */
+  page: PageId;
+  /** What the pick puts in the tin. */
+  gift: CardId[];
+  /** Cards the stall keeps in stock for it, one slot on each stall's first tray. */
+  cards: CardId[];
+}
+
+/**
+ * The engines a run's first stall offers, three of the four at random: each a card and the page that multiplies it,
+ * free. The seventh playtest: with beehives and Busy Bees nights paid 150 to 320, without them 60 to 110, and the
+ * beehive was a rare roll at the stall. Their biggest wish was "a guaranteed choice of engine at each run's first stall".
+ */
+export const ENGINES: Record<EngineId, EngineDef> = {
+  bees: { id: 'bees', page: 'bees', gift: ['beehive'], cards: ['beehive', 'sunflower'] },
+  hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili'], cards: ['chili'] },
+  vines: { id: 'vines', page: 'vines', gift: ['beans'], cards: ['beans', 'strawberry'] },
+  tall: { id: 'tall', page: 'tall', gift: ['corn', 'corn'], cards: ['corn', 'sunflower'] },
+};
+export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[];
+
+/** An engine said plainly: "A beehive and Busy Bees." */
+export function engineText(id: EngineId): string {
+  const e = ENGINES[id];
+  const n = e.gift.length;
+  const card = CARDS[e.gift[0]].name.toLowerCase();
+  // "Beans and Trellis.": a card whose name is already a plural takes no article.
+  const one = /s$/.test(card) ? `${card[0].toUpperCase()}${card.slice(1)}` : `${/^[aeiou]/.test(card) ? 'An' : 'A'} ${card}`;
+  const what = n === 1 ? one : `${n === 2 ? 'Two' : String(n)} ${PLURALS[e.gift[0] as SeedId] ?? card}`;
+  return `${what} and ${PAGES[e.page].name}.`;
+}
+
 export const PAGE_IDS = Object.keys(PAGES) as PageId[];
+/** The row a twist names: "the second row". */
+export const ROW_NAMES = ['top row', 'second row', 'third row', 'bottom row'];
 /** Almanac pages kept before a slot is bought (TUNING.maxPages is what the rules read). */
 export const MAX_PAGES = 4;
 
 export const SEASON_NAMES = ['spring', 'summer', 'autumn', 'winter'] as const;
+
+/** Crops said as one, not many: "your corn grows". */
+export const MASS: readonly SeedId[] = ['corn', 'mint', 'garlic', 'wheat'];
 
 /** A crop's name for a crowd of them: "A buyer pays double for carrots." */
 export const PLURALS: Record<SeedId, string> = {
@@ -185,27 +228,40 @@ export const PLURALS: Record<SeedId, string> = {
   chili: 'chilies',
 };
 
-/** A season's twist in one plain line, as the stall, the table and the almanac say it (no colons, no season word, so it reads anywhere). */
+/**
+ * A season's twist in one plain line, as the stall, the table and the almanac say it (no colons, no season word, so it
+ * reads anywhere). Round 7: each says what it hits or helps on this run's own plot ("Your carrots sell for half.",
+ * "Frost on your carrots' row.").
+ */
 export function twistText(t: Twist): string {
   const crop = t.crop ? PLURALS[t.crop] : '';
+  // Corn, mint, garlic and wheat are said as one ("your corn sells"); the rest as many ("your carrots sell").
+  const one = !!t.crop && MASS.includes(t.crop);
+  const sell = one ? 'sells' : 'sell';
   switch (t.id) {
     case 'buyer':
-      return `A buyer pays double for ${crop}.`;
+      return `A buyer pays double for your ${crop}.`;
     case 'glut':
-      return `${crop[0].toUpperCase()}${crop.slice(1)} sell for half.`;
+      return crop ? `Your ${crop} ${sell} for half.` : 'A glut.';
     case 'company':
       return 'Crops get +1 yield for each crop beside them.';
     case 'calm':
       return 'No new pests.';
     case 'picks':
-      return 'Beans and strawberries pick one more time.';
+      return 'Your beans and strawberries pick one more time.';
     case 'sunall':
-      return 'Sunflowers bloom every crop beside them.';
-    case 'frost':
-      return 'No sowing on the frosted bottom row.';
+      return 'Your sunflowers bloom every crop beside them.';
+    case 'frost': {
+      // A save from before round 7 frosts the bottom row and names no crop.
+      const row = ROW_NAMES[t.row ?? ROW_NAMES.length - 1] ?? 'bottom row';
+      // The clipping's little map and the board show which row: the line names whose row it is.
+      return t.crop ? `Frost on your ${crop}${crop.endsWith('s') ? "'" : "'s"} row.` : `Frost on the ${row}: no sowing there.`;
+    }
     case 'sunup':
-      return 'Sunflowers face up and bloom the crop above.';
+      return 'Your sunflowers face up and bloom the crop above.';
     case 'crows':
-      return 'Crows come twice as often.';
+      return 'A crow comes every morning.';
+    case 'rest':
+      return `${t.page ? PAGES[t.page].name : 'A page'} rests this season.`;
   }
 }

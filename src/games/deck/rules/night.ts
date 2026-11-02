@@ -4,7 +4,7 @@
 // another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, CARDS, SEEDS } from './cards';
-import { around, bySeason, guarded, immune, isEmpty, isRipe, isTall, neighbours, picksOf, twistOn, TUNING } from './board';
+import { around, bySeason, guarded, immune, isEmpty, isRipe, isTall, neighbours, newTally, pageOn, perennial, picksOf, twistOn, TUNING } from './board';
 import { pick, rand } from './rng';
 import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, SeedId, Step } from './types';
 
@@ -49,6 +49,8 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   const tw = twistOn(s, o.night ?? 0);
 
   const near = (k: string) => nb.filter((j) => snap.crops[j]?.kind === k);
+  // A page at work on the night it is pulled (a twist may rest one for the season).
+  const page = (id: Parameters<typeof pageOn>[1]) => pageOn(s, id, o.night ?? 0);
   if (kind === 'radish') {
     const c = near('carrot')[0];
     if (c !== undefined) chips.push({ label: 'next to a carrot', icon: 'carrot', op: '+', v: 2, from: c });
@@ -60,8 +62,8 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   if (kind === 'wheat') for (const j of near('wheat')) chips.push({ label: 'wheat next to it', icon: 'wheat', op: '+', v: 2, from: j });
   for (const j of near('beans')) chips.push({ label: 'beans next to it', icon: 'beans', op: '+', v: 2, from: j });
   if (crop.compost > 0) chips.push({ label: crop.compost > 1 ? `compost x${crop.compost}` : 'compost', icon: 'compost', op: '+', v: 6 * crop.compost });
-  if (crop.rot) chips.push({ label: 'crop rotation', icon: 'rotation', op: '+', v: 4 });
-  if ((kind === 'radish' || kind === 'carrot') && TUNING.cellarYield && s.pages.includes('cellar')) chips.push({ label: 'root cellar', icon: 'cellar', op: '+', v: TUNING.cellarYield });
+  if (crop.rot && page('rotation')) chips.push({ label: 'crop rotation', icon: 'rotation', op: '+', v: 4 });
+  if ((kind === 'radish' || kind === 'carrot') && TUNING.cellarYield && page('cellar')) chips.push({ label: 'root cellar', icon: 'cellar', op: '+', v: TUNING.cellarYield });
   if (o.suns > 0) chips.push({ label: o.suns > 1 ? `sun x${o.suns}` : 'sun', icon: 'sun', op: '+', v: 3 * o.suns });
   // Good company: +1 yield for each crop beside it.
   if (tw?.id === 'company') {
@@ -73,7 +75,7 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   if (kind === 'carrot') for (const j of near('radish')) mult.push({ label: 'a radish next to it', icon: 'radish', op: '+', v: 1, from: j });
   // The Root Cellar pairs the roots: a radish beside a carrot (or a carrot beside a radish) gets +1 bloom for each, up to +2.
   // It used to count every root beside a root, uncapped, and a carrot ringed by radishes on a bare plot won every run.
-  if ((kind === 'radish' || kind === 'carrot') && s.pages.includes('cellar')) {
+  if ((kind === 'radish' || kind === 'carrot') && page('cellar')) {
     for (const j of near(kind === 'radish' ? 'carrot' : 'radish').slice(0, TUNING.cellarCap)) mult.push({ label: 'root cellar', icon: 'cellar', op: '+', v: 1, from: j });
   }
   // A sunflower faces the crop below it (the plate's foot, where the sun is) and blooms it. A season's twist may turn
@@ -85,15 +87,28 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
     // All round, the crop it faces gets its usual bloom and the others beside it +1 (at +2 each, sunflower decks ran away with the season).
     const v = tw?.id === 'sunall' && j !== i - s.cols ? TUNING.sunAll : TUNING.sunBloom;
     mult.push({ label: j === i - s.cols ? 'sunflower above it' : j === i + s.cols ? 'sunflower below it' : 'sunflower beside it', icon: 'sunflower', op: '+', v, from: j });
-    bees++;
+    if (TUNING.beesSun) bees++;
   }
+  // Beehives bloom the 3 by 3 around them; a crop takes the bloom of `hiveCap` hives at most (round 7: hives stacked
+  // without end, and a plot ringed by them paid 150 to 320 a night in the seventh playtest).
+  let hives = 0;
   for (const j of around(s, i)) {
-    if (snap.objs[j] !== 'beehive') continue;
+    if (snap.objs[j] !== 'beehive' || hives >= TUNING.hiveCap) continue;
     mult.push({ label: 'beehive', icon: 'beehive', op: '+', v: 1, from: j });
+    hives++;
     bees++;
   }
-  // Busy Bees: one x2 for a crop a sunflower or a beehive blooms, however many there are (it used to double every bee).
-  if (bees && s.pages.includes('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: TUNING.beesTimes });
+  // Busy Bees: one x1.5 for a crop a sunflower or a beehive blooms, however many there are (it used to double every bee).
+  if (bees && page('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: TUNING.beesTimes });
+  // Trellis (round 7): beans and strawberries bloom each crop beside them.
+  if (page('vines') && (TUNING.vinesSelf || (kind !== 'beans' && kind !== 'strawberry'))) {
+    const vines = nb.filter((j) => snap.crops[j]?.kind === 'beans' || (TUNING.vinesBerry && snap.crops[j]?.kind === 'strawberry')).slice(0, TUNING.vinesCap);
+    for (const j of vines) mult.push({ label: `${snap.crops[j]!.kind === 'beans' ? 'beans' : 'a strawberry'} beside it`, icon: 'vines', op: '+', v: TUNING.vinesBloom, from: j });
+  }
+  // Tall Rows (round 7): corn and sunflowers bloom for each crop beside them.
+  if ((kind === 'corn' || kind === 'sunflower') && page('tall')) {
+    for (const j of nb) if (snap.crops[j]) mult.push({ label: 'a crop beside it', icon: 'tall', op: '+', v: TUNING.tallBloom, from: j });
+  }
   if (kind === 'corn') {
     const b = near('beans')[0];
     if (b !== undefined) mult.push({ label: 'next to beans', icon: 'beans', op: 'x', v: 1.5, from: b });
@@ -106,9 +121,9 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   // Pests still on the crop the night it is pulled halve its pay.
   if (crop.pest > (o.night ?? 0)) mult.push({ label: 'pests', icon: 'pest', op: 'x', v: TUNING.pestPay });
   const n = o.n ?? s.dayHarvests + 1;
-  if (s.pages.includes('market') && n % 5 === 0) mult.push({ label: 'market day', icon: 'market', op: 'x', v: 2 });
+  if (page('market') && n % 5 === 0) mult.push({ label: 'market day', icon: 'market', op: 'x', v: 2 });
   let golden = false;
-  if (o.roll && s.pages.includes('clover') && rand(s) < 1 / 8) {
+  if (o.roll && page('clover') && rand(s) < 1 / 8) {
     golden = true;
     mult.push({ label: 'four-leaf clover', icon: 'clover', op: 'x', v: 3 });
   }
@@ -143,10 +158,11 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
  * crop leaves or stays. At night the scoops go on the next morning's bench; a
  * crop pulled in the day (the shears) puts them on today's.
  */
-export function applyHarvest(s: RunState, h: Harvest, ev: Ev[], now = false): void {
+export function applyHarvest(s: RunState, h: Harvest, ev: Ev[], now = false, beside = 0): void {
   const p = s.plots[h.plot];
   const crop = p.crop!;
   const before = s.earned;
+  tallyHarvest(s, h, beside);
   s.dayHarvests++;
   s.coins += h.score;
   s.earned += h.score;
@@ -176,6 +192,38 @@ export function applyHarvest(s: RunState, h: Harvest, ev: Ev[], now = false): vo
   }
   ev.push({ t: 'harvest', h });
   if (before < s.quota && s.earned >= s.quota) ev.push({ t: 'quota', earned: s.earned, quota: s.quota });
+}
+
+/** What one bonus added to a harvest's pay: a + to yield or bloom, or a x. */
+export function stepCoins(h: Harvest, st: Step, yieldStep: boolean): number {
+  if (yieldStep) return st.op === '+' ? st.v * h.multTotal : 0;
+  if (st.op === 'x') return h.score * (1 - 1 / st.v);
+  const times = h.mult.filter((x) => x.op === 'x').reduce((a, x) => a * x.v, 1);
+  return h.chipsTotal * st.v * times;
+}
+
+/**
+ * Keep the season's tally (round 7): coins by crop, by the row a sown crop was pulled from, what each bonus added,
+ * what pests took, what good company and one more pick would have added. The stall aims its twists with it.
+ */
+function tallyHarvest(s: RunState, h: Harvest, beside: number): void {
+  const t = (s.tally ??= newTally(s.rows));
+  t.take += h.score;
+  t.harvests++;
+  t.kinds[h.kind] = (t.kinds[h.kind] ?? 0) + h.score;
+  if (h.leaves) {
+    const r = Math.floor(h.plot / s.cols);
+    t.rows[r] = (t.rows[r] ?? 0) + h.score;
+    t.rowKinds[r] ??= {};
+    t.rowKinds[r][h.kind] = (t.rowKinds[r][h.kind] ?? 0) + h.score;
+    if (perennial(h.kind)) t.last += h.score;
+  }
+  for (const st of h.chips) t.from[st.icon] = (t.from[st.icon] ?? 0) + stepCoins(h, st, true);
+  for (const st of h.mult) {
+    if (st.icon === 'pest') t.pests += h.score;
+    else t.from[st.icon] = (t.from[st.icon] ?? 0) + stepCoins(h, st, false);
+  }
+  if (beside && !h.chips.some((st) => st.icon === 'company')) t.company += beside * h.multTotal;
 }
 
 /**
@@ -225,7 +273,9 @@ export function night(s: RunState, ev: Ev[]): void {
   });
   if (growth.length) ev.push({ t: 'grow', growth });
 
-  // 3. A crow, if one sat on the plate at dawn, takes one unguarded ripe crop.
+  // 3. A crow, if one sat on the plate at dawn, takes one unguarded ripe crop: tonight's pick of a perennial too (it
+  // used to use up a later pick and let tonight's pay in full).
+  let crowed = -1;
   if (crow) {
     const opts = s.plots.map((p, i) => (p.crop && isRipe(p.crop) && !guarded(s, i) ? i : -1)).filter((i) => i >= 0);
     if (opts.length) {
@@ -234,6 +284,7 @@ export function night(s: RunState, ev: Ev[]): void {
       ev.push({ t: 'crow', plot: i, kind: c.kind, uid: c.uid });
       c.picks++;
       if (c.picks >= picksOf(s, c.kind)) s.plots[i].crop = null;
+      else crowed = i;
     }
   }
 
@@ -241,8 +292,9 @@ export function night(s: RunState, ev: Ev[]): void {
   const snap = snapshot(s);
   for (let i = 0; i < s.plots.length; i++) {
     const c = s.plots[i].crop;
-    if (!c || !isRipe(c)) continue;
-    applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev);
+    if (!c || !isRipe(c) || i === crowed) continue;
+    const beside = neighbours(s, i).filter((j) => snap.crops[j]).length;
+    applyHarvest(s, scoreHarvest(s, i, snap, { suns, shears: false, roll: true }), ev, false, beside);
   }
 
   // 5. Pests count down, may spread, and new ones may land on a growing crop (from summer of year 1, more each season).

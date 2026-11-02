@@ -99,10 +99,12 @@ const PIECES = {
   slipspot: '.sb-slipspot > *',
   slot: '.sb-slot',
   kept: '.sb-keptpage',
+  engine: '.sb-enginecard',
+  keptline: '.sb-keptline',
   // The run's end.
   entry: '.sb-entry > *',
 };
-const SAME = new Set(['card', 'scoop', 'tonight', 'entry', 'kept']);
+const SAME = new Set(['card', 'scoop', 'tonight', 'entry', 'kept', 'keptline']);
 // Text needs air around it, not just no overlap: labels get this much clearance (CSS px).
 const PAD = { label: 3, count: 1, line: 2 };
 // A piece inside another piece is part of it (a count on its tin, an ask on its good).
@@ -175,12 +177,15 @@ async function run(label, viewport, touch) {
   /** The purse on the table, the purse line at the stall, and the rules' coins: all three must agree. */
   const purse = () => p.evaluate(() => ({ table: Number(window.deck.purse()), line: Number(document.querySelector('.sb-purse-line b')?.textContent ?? NaN), rules: window.deck.state().coins }));
   const purseOk = (q) => q.table === q.rules && (Number.isNaN(q.line) || q.line === q.rules);
-  const toStall = async (seed, coins, tweak) => {
+  // Round 7: a run's first stall offers an engine; the stall states here are later stalls (a season already in the
+  // log) unless `first` asks for the first one.
+  const toStall = async (seed, coins, tweak, first = false) => {
     await p.evaluate(() => window.deck.skip());
     await fresh(seed);
-    await p.evaluate(async ([coins, tweak]) => {
+    await p.evaluate(async ([coins, tweak, first]) => {
       const d = window.deck;
       const w = (ms) => new Promise((r) => setTimeout(r, ms));
+      if (!first) d.state().stats.log.push({ year: 1, season: 0, earned: 200, quota: 170, cleared: true, carried: 0, twist: null, idle: 0 });
       if (tweak) new Function('s', tweak)(d.state());
       d.state().earned = 99999;
       d.state().coins = coins;
@@ -193,7 +198,7 @@ async function run(label, viewport, touch) {
       d.state().coins = coins;
       d.table.syncPurse();
       d.table.sheets.stall();
-    }, [coins, tweak ? `(${tweak.toString()})(s)` : null]);
+    }, [coins, tweak ? `(${tweak.toString()})(s)` : null, first]);
     await settle(600);
   };
   const perStall = { moves: [] };
@@ -907,7 +912,7 @@ async function run(label, viewport, touch) {
         const cards = [...document.querySelectorAll('.sb-hand .sb-card:not(.flying)')].map((e) => e.getBoundingClientRect().bottom);
         const panel = document.querySelector('.sb-bench').getBoundingClientRect();
         const vis = (e) => { const s = getComputedStyle(e); return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) > 0.05 && !e.closest('.sb-off'); };
-        const parts = ['.sb-ledger', '.sb-peg', '.sb-hint.on', '.sb-twist.on', '.sb-pages h4', '.sb-pages .sb-pagesheet', '.sb-pageslot', '.sb-scoops img', '.sb-tin img', '.sb-lantern img']
+        const parts = ['.sb-ledger', '.sb-peg', '.sb-hint.on', '.sb-twist.on', '.sb-pages h4', '.sb-pages .sb-pagesheet', '.sb-pageslot', '.sb-keptline', '.sb-scoops img', '.sb-tin img', '.sb-lantern img']
           .flatMap((sel) => [...document.querySelectorAll(sel)].filter(vis).map((e) => e.getBoundingClientRect()))
           .filter((r) => r.left >= panel.left - 4 && r.width > 2)
           .sort((a, b) => a.top - b.top);
@@ -1222,6 +1227,273 @@ async function run(label, viewport, touch) {
       console.log(`       ${label} "${q.beans}" / "${q.scarecrow}" / "${improve}" / the won run's ledger "${won.ledger}"`);
       await p.evaluate(() => window.deck.table.sheets.close());
     }],
+    // Round 7: the engine at a run's first stall; the reason line clear of the chips it explains; coin totals and the
+    // can's; what is still to go; the hand closing its gaps; tall crops inside their plot; one-line kept pages.
+    ['round 7: the first stall offers three engines, and a tap picks one', async () => {
+      await toStall(97, 120, null, true);
+      const q = await p.evaluate(() => ({ n: document.querySelectorAll('.sb-enginecard').length, rules: window.deck.state().shop.engines?.length ?? 0, text: [...document.querySelectorAll('.sb-enginecard')].map((e) => e.textContent.trim()) }));
+      if (q.n !== 3 || q.rules !== 3) extra.push(`the first stall shows ${q.n} engines (rules ${q.rules})`);
+      // The way on asks for one first, then a real tap picks one: pinned, the others faded.
+      await tapAt('.sb-signpost');
+      const ask = await p.evaluate(() => ({ phase: window.deck.state().phase, slip: document.querySelector('.sb-read')?.textContent ?? '' }));
+      if (ask.phase !== 'shop' || !/Pick one to take home first/.test(ask.slip)) extra.push(`the way on did not ask for an engine: ${JSON.stringify(ask)}`);
+      await tapAt('.sb-enginecard', 2);
+      const took = await p.evaluate(() => ({ i: window.deck.state().shop.engine, pinned: document.querySelectorAll('.sb-enginecard.picked').length }));
+      if (took.i !== 2 || took.pinned !== 1) extra.push(`a tap did not pick the engine: ${JSON.stringify(took)}`);
+      console.log(`       ${label} engines: ${q.text.join(' | ')}`);
+    }],
+    ['round 7: the reason line covers none of the chips it explains', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+      // The playtest's day 6: beans on C3 that are pulled before a sunflower aimed at C2 ripens. The beans gain the
+      // sunflower's +2 bloom and show their new total; the reason under C2 hid both.
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        s.twist = null;
+        s.crow = false;
+        s.pages = [];
+        s.day = 4;
+        for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+        s.plots[10].crop = { uid: 9401, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 1, pest: 0, sprout: false };
+        s.energy = 5;
+        window.deck.hand(['sunflower', 'radish']);
+      });
+      await settle(400);
+      const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (b) => [b.left + b.width / 2, b.top + b.height / 2]; return { card: c(x.cards[0]), plot: c(x.plots[6]) }; });
+      const go = async ([x, y]) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 12 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(250);
+      };
+      await go(r.card);
+      if (touch) await go(r.plot);
+      else {
+        await p.mouse.move(...r.plot, { steps: 4 });
+        await settle(300);
+      }
+      const q = await p.evaluate(() => {
+        const b = window.deck.table.board;
+        return { reason: b.reasonBox, chips: b.chips, slip: b.totalSlip };
+      });
+      if (!q.reason) extra.push('no reason line under the aimed sunflower');
+      else {
+        const cross = (a, c) => Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 0.5 && Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 0.5;
+        for (const c of q.chips) if (cross(q.reason, c)) extra.push(`the reason "${q.reason.text}" covers the chip "${c.text}" on plot ${c.plot}`);
+        if (q.slip && cross(q.reason, q.slip)) extra.push(`the reason covers the aimed seed's slip`);
+      }
+      if (!q.chips.some((c) => c.plot === 10 && c.kind === 'total')) extra.push(`the beans show no new total: ${JSON.stringify(q.chips)}`);
+      console.log(`       ${label} reason "${q.reason?.text}" at y ${Math.round(q.reason?.y ?? 0)}; chips ${q.chips.map((c) => `${c.text} on ${c.plot} at y ${Math.round(c.y)}`).join(', ')}`);
+      await p.evaluate(() => window.deck.table.putDown(true));
+    }],
+    ['round 7: coin totals by a coin, and the can shows what it brings in tonight', async () => {
+      await fresh(4242);
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        s.twist = null;
+        s.crow = false;
+        s.pages = [];
+        for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+        const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        s.plots[9].crop = crop(9501, 'carrot', 0, 2);
+        s.plots[8].crop = crop(9502, 'radish', 0, 1);
+        s.plots[10].crop = crop(9503, 'radish', 0, 1);
+        s.energy = 5;
+        window.deck.hand(['can', 'radish']);
+      });
+      await settle(400);
+      const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (b) => [b.left + b.width / 2, b.top + b.height / 2]; return { card: c(x.cards[0]), plot: c(x.plots[9]) }; });
+      const go = async ([x, y]) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 13 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(250);
+      };
+      await go(r.card);
+      if (touch) await go(r.plot);
+      else {
+        await p.mouse.move(...r.plot, { steps: 4 });
+        await settle(300);
+      }
+      const q = await p.evaluate(() => {
+        const t = window.deck.table;
+        const b = t.board;
+        const tot = b.chips.find((c) => c.plot === 9 && c.kind === 'total');
+        // The chip's icon, read from the canvas: a gold coin, not the ink basket.
+        let gold = 0;
+        if (tot) {
+          const g = b.canvas.getContext('2d');
+          const k = b.canvas.width / b.canvas.getBoundingClientRect().width;
+          const d = g.getImageData(Math.round((tot.x + tot.w * 0.55) * k), Math.round(tot.y * k), Math.max(1, Math.round(tot.w * 0.45 * k)), Math.max(1, Math.round(tot.h * k))).data;
+          for (let i = 0; i < d.length; i += 4) if (d[i] > 190 && d[i + 1] > 140 && d[i + 2] < 110) gold++;
+        }
+        return { tot, gold, mark: window.deck.preview()?.marks?.find((m) => m.plot === 9) ?? null };
+      });
+      if (!q.tot) extra.push(`the carrot the can brings in tonight shows no total: ${JSON.stringify(q.mark)}`);
+      else if (q.gold < 6) extra.push(`the total chip "${q.tot.text}" has no gold coin (${q.gold} gold pixels)`);
+      // Water it and play the night: the carrot pays what its chip said.
+      await go(r.plot);
+      const paid = await p.evaluate(async () => {
+        const d = window.deck;
+        const n = d.ruleScores().length;
+        d.endDay();
+        d.skip();
+        await new Promise((res) => setTimeout(res, 400));
+        return d.ruleScores().slice(n);
+      });
+      if (q.tot && !paid.includes(Number(q.tot.text))) extra.push(`the chip said ${q.tot.text}, the night paid ${paid.join(', ')}`);
+      console.log(`       ${label} the can on row 3: carrot chip ${q.tot?.text} (${q.gold} gold pixels), the night paid ${paid.join(', ')}`);
+    }],
+    ['round 7: the last two days say what is still to go', async () => {
+      await fresh(4242);
+      const rows = [];
+      for (const [day, earned] of [[4, 100], [5, 286], [6, 286], [6, 400]]) {
+        const q = await p.evaluate(([day, earned]) => {
+          const t = window.deck.table;
+          const s = t.run;
+          s.day = day;
+          s.earned = earned;
+          s.quota = 350;
+          t.syncAll();
+          const box = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+          const words = (e) => { const r = document.createRange(); r.selectNodeContents(e); return box(r); };
+          const i = document.querySelector('.sb-led-tally i');
+          return { go: window.deck.toGo(), led: box(document.querySelector('.sb-ledger')), words: i ? words(i) : null, tally: words(document.querySelector('.sb-led-tally b')) };
+        }, [day, earned]);
+        const want = day >= 5 && earned < 350 ? `${350 - earned} to go` : '';
+        if (q.go !== want) extra.push(`day ${day} at ${earned} of 350: the ledger says "${q.go}", want "${want}"`);
+        if (q.words && (q.words.r > q.led.r - 1 || q.words.b > q.led.b + 0.5 || q.words.l < q.led.l)) extra.push(`"${q.go}" runs out of the ledger`);
+        rows.push(`day ${day}, ${earned}: "${q.go}"`);
+      }
+      console.log(`       ${label} ${rows.join('; ')}`);
+    }],
+    ['round 7: the hand closes its gaps once it rests', async () => {
+      await fresh(4242);
+      await p.evaluate(() => window.deck.hand(['radish', 'carrot', 'radish', 'lettuce', 'radish']));
+      await settle(400);
+      const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (b) => [b.left + b.width * 0.5, b.top + b.height * 0.35]; return { card: c(x.cards[2]), plot: [x.plots[5].left + x.plots[5].width / 2, x.plots[5].top + x.plots[5].height / 2] }; });
+      const go = async ([x, y]) => {
+        if (touch) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 14 }] });
+          await p.waitForTimeout(40);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else await p.mouse.click(x, y);
+        await settle(200);
+      };
+      await go(r.card);
+      await go(r.plot);
+      if (touch) await go(r.plot);
+      const soon = await p.evaluate(() => window.deck.table.handGaps);
+      if (!touch) await p.mouse.move(640, 300);
+      await settle(1900);
+      const later = await p.evaluate(() => {
+        const t = window.deck.table;
+        // Centres: a tilted card's box widens about its centre.
+        const xs = t.run.hand.map((c) => { const r = t.handEls.get(c.uid).el.getBoundingClientRect(); return (r.left + r.right) / 2; }).sort((a, b) => a - b);
+        const steps = xs.slice(1).map((x, k) => x - xs[k]);
+        return { gaps: t.handGaps, n: t.run.hand.length, spread: steps.length ? Math.max(...steps) - Math.min(...steps) : 0 };
+      });
+      if (soon !== 1) extra.push(`right after the play the hand should keep its gap (gaps ${soon})`);
+      if (later.gaps !== 0 || later.spread > 3) extra.push(`once it rests the hand still has a gap: ${JSON.stringify(later)}`);
+      console.log(`       ${label} gap right after the play ${soon}; after a rest ${later.gaps} (spacing varies ${later.spread.toFixed(1)} px over ${later.n} cards)`);
+    }],
+    ['round 7: tall crops stay inside their own plot', async () => {
+      await fresh(4242);
+      // Beans, a sunflower and corn, ripe, with the plots above them bare and the key letters above row 1.
+      const grab = (fill) => p.evaluate(async (fill) => {
+        const t = window.deck.table;
+        const s = t.run;
+        s.twist = null;
+        s.crow = false;
+        for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+        const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        if (fill) {
+          s.plots[5].crop = crop(9601, 'sunflower', 3, 3);
+          s.plots[6].crop = crop(9602, 'beans', 3, 3);
+          s.plots[7].crop = crop(9603, 'corn', 4, 4);
+          s.plots[0].crop = crop(9604, 'beans', 3, 3);
+          s.plots[1].crop = crop(9605, 'sunflower', 3, 3);
+        }
+        t.syncAll();
+        await new Promise((r) => setTimeout(r, 300));
+        const b = t.board;
+        const g = b.canvas.getContext('2d');
+        const k = b.canvas.width / b.canvas.getBoundingClientRect().width;
+        const read = (x, y, w, h) => g.getImageData(Math.round(x * k), Math.round(y * k), Math.round(w * k), Math.round(h * k)).data;
+        const up = [1, 2, 3].map((i) => b.plotRect(i));
+        const p0 = b.plotRect(0);
+        return { plots: up.map((r) => Array.from(read(r.x + 3, r.y + 3, r.w - 6, r.h - 6))), margin: Array.from(read(p0.x, p0.y - p0.h * 0.45, p0.w * 2, p0.h * 0.42)) };
+      }, fill);
+      const bare = await grab(false);
+      const full = await grab(true);
+      const diff = (a, c) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - c[i]) + Math.abs(a[i + 1] - c[i + 1]) + Math.abs(a[i + 2] - c[i + 2]) > 60) n++; return n / (a.length / 4); };
+      // Plots B1 to D1 hold nothing: what the crops below them paint there is overhang. (B1 holds a sunflower in row 1
+      // too, so its plot is read against the bare board only for the part a crop below would reach.)
+      const over = [diff(bare.plots[1], full.plots[1]), diff(bare.plots[2], full.plots[2])];
+      const margin = diff(bare.margin, full.margin);
+      if (Math.max(...over) > 0.01) extra.push(`a tall crop paints over the plot above it: ${over.map((v) => `${(v * 100).toFixed(1)}%`).join(', ')}`);
+      if (margin > 0.01) extra.push(`a tall crop in row 1 paints over the key letters' margin: ${(margin * 100).toFixed(1)}%`);
+      console.log(`       ${label} overhang into the plots above: ${over.map((v) => `${(v * 100).toFixed(2)}%`).join(', ')}; into the margin above row 1: ${(margin * 100).toFixed(2)}%`);
+    }],
+    ['round 7: kept pages are one line each, all in sight', async () => {
+      await fresh(4242);
+      await p.evaluate(() => {
+        const t = window.deck.table;
+        t.run.pages = ['cellar', 'coldframe', 'basket', 'bees', 'market', 'clover'];
+        t.run.slots = 5;
+        t.syncAll();
+        t.relayout();
+      });
+      await settle(400);
+      const q = await p.evaluate(() => {
+        const panel = document.querySelector('.sb-pages');
+        if (!panel || getComputedStyle(panel).display === 'none' || panel.getBoundingClientRect().height < 2) return null;
+        const pr = panel.getBoundingClientRect();
+        const lines = [...panel.querySelectorAll('.sb-keptline')].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, in: r.top >= pr.top - 0.5 && r.bottom <= pr.bottom + 0.5, h: r.height }; });
+        return { lines, over: panel.scrollHeight - panel.clientHeight };
+      });
+      // The phone reads kept pages in the almanac; the desktop lists them in the side panel.
+      if (label === 'desk') {
+        if (!q) extra.push('no kept pages panel on the desktop');
+        else {
+          for (const l of q.lines) if (!l.in) extra.push(`kept page "${l.text}" is cut off`);
+          if (q.lines.filter((l) => !/Room/.test(l.text)).length !== 6 || q.lines.filter((l) => /Room for a page/.test(l.text)).length !== 3) extra.push(`the panel lists ${q.lines.map((l) => l.text).join(', ')} for 6 pages and room for 3`);
+        }
+        console.log(`       ${label} kept pages: ${q?.lines.map((l) => `${l.text} ${Math.round(l.h)} px`).join(', ')}`);
+      }
+      await p.evaluate(() => {
+        const t = window.deck.table;
+        t.run.pages = [];
+        t.run.slots = 0;
+        t.syncAll();
+        t.relayout();
+      });
+    }],
+    ['round 7: the run\'s end with new cards says when there is more below', async () => {
+      await fresh(4242);
+      await p.evaluate(() => {
+        const t = window.deck.table;
+        const s = t.run;
+        s.stats.log = Array.from({ length: 7 }, (_, k) => ({ year: Math.floor(k / 4) + 1, season: k % 4, earned: 300 + k * 90, quota: 280 + k * 80, cleared: k < 6, carried: 20 }));
+        s.phase = 'over';
+        s.end = { year: 2, season: 2, earned: 431, quota: 690, unlocked: ['beehive', 'chili', 'corn', 'wheat', 'pumpkin', 'shears'], recorded: true };
+        t.sheets.entry();
+      });
+      await settle(500);
+      const q = await p.evaluate(() => {
+        const body = document.querySelector('.sb-entry-body');
+        const imgs = [...document.querySelectorAll('.sb-new img')];
+        const br = body.getBoundingClientRect();
+        const cut = imgs.filter((e) => e.getBoundingClientRect().bottom > br.bottom + 1).length;
+        return { more: body.classList.contains('more'), scroll: body.scrollHeight - body.clientHeight, cut, n: imgs.length };
+      });
+      if (q.cut && !q.more) extra.push(`${q.cut} of the ${q.n} new cards are cut off with no shade`);
+      console.log(`       ${label} the run's end: ${q.n} new cards, ${q.cut} below the fold, scrolls ${q.scroll} px, shade ${q.more}`);
+    }],
     ['stall', async () => {
       await toStall(91, 400);
       const q = await purse();
@@ -1520,6 +1792,25 @@ async function run(label, viewport, touch) {
       return document.querySelector('.sb-sheets.on') ? '.sb-sheets.on button:not([data-clipped]), .shellbtn' : 'button';
     });
     for (const q of await p.evaluate(reachScan, reachable)) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
+    // Round 7: nothing cut off without a sign. A panel or body whose content runs past its foot must scroll and show its
+    // soft shade while there is more below; a panel that cannot scroll must hold everything (the seventh playtest's
+    // desktop kept pages showed half of Big Basket, and the run's end cut off its new cards with no shade).
+    for (const q of await p.evaluate(() => {
+      const out = [];
+      for (const e of document.querySelectorAll('.sb-pages, .sb-entry-body, .sb-stall-body')) {
+        const st = getComputedStyle(e);
+        if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue;
+        const r = e.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        const more = e.scrollHeight - e.clientHeight - e.scrollTop > 2;
+        const scrolls = /(auto|scroll)/.test(st.overflowY);
+        const name = e.className.split(' ')[0];
+        if (more && !scrolls) out.push(`${name} cuts off ${Math.round(e.scrollHeight - e.clientHeight)} px of its content and cannot scroll`);
+        else if (more && name !== 'sb-pages' && !e.classList.contains('more')) out.push(`${name} has ${Math.round(e.scrollHeight - e.clientHeight - e.scrollTop)} px more below and no shade`);
+        else if (more && name === 'sb-pages') out.push(`the kept pages run ${Math.round(e.scrollHeight - e.clientHeight)} px past their panel`);
+      }
+      return out;
+    })) hits.push(`clipped: ${q}`);
     const ok = hits.length === 0;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} ${name} (${bx.length} pieces)${ok ? '' : `\n       ${hits.join('\n       ')}`}`);

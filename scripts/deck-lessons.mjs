@@ -654,11 +654,35 @@ async function session(label, viewport, touch) {
     await wait(300);
     t = await step('the stall');
     await shot('19-stall');
-    check(`${label}: the stall's lesson: buy a seed`, /coins/i.test(t.line), t.line);
+    // Round 7: the run's first stall offers an engine to take home, free. Its lesson comes first; then the purse's.
+    const offer = await p.evaluate(() => ({ n: document.querySelectorAll('.sb-enginecard').length, rules: window.deck.state().shop.engines?.length ?? 0, words: [...document.querySelectorAll('.sb-enginecard')].map((e) => e.textContent.trim()) }));
+    check(`${label}: the first stall offers three engines, a card and its page each, with one line to pick`, offer.n === 3 && offer.rules === 3 && t.lesson === 'engine' && /^Pick one to take home\.$/.test(t.line), `${offer.n} clippings, lesson ${t.lesson}: ${t.line}; ${offer.words.join(' | ')}`);
+    // The way on asks for a pick first.
+    await p.evaluate(() => document.querySelector('.sb-signpost').scrollIntoView({ block: 'center' }));
+    if (touch) await tap(...(await center('.sb-signpost')));
+    else await p.mouse.click(...(await center('.sb-signpost')));
+    await wait(300);
+    const asked = await p.evaluate(() => ({ phase: window.deck.state().phase, slip: document.querySelector('.sb-read')?.textContent ?? '' }));
+    check(`${label}: the way on asks for an engine first`, asked.phase === 'shop' && /Pick one to take home first/.test(asked.slip), JSON.stringify(asked));
+    if (touch) await tap(...(await center('.sb-enginecard:nth-child(2)')));
+    else {
+      for (let k = 0; k < 30; k++) {
+        if (await p.evaluate(() => document.activeElement === document.querySelectorAll('.sb-enginecard')[1])) break;
+        await p.keyboard.press('ArrowDown');
+      }
+      await p.keyboard.press('Enter');
+    }
+    await wait(300);
+    t = await step('the stall, engine picked');
+    const took = await p.evaluate(() => ({ engine: window.deck.state().shop.engine, pinned: document.querySelectorAll('.sb-enginecard.picked').length, faded: document.querySelectorAll('.sb-enginecard.other').length }));
+    await shot('19a-stall-engine');
+    check(`${label}: a ${touch ? 'tap' : 'key'} picks the engine, pinned, the others faded`, took.engine === 1 && took.pinned === 1 && took.faded === 2, JSON.stringify(took));
+    check(`${label}: then the stall's lesson: buy a seed`, /coins/i.test(t.line), t.line);
     check(`${label}: the first stall shows only the goods`, !t.pieces.pages && !t.pieces.services);
-    // Round 6: the guided run's summer, its first season on its own, asks 180 (it asked 230 and the playtest missed by 5).
+    // Round 6: the guided run's summer, its first season on its own, asks 180 (it asked 230 and the playtest missed by 5);
+    // round 7: 240, since the guided run now takes an engine at this stall.
     const head = await p.evaluate(() => document.querySelector('.sb-purse-line')?.textContent ?? '');
-    check(`${label}: the guided run's first stall says summer asks 180`, /Summer asks 180\./.test(head), head);
+    check(`${label}: the guided run's first stall says summer asks 240`, /Summer asks 240\./.test(head), head);
     const before = await p.evaluate(() => window.deck.state().coins);
     const idx = await p.evaluate(() => window.deck.state().shop.cards.findIndex((c) => c.price <= window.deck.state().coins));
     check(`${label}: the first stall stocks a seed`, await p.evaluate(() => window.deck.state().shop.cards.some((c) => ['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili'].includes(c.card))));
@@ -690,6 +714,8 @@ async function session(label, viewport, touch) {
     await wait(400);
     t = await step('summer, day 1');
     check(`${label}: on to summer`, t.phase === 'day' && t.season === 1);
+    const home = await p.evaluate(() => ({ engine: window.deck.state().engine, pages: window.deck.state().pages }));
+    check(`${label}: the engine went home with the run, its page in the almanac`, !!home.engine && home.pages.length === 1, JSON.stringify(home));
     await shot('20-summer');
     // Reload mid-season: the lessons and pieces come back as they were.
     const was = await p.evaluate(() => ({ done: window.deck.table.tutor.learn.done.join(), seen: window.deck.pieces().sort().join() }));
@@ -928,6 +954,8 @@ async function round5(label, viewport, touch) {
     t.tutor.learn.done = t.tutor.learn.done.filter((x) => x !== 'twist' && x !== 'spent' && x !== 'crows');
     t.tutor.drop();
     d.state().season = 3;
+    // A later stall, not the run's first (round 7: that one offers an engine).
+    d.state().stats.log.push({ year: 1, season: 2, earned: 400, quota: 300, cleared: true, carried: 0, twist: null, idle: 0 });
     while (d.state().phase === 'day') {
       d.state().earned = 99999;
       d.endDay();
@@ -961,7 +989,8 @@ async function round5(label, viewport, touch) {
   const line = await p.evaluate(() => ({ phase: window.deck.state().phase, twist: window.deck.state().twist, text: window.deck.twist() }));
   await p.screenshot({ path: `${out}/${label}-r5-twist-line.png` });
   check(`${label}: the season takes the twist picked and the table says it`, line.phase === 'day' && JSON.stringify(line.twist) === JSON.stringify(picked.tw) && line.text === picked.text, `"${line.text}"`);
-  // The spent lesson: not while every card has a job; up with a card the scoops cannot pay for; away once none is left.
+  // The spent lesson: not while every card has a job; round 7: not for a card that is only dear today (the playtest
+  // tossed a strawberry it would have sown the next morning); up with a card that has nowhere to go; away once none is left.
   const spent = await p.evaluate(async () => {
     const d = window.deck;
     const w = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -977,18 +1006,22 @@ async function round5(label, viewport, touch) {
     s.energy = 1;
     d.table.renderAll();
     await w(200);
+    const dear = d.lesson()?.id ?? null;
+    // Shears with nothing ripe to cut: nowhere to go today.
+    d.hand(['shears', 'radish']);
+    await w(200);
     const spare = d.lesson()?.id ?? null;
     const text = d.lesson()?.text ?? '';
     d.hand([]);
     await w(200);
     const empty = d.lesson()?.id ?? null;
-    return { jobs, spare, text, empty, done: d.table.tutor.learn.done.includes('spent') };
+    return { jobs, dear, spare, text, empty, done: d.table.tutor.learn.done.includes('spent') };
   });
-  check(`${label}: the spent lesson waits for a card with no use, and goes away when the hand is empty`, spent.jobs !== 'spent' && spent.spare === 'spent' && spent.empty !== 'spent' && !spent.done, JSON.stringify(spent));
+  check(`${label}: the spent lesson waits for a card with nowhere to go (not one only dear today), and goes away when the hand is empty`, spent.jobs !== 'spent' && spent.dear !== 'spent' && spent.spare === 'spent' && spent.empty !== 'spent' && !spent.done, JSON.stringify(spent));
   // Then a real toss of a spare card ends it.
   await p.evaluate(async () => {
     const d = window.deck;
-    d.hand(['pumpkin', 'radish', 'lettuce']);
+    d.hand(['shears', 'radish', 'lettuce']);
     d.state().energy = 1;
     d.table.renderAll();
     await new Promise((r) => setTimeout(r, 250));
@@ -1074,6 +1107,8 @@ async function round6(label, viewport, touch) {
     d.seed(707);
     d.learnAll();
     d.state().season = 3;
+    // A later stall, not the run's first (round 7: that one offers an engine).
+    d.state().stats.log.push({ year: 1, season: 2, earned: 400, quota: 300, cleared: true, carried: 0, twist: null, idle: 0 });
     while (d.state().phase === 'day') {
       d.state().earned = d.state().quota + 160;
       d.endDay();

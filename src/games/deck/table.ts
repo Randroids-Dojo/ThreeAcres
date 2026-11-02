@@ -23,6 +23,7 @@ import {
   newMeta,
   newRun,
   nextPick,
+  PAGES,
   playCard,
   previewPlay,
   recordRun,
@@ -104,6 +105,8 @@ const AIM_VERB: Partial<Record<CardId, string>> = { can: 'water', compost: 'lay 
 const PLURAL: readonly CardId[] = ['beans'];
 /** "Tap again to plant it." shows for this many aims, then the player knows. */
 const AIM_NOTES = 3;
+/** The hand closes its gaps this long after the last play, once it rests. */
+const SETTLE_MS = 1400;
 export function ladder(n: number): number {
   return PENTA[n % 5] * Math.pow(2, Math.floor(n / 5) * 0.5);
 }
@@ -522,7 +525,7 @@ export class Table {
     const s = this.run;
     const tw = s?.phase === 'day' ? (s.twist ?? null) : null;
     const on = !!tw && !this.hint.classList.contains('on');
-    const key = tw ? `${tw.id}:${tw.crop ?? ''}:${s.season}` : '';
+    const key = tw ? `${tw.id}:${tw.crop ?? ''}:${tw.row ?? ''}:${tw.page ?? ''}:${s.season}` : '';
     if (this.twistEl.dataset.k !== key) {
       this.twistEl.dataset.k = key;
       this.twistEl.innerHTML = tw ? `<img src="${twistUrl(tw, 24)}" alt=""><span>${twistText(tw)}</span>` : '';
@@ -695,7 +698,10 @@ export class Table {
     const take = Math.round(this.shownEarned);
     // Four-digit takes and quotas stack the take over "of 1550" (the phone's purse covered the last digit: "1239 of 15").
     this.ledger.classList.toggle('big', Math.max(String(take).length, String(s.quota).length) >= 4);
-    this.ledTally.innerHTML = `<b>${take}</b> <span>of ${s.quota}</span>`;
+    // Over the last two days, what is still to go (the seventh playtest's last day read only "286 of 350").
+    const left = s.quota - take;
+    const late = (s.phase === 'day' || this.busy) && this.shownDay >= TUNING.days - 1 && left > 0;
+    this.ledTally.innerHTML = `<b>${take}</b> <span>of ${s.quota}</span>${late ? `<i>${left} to go</i>` : ''}`;
     this.purse.classList.toggle('big', String(Math.round(this.shownCoins)).length >= 5);
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
@@ -831,9 +837,19 @@ export class Table {
     this.pages.dataset.k = key;
     this.pages.innerHTML = '';
     this.pages.append(el('h4', '', 'Almanac pages kept'));
-    for (const p of this.run.pages) this.pages.append(this.sheets.pageEl(p, null));
-    // The room left, as empty leaves: the stall sells pages to fill them.
-    for (let k = this.run.pages.length; k < room; k++) this.pages.append(el('div', 'sb-pageslot', '<span>Room for a page</span>'));
+    // Round 7: one line a page, its name (its rule on hover and in the almanac), so a full almanac fits the panel: the
+    // seventh playtest's desktop showed half of Big Basket and hid two more pages.
+    const list = el('ul', 'sb-keptlist');
+    for (const p of this.run.pages) {
+      const li = el('li', 'sb-keptline', `<b>${PAGES[p].name}</b>`);
+      li.title = PAGES[p].text;
+      list.append(li);
+    }
+    // The room left, a dashed line for each page more it keeps: the stall sells pages to fill them.
+    for (let k = this.run.pages.length; k < room; k++) list.append(el('li', 'sb-keptline empty', 'Room for a page'));
+    // A long almanac (page slots bought) lists in two columns, so ten pages still fit.
+    list.classList.toggle('two', list.children.length > 6);
+    this.pages.append(list);
     this.applyPieces();
   }
 
@@ -844,9 +860,33 @@ export class Table {
    */
   private slots = new Map<number, number>();
   private slotN = 0;
+  /**
+   * Round 7: when the gaps close. A second tap soon after a play still lands where the card was; once the hand has
+   * rested a moment (no card held, no pointer on the hand) the fan closes up, keeping its order (the seventh playtest's
+   * hand kept a gap in the middle all day).
+   */
+  private settleAt = 0;
   resetSlots(): void {
     this.slots.clear();
     this.slotN = 0;
+  }
+
+  /** Close the hand's gaps, keeping each card's order, if the hand has rested since the last play. */
+  private closeGaps(now: number): void {
+    if (!this.settleAt || now < this.settleAt) return;
+    if (this.held || this.hoverCard !== null || this.busy || this.press) return;
+    this.settleAt = 0;
+    const order = [...this.handShown].sort((a, b) => (this.slots.get(a.uid) ?? 0) - (this.slots.get(b.uid) ?? 0));
+    if (order.every((c, k) => this.slots.get(c.uid) === k) && this.slotN === order.length) return;
+    this.slots.clear();
+    order.forEach((c, k) => this.slots.set(c.uid, k));
+    this.slotN = order.length;
+    this.renderHand();
+  }
+
+  /** Gaps left in the hand by plays today, for checks. */
+  get handGaps(): number {
+    return Math.max(0, this.slotN - this.handShown.length);
   }
 
   /** Fan the hand. */
@@ -1000,6 +1040,7 @@ export class Table {
     for (const s of this.small) s.update(dt * this.speed);
     this.small = this.small.filter((s) => !s.done);
     this.teach(dt);
+    this.closeGaps(performance.now());
     // Music lifts during a harvest run, then settles.
     const target = this.hot > 0 ? 1 : 0;
     this.hot = Math.max(0, this.hot - dt);
@@ -1489,6 +1530,7 @@ export class Table {
     const from = cEl?.el.getBoundingClientRect();
     const before = clonePlots(this.run.plots);
     const ev = playCard(this.run, idx, plot, to)!;
+    this.settleAt = performance.now() + SETTLE_MS;
     for (const e of ev) if (e.t === 'harvest') this.ruleScores.push(e.h.score);
     // "Tap again to plant it." is done with once it is planted.
     if (this.aimNote) {
@@ -1672,6 +1714,7 @@ export class Table {
     const card = this.run.hand[idx];
     const ev = toss(this.run, idx);
     if (!ev) return;
+    this.settleAt = performance.now() + SETTLE_MS;
     this.held = null;
     this.tutor.count('toss');
     const c = this.cards.get(card.uid);
@@ -2451,6 +2494,11 @@ export class Table {
 
   get tallyText(): string {
     return this.ledTally.textContent ?? '';
+  }
+
+  /** What the ledger says is still to go over the last two days ("64 to go"), or empty. */
+  get toGoText(): string {
+    return this.ledTally.querySelector('i')?.textContent ?? '';
   }
 }
 
