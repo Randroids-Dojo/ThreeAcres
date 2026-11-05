@@ -11,6 +11,9 @@
 // plays deep): one play deep (the default, faster) takes about a third less than the run does, and a hitch's coins
 // with it. --json=path writes the raw offers instead of the report; --merge=a.json,b.json reports several chunks
 // (--first=n) as one. --buys plays each season ahead after the policy's shopping at that stall, as the run will.
+// Round 11: the merchant pays a hitch in coins. Each pair's margin, said (the cut, less what the clipping says it costs, and
+// the merchant's coins) and played (the same with what it cost played ahead), against the help's coins said and played:
+// the eleventh playtest's help said about 4 times the hitch's margin (+310 against 490 less 410).
 // npx tsx scripts/deck-twists.ts [runs] [--policy=name] [--first=n] [--tune=key:value] [--depth=2] [--buys] [--json=path]
 // npx tsx scripts/deck-twists.ts --merge=a.json,b.json
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -55,7 +58,7 @@ interface Offer {
 }
 interface Data {
   offers: Offer[];
-  pairs: { help: number; hitch: number }[];
+  pairs: { help: number; hitch: number; helpSaid?: number; marginSaid?: number; helpCoins?: number; marginPlayed?: number; pay?: number }[];
   stalls: number;
   tookHitch: number;
 }
@@ -95,7 +98,7 @@ function measure(): Data {
           const base = [0, 1, 2].map((k) => play(s, null, seed + k));
           const b = base.reduce((a, x) => a + x, 0) / base.length || 1;
           const q0 = R.twistQuota(s, null);
-          const pair = { help: 0, hitch: 0 };
+          const pair = { help: 0, hitch: 0, helpSaid: 0, marginSaid: 0, helpCoins: 0, marginPlayed: 0, pay: 0 };
           for (const t of tw) {
             const hitch = R.HITCHES.includes(t.id);
             // The aim this twist came from: the same crop, row or page (round 8: a buyer read the first crop's).
@@ -119,6 +122,15 @@ function measure(): Data {
             });
             if (hitch) pair.hitch = R.twistEase(t) - got;
             else pair.help = got;
+            const pay = (t as R.Twist & { pay?: number }).pay ?? 0;
+            if (hitch) {
+              pair.pay = pay;
+              pair.marginSaid = q0 - R.twistQuota(s, t) - R.twistCoins(s, t) + pay;
+              pair.marginPlayed = q0 - R.twistQuota(s, t) - (b - took) + pay;
+            } else {
+              pair.helpSaid = R.twistCoins(s, t);
+              pair.helpCoins = took - b;
+            }
           }
           if (tw.length === 2) out.pairs.push(pair);
           shop(s, dice);
@@ -150,6 +162,12 @@ function report(d: Data, label: string): void {
   if (d.pairs.length) {
     const better = d.pairs.filter((p) => p.hitch > p.help).length;
     console.log(`pairs: the help played +${(mean(d.pairs.map((p) => p.help)) * 100).toFixed(1)}%, the hitch played +${(mean(d.pairs.map((p) => p.hitch)) * 100).toFixed(1)}% (its cut less its cost); the hitch the better of the two at ${Math.round((better / d.pairs.length) * 100)}% of ${d.pairs.length} stalls`);
+  }
+  if (d.pairs.length) {
+    const m = (f: (p: Data['pairs'][number]) => number) => mean(d.pairs.map(f)).toFixed(0);
+    const close = d.pairs.filter((p) => (p.helpSaid ?? 0) > 0 && Math.abs((p.marginSaid ?? 0) / (p.helpSaid ?? 1) - 1) <= 0.2).length;
+    const better = d.pairs.filter((p) => (p.marginPlayed ?? 0) > (p.helpCoins ?? 0)).length;
+    console.log(`round 11, in coins (means): the help says ${m((p) => p.helpSaid ?? 0)}, the hitch's margin says ${m((p) => p.marginSaid ?? 0)} (the merchant pays ${m((p) => p.pay ?? 0)}), within a fifth of each other at ${Math.round((close / d.pairs.length) * 100)}% of ${d.pairs.length} stalls; played ahead the help brought ${m((p) => p.helpCoins ?? 0)}, the hitch's margin came to ${m((p) => p.marginPlayed ?? 0)}, the better of the two at ${Math.round((better / d.pairs.length) * 100)}% of stalls`);
   }
   const hitches = d.offers.filter((o) => o.hitch);
   console.log(`hitches offered that would cost under ${R.TUNING.minHit * 100}% (miss the build): ${hitches.filter((o) => o.missing).length} of ${hitches.length}`);

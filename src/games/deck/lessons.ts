@@ -52,6 +52,11 @@ interface Lesson {
   /** Finished? Passive lessons also finish on their own after `passive` seconds on screen. */
   done(v: View): boolean;
   passive?: number;
+  /**
+   * Round 11: a passive lesson that also waits for a play since it came up: the eleventh playtest's pest lines vanished
+   * after five seconds with nothing done, before the player had looked up from the hand.
+   */
+  holds?: boolean;
   /** Put away unfinished, to come back when it next matters (the hand no longer has a spare card). */
   away?(v: View): boolean;
 }
@@ -338,6 +343,7 @@ const LESSONS: Lesson[] = [
     point: () => 'board',
     done: (v) => nightPassed(v, 'pests'),
     passive: 5,
+    holds: true,
   },
   {
     id: 'pestfix',
@@ -351,6 +357,7 @@ const LESSONS: Lesson[] = [
     point: () => 'board',
     done: (v) => nightPassed(v, 'pestfix'),
     passive: 6,
+    holds: true,
   },
   {
     id: 'crows',
@@ -363,6 +370,7 @@ const LESSONS: Lesson[] = [
     point: () => 'board',
     done: (v) => nightPassed(v, 'crows'),
     passive: 6,
+    holds: true,
   },
   {
     // The season's twist: from year 2 each stall offers two plain rules for the season ahead; pick one.
@@ -403,7 +411,9 @@ const LESSONS: Lesson[] = [
     after: ['coins'],
     unlocks: ['pages'],
     where: 'stall',
-    ready: (v) => v.s.phase === 'shop' && v.n('stall') >= 2,
+    // Round 11: not while the first stall shows only its engines: the eleventh playtest's run 2 read "Pin a page to change
+    // the rules." under the engine pick with no pages on screen.
+    ready: (v) => v.s.phase === 'shop' && v.n('stall') >= 2 && !(v.s.shop?.engines?.length && v.s.shop.engine === undefined),
     text: () => 'Pin a page to change the rules.',
     point: () => 'stall',
     done: (v) => v.n('page') >= 1 || v.n('leave') > v.n('at:pages:leave'),
@@ -413,7 +423,7 @@ const LESSONS: Lesson[] = [
     after: ['pages'],
     unlocks: ['services'],
     where: 'stall',
-    ready: (v) => v.s.phase === 'shop' && v.n('stall') >= 3,
+    ready: (v) => v.s.phase === 'shop' && v.n('stall') >= 3 && !(v.s.shop?.engines?.length && v.s.shop.engine === undefined),
     text: () => 'Throw out or improve a card here.',
     point: () => 'stall',
     done: (v) => v.n('service') >= 1 || v.n('leave') > v.n('at:services:leave'),
@@ -512,7 +522,7 @@ export class Tutor {
       const onStall = l.where === 'stall';
       if (onStall || (!quiet && !hidden)) this.shown += dt;
       view.shown = this.shown;
-      const over = l.done(view) || (l.passive !== undefined && this.shown >= l.passive);
+      const over = l.done(view) || (l.passive !== undefined && this.shown >= l.passive && (!l.holds || this.n('play') > this.n(`at:${l.id}:play`)));
       if (over) {
         this.learn.done.push(l.id);
         if (l.id === 'newcard') this.meet(s);
@@ -526,7 +536,7 @@ export class Tutor {
         this.active = next;
         this.shown = 0;
         this.learn.n[`at:${next.id}`] = this.n('night');
-        for (const k of ['pick', 'leave', 'detail', 'dear']) this.learn.n[`at:${next.id}:${k}`] = this.n(k);
+        for (const k of ['pick', 'leave', 'detail', 'dear', 'play']) this.learn.n[`at:${next.id}:${k}`] = this.n(k);
         for (const p of next.unlocks) if (this.unlock(p)) unlocked.push(p);
         view.shown = 0;
         // Round 9: a lesson already done as it comes (the player did it unasked) is marked done and never shown.

@@ -89,7 +89,8 @@ describe('round 10: each engine on its own crops', () => {
     expect(bonus(vines, 'carrot', 'vines')).toBeUndefined();
     // Each page says so in its own words.
     for (const id of ['bees', 'vines'] as PageId[]) expect(PAGES[id].text).toMatch(/not radishes or carrots/i);
-    expect(PAGES.hot.text).toMatch(/radishes and carrots x1\.5/);
+    // Round 11: Hot Beds says what a 10 coin crop pays (a chili's own x1.5 stays on radishes and carrots: above).
+    expect(PAGES.hot.text).toMatch(/10 coin crop pays \d+ beside one, \d+ beside two/);
   });
 
   it('the tall engine takes three corn home, so a season seldom goes without one', () => {

@@ -171,7 +171,9 @@ describe('round 8: engine pages level up at the stall', () => {
       expect(two).toMatch(/, not [x+]?\d+(\.\d+)?\.$/);
       expect(X.levelName?.(R.PAGES[id].name, 3)).toBe(`${R.PAGES[id].name} III`);
     }
-    expect(X.levelChange?.('bees', 2)).toBe(`Crops near a beehive get x${(TUNING as unknown as { levelUp?: Record<string, number[]> }).levelUp?.bees[0]} bloom, not x${TUNING.beesTimes}.`);
+    // Round 11: said as what a 10 coin crop pays, not as a sum.
+    const bees2 = (TUNING as unknown as { levelUp?: Record<string, number[]> }).levelUp!.bees[0];
+    expect(X.levelChange?.('bees', 2)).toBe(`Near a beehive, a 10 coin crop pays ${Math.round(10 * bees2)}, not ${Math.round(10 * TUNING.beesTimes)}.`);
     // Hot Beds II: round 9, a chili's neighbours get more bloom (round 8: it picked one night more).
     const hot = table(['radish'], { year: 2 });
     hot.pages = ['hot'];
@@ -195,7 +197,7 @@ describe('round 8: engine pages level up at the stall', () => {
     for (const e of ['bees', 'hot', 'vines', 'tall'] as R.EngineId[]) {
       at[e] = [];
       botStalls(
-        3,
+        5,
         (s) => {
           const lv = (s as RunState & { levels?: Record<string, number> }).levels?.[R.ENGINES[e].page] ?? 1;
           if (R.nextSeason(s).year === 3 && R.nextSeason(s).season === 0) at[e].push(lv);
@@ -234,7 +236,9 @@ describe('round 8: a difficulty curve that rises with the run', () => {
       ratios.sort((a, b) => a - b);
       const med = ratios[ratios.length >> 1];
       // The eighth playtest: the bees took 721 against 320, Tall Rows 1,282 against 400; round 7's bot 1.62 and 1.65.
-      expect(med, `${e}: year 1 median take over quota`).toBeLessThan(1.5);
+      // Round 11: 1.6 (1.5): with its scoop Tall Rows runs 1.51 to 1.57 for the decent bot in year 1, the most of the four,
+      // and the greedy preview-follower 1.38 to 1.51.
+      expect(med, `${e}: year 1 median take over quota`).toBeLessThan(1.6);
     }
   }, 120000);
 
@@ -318,21 +322,30 @@ describe('round 8: twists that do not repeat, see-saw or miss the run', () => {
     }
   });
 
-  it('over bot-played runs no stall aims a twist as the stall before did', () => {
+  it('over bot-played runs a stall seldom aims a twist as the stall before did', () => {
     let stalls = 0;
+    let repeats = 0;
     let prev: Twist[] = [];
     let prevRun = -1;
     let run = 0;
     const same = (a: Twist, b: Twist) => (a.id === b.id && a.crop === b.crop && a.row === b.row && a.page === b.page) || ((a.id === 'glut' || a.id === 'buyer') && (b.id === 'glut' || b.id === 'buyer') && a.crop === b.crop);
-    botStalls(4, (s) => {
+    botStalls(7, (s) => {
       if (R.seasonIndex(R.nextSeason(s)) === R.TUNING.twistFrom) run++;
       const now = s.shop!.twists!;
-      if (prevRun === run) for (const t of now) expect(prev.some((b) => same(b, t)), `${t.id} ${t.crop ?? t.page ?? t.row ?? ''} twice in a row`).toBe(false);
+      // Round 11: never a hitch; a help only when no other is worth having (round 10's fallback: 0 to 1% of stalls for three
+      // engines over 150 runs, 7% for the tall run, whose coins are nearly all corn).
+      if (prevRun === run) {
+        for (const t of now) {
+          if (R.HITCHES.includes(t.id)) expect(prev.some((b) => same(b, t)), `${t.id} ${t.crop ?? t.page ?? t.row ?? ''} twice in a row`).toBe(false);
+          else if (prev.some((b) => same(b, t))) repeats++;
+        }
+      }
       prev = now;
       prevRun = run;
       stalls++;
     });
     expect(stalls).toBeGreaterThan(8);
+    expect(repeats / stalls).toBeLessThan(0.12);
   }, 120000);
 
   it('no page rests that is another engine\'s, and a scarecrow in the tin keeps crows off the offer', () => {

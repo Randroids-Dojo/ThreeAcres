@@ -28,13 +28,30 @@
 // Round 9 adds the snowball measures: the most any season's median take over quota reached, the median single
 // harvest of year 2 (set it against the other engines'), and the coins a won run ends with.
 //
+// Round 11 adds the greedy preview-following player (deck-players.ts, the eleventh playtest's own script) beside the
+// decent bot: policies gBees, gHot, gVines and gTall play every day and stall as that player, and the table at the end
+// sets each policy's wins, its year 2 take over quota season by season, the most any season's median reached, the night
+// year 2's quota was met and the hitch's share of its picks side by side. Hot Beds' harvests hit 257 and 347 in year 2
+// and its takes ran 2.4 and 2.6 times the quotas, while the bot's seasons ran 1.4 to 1.5.
+//
 // It uses only the bot and the rules' public calls, so the same file runs
 // against an older build (copy it into a `git archive` of the commit).
-// npx tsx scripts/deck-strategies.ts [runs] [policy...] [--seasons] [--noTwists] [--first=n]
+// npx tsx scripts/deck-strategies.ts [runs] [policy...] [--seasons] [--noTwists] [--first=n] [--read]
 import { botDay, Dice } from '../src/games/deck/bot';
 import * as R from '../src/games/deck/rules';
 import { costOf, energyMax, newMeta, newRun, type Ev, type Harvest } from '../src/games/deck/rules';
 import { ALL, o, POL } from './deck-policies';
+import { GREEDY, readerDay, readerShop, type Reader } from './deck-players';
+
+// The greedy player, one policy per engine. --read has it read the two clippings for its twist, not play them ahead.
+const twistBy: Reader['twist'] = process.argv.includes('--read') ? 'read' : 'play';
+const READERS: Record<string, Reader> = {
+  gBees: { ...GREEDY, engine: 'bees', twist: twistBy },
+  gHot: { ...GREEDY, engine: 'hot', twist: twistBy },
+  gVines: { ...GREEDY, engine: 'vines', twist: twistBy },
+  gTall: { ...GREEDY, engine: 'tall', twist: twistBy },
+};
+const SUMMARY: string[] = [];
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 30);
@@ -116,8 +133,16 @@ function hitchHit(t: { id: string; crop?: string; row?: number; page?: string },
 }
 
 for (const name of policies.length ? policies : Object.keys(POL)) {
-  const shop = POL[name];
+  const reader = READERS[name];
+  const shop = reader ? (s: R.RunState, d: Dice) => readerShop(s, reader, d) : POL[name];
   if (!shop) throw new Error(`no policy ${name}`);
+  const playDay = (s: R.RunState, d: Dice): Ev[] => (reader ? readerDay(s, reader, d) : botDay(s, o, d));
+  // Round 11: the night each season of year 2 met its quota, and each night's pay in year 2.
+  const y2Met: number[] = [];
+  const y2Night: number[] = [];
+  // Round 11: the cards a run plays on its first day, as a set (all four of the eleventh playtest's later runs opened
+  // with the same move: carrot, radishes beside it, can).
+  const openings = new Map<string, number>();
   const cleared: number[] = [];
   const unspent: number[] = [];
   // Round 8: take over quota by season, and the engine page's level when the run ends (runs at II or more, at III).
@@ -252,9 +277,16 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
         // Scoops above the usual three each morning: Green Thumb, the Long Furrow and scoops bought for good.
         const extra = energyMax(s) - R.TUNING.energy;
         const kNow = (s.year - 1) * 4 + s.season;
-        const ev = botDay(s, o, dice);
+        const dayNow = s.day;
+        const ev = playDay(s, dice);
+        if (kNow === 0 && dayNow === 1) {
+          const set = ev.filter((e): e is Extract<Ev, { t: 'play' }> => e.t === 'play').map((e) => e.card.id).sort().join(' ');
+          openings.set(set, (openings.get(set) ?? 0) + 1);
+        }
         if (kNow >= 4 && kNow < 8) {
+          y2Night.push(ev.reduce((a, e) => a + (e.t === 'harvest' ? e.h.score : 0), 0));
           for (const e of ev) {
+            if (e.t === 'quota') y2Met.push(dayNow);
             if (e.t === 'harvest') {
               y2h.push(e.h.score);
               seasonBest = Math.max(seasonBest, e.h.score);
@@ -346,9 +378,21 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
     const p90 = [...y2h].sort((a, b) => a - b)[Math.floor(y2h.length * 0.9)] ?? 0;
     console.log(`${''.padEnd(17)} round 9: the most a season's median take over quota reached ${top.toFixed(2)} (season ${meds.indexOf(top) + 1}); a single harvest in year 2: median ${med(y2h)}, p90 ${p90} (${y2h.length} harvests), a season's best median ${med(bestY2)}; coins at the end of a won run: median ${med(wonCoins)} (${wonCoins.length} runs), of every run ${med(unspent)}`);
   }
+  {
+    const meds = byK.map((a) => (a.length ? med(a) : 0));
+    const top = Math.max(...meds);
+    const sorted = [...y2h].sort((a, b) => a - b);
+    const nights = [...y2Night].sort((a, b) => a - b);
+    const early = y2Met.filter((d) => d <= 2).length;
+    const open = [...openings.entries()].sort((a, b) => b[1] - a[1]);
+    const openTop = open[0] ? `${Math.round((open[0][1] / runs) * 100)}% ${open[0][0]}` : '-';
+    SUMMARY.push(`${name.padEnd(8)} ${y(4)} ${y(8)} ${y(12)}   ${meds.slice(4, 8).map((v) => v.toFixed(2)).join(' ')}   ${top.toFixed(2)} (season ${meds.indexOf(top) + 1})   ${String(med(y2Met) || '-').padStart(5)} ${pct(early, y2Met.length).padStart(4)}   ${pct(hitches, stalls).padStart(4)}   ${String(sorted[Math.floor(sorted.length * 0.5)] ?? 0).padStart(4)} ${String(sorted[sorted.length - 1] ?? 0).padStart(5)}   ${String(nights[nights.length - 1] ?? 0).padStart(5)}   ${String(med(unspent)).padStart(6)}   ${open.length} openings, most ${openTop}`);
+  }
   if (perSeason) {
     console.log(`${''.padEnd(17)} per season: ${played.map((p, k) => (p ? `${Math.round((met[k] / p) * 100)}%` : '-')).join(' ')}`);
     console.log(`${''.padEnd(17)} take/quota median by season: ${byK.map((a) => (a.length ? med(a).toFixed(2) : '-')).join(' ')}`);
     console.log(`${''.padEnd(17)} top crops of the seasons met in years 2 and 3: ${[...kinds.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
   }
 }
+console.log('\npolicy     Y1   Y2 wins   year 2 take/quota by season   top median         met on, by night 2  hitch   y2 harvest med, max   y2 best night   coins left   first days');
+for (const l of SUMMARY) console.log(l);

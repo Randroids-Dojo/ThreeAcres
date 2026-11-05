@@ -39,6 +39,11 @@ export interface Twist {
    * hitch still costs a careful player). The stall says it in coins, so the two twists can be weighed at a glance.
    */
   worth?: number;
+  /**
+   * Round 11: a hitch pays in coins too: what the merchant pays on leaving the stall. The eleventh playtest's help beat the
+   * hitch at all ten stalls: +310 coins against a cut of 490 less a cost of 410.
+   */
+  pay?: number;
 }
 
 /**
@@ -275,6 +280,8 @@ export interface RunState {
   carried?: number;
   /** The first run after the guided one: its first spring asks less. */
   soft?: boolean;
+  /** Round 11: which of `TUNING.firstLeads` this run's first hand is dealt. */
+  opener?: number;
   /** The engine picked at the run's first stall, if any. */
   engine?: EngineId | null;
   /**
@@ -372,6 +379,8 @@ export type Ev =
   /** The merchant has new stock this year, for this run: cards the catalogue does not hold yet. */
   | { t: 'stock'; cards: CardId[]; select: CardId[] }
   | { t: 'twist'; i: number }
+  /** Round 11: the merchant pays for the hitch picked, on leaving the stall. */
+  | { t: 'paid'; coins: number }
   | { t: 'engine'; i: number }
   | { t: 'buy'; card: CardId }
   | { t: 'page'; page: PageId }

@@ -217,7 +217,8 @@ describe('round 7: twists aimed at the run', () => {
       // Frost falls on the row the run's sown crops paid most from (round 9: or the next), and names the crop sown there.
       if (hitch.id === 'frost') {
         expect([...t.rows].sort((a, b) => b - a).slice(0, 3)).toContain(t.rows[hitch.row!]);
-        expect(R.twistText(hitch)).toBe(`Frost on your ${R.PLURALS[hitch.crop!]}${R.PLURALS[hitch.crop!].endsWith('s') ? "'" : "'s"} row.`);
+        // Round 11: the line names the row (the crop named may have moved on by then).
+        expect(R.twistText(hitch)).toBe(`Frost on the ${R.ROW_NAMES[hitch.row!]}.`);
       }
     });
     expect(offered).toBeGreaterThan(40);

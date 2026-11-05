@@ -13,12 +13,24 @@
 //     crop took under a tenth of the take, or came in once or not at all (famine);
 //   - year 1 summer, the engine's first season: its take over quota, the engine's crops' share, and its best harvest
 //     (the tenth playtest's Hot Beds previewed a carrot at 8 and a strawberry at 10 and missed by 1).
+//   - round 11, feast or famine: each night's pay over what a night of its season has to take (its quota over six), per
+//     year: the low, the median and the high (10th and 90th percentiles), and the share of nights under a third of it.
+//     The eleventh playtest's Tall Rows paid a 144 corn on its first summer night, 173 of 410 in all, and its autumn nights
+//     were 28, 70, 109, 65, 135, 14. gBees, gHot, gVines and gTall play the same as the greedy preview-following player.
 // It uses only the bot and the rules' harvest events, so it runs on an older build too (copy it into a `git archive`).
 // npx tsx scripts/deck-crops.ts [runs] [policy...] [--first=n] [--tune=key:value]
 import { botDay, Dice } from '../src/games/deck/bot';
 import * as R from '../src/games/deck/rules';
 import { newMeta, newRun, type Harvest } from '../src/games/deck/rules';
 import { ALL, o, POL } from './deck-policies';
+import { GREEDY, readerDay, readerShop, type Reader } from './deck-players';
+
+const READERS: Record<string, Reader> = {
+  gBees: { ...GREEDY, engine: 'bees' },
+  gHot: { ...GREEDY, engine: 'hot' },
+  gVines: { ...GREEDY, engine: 'vines' },
+  gTall: { ...GREEDY, engine: 'tall' },
+};
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 40);
@@ -42,6 +54,10 @@ const ENGINE: Record<string, { page: string; icons: string[]; own: string[] }> =
   eHot: { page: 'hot', icons: ['hot'], own: ['chili'] },
   eVines: { page: 'vines', icons: ['vines'], own: ['beans', 'strawberry'] },
   eTall: { page: 'tall', icons: ['tall'], own: ['corn'] },
+  gBees: { page: 'bees', icons: ['bees'], own: [] },
+  gHot: { page: 'hot', icons: ['hot'], own: ['chili'] },
+  gVines: { page: 'vines', icons: ['vines'], own: ['beans', 'strawberry'] },
+  gTall: { page: 'tall', icons: ['tall'], own: ['corn'] },
 };
 const ROOTS = ['radish', 'carrot'];
 
@@ -51,8 +67,9 @@ const med = (a: number[]) => {
 };
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-for (const name of policies.length ? policies : Object.keys(ENGINE)) {
-  const shop = POL[name];
+for (const name of policies.length ? policies : Object.keys(ENGINE).filter((n) => !READERS[n])) {
+  const reader = READERS[name];
+  const shop = reader ? (st: R.RunState, d: Dice) => readerShop(st, reader, d) : POL[name];
   if (!shop) throw new Error(`no policy ${name}`);
   const eng = ENGINE[name] ?? { page: '', icons: [], own: [] };
   // Is this harvest the engine's: its page's bonus is on the slip, or (Hot Beds) a chili's bloom with the page kept.
@@ -72,6 +89,8 @@ for (const name of policies.length ? policies : Object.keys(ENGINE)) {
   let y1Scarce = 0;
   const opening = { ratio: [] as number[], own: [] as number[], best: [] as number[], ownBest: [] as number[] };
   const bigShare: number[] = [];
+  // Round 11: each night's pay over what a night of its season has to take, by year.
+  const nights: number[][] = [[], [], []];
   const runKinds = new Map<string, number>();
   let runCoins = 0;
   let wins = 0;
@@ -93,7 +112,9 @@ for (const name of policies.length ? policies : Object.keys(ENGINE)) {
       }
       const k = (s.year - 1) * 4 + s.season;
       const pages = [...s.pages];
-      const ev = botDay(s, o, dice);
+      const need = s.quota / R.TUNING.days;
+      const ev = reader ? readerDay(s, reader, dice) : botDay(s, o, dice);
+      if (k >= 1) nights[Math.floor(k / 4)].push(ev.reduce((a, e) => a + (e.t === 'harvest' ? e.h.score : 0), 0) / Math.max(1, need));
       for (const e of ev) {
         if (e.t === 'harvest') {
           season.push(e.h);
@@ -156,4 +177,6 @@ for (const name of policies.length ? policies : Object.keys(ENGINE)) {
   console.log(`        share of all coins: ${kinds}`);
   console.log(`        the biggest harvest's share of its season: median ${pct(med(bigShare))}, p90 ${pct(p90)}${eng.own.length ? `; seasons the engine's own crop took under a tenth ${pct(famine / Math.max(1, seasons))}, came in once or not at all ${pct(scarce / Math.max(1, seasons))} (year 1 ${pct(y1Scarce / Math.max(1, y1Seasons))})` : ''}`);
   console.log(`        year 1 summer: take over quota median ${med(opening.ratio).toFixed(2)}, the engine's crops ${pct(med(opening.own))} of it, best harvest median ${med(opening.best)} (the engine's crops' best ${med(opening.ownBest)})`);
+  const at = (a: number[], q: number) => [...a].sort((x, y) => x - y)[Math.floor(a.length * q)] ?? 0;
+  console.log(`        each night's pay over a night's share of the quota: ${nights.map((a, y) => `year ${y + 1} low ${at(a, 0.1).toFixed(2)} median ${at(a, 0.5).toFixed(2)} high ${at(a, 0.9).toFixed(2)}, under a third ${pct(a.filter((v) => v < 1 / 3).length / Math.max(1, a.length))}`).join('; ')}`);
 }

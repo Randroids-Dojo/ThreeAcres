@@ -51,7 +51,7 @@ export const CARDS: Record<CardId, CardDef> = {
   carrot: D('carrot', 'Carrot', 'seed', 1, 'common', 'empty', '+1 bloom for each radish next to it.'),
   lettuce: D('lettuce', 'Lettuce', 'seed', 1, 'common', 'empty', '+4 yield next to a tall crop (sunflower or corn).'),
   beans: D('beans', 'Beans', 'seed', 2, 'uncommon', 'empty', 'Picks for 3 nights. Neighbours get +2 yield.'),
-  corn: D('corn', 'Corn', 'seed', 3, 'rare', 'empty', 'Tall. x1.5 bloom next to beans.'),
+  corn: D('corn', 'Corn', 'seed', 3, 'rare', 'empty', 'Tall. Pays half as much again next to beans.'),
   sunflower: D('sunflower', 'Sunflower', 'seed', 2, 'uncommon', 'empty', 'Tall. It faces the crop below it: +2 bloom.'),
   pumpkin: D('pumpkin', 'Pumpkin', 'seed', 3, 'rare', 'empty', 'x2 bloom with nothing next to it.'),
   strawberry: D('strawberry', 'Strawberry', 'seed', 2, 'uncommon', 'empty', 'Picks for 4 nights. Every pick puts a scoop back.'),
@@ -59,7 +59,8 @@ export const CARDS: Record<CardId, CardDef> = {
   mint: D('mint', 'Mint', 'seed', 1, 'common', 'empty', 'Free crops: each night it spreads to a bare plot beside it.'),
   garlic: D('garlic', 'Garlic', 'seed', 1, 'common', 'empty', 'Pests keep off it and its neighbours.'),
   wheat: D('wheat', 'Wheat', 'seed', 1, 'common', 'empty', '+2 yield for each wheat next to it.'),
-  chili: D('chili', 'Chili', 'seed', 2, 'uncommon', 'empty', 'Neighbours get x1.5 bloom.'),
+  // Round 11: from two chilies at most (`TUNING.chiliCap`).
+  chili: D('chili', 'Chili', 'seed', 2, 'uncommon', 'empty', 'Crops next to it pay half as much again. Two chilies at most.'),
   can: D('can', 'Watering Can', 'tool', 1, 'common', 'plot', 'A row grows an extra night tonight.'),
   compost: D('compost', 'Compost', 'tool', 1, 'uncommon', 'crop', 'A crop gets +6 yield at harvest.'),
   fertiliser: D('fertiliser', 'Fertiliser', 'tool', 1, 'uncommon', 'growing', 'A crop grows a night now.'),
@@ -153,8 +154,10 @@ export interface PageDef {
 export const PAGES: Record<PageId, PageDef> = {
   barrel: { id: 'barrel', name: 'Rain Barrel', price: 80, text: 'Column A grows an extra night every night.' },
   cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
-  // Round 10: the engine pages leave radishes and carrots out, so each engine wants its own layout.
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Crops near a beehive get x1.5 bloom. Not radishes or carrots.' },
+  // Round 10: the engine pages leave radishes and carrots out, so each engine wants its own layout. Round 11: said with a
+  // plain example, not as a sum ("Neighbours get x1.7 bloom, radishes and carrots x1.5." and "+1.25 bloom" were words no
+  // one grokked). `levelText` says the same at every level.
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Near a beehive, a 10 coin crop pays 16. Not radishes or carrots.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Plant a different crop where one was just pulled: +4 yield.' },
@@ -164,9 +167,9 @@ export const PAGES: Record<PageId, PageDef> = {
   coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
   // Round 7: the pages that multiply the engines a run's first stall offers (Busy Bees is the beehive's).
   // Round 9: its bloom levels up (x1.7 at level I since round 10, TUNING.hotTimes), not its picks.
-  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies pick for 3 nights. Neighbours get x1.7 bloom, radishes and carrots x1.5.' },
-  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'Beans and strawberries give neighbours +1.25 bloom. Not radishes or carrots.' },
-  tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'Corn ripens two nights sooner. Tall crops get +1 bloom for each neighbour.' },
+  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies pick for 3 nights. A 10 coin crop pays 18 beside one, 31 beside two.' },
+  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'By beans or strawberries, a 10 coin crop pays 23. Not radishes or carrots.' },
+  tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'One more scoop a day. Corn ripens two nights sooner. Crops beside it add 10 coins.' },
 };
 
 export interface EngineDef {
@@ -177,6 +180,11 @@ export interface EngineDef {
   gift: CardId[];
   /** Cards the stall keeps in stock for it, one slot on each stall's first tray. */
   cards: CardId[];
+  /**
+   * Round 11: what this engine wants planted around it, said at the pick. Spring teaches carrot rings, and three of the
+   * four engines' pages then tell the player to stop, with no word on what to do instead.
+   */
+  plant: string;
 }
 
 /**
@@ -185,13 +193,13 @@ export interface EngineDef {
  * beehive was a rare roll at the stall. Their biggest wish was "a guaranteed choice of engine at each run's first stall".
  */
 export const ENGINES: Record<EngineId, EngineDef> = {
-  bees: { id: 'bees', page: 'bees', gift: ['beehive'], cards: ['beehive', 'sunflower'] },
-  hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili', 'chili', 'chili'], cards: ['chili'] },
-  vines: { id: 'vines', page: 'vines', gift: ['beans'], cards: ['beans', 'strawberry'] },
+  bees: { id: 'bees', page: 'bees', gift: ['beehive'], cards: ['beehive', 'sunflower'], plant: 'Plant beans and strawberries round the hive.' },
+  hot: { id: 'hot', page: 'hot', gift: ['chili', 'chili', 'chili', 'chili'], cards: ['chili'], plant: 'Plant chilies in pairs, with beans beside them.' },
+  vines: { id: 'vines', page: 'vines', gift: ['beans'], cards: ['beans', 'strawberry'], plant: 'Plant beans and strawberries side by side.' },
   // Round 9: two corn again (one in round 8): with one, the tall engine cleared year 1 69% of the time, the least of the four.
   // Round 10: three, so a season seldom goes without one in hand (the tenth playtest's corn paid 38% of a summer, then
   // came once in autumn, too late to ripen, and the run ended).
-  tall: { id: 'tall', page: 'tall', gift: ['corn', 'corn', 'corn'], cards: ['corn', 'sunflower'] },
+  tall: { id: 'tall', page: 'tall', gift: ['corn', 'corn', 'corn'], cards: ['corn', 'sunflower'], plant: 'Plant crops first, then corn among them.' },
 };
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[];
 
@@ -260,8 +268,9 @@ export function twistText(t: Twist): string {
     case 'frost': {
       // A save from before round 7 frosts the bottom row and names no crop.
       const row = ROW_NAMES[t.row ?? ROW_NAMES.length - 1] ?? 'bottom row';
-      // The clipping's little map and the board show which row: the line names whose row it is.
-      return t.crop ? `Frost on your ${crop}${crop.endsWith('s') ? "'" : "'s"} row.` : `Frost on the ${row}: no sowing there.`;
+      // Round 11: it names the row, not a crop: the eleventh playtest's "Frost on your chilies' row." froze a row with no
+      // chilies on it (a row is named for the crop that paid most there last season, and that crop has moved on).
+      return `Frost on the ${row}.`;
     }
     case 'sunup':
       return 'Your sunflowers face up and bloom the crop above.';

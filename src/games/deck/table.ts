@@ -1861,8 +1861,11 @@ export class Table {
   seasonStart(): void {
     const s = this.run;
     const last = s.stats.log[s.stats.log.length - 1];
-    if (isFinal(s)) this.say('The last winter: meet it to win.', null);
-    else if (s.carried && last) this.say(`${s.carried} carried over from ${SEASON_NAMES[last.season]}.`, null);
+    // Round 11: the merchant's coins for the hitch picked come as the stall is left: said once, with what carried over.
+    const paid = s.twist?.pay ? `The merchant paid ${s.twist.pay}.` : '';
+    if (isFinal(s)) this.say(paid ? `${paid} Meet the last winter to win.` : 'The last winter: meet it to win.', null);
+    else if (s.carried && last) this.say(paid ? `${paid} ${s.carried} carried over.` : `${s.carried} carried over from ${SEASON_NAMES[last.season]}.`, null);
+    else if (paid) this.say(paid, null);
   }
 
   /**
@@ -2067,7 +2070,8 @@ export class Table {
             this.ctx.audio.cue('deck.crow', { pan: this.pan(e.plot) });
             const c = b.centre(e.plot);
             b.emit('feather', c.x, c.y - b.T * 0.4, 8, { col: '#2a2830', spread: 70, up: 40, size: 6, life: 1.2 });
-            this.say('A crow took one.', e.plot);
+            // Round 11: it names the crop ("A crow took one." never said which).
+            this.say(`A crow took your ${CARDS[e.kind].name.toLowerCase()}.`, e.plot);
           });
           s.tween(at, 0.45, (k) => {
             const a = anim(e.uid);

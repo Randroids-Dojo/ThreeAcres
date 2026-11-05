@@ -67,8 +67,8 @@ function nameAt(ctx: Ctx, text: string, x: number, baseline: number, size: numbe
   const w = ctx.measureText(text).width + track * Math.max(0, text.length - 1);
   boxes.name = { x: align === 'center' ? x - w / 2 : x, y: baseline - size * 0.78, w, h: size * 0.98, size };
 }
-function ruleAt(ctx: Ctx, bits: Bit[], cx: number, cy: number, h: number, px: number): void {
-  const w = drawBits(ctx, bits, cx, cy, h, px);
+function ruleAt(ctx: Ctx, bits: Bit[], cx: number, cy: number, h: number, px: number, maxW = 84): void {
+  const w = drawBits(ctx, bits, cx, cy, h, px, false, maxW);
   boxes.rule = { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
@@ -618,7 +618,7 @@ function plaque(ctx: Ctx, id: CardId, up: boolean, S: number, showCost: boolean,
   ctx.beginPath();
   ctx.roundRect(14, 76, 72, 22, 4);
   fill(ctx, '#f3e7c6', 0.85);
-  ruleAt(ctx, pictogram(id, up, bonus?.bees ? (bonus.times ?? TUNING.beesTimes) : 0, bonus?.hot), 50, 87, 18, 1 / S);
+  ruleAt(ctx, pictogram(id, up, bonus?.bees ? (bonus.times ?? TUNING.beesTimes) : 0, bonus?.hot), 50, 87, 18, 1 / S, 70);
   if (fine) {
     ctx.strokeStyle = 'rgba(243,231,198,0.55)';
     ctx.lineWidth = 0.6;

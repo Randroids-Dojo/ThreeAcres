@@ -421,8 +421,8 @@ export function pictogram(id: CardId, up: boolean, bees = 0, hot?: number): Bit[
   }
 }
 
-/** Draw a pictogram line centred on (cx, cy), h tall. Returns its width. */
-export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number, px: number, light = false): number {
+/** Draw a pictogram line centred on (cx, cy), h tall, smaller if it would pass maxW (round 11: "x1.75" ran off a plaque). Returns its width. */
+export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number, px: number, light = false, maxW = Infinity): number {
   const gap = h * 0.12;
   const size = (b: Bit): number => {
     switch (b.t) {
@@ -445,6 +445,7 @@ export function drawBits(g: Ctx, bits: Bit[], cx: number, cy: number, h: number,
     }
   };
   const total = bits.reduce((a, b) => a + size(b), 0) + gap * (bits.length - 1);
+  if (total > maxW) return drawBits(g, bits, cx, cy, (h * maxW) / total, px, light);
   let x = cx - total / 2;
   for (const b of bits) {
     const w = size(b);
@@ -535,7 +536,8 @@ export function twistBits(t: Twist): Bit[] {
     case 'sunall':
       return [prod('sunflower'), map('next'), B(`+${TUNING.sunAll}`), BLOOMB];
     case 'frost':
-      return t.crop ? [{ t: 'map', k: 'frost', row: t.row ?? 3 }, prod(t.crop)] : [{ t: 'map', k: 'frost', row: t.row ?? 3 }];
+      // Round 11: the row alone, as the line says it (the crop the row was aimed for may have moved on).
+      return [{ t: 'map', k: 'frost', row: t.row ?? 3 }];
     case 'sunup':
       return [prod('sunflower'), map('above'), B(`+${TUNING.sunBloom}`), BLOOMB];
     case 'crows':

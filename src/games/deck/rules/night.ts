@@ -122,7 +122,8 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
   // Round 9: Hot Beds' level sets a chili's bloom (x1.5 without the page). Round 10: not on radishes and carrots, which
   // keep the chili's own x1.5.
   const hot = mine ? chiliTimes(s, o.night ?? 0) : 1.5;
-  for (const j of near('chili').slice(0, pageOn(s, 'hot', o.night ?? 0) ? TUNING.chiliCap : 99)) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: hot, from: j });
+  // Round 11: from two chilies at most, page or no page (x1.7 to x2 a chili stacked without end, the solved answer).
+  for (const j of near('chili').slice(0, TUNING.chiliCap)) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: hot, from: j });
   // A buyer pays double for one crop this season; a glut halves another's pay.
   if (tw?.id === 'buyer' && tw.crop === kind) mult.push({ label: 'a buyer', icon: 'buyer', op: 'x', v: TUNING.buyerTimes });
   if (tw?.id === 'glut' && tw.crop === kind) mult.push({ label: 'a glut', icon: 'glut', op: 'x', v: TUNING.glutTimes });

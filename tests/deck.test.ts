@@ -796,8 +796,9 @@ describe('the plot persists', () => {
     }
     expect(crops / dawns).toBeGreaterThanOrEqual(2.5);
     expect(bare / dawns).toBeLessThanOrEqual(0.12);
-    // The old deck's crops stood 1.3 nights on average.
-    expect(stood.reduce((a, b) => a + b, 0) / stood.length).toBeGreaterThanOrEqual(1.8);
+    // The old deck's crops stood 1.3 nights on average. Round 11: 1.7 (1.8): 12 seeds; a first hand of one dear seed brings it
+    // to about 1.77 from about 1.85.
+    expect(stood.reduce((a, b) => a + b, 0) / stood.length).toBeGreaterThanOrEqual(1.7);
   });
 });
 
@@ -835,7 +836,8 @@ describe('lessons that fit the moment', () => {
       expect(first.id).toBe('pests');
       expect(first.text).toMatch(/halve/);
       expect(first.text).not.toMatch(/ladybird|garlic/i);
-      // Then, once it has had its say, the answer, only if one can still be brought out.
+      // Then, once it has had its say and a card has been played (round 11), the answer, only if one can still be brought out.
+      t.count('play');
       const next = t.update(c, 'touch', null, 6, false).line;
       if (!own.length) expect(next?.text ?? '').not.toMatch(/ladybird|garlic/i);
       else {
@@ -973,8 +975,9 @@ describe('quotas after the playtest', () => {
     expect(quotaFor(1, 1, [])).toBeGreaterThanOrEqual(Math.round(165 * 1.15));
     expect(quotaFor(1, 2, [])).toBeGreaterThanOrEqual(Math.round(185 * 1.15));
     expect(quotaFor(1, 3, [])).toBeGreaterThanOrEqual(Math.round(220 * 1.15));
-    // Spring of year 1 stays close to where the first round left it: the real puzzle (round 9: 160, with a dealt first hand).
-    expect(quotaFor(1, 0, [])).toBeGreaterThanOrEqual(150);
+    // Spring of year 1 stays close to where the first round left it: the real puzzle (round 9: 160, with a dealt first hand;
+    // round 11: 140, a first hand with no spare radish takes about 4% less).
+    expect(quotaFor(1, 0, [])).toBeGreaterThanOrEqual(130);
     expect(quotaFor(1, 0, [])).toBeLessThanOrEqual(170);
     for (let year = 1; year <= 4; year++) {
       const winter = quotaFor(year, 3, []);
@@ -1425,8 +1428,9 @@ describe('round 4: a finish line, giving up that counts, the Cellar paired, Mark
         if (s.shop!.cards.some((c) => c.card === 'scarecrow')) freshScarecrows++;
       }
     }
-    // Two answer slots on every tray before; now both only when a random good happens to be the other.
-    expect(both / 60).toBeLessThan(0.35);
+    // Two answer slots on every tray before; now both only when a random good happens to be the other. Round 11: 0.5 (0.35):
+    // 0.37 over 2,000 seeds, on round 10 and on this build alike; 60 seeds swing it by a tenth.
+    expect(both / 60).toBeLessThan(0.5);
     expect(freshScarecrows / rolls).toBeLessThan(0.4);
     // Enough owned: one scarecrow (it stands for the rest of the run) and two cards for pests.
     const s = table(['radish'], { season: 2 });
@@ -1858,8 +1862,9 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
     expect(meta.winLog![0]).toMatchObject({ run: 1, coins: s.stats.totalEarned, pages: ['cellar', 'bees'] });
     expect(meta.winLog![0].top[0]).toBe('carrot');
     // The fifth playtest's copy: no 27-word page with a parenthetical, no "blooms gets", a reason to want mint.
+    // Round 11: 19 words (13): the engine pages say what a crop pays in plain words; deck-overlap measures that they fit.
     for (const p of Object.values(PAGES)) {
-      expect(p.text.split(/\s+/).length).toBeLessThanOrEqual(13);
+      expect(p.text.split(/\s+/).length).toBeLessThanOrEqual(19);
       expect(p.text).not.toMatch(/[()]/);
     }
     expect(PAGES.bees.text).not.toMatch(/blooms gets/);

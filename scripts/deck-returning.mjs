@@ -104,7 +104,11 @@ async function session(label, viewport, touch) {
   check(`${label}: the guided run ends on a missed quota, with its entry`, entry.phase === 'over' && entry.kind === 'entry' && entry.runs === 1, JSON.stringify({ ...entry, text: entry.text.slice(0, 60) }));
   check(`${label}: the loss ledger lists each season's twist`, /Your carrots sell for half\./.test(entry.text), entry.text.slice(0, 240));
   await corner('the entry');
-  // A fresh page, by a real tap.
+  // Round 11: a guided run's loss says what to try next, and its one way on starts a new run.
+  const way = await p.evaluate(() => ({ next: document.querySelector('.sb-trynext')?.textContent ?? '', btn: document.querySelector('.sb-entry-foot .sb-plain')?.textContent ?? '', bottom: document.querySelector('.sb-entry-foot .sb-plain')?.getBoundingClientRect().bottom ?? 1e9, H: innerHeight }));
+  check(`${label}: the entry says plainly what to try next`, /^Try this next run: plant /.test(way.next), way.next);
+  check(`${label}: the way on says "Start a new run" and is on the screen`, way.btn === 'Start a new run' && way.bottom <= way.H, JSON.stringify(way));
+  // A new run, by a real tap.
   await tapAt('.sb-entry-foot .sb-plain');
   await wait(600);
   const second = await p.evaluate((all) => {

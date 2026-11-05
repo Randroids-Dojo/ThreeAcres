@@ -979,8 +979,9 @@ export class Board {
     if (p.obj) {
       const s = p.obj === 'scarecrow'
         ? this.sprite('scarecrow', -0.6, -1.15, 0.6, 0.25, (g, px) => {
-            g.scale(0.92, 0.92);
-            paintScarecrow(g, this.pal, px / 0.92);
+            // Round 11: fitted inside its own plot, like a crop: its hat tangled with the crop above (the eleventh playtest).
+            g.scale(SCARECROW_FIT, SCARECROW_FIT);
+            paintScarecrow(g, this.pal, px / SCARECROW_FIT);
           })
         : this.sprite('beehive', -0.6, -1.0, 0.6, 0.25, (g, px) => paintHiveOnPlot(g, px, this.pal.ink));
       ctx.drawImage(s.c, b.x + s.x0 * T + shake, b.y + s.y0 * T, s.w * T, s.h * T);
@@ -1249,6 +1250,8 @@ const FRAME_M = 9;
 const OVERHANG_FADE = 0.28;
 /** The top of a plot, in plot units from a crop's base (0.74 down the plot), less a hair: a crop is fitted under it. */
 const PLOT_TOP = -0.7;
+/** Round 11: the scarecrow's scale, so its hat stays inside its plot. */
+const SCARECROW_FIT = 0.62;
 
 /** The highest painted pixel of a sprite, in plot units from its base (negative is up). */
 function paintedTop(s: Sprite): number {

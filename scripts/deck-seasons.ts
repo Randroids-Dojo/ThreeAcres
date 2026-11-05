@@ -13,14 +13,27 @@
 // Round 9: the careful bot (the guided first run played with no noise: the careful line through the guided year), the
 // loose bot (a weak player: noise 0.4 and one play deep), and --upto=n to stop after n seasons (--upto=1 for a cheap
 // spring clear rate over many seeds).
-// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|careful|loose|second] [--upto=n]
+// Round 11: the novice (deck-players.ts): a careful first-timer on the guided year, reading the previews with no look-ahead
+// over days, some weaker placements, the cheapest useful thing at the stall. The eleventh playtest followed every lesson
+// and preview and died in the guided summer, 259 of 330, while the bots cleared it. --engine=bees|hot|vines|tall fixes its
+// pick. A line of the guided year's clears by engine follows its table.
+// npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|careful|loose|second|novice|greedy] [--upto=n] [--engine=id]
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
-import { BOONS, newMeta, newRun, SEASON_NAMES } from '../src/games/deck/rules';
+import { BOONS, newMeta, newRun, SEASON_NAMES, TUNING, type EngineId } from '../src/games/deck/rules';
+import { GREEDY, NOVICE, readerDay, readerShop, type Reader } from './deck-players';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const runs = Number(args[0] ?? 200);
 const only = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1];
 const K = Number(process.argv.find((a) => a.startsWith('--upto='))?.split('=')[1] ?? 12);
+// --tune=key:value plays any TUNING number; a value in brackets or braces is read as JSON (round 11).
+for (const a of process.argv.filter((x) => x.startsWith('--tune='))) {
+  const at = a.indexOf(':');
+  const v = a.slice(at + 1);
+  (TUNING as unknown as Record<string, unknown>)[a.slice(7, at)] = /^[[{]/.test(v) ? JSON.parse(v) : Number(v);
+}
+const pickEngine = process.argv.find((a) => a.startsWith('--engine='))?.split('=')[1] as EngineId | undefined;
+const READ: Record<string, Reader> = { novice: { ...NOVICE, engine: pickEngine ?? 'any' }, greedy: { ...GREEDY, engine: pickEngine ?? 'any' } };
 
 interface Tally {
   played: number[];
@@ -44,9 +57,11 @@ interface Tally {
   offered: number[];
   repeats: number;
   traySlots: number;
+  /** Round 11: by the engine taken, [runs, met the first free season, met the year]. */
+  byEngine: Record<string, [number, number, number]>;
 }
 
-function play(noise: number, guided: boolean, second = false, depth = 2): Tally {
+function play(noise: number, guided: boolean, second = false, depth = 2, reader?: Reader): Tally {
   const t: Tally = {
     played: new Array(K).fill(0),
     cleared: new Array(K).fill(0),
@@ -66,6 +81,7 @@ function play(noise: number, guided: boolean, second = false, depth = 2): Tally 
     offered: [],
     repeats: 0,
     traySlots: 0,
+    byEngine: {},
   };
   for (let i = 0; i < runs; i++) {
     const seed = 1000 + i * 7919;
@@ -88,7 +104,8 @@ function play(noise: number, guided: boolean, second = false, depth = 2): Tally 
       if (s.phase === 'shop') {
         tray();
         const offer = s.shop?.twists ?? [];
-        botShop(s, o, dice);
+        if (reader) readerShop(s, reader, dice);
+        else botShop(s, o, dice);
         if (offer.length === 2 && s.twist) {
           t.twists++;
           if (!(BOONS as readonly string[]).includes(s.twist.id)) t.hitches++;
@@ -100,7 +117,7 @@ function play(noise: number, guided: boolean, second = false, depth = 2): Tally 
       if (s.day === 1) t.dawn[k].push(s.plots.filter((p) => p.crop).length);
       const day = s.day;
       const before = s.earned;
-      const ev = botDay(s, o, dice);
+      const ev = reader ? readerDay(s, reader, dice) : botDay(s, o, dice);
       const end = ev.find((e) => e.t === 'seasonEnd');
       const took = end && end.t === 'seasonEnd' ? end.earned - before : s.earned - before;
       if (day === 1) t.night1[k].push(took);
@@ -119,6 +136,11 @@ function play(noise: number, guided: boolean, second = false, depth = 2): Tally 
         t.quota[k].push(end.quota);
       }
     }
+    const eng = (s as { engine?: string | null }).engine ?? 'none';
+    const be = (t.byEngine[eng] ??= [0, 0, 0]);
+    be[0]++;
+    if (s.stats.seasonsCleared >= 2) be[1]++;
+    if (s.stats.seasonsCleared >= 4) be[2]++;
     t.offered.push(offered.size);
     t.unspent.push(s.coins);
     t.slots.push((s as { slots?: number }).slots ?? 0);
@@ -134,6 +156,8 @@ const med = (a: number[]) => {
 };
 
 const bots: [string, number, boolean, boolean, number][] = [
+  ['novice', 0, true, false, 2],
+  ['greedy', 0, false, false, 2],
   ['decent', 0.15, false, false, 2],
   ['strict', 0, false, false, 2],
   ['guided', 0.15, true, false, 2],
@@ -142,10 +166,11 @@ const bots: [string, number, boolean, boolean, number][] = [
   ['second', 0.15, false, true, 2],
 ];
 for (const [name, noise, guided, second, depth] of bots) {
-  if (only ? only !== name : name === 'careful' || name === 'loose') continue;
+  if (only ? only !== name : name === 'careful' || name === 'loose' || name === 'greedy') continue;
   const t0 = performance.now();
-  const t = play(noise, guided, second, depth);
-  console.log(`\n${name} bot (noise ${noise}${depth !== 2 ? `, ${depth} play deep` : ''}${guided ? ', guided first run' : ''}${second ? ', the first run after the guided one' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
+  const reader = READ[name];
+  const t = play(noise, guided, second, depth, reader);
+  console.log(reader ? `\n${name} player (reads the previews${guided ? ', guided first run' : ''}${pickEngine ? `, ${pickEngine}` : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run` : `\n${name} bot (noise ${noise}${depth !== 2 ? `, ${depth} play deep` : ''}${guided ? ', guided first run' : ''}${second ? ', the first run after the guided one' : ''}), ${runs} runs, ${((performance.now() - t0) / runs).toFixed(0)} ms a run`);
   console.log('season            played  pass  quota  median take  earned/quota  crops at first dawn  night 1  night 2');
   for (let k = 0; k < K; k++) {
     if (!t.played[k]) continue;
@@ -158,6 +183,8 @@ for (const [name, noise, guided, second, depth] of bots) {
     const n = t.played[y * 4 - 1] ? t.cleared[y * 4 - 1] : 0;
     console.log(`cleared year ${y}: ${((n / runs) * 100).toFixed(0)}%`);
   }
+  const bye = Object.entries(t.byEngine).sort().map(([k, [n, a, b]]) => `${k} ${n} runs: first free season ${Math.round((a / n) * 100)}%, year 1 ${Math.round((b / n) * 100)}%`).join('; ');
+  console.log(`by engine: ${bye}`);
   console.log(`coins unspent when the run ends: median ${med(t.unspent)}, mean ${mean(t.unspent).toFixed(0)}, max ${Math.max(...t.unspent)}`);
   console.log(`coins left on leaving a stall from year 2 summer on: median ${med(t.kept)}, p90 ${[...t.kept].sort((a, b) => a - b)[Math.floor(t.kept.length * 0.9)] ?? 0}`);
   console.log(`pages kept at the end: mean ${mean(t.pages).toFixed(1)}, max ${Math.max(...t.pages)}; page slots bought: ${t.slots.filter((n) => n > 0).length} runs, max ${Math.max(...t.slots)}`);

@@ -250,6 +250,8 @@ function pageValue(s: RunState, id: PageId): number {
 const TWIST_SAMPLES = 2;
 /** A take past this many times the quota is worth no more to the bot: the carry is capped, and the season is met. */
 const TWIST_CAP = 1.6;
+/** Round 11: what the purse gains, over the quota, counts this much beside the take over the quota: the merchant's coins spend. */
+const TWIST_PURSE = 1 / 3;
 
 /**
  * What a twist on offer is worth to the bot's own deck and plot: the coming season played ahead on a copy with that
@@ -265,11 +267,12 @@ export function twistWorth(s: RunState, i: number, seed = 1): number {
     c.stats = { ...c.stats, log: [...s.stats.log] };
     c.rng = (Math.imul(seed + k * 7919, 2654435761) ^ s.rng) | 0;
     chooseTwist(c, i);
+    const purse = c.coins;
     leaveShop(c);
     const dice = new Dice(c.rng ^ 0x5bd1e995);
     for (let d = 0; d < TUNING.days && c.phase === 'day'; d++) botDay(c, { noise: 0, seed, depth: 1 }, dice);
     const l = c.stats.log[c.stats.log.length - 1];
-    v += l ? Math.min(TWIST_CAP, l.earned / Math.max(1, l.quota)) : 0;
+    v += l ? Math.min(TWIST_CAP, l.earned / Math.max(1, l.quota)) + (TWIST_PURSE * (c.coins - purse)) / Math.max(1, l.quota) : 0;
   }
   return v / TWIST_SAMPLES;
 }

@@ -712,7 +712,8 @@ async function session(label, viewport, touch) {
     // round 7: 240, since the guided run now takes an engine at this stall; round 9: 330 (the ninth playtest met 240 on
     // night 3, and the careful line took a median 1.82 times it).
     const head = await p.evaluate(() => document.querySelector('.sb-purse-line')?.textContent ?? '');
-    check(`${label}: the guided run's first stall says summer asks 330`, /Summer asks 330\./.test(head), head);
+    // Round 11: 270 (330 before): the eleventh playtest followed every lesson and preview and took 259 of 330.
+    check(`${label}: the guided run's first stall says summer asks 270`, /Summer asks 270\./.test(head), head);
     const before = await p.evaluate(() => window.deck.state().coins);
     const idx = await p.evaluate(() => window.deck.state().shop.cards.findIndex((c) => c.price <= window.deck.state().coins));
     check(`${label}: the first stall stocks a seed`, await p.evaluate(() => window.deck.state().shop.cards.some((c) => ['radish', 'carrot', 'lettuce', 'beans', 'corn', 'sunflower', 'pumpkin', 'strawberry', 'mint', 'garlic', 'wheat', 'chili'].includes(c.card))));
@@ -1139,6 +1140,10 @@ async function round6(label, viewport, touch) {
     d.state().season = 3;
     // A later stall, not the run's first (round 7: that one offers an engine).
     d.state().stats.log.push({ year: 1, season: 2, earned: 400, quota: 300, cleared: true, carried: 0, twist: null, idle: 0 });
+    // Round 11: a season played, so the hitch is priced and the merchant pays.
+    // No rows and a scarecrow in the tin: a glut, so the steps below can plant anywhere and no crow comes.
+    d.state().tally = { take: 1000, harvests: 40, kinds: { carrot: 400, beans: 150, strawberry: 140, radish: 100 }, rows: [0, 0, 0, 0], rowKinds: [{}, {}, {}, {}], from: {}, pests: 200, company: 140, last: 90 };
+    d.state().draw.push({ uid: 97001, id: 'scarecrow', up: false });
     while (d.state().phase === 'day') {
       d.state().earned = d.state().quota + 160;
       d.endDay();
@@ -1149,20 +1154,22 @@ async function round6(label, viewport, touch) {
   await wait(500);
   const offer = await p.evaluate(() => ({ cards: [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ line: e.querySelector('span')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })), head: document.querySelector('.sb-purse-line').textContent }));
   const hi = offer.cards.findIndex((c) => c.trade);
-  const m = offer.cards[hi]?.trade.match(/^Spring asks (\d+), not (\d+)\.$/);
+  // Round 11: the hitch's line is "Spring asks 700. The merchant pays 140."; the head says what spring asks without it.
+  const m = offer.cards[hi]?.trade.match(/^Spring asks (\d+)\. The merchant pays (\d+)\.$/);
   const plain = Number(offer.head.match(/asks (\d+)/)?.[1]);
-  check(`${label}: the hitch says what it takes off spring's quota, the help says nothing`, offer.cards.length === 2 && offer.cards.filter((c) => c.trade).length === 1 && !!m && Number(m[1]) < Number(m[2]) && Number(m[2]) === plain, JSON.stringify(offer));
+  check(`${label}: the hitch says what spring asks with it and what the merchant pays, the help says nothing`, offer.cards.length === 2 && offer.cards.filter((c) => c.trade).length === 1 && !!m && Number(m[1]) < plain && Number(m[2]) > 0, JSON.stringify(offer));
   await p.screenshot({ path: `${out}/${label}-r6-trade.png` });
   if (hi >= 0) await tap(...(await at('.sb-twistcard', hi)));
   const head2 = await p.evaluate(() => document.querySelector('.sb-purse-line').textContent);
   check(`${label}: picking the hitch by a ${touch ? 'tap' : 'click'} moves the stall's head to the smaller quota`, !!m && head2.includes(`asks ${m[1]}.`), head2);
   await tap(...(await at('.sb-signpost')));
   await wait(350);
-  const start = await p.evaluate(() => ({ phase: window.deck.state().phase, quota: window.deck.state().quota, tally: window.deck.tally() }));
+  const start = await p.evaluate(() => ({ phase: window.deck.state().phase, quota: window.deck.state().quota, tally: window.deck.tally(), paid: window.deck.state().twist?.pay ?? 0 }));
   const n1 = await noteAt();
   await p.screenshot({ path: `${out}/${label}-r6-carried-note.png` });
   check(`${label}: spring asks what the hitch said, on the ledger too`, start.phase === 'day' && !!m && start.quota === Number(m[1]) && start.tally.includes(m[1]), JSON.stringify(start));
-  check(`${label}: "carried over" stands in the lesson strip, the twist stepping aside, not over row 1`, n1.on && /carried over from winter/.test(n1.text) && !n1.row1.some((r) => cross(n1.note, r)) && cross(n1.note, n1.strip) && n1.twist < 0.1, JSON.stringify({ text: n1.text, twist: n1.twist }));
+  check(`${label}: the merchant's coins came, as the clipping said`, !!m && start.paid === Number(m[2]), JSON.stringify(start));
+  check(`${label}: "carried over" and what the merchant paid stand in the lesson strip, the twist stepping aside, not over row 1`, n1.on && /carried over/.test(n1.text) && new RegExp(`The merchant paid ${start.paid}\\.`).test(n1.text) && !n1.row1.some((r) => cross(n1.note, r)) && cross(n1.note, n1.strip) && n1.twist < 0.1, JSON.stringify({ text: n1.text, twist: n1.twist }));
   await wait(2600);
   const back = await p.evaluate(() => ({ twist: Number(getComputedStyle(document.querySelector('.sb-twist')).opacity), line: window.deck.twist() }));
   check(`${label}: the twist line comes back once the note goes`, back.twist > 0.9 && back.line.length > 0, JSON.stringify(back));

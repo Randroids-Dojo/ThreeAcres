@@ -7,6 +7,7 @@
 import type { GameContext } from '../../shell/types';
 import {
   allCards,
+  cardLine,
   buyCard,
   buyLevel,
   buyPage,
@@ -63,7 +64,7 @@ import {
 import type { Line } from './lessons';
 import type { Table } from './table';
 import { pinUrl, scoopUrl, thingUrl } from './view/art';
-import { faceUrl, VARIETY } from './view/faces';
+import { faceBonus, faceUrl, VARIETY } from './view/faces';
 import { paintBell, paintStamp } from './view/glyphs';
 import { twistUrl } from './view/icons';
 
@@ -102,15 +103,26 @@ function btn(cls: string, html: string, on: () => void): HTMLButtonElement {
   return b;
 }
 
+/**
+ * Round 11: what to try next, on the page a guided run ends on: its engine's own planting, and the purse if it went
+ * unspent. The eleventh playtest's first run read "Short by 71. The run ends here." with 309 coins unspent and a feel-good
+ * score of 3 of 10. Null for a run that was given up or won, or a later run (the page has said it once).
+ */
+export function lossAdvice(s: { guided: boolean; end: { won?: boolean; gaveUp?: boolean } | null; engine?: keyof typeof ENGINES | null; coins: number }): string | null {
+  if (!s.guided || !s.end || s.end.won || s.end.gaveUp) return null;
+  const plant = s.engine ? ENGINES[s.engine].plant : 'Plant a carrot, then radishes beside it.';
+  return `Try this next run: ${lowerFirst(plant)} ${s.coins >= 60 ? 'And spend your coins at each stall: they buy seeds.' : 'Spend your scoops every day.'}`;
+}
+
 /** A card said in plain words: its cost, when a seed ripens, and its rule. */
-export function cardWords(id: CardId, up: boolean): string {
+export function cardWords(id: CardId, up: boolean, s: Parameters<typeof cardLine>[2] = {}): string {
   const d = CARDS[id];
   const bits = [`${scoops(costOf(id, up))}.`];
   if (d.type === 'seed') {
     const sd = SEEDS[id as SeedId];
     bits.push(`Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}.`);
   }
-  bits.push(cardText(id, up));
+  bits.push(cardLine(id, up, s));
   return bits.join(' ');
 }
 
@@ -211,6 +223,21 @@ export class Sheets {
     return this.ctx.device() === 'touch';
   }
 
+  /**
+   * A card's face as this run has it, with its kept pages' numbers. Round 11: the stall, the tin and the end pages drew the
+   * plain face: with Hot Beds IV kept, the stall's chili said x1.5 and the win page showed a 6 basket x1.5 chili for a run
+   * of 9 basket x2s.
+   */
+  private face(id: CardId, up: boolean): string {
+    const s = this.t.run;
+    return faceUrl(id, up, true, faceBonus(id, s.pages, s.levels));
+  }
+
+  /** The face a run's best crop is shown with on its end page: improved if the run improved one, with the run's numbers. */
+  private bestFace(id: CardId): string {
+    return this.face(id, allCards(this.t.run).some((c) => c.id === id && c.up));
+  }
+
   // ---------------------------------------------------------------- the almanac (pause)
 
   menu(): void {
@@ -282,10 +309,10 @@ export class Sheets {
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
       'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on. An engine\'s page never works on radishes and carrots: each engine wants its own crops.',
       'From year 2 the stall sells your engine\'s page at its next level, such as Busy Bees II, then III. Each level makes it pay more, and the quotas climb to match.',
-      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you plant most. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota, by about what it would cost you and a little more. Pick one; it holds all season.',
+      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on a row you plant. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota, and the merchant pays you for it as you leave the stall: together about what the other would bring. Pick one; it holds all season.',
       'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
       'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
-      'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
+      'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late planting is picked next season and counts for its quota.',
       'From summer, pests settle on crops: a pested crop pays half for the nights shown on it. From autumn, a crow may sit on the bed at dawn; that night it takes a ripe crop no scarecrow guards.',
       'Cards you keep stay in hand. Once a day you may toss one on the spent heap for a fresh one.',
     ];
@@ -297,7 +324,7 @@ export class Sheets {
     const list = el('div', 'sb-cardlist');
     for (const id of [...ids].sort((a, b) => order[CARDS[a].type] - order[CARDS[b].type] || CARDS[a].name.localeCompare(CARDS[b].name))) {
       const row = el('div', 'sb-cardrow');
-      row.innerHTML = `<img src="${faceUrl(id, false)}" alt=""><p><b>${esc(CARDS[id].name)}</b> ${esc(cardWords(id, false))}</p>`;
+      row.innerHTML = `<img src="${this.face(id, false)}" alt=""><p><b>${esc(CARDS[id].name)}</b> ${esc(cardWords(id, false, this.t.run))}</p>`;
       list.append(row);
     }
     page.append(list);
@@ -312,7 +339,7 @@ export class Sheets {
     const def = CARDS[card.id];
     d.innerHTML = '';
     const img = el('img');
-    img.src = faceUrl(card.id, card.up);
+    img.src = this.face(card.id, card.up);
     img.alt = def.name;
     d.append(img);
     const notes = el('div', 'sb-detail-notes');
@@ -321,7 +348,7 @@ export class Sheets {
     notes.append(el('p', '', `<b>${esc(def.name)}</b>${variety}${card.up ? ', improved' : ''}. ${cost === 0 ? 'Free to play.' : `Costs ${cost} ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
     if (def.type === 'seed') {
       const sd = SEEDS[card.id as SeedId];
-      notes.append(el('p', '', `Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}. ${esc(cardText(card.id, card.up))}`));
+      notes.append(el('p', '', `Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}. ${esc(cardLine(card.id, card.up, this.t.run))}`));
     } else notes.append(el('p', '', esc(cardText(card.id, card.up))));
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
     if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot from season to season, for the rest of the run.'));
@@ -392,7 +419,7 @@ export class Sheets {
       const grid = el('div', 'sb-tingrid');
       for (const c of g.cards) {
         const disabled = pick === 'upgrade' && c.up;
-        const b = btn(`sb-tincard${disabled ? ' off' : ''}${g.mark ? ` ${g.mark}` : ''}`, `<img src="${faceUrl(c.id, c.up)}" alt="${esc(CARDS[c.id].name)}${c.up ? ', improved' : ''}">`, () => {
+        const b = btn(`sb-tincard${disabled ? ' off' : ''}${g.mark ? ` ${g.mark}` : ''}`, `<img src="${this.face(c.id, c.up)}" alt="${esc(CARDS[c.id].name)}${c.up ? ', improved' : ''}">`, () => {
           if (!pick) {
             this.detail(c);
             return;
@@ -524,7 +551,7 @@ export class Sheets {
         const two = e.gift.length > 1 ? `<i class="sb-twice">x${e.gift.length}</i>` : '';
         const b = btn(
           `sb-enginecard${on ? ' picked' : sh.engine !== undefined ? ' other' : ''}`,
-          `<span class="sb-engface"><img src="${faceUrl(e.gift[0], false)}" alt="">${two}</span><span><b>${esc(engineText(id).replace(/\.$/, ''))}</b> ${esc(PAGES[e.page].text)}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`,
+          `<span class="sb-engface"><img src="${faceUrl(e.gift[0], false)}" alt="">${two}</span><span><b>${esc(engineText(id).replace(/\.$/, ''))}</b> ${esc(PAGES[e.page].text)}${choosing ? `<em class="sb-engplant">${esc(e.plant)}</em>` : ''}</span>${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`,
           () => {
             if (!chooseEngine(s, i)) return;
             this.t.tutor.count('engine');
@@ -547,8 +574,10 @@ export class Sheets {
       row.setAttribute('aria-label', `${cap(SEASON_NAMES[coming.season])} brings one of these`);
       sh.twists.forEach((tw, i) => {
         const on = sh.twist === i;
-        // A hitch is a trade: it says what it takes off the season's quota ("Summer asks 510, not 600.").
-        const trade = twistEase(tw) ? `<em class="sb-trade">${cap(SEASON_NAMES[coming.season])} asks ${twistQuota(s, tw)}, not ${twistQuota(s, null)}.</em>` : '';
+        // A hitch is a trade: it says what the season asks with it, and round 11 what the merchant pays ("Spring asks 700.
+        // The merchant pays 140."), so its margin reads beside the help's coins. A save from before round 11 pays nothing.
+        const asks = `${cap(SEASON_NAMES[coming.season])} asks ${twistQuota(s, tw)}`;
+        const trade = twistEase(tw) ? `<em class="sb-trade">${tw.pay ? `<span class="sb-say">${asks}.</span> <span class="sb-say">The merchant pays ${tw.pay}.</span>` : `${asks}, not ${twistQuota(s, null)}.`}</em>` : '';
         // Round 8: both say what they would do to the season's take, in coins, from the shares the rules priced them by
         // ("Your carrots would pay about 320 more."): the eighth playtest's help showed no number beside the hitch's.
         const note = twistNote(s, tw);
@@ -675,9 +704,9 @@ export class Sheets {
         b.innerHTML = '<span class="sb-chalk">sold</span>';
         b.disabled = true;
       } else {
-        b.innerHTML = `<img src="${faceUrl(o.card, !!o.up)}" alt="${esc(def.name)}${o.up ? ', improved' : ''}"><span class="sb-pricetag">${o.price}</span>`;
-        if (this.picked === key) read = `<b>${o.up ? 'Improved ' : ''}${esc(o.up ? lower(o.card) : def.name)}</b>, ${esc(cardWords(o.card, !!o.up))} ${ask(o.price)}`;
-        b.setAttribute('aria-label', `${o.up ? 'Improved ' : ''}${def.name}, ${o.price} coins. ${cardText(o.card, !!o.up)}`);
+        b.innerHTML = `<img src="${this.face(o.card, !!o.up)}" alt="${esc(def.name)}${o.up ? ', improved' : ''}"><span class="sb-pricetag">${o.price}</span>`;
+        if (this.picked === key) read = `<b>${o.up ? 'Improved ' : ''}${esc(o.up ? lower(o.card) : def.name)}</b>, ${esc(cardWords(o.card, !!o.up, s))} ${ask(o.price)}`;
+        b.setAttribute('aria-label', `${o.up ? 'Improved ' : ''}${def.name}, ${o.price} coins. ${cardLine(o.card, !!o.up, s)}`);
       }
       b.onclick = () =>
         this.lift(key, () => {
@@ -749,7 +778,7 @@ export class Sheets {
     if (read) spot.append(this.readSlip(read));
     else if (this.done) {
       const d = el('div', 'sb-done');
-      if (this.doneCard) d.append(Object.assign(el('img'), { src: faceUrl(this.doneCard.id, true), alt: '' }));
+      if (this.doneCard) d.append(Object.assign(el('img'), { src: this.face(this.doneCard.id, true), alt: '' }));
       d.append(el('p', '', esc(this.done)));
       spot.append(d);
     } else if (this.t.stallLine && !(choosing && this.t.stallLine.id === 'engine')) spot.append(this.lessonEl);
@@ -909,9 +938,12 @@ export class Sheets {
       const more = seasonsToNext(m);
       page.append(el('p', 'sb-quiet', more ? `The catalogue holds nothing new yet. Meet ${NUMS[more] ?? more} more ${more === 1 ? 'season' : 'seasons'}, in any run, to add to it.` : 'The catalogue holds every card.'));
     }
+    // Round 11: a first run's loss says plainly what to try next, and the way on starts the next run at once.
+    const next = lossAdvice(s);
+    if (next) page.append(el('p', 'sb-trynext', esc(next)));
     // The way on, and for a won run a red wax seal beside it (kept off the ruled account).
     const foot = el('div', 'sb-entry-foot');
-    foot.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    foot.append(btn('sb-plain big', 'Start a new run', () => this.t.fresh(null, false)));
     if (end?.won) foot.append(el('div', 'sb-seal', '<span>Won</span>'));
     sheet.append(foot);
     this.show('entry', sheet);
@@ -959,7 +991,7 @@ export class Sheets {
     // The best harvest, with its card.
     if (s.stats.bestKind) {
       const best = el('div', 'sb-win-best');
-      best.append(Object.assign(el('img'), { src: faceUrl(s.stats.bestKind, false), alt: CARDS[s.stats.bestKind].name }));
+      best.append(Object.assign(el('img'), { src: this.bestFace(s.stats.bestKind), alt: CARDS[s.stats.bestKind].name }));
       best.append(el('p', '', `<b>Best harvest</b>${esc(cap(lower(s.stats.bestKind)))}, for ${s.stats.bestHarvest}.`));
       page.append(best);
     }
@@ -973,7 +1005,7 @@ export class Sheets {
       const row = el('div', 'sb-win-crops');
       for (const k of crops) {
         const c = el('div', 'sb-win-crop');
-        c.append(Object.assign(el('img'), { src: faceUrl(k, false), alt: '' }));
+        c.append(Object.assign(el('img'), { src: this.bestFace(k), alt: '' }));
         c.append(el('span', '', `${cap(PLURALS[k])} ${Math.round(((by[k] ?? 0) / total) * 100)}%`));
         row.append(c);
       }
@@ -1001,7 +1033,7 @@ export class Sheets {
     const fresh: CardId[] = end.unlocked ?? [];
     if (fresh.length) page.append(el('p', '', `New in the merchant's catalogue: ${listOf(fresh.map((c) => lower(c)))}.`));
     const foot = el('div', 'sb-entry-foot');
-    foot.append(btn('sb-plain big', 'Turn to a fresh page', () => this.t.fresh(null, false)));
+    foot.append(btn('sb-plain big', 'Start a new run', () => this.t.fresh(null, false)));
     sheet.append(foot);
     this.show('entry', sheet);
     this.shadeMore(page);

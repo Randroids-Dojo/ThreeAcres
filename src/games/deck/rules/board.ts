@@ -1,7 +1,7 @@
 // Board geometry and the numbers that set a run's pace. Plots are indexed in
 // reading order: row by row, left to right, which is also the harvest order.
 
-import { CELLAR_YIELD, SEEDS } from './cards';
+import { cardText, CELLAR_YIELD, SEEDS } from './cards';
 import type { CardId, Crop, PageId, Plot, RunState, Season, SeedId, Tally, Twist, TwistId } from './types';
 
 /** Tunable numbers. The balance bot sweeps these; the game uses them as they are. */
@@ -15,9 +15,10 @@ export const TUNING = {
    * starts of the four evened (deck-fit, 150 runs each: every engine clears year 1 86 to 89% of the time). Round 10:
    * spring 150 (160): the tenth playtest's no-engine run ended its first spring 158 of 160, before any choice; summer to
    * winter 410, 540, 680 (380, 500, 640), with years 2 and 3, so every season asks about the same share of its take: three
-   * corn took the tall engine's year 1 median to 1.59 times 380, 500, 640.
+   * corn took the tall engine's year 1 median to 1.59 times 380, 500, 640. Round 11: spring 140 (150): a first hand with no
+   * spare radish takes about 4% less, and the greedy preview-follower met 150 96% of the time, 98% before.
    */
-  quotas: [150, 410, 540, 680] as number[],
+  quotas: [140, 410, 540, 680] as number[],
   /**
    * Year 2's. Takes grow faster through year 2 than year 1, so it has its own row. Round 4 set years 2 and 3 against
    * the strong builds (roots with the Cellar, bloom with Busy Bees, perennials), which ran at 1.8 to 2.5 times the old
@@ -73,21 +74,26 @@ export const TUNING = {
    * Round 7: 240 (180 before), since the guided run takes an engine at its first stall: at 180 the guided bot took a
    * median 2.3 times it (its takes: 5% under 297, 10% under 314, median 416). Round 9: 330 (240 before): the ninth
    * playtest took 457 of 240 and met it on night 3, and the careful line took a median 1.82 times it, the walkover of
-   * a guided year that then ended in winter.
+   * a guided year that then ended in winter. Round 11: 260 (330 before), with the engine's card dealt in that season's
+   * first hand: the eleventh playtest followed every lesson and every preview and took 259 of 330 from a nearly bare plot,
+   * with the hive first in hand on day 3 and 309 coins unspent. The bot clears it; the new player does not look ahead.
    */
-  guidedSummer: 330,
+  guidedSummer: 270,
   /**
    * A guided first run's year 1 autumn and winter are this much of the usual: its first stall had fewer coins to spend.
    * Round 9: of the raised row, 440 and 560 (420 and 520 before). At 0.92 (460 and 590) the bots met each season at
-   * 1.27 to 1.42 times its quota but the guided bot cleared year 1 76% of the time (deck-seasons, 200 runs).
+   * 1.27 to 1.42 times its quota but the guided bot cleared year 1 76% of the time (deck-seasons, 200 runs). Round 11: 0.86,
+   * 460 and 580 (480 and 600 before): a player who reads the previews and looks no further (the novice in deck-players)
+   * got through the guided year in 35 runs of 100 at the old row, 52 at the old autumn and winter with the summer's fix, 63 at this.
    */
-  firstYear: 0.88,
+  firstYear: 0.86,
   /**
    * A guided first run's year 2 is this much of the usual, about round 5's row (400, 580, 690, 770): round 6 raised year
    * 2 from summer for the built plots, and at the full rate the guided bot cleared year 2 22% of the time against the
-   * decent bot's 30% (34% at this).
+   * decent bot's 30% (34% at this). Round 11: 0.85 (0.93): with autumn and winter eased, year 2 spring stepped 1.45 times over
+   * the guided winter, against 1.32 for every other run, and the novice met it 51% of the time (64% at this).
    */
-  guidedYear2: 0.93,
+  guidedYear2: 0.85,
   days: 6,
   handSize: 5,
   energy: 3,
@@ -108,6 +114,13 @@ export const TUNING = {
   pestPay: 0.5,
   /** Scoops a crop puts back on the next morning's bench when it is pulled up. */
   scoopBack: 1,
+  /**
+   * Round 11: scoops a day Tall Rows adds. Corn costs three, on some dawns the bench holds three, and the eleventh
+   * playtest's tall run paid a 144 corn on its first night and 14 on another. Tried against a corn that puts two scoops
+   * back (deck-crops, 150 runs, nights under a third of a night's share of the quota, the biggest harvest's share of its
+   * season): 19% and 26% as it was, 18% and 26% with two scoops back, 16% and 22% with this and the gentler bloom below.
+   */
+  tallScoop: 1,
   /** Checks only (the quota fit): a missed season still opens the stall, so every run sees every season with the real quotas in play. */
   noEnd: false,
   /** Which crops put a scoop back when pulled up: every crop (shipped), or for checks only those that cost a scoop, or none. */
@@ -142,9 +155,10 @@ export const TUNING = {
    * 30% at x1.25, the other engines 24 to 47%). Round 8: x1.2 at level I (Busy
    * Bees II and III are x1.6 and x2.1), since the bees made year 1 a walkover
    * (a median take of 1.62 times the quota). Round 10: x1.5, on no root: it no
-   * longer lands on the carrots ringed by radishes that made most of its coins.
+   * longer lands on the carrots ringed by radishes that made most of its coins. Round 11: x1.6: the greedy preview-follower
+   * cleared year 1 70% of the time with it, the least of the four (78% at this).
    */
-  beesTimes: 1.5,
+  beesTimes: 1.6,
   /** Busy Bees reaches the crop below a sunflower too (round 7: only crops near a beehive, the engine's own card). */
   beesSun: false,
   /**
@@ -230,9 +244,11 @@ export const TUNING = {
    * Round 9: the levels raise this, not the picks (the ninth playtest's hot run met year 1 summer by 6 coins and died in
    * autumn: its best harvest was 42, as x1.5 on a bloom of 1 or 2 never got going, and levels came only in year 2).
    * Round 10 (1.6, 1.75, 1.9, 2 before): x1.7 at level I, its raised heat on no radish or carrot: the tenth playtest's
-   * first summer previewed a carrot at 8 and a strawberry at 10; chilies side by side are where its value shows.
+   * first summer previewed a carrot at 8 and a strawberry at 10; chilies side by side are where its value shows. Round 11:
+   * x1.75 to x2.05 (1.7 to 2), capped at two chilies (`chiliCap`): at the old row the decent bot won 24% with it and the
+   * other engines 33 to 39; at this it wins 36 and the greedy preview-follower 46 (33 to 37).
    */
-  hotTimes: [1.7, 1.8, 1.9, 2] as number[],
+  hotTimes: [1.75, 1.85, 1.95, 2.05] as number[],
   /**
    * Round 10: checks only. True lets the engine pages' bonuses land on radishes and carrots as they did before round 10;
    * shipped, Busy Bees, Hot Beds' raised heat and Trellis skip them (Tall Rows is corn's and the sunflower's own).
@@ -240,13 +256,24 @@ export const TUNING = {
   engineRoots: false,
   /** Round 10: the ledger says what is still to go from this day of a season (5 before: the last two days). */
   toGoFrom: 4,
-  /** With Hot Beds, the chilies a crop takes bloom from, at most. */
-  chiliCap: 99,
+  /**
+   * The chilies a crop takes bloom from, at most. Round 11: two (no cap before): x1.7 to x2 for each chili beside it stacked
+   * without end while Trellis applies once and hives are capped at one. The eleventh playtest's harvests hit 257 and 347 in
+   * year 2, a night paid 668, its takes ran 2.4 and 2.6 times the quotas, and year 2 spring was met on night 2 of 6.
+   */
+  chiliCap: 2,
   /**
    * Round 9: the cards a run's first hand is dealt from the tin before it draws up (not the guided run, whose days are
    * set). The ninth playtest's run 4 drew no carrot in its first two hands and its spring ended at 146 of 170.
    */
   firstHand: ['carrot', 'radish'] as CardId[],
+  /**
+   * Round 11: the dear seed a run's first hand is dealt beside its carrot and radish, one of these by run. The rest draws
+   * from the tin with no spare radish, no other dear seed and one can at most (`firstDraw`). All four of the eleventh playtest's later runs
+   * opened with the same move, carrot, radishes beside it, can: the hand's spare radishes and can were always the most the
+   * previews offered for the scoops. A run counts through these; one with no record picks by its seed.
+   */
+  firstLeads: ['beans', 'strawberry', 'sunflower'] as CardId[],
 
   /**
    * Trellis: the bloom beans and strawberries give each other crop beside them, from this many of them at most. Round 7
@@ -270,8 +297,11 @@ export const TUNING = {
   tallFast: 2 as number | boolean,
   /** The beehives a crop takes bloom from, at most. */
   hiveCap: 1,
-  /** Tall Rows: the bloom corn and sunflowers get for each crop beside them. */
-  tallBloom: 1,
+  /**
+   * Tall Rows: the bloom corn and sunflowers get for each crop beside them. Round 11: 0.8 (1 before), with the scoop it
+   * now brings (`tallScoop`): more corn, each a smaller feast. At +1 with the scoop the tall engine won 68%.
+   */
+  tallBloom: 0.8,
   /**
    * Round 7: a hitch is aimed at what the run relies on and offered only if it would cost this run at least this share
    * of a season's take, read from the season just played. The seventh playtest took "sunflowers face up" with no
@@ -326,7 +356,7 @@ export const TUNING = {
    * was refused, the page slot doubled to 4,000 and year 3 takes stayed flat while the quotas climbed. Round 10: Busy Bees'
    * and Trellis' rows are set against crops other than radishes and carrots; Tall Rows' is unchanged, with a third corn.
    */
-  levelUp: { bees: [1.7, 2, 2.3], hot: [4, 6, 6], vines: [1.45, 1.7, 1.9], tall: [1.5, 1.8, 2.1] } as Partial<Record<PageId, number[]>>,
+  levelUp: { bees: [1.75, 2, 2.3], hot: [4, 6, 6], vines: [1.45, 1.7, 1.9], tall: [1.15, 1.4, 1.6] } as Partial<Record<PageId, number[]>>,
   /** What levels II, III and IV cost at the stall (the same in every year). */
   levelPrice: [800, 1800, 3600] as number[],
   /**
@@ -345,9 +375,11 @@ export const TUNING = {
   /**
    * Round 10: the share of the help's worth a hitch's cut adds to its careful cost (round 8 added all of it, so the cut
    * ran about twice what the hitch cost when played and the hitch was nearly always the better pick: frost cut 348 coins
-   * and cost 158, a glut cut 399 and cost 211, and the bot took the hitch at 62% of stalls).
+   * and cost 158, a glut cut 399 and cost 211, and the bot took the hitch at 62% of stalls). Round 11: 0.1 (0.25): the rest of
+   * the help's worth comes as the merchant's coins (`hitchPay`), and with more of it on the quota the bots took the hitch
+   * at 48 to 60% of stalls.
    */
-  helpShare: 0.25,
+  helpShare: 0.1,
   /**
    * Round 10: a twist's share of a season's take is said, and cut, in coins of the take the run is making: its last
    * season's take over its quota, between 1 and this. The stall said a share of the quota, so a run taking 1.45 times its
@@ -416,34 +448,54 @@ export function levelName(name: string, level: number): string {
  */
 export function levelText(id: PageId, level: number, roots = true): string | null {
   const n = levelNum(id, level);
-  // Round 10: an engine page never blooms radishes and carrots, and says so in a short line of its own (a longer page
-  // ran to four lines on the phone's cork board and pushed the year's first stall into a scroll).
+  // Round 10: an engine page never blooms radishes and carrots, and says so in a short line of its own. Round 11: every
+  // number said as what a 10 coin crop pays, or what a corn gains: "x1.7 bloom" and "+1.25 bloom" read as sums.
   const not = roots && !TUNING.engineRoots ? ' Not radishes or carrots.' : '';
   switch (id) {
     case 'bees':
-      return `Crops near a beehive get x${n} bloom.${not}`;
+      return `Near a beehive, a 10 coin crop pays ${tenCoin(n)}.${not}`;
     case 'hot':
-      // Round 10: thirteen words at most, like every page (it ran to seventeen). The chili's own x1.5 stays on roots.
-      return hotLevels() ? `Chilies pick for ${TUNING.hotPicks} nights. Neighbours get x${n} bloom${not ? ', radishes and carrots x1.5' : ''}.` : `Chilies stay and pick for ${n} nights.`;
+      // A chili's own x1.5 stays on radishes and carrots: the chili's card says so (`cardLine`), not the page.
+      return hotLevels() ? `Chilies pick for ${TUNING.hotPicks} nights. A 10 coin crop pays ${tenCoin(n)} beside one, ${tenCoin(n * n)} beside two.` : `Chilies stay and pick for ${n} nights.`;
     case 'vines':
-      return `Beans and strawberries give ${TUNING.vinesSelf ? 'neighbours' : 'the other crops beside them'} +${n} bloom.${not}`;
+      return `By beans or strawberries, a 10 coin crop pays ${tenCoin(1 + n)}.${not}`;
     case 'tall':
-      return `Corn ripens two nights sooner. Tall crops get +${n} bloom for each neighbour.`;
+      return `One more scoop a day. Corn ripens two nights sooner. Crops beside it add ${Math.round(SEEDS.corn.base * n)} coins.`;
+    default:
+      return null;
+  }
+}
+
+const tenCoin = (times: number) => Math.round(10 * times);
+
+/**
+ * What the next level does, said against what it does now: "Near a beehive, a 10 coin crop pays 17, not 15." (the page's
+ * own line says it leaves radishes and carrots out).
+ */
+export function levelChange(id: PageId, to: number): string | null {
+  const n = levelNum(id, to);
+  const was = levelNum(id, to - 1);
+  switch (id) {
+    case 'bees':
+      return `Near a beehive, a 10 coin crop pays ${tenCoin(n)}, not ${tenCoin(was)}.`;
+    case 'hot':
+      return hotLevels() ? `A 10 coin crop pays ${tenCoin(n)} beside a chili, not ${tenCoin(was)}.` : `Chilies stay and pick for ${n} nights, not ${was}.`;
+    case 'vines':
+      return `By beans or strawberries, a 10 coin crop pays ${tenCoin(1 + n)}, not ${tenCoin(1 + was)}.`;
+    case 'tall':
+      return `Crops beside a corn add ${Math.round(SEEDS.corn.base * n)} coins, not ${Math.round(SEEDS.corn.base * was)}.`;
     default:
       return null;
   }
 }
 
 /**
- * What the next level does, said against what it does now: "Crops near a beehive get x1.65 bloom, not x1.5." (the
- * page's own line says it leaves radishes and carrots out).
+ * A card's rule as this run reads it (round 11). With Hot Beds kept a chili says the page's number at its level: the
+ * eleventh playtest's stall slip still said x1.5 with Hot Beds IV kept.
  */
-export function levelChange(id: PageId, to: number): string | null {
-  const t = levelText(id, to, false);
-  if (!t) return null;
-  const n = levelNum(id, to - 1);
-  const was = id === 'bees' || (id === 'hot' && hotLevels()) ? `x${n}` : id === 'hot' ? `${n}` : `+${n}`;
-  return `${t.replace(/\.$/, '')}, not ${was}.`;
+export function cardLine(id: CardId, up: boolean, s: Partial<Pick<RunState, 'pages' | 'levels'>>): string {
+  if (id === 'chili' && s.pages?.includes('hot') && hotLevels()) return `A 10 coin crop beside it pays ${tenCoin(engineNum(s, 'hot'))}. Two chilies at most.`;
+  return cardText(id, up);
 }
 
 /**
@@ -563,9 +615,9 @@ export function perennial(kind: SeedId): boolean {
   return SEEDS[kind].picks > 1;
 }
 
-/** The bench's morning refill: three scoops, one more for Green Thumb, one for the Long Furrow, and any bought for good. */
+/** The bench's morning refill: three scoops, one more for Green Thumb, one for the Long Furrow, one for Tall Rows (round 11), and any bought for good. */
 export function energyMax(s: Pick<RunState, 'pages' | 'scoops'>): number {
-  return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.pages.includes('furrow') ? 1 : 0) + (s.scoops ?? 0);
+  return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.pages.includes('furrow') ? 1 : 0) + (s.pages.includes('tall') ? TUNING.tallScoop : 0) + (s.scoops ?? 0);
 }
 
 /** Cards drawn up to each morning: five, and one more for Big Basket. */

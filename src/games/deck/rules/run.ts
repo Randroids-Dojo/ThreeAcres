@@ -86,6 +86,7 @@ export function newRun(seed: number, meta: Meta | null, guided = false): { s: Ru
     engine: null,
   };
   for (const id of START_DECK) s.draw.push(newCard(s, id));
+  s.opener = meta && meta.runs > 0 ? meta.runs % TUNING.firstLeads.length : Math.floor(rand(s) * TUNING.firstLeads.length);
   const ev: Ev[] = [];
   startSeason(s, ev);
   return { s, ev };
@@ -192,7 +193,14 @@ export function startDay(s: RunState, ev: Ev[]): void {
   } else {
     // Round 9: a run's first hand is dealt a carrot and a radish (the ninth playtest's run 4 drew no carrot in its first
     // two hands and missed its first spring by 24), then draws up as usual.
-    if (!s.guided && s.year === 1 && s.season === 0 && s.day === 1 && !s.stats.log.length) dealScripted(s, TUNING.firstHand, ev);
+    // Round 11: and a dear seed that differs from run to run, and the rest of it draws with no spare radish (`firstDraw`).
+    if (!s.guided && s.year === 1 && s.season === 0 && s.day === 1 && !s.stats.log.length) {
+      dealScripted(s, [...TUNING.firstHand, TUNING.firstLeads[s.opener ?? 0]], ev);
+      firstDraw(s, ev);
+    }
+    // Round 11: the guided summer's first hand holds the engine's card, so its first free season starts with what it
+    // took home (the eleventh playtest's hive first came to hand on day 3).
+    if (s.guided && s.year === 1 && s.season === 1 && s.day === 1 && s.engine) dealScripted(s, ENGINES[s.engine].gift.slice(0, 1), ev);
     drawUp(s, ev);
   }
 }
@@ -251,6 +259,19 @@ export function drawOne(s: RunState, ev: Ev[]): boolean {
 
 function drawUp(s: RunState, ev: Ev[]): void {
   while (s.hand.length < handSize(s)) if (!drawOne(s, ev)) break;
+}
+
+/**
+ * Round 11: the rest of a run's first hand, from the tin in its shuffled order: a spare radish, a second can or a second
+ * dear seed goes to the bottom, so each first day turns on the run's dear seed and is not a carrot ringed with radishes and
+ * watered, whatever the shuffle.
+ */
+function firstDraw(s: RunState, ev: Ev[]): void {
+  for (let tries = s.draw.length; tries > 0 && s.hand.length < handSize(s); tries--) {
+    const c = s.draw[s.draw.length - 1];
+    if (c.id === 'radish' || (c.id === 'can' && s.hand.some((h) => h.id === 'can')) || (isSeed(c.id) && CARDS[c.id].cost >= 2)) s.draw.unshift(s.draw.pop()!);
+    else drawOne(s, ev);
+  }
 }
 
 /** Plots a card in hand may be played on (for 'move', the crops that can be moved). Empty for 'board' cards. */
@@ -957,10 +978,23 @@ export function offerTwists(s: RunState): Twist[] {
   const cost = Math.min(round2(hitchCost(h) * r), ease);
   const b: Twist = known ? { ...h.t, ease, worth: cost } : { ...h.t, ease };
   const a: Twist = known ? { ...g.t, worth: gv } : { ...g.t };
+  // Round 11: the merchant pays what the cut leaves short of the help's coins.
+  if (known) b.pay = hitchPay(s, a, b);
   return rand(s) < 0.5 ? [a, b] : [b, a];
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * Round 11: the coins the merchant pays for a hitch, so its margin (its cut, less what it costs, and this) comes to the
+ * help's coins, all in the numbers the two clippings say. The eleventh playtest's help beat the hitch at all ten stalls:
+ * +310 against 490 less 410, +910 against 450 less 220.
+ */
+export function hitchPay(s: RunState, help: Twist, hitch: Twist): number {
+  const margin = twistQuota(s, null) - twistQuota(s, hitch) - twistCoins(s, hitch);
+  const owed = twistCoins(s, help) - margin;
+  return owed <= 0 ? 0 : owed >= 100 ? Math.round(owed / 10) * 10 : Math.max(5, Math.round(owed / 5) * 5);
+}
 
 /**
  * What a twist on offer would do to the coming season's take, in coins (round 8): a help's gain, what a hitch would
@@ -1147,6 +1181,11 @@ export function leaveShop(s: RunState): Ev[] | null {
   // The season's twist: the one picked, or the first offered if none was.
   const tw = s.shop?.twists;
   s.twist = tw?.length ? { ...tw[s.shop!.twist ?? 0] } : null;
+  // Round 11: the merchant pays for the hitch now, once the pick can no longer change.
+  if (s.twist?.pay) {
+    s.coins += s.twist.pay;
+    ev.push({ t: 'paid', coins: s.twist.pay });
+  }
   // The engine picked at a run's first stall goes home with it (none if none was picked).
   const en = s.shop?.engines;
   if (en?.length && s.shop!.engine !== undefined && en[s.shop!.engine]) takeEngine(s, en[s.shop!.engine]);
