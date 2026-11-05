@@ -53,7 +53,7 @@ npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell f
 npx tsx scripts/ranch-balance.ts       # Thistledown: coins a game day for typical ranches, against sweeping; neglect and gate timing
 node scripts/deck-board.mjs            # Seedbound: how the board persists (crops standing at dawn, bare dawns, sowings beside standing crops)
 npx tsx scripts/deck-seasons.ts        # Seedbound: per-season clear rates for years 1 to 3 with the decent, strict and guided bots
-npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates for each stall strategy (is one dominant?)
+npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates for each stall strategy (is one dominant?), for the decent bot and the greedy preview player (scripts/deck-players.ts)
 npx tsx scripts/deck-twists.ts         # Seedbound: what each twist really costs or pays a run, against the quota it moves
 npx tsx scripts/deck-crops.ts          # Seedbound: does each engine change what you plant (each crop's share of the take, per engine)
 npx tsx scripts/deck-guided-days.ts    # Seedbound: the guided spring day by day, for the careful line and the decent bot
