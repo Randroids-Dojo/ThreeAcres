@@ -12,6 +12,8 @@
 // (and the path and yard above them) and asks whether the whole field and a well are both in the clear part of
 // the screen (below the day card, above the rack).
 // And on a phone, the View the farm was left in comes back after a reload.
+// Round 11: and on phones with five and six fields, the View's two stops (see below). On a desktop, one more: a click pass
+// over a field keeps the camera still.
 // node scripts/qa/sunup-view.mjs [base url]
 import { chromium } from 'playwright-core';
 
@@ -115,6 +117,77 @@ for (const [w, h] of [[412, 900], [412, 838], [390, 844], [360, 740]]) {
   await ctx.close();
 }
 
+// Round 11: five and six fields. The View shrank every plot to 27 px, with a third of the screen empty under the farm:
+// three columns of fields do not fit a phone's width at a plot a thumb can hit. Now a real tap on View goes to the fields
+// the farmer is in, a second to the others, a third back to close up: at each stop plots of 33 px or more, between them
+// every plot owned, and little blank under the farm.
+for (const [w, h] of [[412, 838], [360, 740], [412, 900]]) {
+  for (const fields of [5, 6]) {
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+    const p = await ctx.newPage();
+    const cdp = await ctx.newCDPSession(p);
+    const tap = async (x, y) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1, radiusX: 6, radiusY: 6, force: 1 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await p.goto(`${base}/?game=homestead&fresh&touch`);
+    await p.waitForFunction(() => window.sunup && window.sunup.frames > 20, null, { timeout: 180000 });
+    await setup(p);
+    await p.evaluate((n) => {
+      const s = window.sunup.state;
+      for (const q of s.parcels.slice(0, n)) {
+        q.owned = true;
+        for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) s.plots[y * s.W + x].tilled = true;
+      }
+    }, fields);
+    await camera(p, 'close');
+    await stand(p, 4.5, 4.5);
+    await p.waitForTimeout(1200);
+    // What the close view shows of the owned plots, for the record.
+    const read = () => p.evaluate(() => {
+      const r = window.sunup.r3d;
+      const st = window.sunup.state;
+      const top = document.querySelector('.daycard').getBoundingClientRect().bottom;
+      const rack = document.querySelector('.toolbar').getBoundingClientRect().top;
+      let size = 99;
+      let front = 0;
+      const seen = [];
+      for (const pc of st.parcels.filter((q) => q.owned)) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) {
+        const a = r.project(x, y + 0.5, 0);
+        const c = r.project(x + 1, y + 0.5, 0);
+        const m = r.project(x + 0.5, y + 0.5, 0);
+        if (m.x >= 0 && m.x <= innerWidth && m.y >= top && m.y <= rack) {
+          seen.push(`${x},${y}`);
+          size = Math.min(size, Math.hypot(c.x - a.x, c.y - a.y));
+        }
+      }
+      for (let x = 2; x <= 15; x++) front = Math.max(front, r.project(x, 15.25, 0).y);
+      return { size, seen, front, rack };
+    });
+    const closeRead = await read();
+    const viewAt = await p.evaluate(() => { const r = document.querySelector('.topbtns .viewbtn').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    const owned = fields * 16;
+    await tap(viewAt[0], viewAt[1]);
+    await p.waitForTimeout(1500);
+    const one = await read();
+    await tap(viewAt[0], viewAt[1]);
+    await p.waitForTimeout(1500);
+    const two = await read();
+    const mode2 = await p.evaluate(() => window.sunup.state.rules.camera);
+    await tap(viewAt[0], viewAt[1]);
+    await p.waitForTimeout(1000);
+    const mode3 = await p.evaluate(() => window.sunup.state.rules.camera);
+    const both = new Set([...one.seen, ...two.seen]).size;
+    const band = Math.max(0, one.rack - one.front) / h;
+    console.log(`phone ${w}x${h}, ${fields} fields: close view shows ${closeRead.seen.length} of ${owned} plots; View stop 1 ${one.seen.length} plots at ${one.size.toFixed(1)} px, stop 2 ${two.seen.length} at ${two.size.toFixed(1)} px, together ${both} of ${owned}; blank under the farm ${(band * 100).toFixed(0)}%`);
+    check(`phone ${w}x${h}, ${fields} fields: View's plots are 33 px or more across at each stop (they were 27)`, one.size >= 33 && two.size >= 33, `${one.size.toFixed(1)} and ${two.size.toFixed(1)}`);
+    check(`phone ${w}x${h}, ${fields} fields: the two stops show every plot owned`, both === owned, `${both} of ${owned}`);
+    check(`phone ${w}x${h}, ${fields} fields: little blank under the farm (it was a third of the screen)`, band < 0.2, `${(band * 100).toFixed(1)}%`);
+    check(`phone ${w}x${h}, ${fields} fields: a real tap goes to the other stop, the next back to close up`, mode2 === 'wide' && mode3 === 'close', `${mode2}, ${mode3}`);
+    await ctx.close();
+  }
+}
+
 {
   const ctx = await b.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const p = await ctx.newPage();
@@ -149,6 +222,34 @@ for (const [w, h] of [[412, 900], [412, 838], [390, 844], [360, 740]]) {
   }
   console.log(`desktop 1280x800 close view: field and a well both in the clear area from ${both} of ${n} plots${misses.length ? ` (not from ${misses.slice(0, 8).join(' ')})` : ''}`);
   check('desktop 1280x800: from every plot of the first two fields, the whole field and a well show together', both === n, `${both} of ${n}`);
+  // Round 11: a click pass over a field holds the camera still (it slid 68 px, and each click chased its plot).
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    Object.assign(st, { day: 3, coins: 500, weather: 'sun', forecast: ['sun', 'sun', 'sun'], minute: 120, orders: [], crowPlan: [], requested: 1, water: 40 });
+    st.tools.can = 0;
+    const pc = st.parcels[0];
+    for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) { const q = st.plots[y * st.W + x]; q.tilled = true; q.wet = false; q.moisture = 0; q.crop = { id: st.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; }
+    Object.assign(st.actors[0], { x: 2.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    window.sunup.hud.pickTool('can');
+  });
+  await p.waitForTimeout(1500);
+  const proj = (x, y) => p.evaluate(([x, y]) => window.sunup.r3d.project(x + 0.5, y + 0.5, 0), [x, y]);
+  const first = await proj(2, 5);
+  let far = 0;
+  let wet = 0;
+  for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) {
+    const q = await proj(x, y);
+    const at = await proj(2, 5);
+    far = Math.max(far, Math.hypot(at.x - first.x, at.y - first.y));
+    await p.mouse.click(q.x, q.y);
+    await p.waitForTimeout(280);
+  }
+  for (let k = 0; k < 150; k++) {
+    if (!(await p.evaluate(() => { const st = window.sunup.state; const f = st.actors[0]; return !!(f.task || f.aim || f.path.length || (st.taps ?? []).length); }))) break;
+    await p.waitForTimeout(100);
+  }
+  wet = await p.evaluate(() => { const st = window.sunup.state; const pc = st.parcels[0]; let n = 0; for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) if (st.plots[y * st.W + x].wet) n++; return n; });
+  check('desktop 1280x800: a click pass over a field keeps the camera still, and every click lands', far <= 24 && wet === 16, `slid ${Math.round(far)} px (it was 68); ${wet} of 16 watered`);
   await ctx.close();
 }
 await b.close();

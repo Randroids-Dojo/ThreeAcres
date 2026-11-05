@@ -3,7 +3,9 @@
 // control: a floating thumbstick that appears where the left thumb lands and
 // follows a thumb that drifts, a big act button that repeats while held, and a
 // tool button. Each control tracks its own pointer, so walking and acting work
-// together. Under point control the farm itself is the control: one finger
+// together. Round 11: a finger that lands on a plot with a job drags across
+// plots once it moves (each plot it crosses queues); one that lands anywhere
+// else is the stick. Under point control the farm itself is the control: one finger
 // paints jobs, two fingers pan and pinch; a clear button drops queued jobs.
 
 import type { Input } from '../game/input';
@@ -44,6 +46,8 @@ export class TouchControls {
   private origin = { x: 0, y: 0 };
   /** Where and when the stick's touch began, to tell a tap from a push. */
   private press = { x: 0, y: 0, t: 0, far: false };
+  /** Round 11: this finger landed on a plot with a job: it drags across plots, not the stick. */
+  private sweep = false;
   private held = new Map<HTMLElement, number>();
   /** Lab hook (?touch): show the controls whatever the device. */
   forced = false;
@@ -150,6 +154,9 @@ export class TouchControls {
     capture(this.zone, e.pointerId);
     this.origin = { x: e.clientX, y: e.clientY };
     this.press = { x: e.clientX, y: e.clientY, t: performance.now(), far: false };
+    this.sweep = this.host.input.dragAt(e.clientX, e.clientY);
+    // (A finger on a plot with a job shows no stick: a drag from here works plots, it does not walk.)
+    if (this.sweep) return;
     this.place();
     this.base.classList.add('active');
     this.knob.style.transform = '';
@@ -157,7 +164,14 @@ export class TouchControls {
 
   private stickMove(e: PointerEvent): void {
     if (e.pointerId !== this.stickId) return;
-    if (Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > TAP_SLOP) this.press.far = true;
+    const far = Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > TAP_SLOP;
+    if (this.sweep) {
+      if (far && !this.press.far) this.host.input.sweepStart(this.press.x, this.press.y);
+      if (far) this.press.far = true;
+      if (this.press.far) this.host.input.sweepMove(e.clientX, e.clientY);
+      return;
+    }
+    if (far) this.press.far = true;
     let dx = e.clientX - this.origin.x;
     let dy = e.clientY - this.origin.y;
     const d = Math.hypot(dx, dy);
@@ -192,6 +206,8 @@ export class TouchControls {
       this.base.style.left = '';
       this.base.style.top = '';
     }
+    if (this.sweep) this.host.input.sweepEnd();
+    this.sweep = false;
     this.stickId = null;
     this.base.classList.remove('active');
     this.knob.style.transform = '';
@@ -205,6 +221,8 @@ export class TouchControls {
   }
 
   private reset(): void {
+    if (this.sweep) this.host.input.sweepEnd();
+    this.sweep = false;
     this.stickId = null;
     this.base.classList.remove('active');
     this.knob.style.transform = '';

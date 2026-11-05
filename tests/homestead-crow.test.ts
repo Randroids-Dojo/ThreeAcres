@@ -136,7 +136,7 @@ describe('a crow takes over from the bug line', () => {
     plant(s, 2, 8, 'lettuce', 1);
     plots(s, 2, 8).crop!.bugs = 1;
     const out = new Tutor().update(s, 0.1, true);
-    expect(out.line).toBe('Take the hands. Pick bugs off the lettuces.');
+    expect(out.line).toBe('Tap Hands. Pick bugs off the lettuces.');
     expect(out.point).toEqual({ x: 2.5, y: 8.5 });
   });
 

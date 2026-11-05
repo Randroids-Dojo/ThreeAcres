@@ -53,7 +53,7 @@ describe('the crow lesson', () => {
   it('lets crows in quietly, and speaks only while a crow is actually on the farm', async () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'deliver', 'field', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'sweep', 'requests', 'deliver', 'field', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
     s.day = 5;
     const t = new Tutor();
     // Day 5, no crow: no line, but crows are let in.
@@ -84,7 +84,7 @@ describe('a crow will not wait', () => {
     const { Tutor } = await import('../src/games/homestead/lessons');
     const s = world('sunup');
     // (Round 9: the field lesson comes once the first pair is decided.)
-    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'requests', 'sowfor', 'deliver', 'choose', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
+    for (const id of ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'sweep', 'requests', 'sowfor', 'deliver', 'choose', 'turn', 'smith', 'wide']) s.learn.push(`lesson:${id}`);
     s.learn.push('pests');
     s.day = 5;
     s.coins = 500;

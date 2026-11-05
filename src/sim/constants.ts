@@ -90,14 +90,16 @@ export function requestSlots(rep: number): number {
 /** Round 9: the first offer is a small pair, a few plots each, so the first choice comes on the day the board is read. */
 export const FIRST_PAIR_MOST = 5;
 /**
- * Round 9: the season's fair, on its last day, wants so many requests filled that season: two more than the fields
- * owned when the season began, one fewer in summer (only two crops a request can ask for grow then), one more in autumn
- * (five can, and a careful player met five in nine autumns in ten). The
- * ninth playtest had no reason to keep going after about day 16 ("it is a sum, not a choice"). Met, it gives a ribbon
- * for the house and a fifth off the next field (`FAIR_OFF`), so the coins have somewhere to go.
+ * Round 9: the season's fair, on its last day, wants so many requests filled that season, more as the farm grows; met, it
+ * gives a ribbon for the house and a prize, so the coins have somewhere to go. The ninth playtest had no reason to keep
+ * going after about day 16 ("it is a sum, not a choice"). Round 11: it counts only requests taken in its season and filled
+ * in full, so it can be lost: spring's first Accept comes on Spring 3, summer's crops are slow (the last seed that can
+ * ripen by the fair goes in by Summer 5), and from autumn five is as many as a careful farm reaches, however many fields
+ * it owns. By season: its fields plus this, at most `FAIR_MOST`. `scripts/balance.ts` measures it (a careful bot, and a
+ * player who follows the lessons).
  */
-export const FAIR_MORE = 2;
-export const FAIR_LEAN = [0, 1, -1, 0] as const;
+export const FAIR_MORE = [2, 0, 2, 2] as const;
+export const FAIR_MOST = [3, 3, 5, 5] as const;
 export const FAIR_OFF = 0.2;
 /**
  * Round 10: a pair comes every morning while fewer than this many requests are taken (two could be open before the
@@ -106,10 +108,17 @@ export const FAIR_OFF = 0.2;
  */
 export const TAKEN_MOST = 6;
 /**
- * Round 10: mornings to spare (beyond the requests the fair still wants) before a pair's days may matter to it: one
- * side due by the fair, the other after it, for the next season's. With fewer, both sides count for the fair.
+ * Round 11: what a ribbon brings with no field to discount (they are all bought, or a discount already waits): requests
+ * pay this share more over market from then on, each such ribbon adding to it (the eleventh playtest's ribbons, its
+ * fields all bought, were only decoration).
  */
-export const FAIR_SPARE = 2;
+export const PRIZE_PAY = 0.1;
+/**
+ * Round 11: what the crate pays for market crops by fields owned, as a share of their price: a farm this big fills the
+ * market (one crate day paid the eleventh playtest 2,780, against requests of 120 to 805, and a two-year bot held 37,000
+ * coins with nothing to buy). Crops sown for a request are paid in full: their note said so.
+ */
+export const CRATE_SHARE = [1, 1, 1, 1, 0.9, 0.8] as const;
 /** Round 9: a fair needs at least this many days of its season left when it is first set, or it waits for the next season. */
 export const FAIR_LEAD = 6;
 /**

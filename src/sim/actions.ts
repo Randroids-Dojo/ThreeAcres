@@ -1,7 +1,7 @@
 // What a tool does to a tile, and doing it. resolve() is pure and is also used
 // by the UI for the highlight; perform() changes the farm and reports events.
 
-import { BUILD_COST, CAN_MOISTURE, CAN_WATER, DAY_SECONDS, DAYS_PER_SEASON, FIELD_REP, SEASON_PREVIEW_DAYS, SPRINKLER_MORNINGS, STAMINA_COST, SUNUP_DAY_SECONDS } from './constants';
+import { BUILD_COST, CAN_MOISTURE, CAN_WATER, CRATE_SHARE, DAY_SECONDS, DAYS_PER_SEASON, FIELD_REP, SEASON_PREVIEW_DAYS, SPRINKLER_MORNINGS, STAMINA_COST, SUNUP_DAY_SECONDS } from './constants';
 import { CROPS, inSeason, QUALITY_MULT, stageOf } from './crops';
 import { propAt } from './map';
 import { feedAround, needsWater, qualityAt, soak } from './soil';
@@ -101,7 +101,8 @@ export function justInTime(day: number, crop: CropId): boolean {
  */
 export function doomedAtTurn(s: WorldState, i: number): boolean {
   const c = s.plots[i]?.crop;
-  if (!c || c.dead || c.stage === 4 || !homestead(s)) return false;
+  // (Round 11: a regrowing crop already picked has paid its way: its end at the turn is no loss.)
+  if (!c || c.dead || c.stage === 4 || !homestead(s) || c.picks > 0) return false;
   const next = ((season(s.day) + 1) % 4) as 0 | 1 | 2 | 3;
   if (inSeason(c.kind, next)) return false;
   return CROPS[c.kind].days - c.age > nightsToTurn(s.day);
@@ -338,7 +339,7 @@ export function perform(s: WorldState, actor: Actor, r: Resolved, x: number, y: 
       // Round 7: every crop is paid for at market the moment it goes into the crate, so a harvest can be planted again
       // the same day (the seventh playtest picked eleven crops on Summer 5 and still had nothing to plant with); a
       // request adds its gain when it is filled.
-      if (homestead(s)) payAtCrate(s, c.kind, q, ev);
+      if (homestead(s)) payAtCrate(s, c.kind, q, ev, !!forReq);
       else s.stock[c.kind][q] += 1;
       s.stats.harvested[c.kind] += 1;
       s.almanac.harvested += 1;
@@ -468,8 +469,8 @@ export function workLeft(s: WorldState): { ripe: number; thirsty: number; bugs: 
  * The coins count at once (a small rise of coins at the crate says so) and
  * the day's sales are kept for the morning card ("sold 8 for 340").
  */
-export function payAtCrate(s: WorldState, crop: CropId, quality: number, ev: SimEvent[]): void {
-  const value = priceOf(s, crop, quality);
+export function payAtCrate(s: WorldState, crop: CropId, quality: number, ev: SimEvent[], forRequest = false): void {
+  const value = forRequest ? priceOf(s, crop, quality) : marketPrice(s, crop, quality);
   s.coins += value;
   s.stats.earned += value;
   s.almanac.earned += value;
@@ -483,19 +484,22 @@ export function payAtCrate(s: WorldState, crop: CropId, quality: number, ev: Sim
 }
 
 /**
- * Sunup: what the sleep question has to say. Before evening it always asks
- * (round 7: Space on a focused Sleep button put the farmer to bed at 3:27
- * pm, twice); at any hour it asks while something on the farm would be lost
- * overnight or a request still wants planting today on its last day for it.
- * `urgent` is the one thing it names, most pressing first. Never while the
- * first lesson teaches sleep, nor with no stamina left for any job.
+ * Sunup: what the sleep question has to say. Before evening it asks while a
+ * job is left or an offer unread (round 7: Space on a focused Sleep button put
+ * the farmer to bed at 3:27 pm, twice; round 11: with no job left, the
+ * question "It is 6:06 am." only got in the way); at any hour it asks while
+ * something on the farm would be lost overnight or a request still wants
+ * planting today on its last day for it. `urgent` is the one thing it names,
+ * most pressing first. Never while the first lesson teaches sleep, nor with no
+ * stamina left for any job.
  */
-export function sleepAsk(s: WorldState, opts: { teaching: boolean; flock: boolean; owedToday: number }): { ask: boolean; left: ReturnType<typeof workLeft> } {
+export function sleepAsk(s: WorldState, opts: { teaching: boolean; flock: boolean; owedToday: number; unread?: number }): { ask: boolean; left: ReturnType<typeof workLeft> } {
   const left = workLeft(s);
   if (opts.teaching) return { ask: false, left };
   const pests = (left.bugs > 0 && s.stamina >= STAMINA_COST.tend) || left.crows > 0;
   const tired = s.stamina < Math.min(STAMINA_COST.tend, STAMINA_COST.plant, STAMINA_COST.water);
-  const early = s.minute < SLEEP_ASK_BEFORE && !tired;
+  const jobs = left.ripe + left.thirsty + left.bugs + left.crows + (opts.unread ?? 0) > 0;
+  const early = s.minute < SLEEP_ASK_BEFORE && !tired && jobs;
   return { ask: early || opts.flock || pests || (opts.owedToday > 0 && s.stamina >= STAMINA_COST.plant), left };
 }
 
@@ -518,6 +522,15 @@ export function fieldRep(s: WorldState, id: number): number {
   const p = s.parcels[id];
   if (!p || p.owned || !homestead(s)) return 0;
   return FIELD_REP[id] ?? 0;
+}
+
+/**
+ * Round 11: what the crate pays for a crop not sown for a request: its price, less on a farm of five or six fields, which
+ * fills the market (`CRATE_SHARE`).
+ */
+export function marketPrice(s: WorldState, crop: CropId, quality = 0): number {
+  const fields = s.parcels.filter((p) => p.owned).length;
+  return Math.round(priceOf(s, crop, quality) * (homestead(s) ? CRATE_SHARE[Math.min(CRATE_SHARE.length, fields) - 1] : 1));
 }
 
 /** Sale value of one crop at a quality, with the market's mood under orders. */

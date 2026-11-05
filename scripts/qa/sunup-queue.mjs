@@ -63,7 +63,7 @@ await p.waitForFunction(() => window.sunup && window.sunup.frames > 10);
 // A farm past its lessons, two fields owned (the second came with the copper can), at mid-morning.
 await p.evaluate(() => {
   const st = window.sunup.state;
-  const lessons = ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'hoe', 'requests', 'sowfor', 'deliver', 'choose', 'field', 'pests', 'scarecrow', 'forecast', 'sprinkler', 'bugs', 'turn', 'smith', 'wide', 'stamina'];
+  const lessons = ['pull', 'water', 'well', 'sleep', 'broke', 'plant', 'hoe', 'requests', 'sowfor', 'deliver', 'choose', 'field', 'pests', 'scarecrow', 'forecast', 'sprinkler', 'bugs', 'turn', 'smith', 'wide', 'stamina', 'fair', 'sweep'];
   for (const what of ['can', 'sleep', 'coins', 'seeds', 'stamina', 'board', 'requests', 'pests', 'hoe', 'build', 'forecast', 'wide', ...lessons.map((l) => `lesson:${l}`)]) if (!st.learn.includes(what)) st.learn.push(what);
   st.held = false;
   st.minute = 120;
@@ -389,6 +389,167 @@ await p.waitForTimeout(800);
   const after = await p.evaluate(() => ({ taps: (window.sunup.state.taps ?? []).length, aim: !!window.sunup.state.actors[0].aim }));
   check('round 10: six quick taps queue, and a tap on the farmer lets them go', queued >= 4 && after.taps === 0 && !after.aim, JSON.stringify({ queued, ...after }));
   await settle(8000);
+}
+
+// 11. Round 11: Stop. A tap on the farmer at a walk mostly missed him (0 of 8, with a 150 to 300 ms lag, and a miss queued
+// another walk). From three taps waiting a Stop button stands in a fixed slot in the thumb's reach, and a real tap on it
+// lets them go.
+{
+  const row = () => p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.hud.pickTool('hands');
+    st.minute = 120;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) { const q = st.plots[y * st.W + x]; q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; }
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    st.taps = [];
+  });
+  const stop = () => p.evaluate(() => { const e = document.querySelector('.stopbtn'); const r = e.getBoundingClientRect(); return { on: !e.classList.contains('gone') && r.width > 0, x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height, right: innerWidth - r.right, bottom: innerHeight - r.bottom }; });
+  await row();
+  await p.waitForTimeout(1200);
+  const none = await stop();
+  check('round 11: no Stop button with nothing waiting', !none.on);
+  await tapTile(2, 8);
+  await p.waitForTimeout(60);
+  await tapTile(3, 8);
+  await p.waitForTimeout(60);
+  const two = await stop();
+  const twoWait = await p.evaluate(() => (window.sunup.state.taps ?? []).length);
+  check('round 11: none while fewer than three taps wait', twoWait >= 3 || !two.on, `${twoWait} waiting`);
+  for (const [x, y] of [[4, 8], [5, 8], [5, 7], [4, 7]]) {
+    await tapTile(x, y);
+    await p.waitForTimeout(60);
+  }
+  await p.waitForTimeout(300);
+  const up = await stop();
+  const waiting = await p.evaluate(() => (window.sunup.state.taps ?? []).length);
+  check('round 11: Stop comes with three or more waiting, in the thumb\u2019s reach, a finger wide', up.on && waiting >= 3 && up.w >= 44 && up.h >= 44 && up.y > 900 * 0.6 && up.x > 412 * 0.5, JSON.stringify(up));
+  const covered = await p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('.stopbtn') !== null, [up.x, up.y]);
+  check('round 11: nothing lies over it', covered);
+  await tapAt(up.x, up.y);
+  await p.waitForTimeout(300);
+  const stopped = await p.evaluate(() => ({ taps: (window.sunup.state.taps ?? []).length, aim: !!window.sunup.state.actors[0].aim }));
+  const gone = await stop();
+  check('round 11: a real tap on Stop lets them go, the walk too, and the button goes', stopped.taps === 0 && !stopped.aim && !gone.on, JSON.stringify(stopped));
+  // In a fixed slot: the same place the next time, from anywhere on the farm.
+  await settle(4000);
+  await row();
+  await p.evaluate(() => Object.assign(window.sunup.state.actors[0], { x: 9.5, y: 4.5 }));
+  await p.waitForTimeout(1000);
+  for (const [x, y] of [[2, 8], [3, 8], [4, 8], [5, 8], [5, 7]]) {
+    await tapTile(x, y);
+    await p.waitForTimeout(60);
+  }
+  await p.waitForTimeout(300);
+  const again = await stop();
+  check('round 11: the same slot from anywhere on the farm', again.on && Math.abs(again.x - up.x) < 1 && Math.abs(again.y - up.y) < 1, JSON.stringify([again.x, again.y, up.x, up.y]));
+  await p.evaluate(() => window.sunup.input.push({ type: 'cancelTaps' }));
+  await settle(4000);
+}
+
+// 12. Round 11: a drag across plots queues each plot it crosses, with real touch (Winter 1 took 43 harvests and 42
+// plantings by single taps). A finger that lands on a plot with a job drags, on either half of the screen; one that lands
+// anywhere else is still the walk stick, on the left, and a pan of the View, on the right.
+{
+  const drag = async (pts) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts[0].x, y: pts[0].y, id: 7, radiusX: 6, radiusY: 6, force: 1 }] });
+    for (const q of pts.slice(1)) {
+      await p.waitForTimeout(40);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: q.x, y: q.y, id: 7, radiusX: 6, radiusY: 6, force: 1 }] });
+    }
+    await p.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const line = (a, b, n = 16) => Array.from({ length: n + 1 }, (_, k) => ({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n }));
+  const px = (x, y) => p.evaluate(([x, y]) => window.sunup.r3d.project(x + 0.5, y + 0.5, 0), [x, y]);
+  const setRow = (crop, age, stage) => p.evaluate(([crop, age, stage]) => {
+    const st = window.sunup.state;
+    window.sunup.hud.pickTool('hands');
+    st.minute = 120;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) st.plots[y * st.W + x].crop = null;
+    for (let y = 5; y < 9; y++) for (let x = 7; x < 11; x++) { const q = st.plots[y * st.W + x]; q.tilled = true; q.crop = null; }
+    st.parcels[1].owned = true;
+    for (const [x0] of [[2], [7]]) for (let x = x0; x < x0 + 4; x++) { const q = st.plots[6 * st.W + x]; q.tilled = true; q.wet = false; q.crop = { id: st.nextId++, kind: crop, age, stage, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; }
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    st.taps = [];
+    st.stamina = 100;
+  }, [crop, age, stage]);
+  const picked = () => p.evaluate(() => window.sunup.state.stats.harvested.radish);
+  // Left half, over the stick's zone.
+  await setRow('radish', 3, 4);
+  await p.waitForTimeout(1200);
+  const h0 = await picked();
+  await drag(line(await px(2, 6), await px(5, 6)));
+  await p.waitForTimeout(150);
+  const queuedL = await p.evaluate(() => { const st = window.sunup.state; return { taps: (st.taps ?? []).length, stick: document.querySelector('.ts-base').classList.contains('active') }; });
+  await settle(6000);
+  check('round 11: a real drag across a row of four ripe plots, on the stick\u2019s side, picks all four', (await picked()) - h0 === 4 && !queuedL.stick, JSON.stringify({ picked: (await picked()) - h0, ...queuedL }));
+  // Right half.
+  await setRow('radish', 3, 4);
+  await p.waitForTimeout(1000);
+  const h1 = await picked();
+  await drag(line(await px(7, 6), await px(10, 6)));
+  await settle(6000);
+  check('round 11: on the other side too', (await picked()) - h1 === 4, `${(await picked()) - h1} of 4`);
+  // A quick finger, four plots in three moves.
+  await setRow('radish', 3, 4);
+  await p.waitForTimeout(1000);
+  const h2 = await picked();
+  await drag(line(await px(2, 6), await px(5, 6), 3));
+  await settle(6000);
+  check('round 11: a quick finger misses no plot it crossed', (await picked()) - h2 === 4, `${(await picked()) - h2} of 4`);
+  // The can on a thirsty row.
+  await setRow('carrot', 1, 1);
+  await p.evaluate(() => { window.sunup.hud.pickTool('can'); window.sunup.state.water = 20; window.sunup.state.tools.can = 0; });
+  await p.waitForTimeout(800);
+  await drag(line(await px(2, 6), await px(5, 6)));
+  await settle(6000);
+  const wet = await p.evaluate(() => [2, 3, 4, 5].filter((x) => window.sunup.state.plots[6 * window.sunup.state.W + x].wet).length);
+  check('round 11: with the can, a drag waters the row it crosses', wet === 4, `${wet} of 4`);
+  // Seeds on bare soil.
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    for (let x = 2; x < 6; x++) st.plots[7 * st.W + x].crop = null;
+    for (let x = 2; x < 6; x++) st.plots[7 * st.W + x].tilled = true;
+    st.coins = 100;
+    window.sunup.hud.pickTool('seeds');
+    window.sunup.input.push({ type: 'seed', crop: 'radish' });
+  });
+  await p.waitForTimeout(500);
+  await p.evaluate(() => { document.querySelector('.seedbar')?.classList.contains('hidden') || window.sunup.hud.closePicker(); });
+  await p.waitForTimeout(300);
+  await drag(line(await px(2, 7), await px(5, 7)));
+  await settle(6000);
+  const sownRow = await p.evaluate(() => [2, 3, 4, 5].filter((x) => window.sunup.state.plots[7 * window.sunup.state.W + x].crop?.kind === 'radish').length);
+  check('round 11: with seeds, a drag plants the bare plots it crosses', sownRow === 4, `${sownRow} of 4`);
+  // A finger that lands anywhere else is the stick: on the path, and on a plot with no job for the tool.
+  await p.evaluate(() => { window.sunup.hud.pickTool('hands'); });
+  await setRow('carrot', 1, 1);
+  await p.evaluate(() => { for (let x = 2; x < 6; x++) window.sunup.state.plots[6 * window.sunup.state.W + x].crop = null; });
+  await p.waitForTimeout(800);
+  const zone = await p.evaluate(() => { const r = document.querySelector('.ts-zone').getBoundingClientRect(); return { x: r.x + r.width * 0.4, y: r.y + r.height * 0.8 }; });
+  const s0 = await p.evaluate(() => { const f = window.sunup.state.actors[0]; return { x: f.x, y: f.y }; });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: zone.x, y: zone.y, id: 8, radiusX: 6, radiusY: 6, force: 1 }] });
+  await p.waitForTimeout(40);
+  for (let k = 1; k <= 6; k++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: zone.x + k * 8, y: zone.y, id: 8, radiusX: 6, radiusY: 6, force: 1 }] });
+    await p.waitForTimeout(60);
+  }
+  await p.waitForTimeout(500);
+  const walking = await p.evaluate(() => { const f = window.sunup.state.actors[0]; return { x: f.x, y: f.y, stick: document.querySelector('.ts-base').classList.contains('active'), taps: (window.sunup.state.taps ?? []).length }; });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check('round 11: a finger that lands with no job under it is still the walk stick', walking.stick && walking.x > s0.x + 0.3 && walking.taps === 0, JSON.stringify({ s0, walking }));
+  await settle(2000);
+  // The View: a finger on the right, on the path, still pans it; a drag from a plot with a job works plots.
+  await p.evaluate(() => window.sunup.input.push({ type: 'rules', patch: { camera: 'wide' } }));
+  await p.waitForTimeout(1500);
+  await setRow('radish', 3, 4);
+  await p.waitForTimeout(800);
+  const h3 = await picked();
+  await drag(line(await px(7, 6), await px(10, 6)));
+  await settle(6000);
+  check('round 11: in the View too, a drag across plots works them', (await picked()) - h3 === 4, `${(await picked()) - h3} of 4`);
+  await p.evaluate(() => window.sunup.input.push({ type: 'rules', patch: { camera: 'close' } }));
+  await p.waitForTimeout(800);
 }
 
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

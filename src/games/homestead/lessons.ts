@@ -10,7 +10,7 @@ import { BUILD_COST, FIELD_SEED, TOOL_UPGRADES } from '../../sim/constants';
 import { CROP_IDS, CROPS, cropWord } from '../../sim/crops';
 import { nightsToTurn, sowing, workLeft } from '../../sim/actions';
 import { guardedSure } from '../../sim/day';
-import { isTaken, offered, owed, requestProgress, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
+import { isTaken, offered, owed, ripeFor, sowByOf, stillToSow, stockCount, wanted } from '../../sim/goals';
 import { PROPS } from '../../sim/map';
 import { wellsFrom } from '../../sim/actors';
 import { dayOfSeason, season, SEASON_NAMES } from '../../sim/world';
@@ -36,8 +36,10 @@ interface Lesson {
   done?(s: WorldState, n: (k: string) => number, acted: boolean): boolean;
   passive?: number;
   /**
-   * Brings something new onto the screen, so it waits for a day when nothing else has: the crow, the Build tool, the
-   * forecast and the smith come one a day, each with its own line.
+   * Something new, so it waits for a day when nothing else new has come: one new thing a day, each with its own line.
+   * Round 11: every calm lesson but the first day's loop and what follows on directly from the day's new thing (the
+   * eleventh playtest's Spring 9 brought Buy field, Hoe, Spring ends, Smith, Bugs and View, and three new tabs).
+   * Urgent lessons (a crow, bugs, the new field's hoe) still cut in.
    */
   stagger?: boolean;
   /**
@@ -93,20 +95,20 @@ function nearest(s: WorldState, test: (crop: Crop | null, i: number) => boolean)
 const live = (c: Crop | null): c is Crop => !!c && !c.dead;
 const anyRipe = (s: WorldState) => !!nearest(s, (c) => live(c) && c.stage === 4);
 /**
- * The first request the player took, what was sown for it and is in the crate, and the nearest ripe crop sown for it
- * (round 6: only crops sown for a request count, so the pointer never shows one sown before it).
+ * The first request the player took with a ripe crop sown for it, how many are ripe, and the nearest of them (round 6:
+ * only crops sown for a request count, so the pointer never shows one sown before it). Round 11: only those: "Harvest 4
+ * carrots" stayed up from Spring 7 to 9 with none ripe, and ripe market carrots picked under it did nothing.
  */
 const theRequest = (s: WorldState) => {
   for (const o of s.orders) {
     if (!isTaken(o)) continue;
-    const it = o.items[0];
-    const have = requestProgress(s, o).crate;
     const spots = ripeFor(s, o);
-    const ripe = spots.length ? nearest(s, (_c, i) => spots.includes(i)) : null;
-    if (ripe || have > 0) return { o, it, have, ripe };
+    if (spots.length) return { o, it: o.items[0], n: spots.length, ripe: nearest(s, (_c, i) => spots.includes(i)) };
   }
   return null;
 };
+/** Round 11: has a request been filled (in full or short)? Each brings reputation. */
+const anyFilled = (s: WorldState) => s.rep + (s.repPart ?? 0) > 0;
 const thirsty = (s: WorldState, c: Crop | null, i: number) => live(c) && c.stage < 4 && !s.plots[i].wet;
 const anyThirsty = (s: WorldState) => !!nearest(s, (c, i) => thirsty(s, c, i));
 /** A crow on the farm right now, flying in or pecking. */
@@ -202,6 +204,23 @@ export function seedWanted(s: WorldState, cheaper = false): number {
 const paidOk = (s: WorldState, cost: number) => s.coins - cost >= seedWanted(s);
 /** The nearest bare plot, or null when every plot is sown or built on (a line about bare soil waits for one). */
 const bareSpot = (s: WorldState) => nearest(s, (_c, i) => bareAt(s, i));
+/**
+ * Round 11: is all the bare soil spoken for by the requests taken? Then a build lesson waits: the eleventh playtest's
+ * note said "Plant 1 more today", the Build line took the last bare plot, and +620 became "+470, 5 of 6 can come".
+ */
+const soilOwed = (s: WorldState) => {
+  const want = owed(s).plots;
+  if (!want) return false;
+  let bare = 0;
+  for (let i = 0; i < s.plots.length; i++) if (ownedAt(s, i) && bareAt(s, i)) bare++;
+  return bare <= want;
+};
+/** Round 11: enough on the farm for a sweep to be worth saying: four jobs or more for the tool that does them. */
+const SWEEP_JOBS = 4;
+const sweepWork = (s: WorldState) => {
+  const w = workLeft(s);
+  return w.ripe >= SWEEP_JOBS || (w.thirsty >= SWEEP_JOBS && s.learn.includes('can'));
+};
 /** Can the smith make something now that the farm can pay for: a better can or hoe (one the farm has), its reputation and its coins enough? */
 const smithReady = (s: WorldState) =>
   (['can', 'hoe'] as const).some((t) => {
@@ -271,6 +290,7 @@ const LESSONS: Lesson[] = [
   {
     id: 'plant',
     after: ['sleep'],
+    stagger: true,
     // Seeds cost coins, so the two come together; stamina waits for a line of its own.
     unlocks: ['coins', 'seeds'],
     ready: (s) => s.coins >= 10,
@@ -312,6 +332,7 @@ const LESSONS: Lesson[] = [
   {
     id: 'requests',
     after: ['plant'],
+    stagger: true,
     unlocks: ['board', 'requests'],
     ready: (s) => s.day >= 3,
     text: () => 'Read the board.',
@@ -344,28 +365,27 @@ const LESSONS: Lesson[] = [
     point: (s) => bareSpot(s),
   },
   {
-    // Up when it matters: once a crop the request wants is ripe (or already in
-    // the crate), not on the day the request is read. Names the request, points
-    // at a ripe one, and ends when the crate holds enough or the request has
-    // gone. From day 7 it comes anyway, so the lessons after it never wait on
-    // a request nobody grew for.
+    // Up when it matters: once a crop sown for a request is ripe. Names how many, points at one, and ends at the first
+    // request filled. Round 11: it did not end while another request was open, and with a pair each morning one always
+    // is, so it held Spring 7 to 9 with none ripe, and every lesson behind it landed on Spring 9. It says which crops
+    // count ("planted for the request"): a crop planted before Accept does not, and picking one under the line looked
+    // like a bug. From Spring 9 with none ripe it passes quietly, so the lessons after it never wait on a request nobody
+    // grew for.
     id: 'deliver',
     after: ['requests'],
+    stagger: true,
     unlocks: [],
-    // (Only a request the player took: an offer on the board is not yet theirs to fill.) Round 9: only once one is ripe
-    // (from Spring 7 it said "Harvest 3 radishes" with none ripe); from Spring 9 with none ripe it passes quietly, so the
-    // lessons after it never wait on a request nobody grew for.
     ready: (s) => !!theRequest(s),
-    pass: (s) => s.day >= 9 && !theRequest(s),
+    hold: (s) => !theRequest(s),
+    pass: (s) => anyFilled(s) || (s.day >= 9 && !theRequest(s)),
     text: (s) => {
-      const it = (theRequest(s)?.o ?? s.orders.find(isTaken))?.items[0];
-      return it ? `Harvest ${it.n} ${cropWord(it.crop, it.n)}. The crate ships them.` : 'Harvest what it asks. The crate ships it.';
-    },
-    done: (s) => {
       const r = theRequest(s);
-      return !s.orders.some(isTaken) || (!!r && r.have >= r.it.n);
+      return r ? `Harvest ${r.n} ${cropWord(r.it.crop, r.n)} planted for the request.` : 'Harvest what you planted for the request.';
     },
-    point: (s) => theRequest(s)?.ripe ?? prop('crate'),
+    done: (s) => anyFilled(s) || !s.orders.some(isTaken),
+    // (A count line: it goes the moment the first request is filled, whose toast says so.)
+    instant: true,
+    point: (s) => theRequest(s)?.ripe ?? null,
   },
   {
     // The first pair of requests: only one of them can be taken, with the board's Accept. Points at the board; ends
@@ -390,13 +410,32 @@ const LESSONS: Lesson[] = [
     unlocks: ['fair'],
     stagger: true,
     ready: (s) => !!s.fair && s.orders.some(isTaken),
-    text: (s) => (s.fair ? `The fair wants ${s.fair.want} requests by ${SEASON_NAMES[season(s.fair.day)]} ${dayOfSeason(s.fair.day)}.` : 'The fair wants requests filled.'),
+    // Round 11: what it wants, in the words of its rule: filled in full (the board's line adds "taken this season").
+    text: (s) => (s.fair ? `Fill ${s.fair.want} requests in full by ${SEASON_NAMES[season(s.fair.day)]} ${dayOfSeason(s.fair.day)}.` : 'Fill requests in full for the fair.'),
     passive: 4,
+  },
+  {
+    // The last days of a season: the picker now offers the next season's seeds. Round 11: ahead of what can wait a day:
+    // it has only three days to be said.
+    id: 'turn',
+    after: ['plant'],
+    stagger: true,
+    // The board's Seeds tab (every crop and its seasons) comes with the first turn of a season.
+    unlocks: ['seedtab'],
+    ready: (s) => nightsToTurn(s.day) <= 3,
+    text: (s) => `${SEASON_NAMES[season(s.day)]} ends soon. Plant ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()} seeds.`,
+    // Ends when a next season's seed goes in, or once read while idle.
+    act: 'plant:next',
+    passive: 6,
+    // It says to plant, so it waits for bare soil and points at it (the sixth playtest's chevron sat on a bug).
+    hold: (s) => !bareSpot(s),
+    point: (s) => bareSpot(s),
   },
   {
     // Not before buying it leaves coins to sow it (the fifth playtest spent 250 of 270 and sat broke for five days).
     // The board's Fields tab comes with it.
     id: 'field',
+    stagger: true,
     // Round 9: once the first pair is decided, not once its request is delivered: the ninth playtest's Spring 5 to 8 had
     // 490 coins, a full field and nothing to do while the first request grew (it came on Spring 9). It still waits its
     // turn behind the request's own lines.
@@ -412,6 +451,20 @@ const LESSONS: Lesson[] = [
       const p = s.parcels.find((q) => !q.owned);
       return p ? { x: p.x + p.w / 2, y: p.y + p.h / 2 } : null;
     },
+  },
+  {
+    // Round 11: a run of plots in one go, on a day with enough to do: held Space on a keyboard (a held-Space zigzag watered
+    // 16 plots in 8.9 s, a single-press keyboard bot used 45 to 62 s of a 60 s day), a drag across plots on touch. It ends
+    // when the farmer does it, or once read while idle.
+    id: 'sweep',
+    after: ['plant'],
+    unlocks: [],
+    stagger: true,
+    act: 'sweep',
+    ready: (s) => s.day >= 3 && sweepWork(s),
+    text: (_s, touch) => (touch ? 'Drag across plots to work them all.' : 'Hold Space and walk.'),
+    passive: 6,
+    pass: (s) => (s.learnCount.sweep ?? 0) > 0,
   },
   {
     // Crows are let onto the farm quietly (see QUIET); the line waits for a
@@ -452,7 +505,8 @@ const LESSONS: Lesson[] = [
     ready: (s) => (s.day > doneOn(s, 'pests') || s.day > (s.learnCount.crowAte ?? Infinity)) && s.coins >= BUILD_COST.scarecrow,
     // Round 9: not while the taken requests want the coins for seed. Round 10: on any bare plot when no plot in the
     // middle of a field is bare (the middle is still the first choice: a corner watches the least).
-    hold: (s) => s.coins - BUILD_COST.scarecrow < seedWanted(s, true) || !scarecrowSpot(s),
+    // Round 11: nor while the requests taken want all the bare soil there is.
+    hold: (s) => s.coins - BUILD_COST.scarecrow < seedWanted(s, true) || !scarecrowSpot(s) || soilOwed(s),
     text: () => 'Build a scarecrow on bare soil.',
     done: (s, _n, acted) => acted || s.builds.some((b) => b.kind === 'scarecrow'),
     point: (s) => scarecrowSpot(s),
@@ -479,7 +533,7 @@ const LESSONS: Lesson[] = [
     ready: (s) => fields(s) >= 2 && s.coins >= BUILD_COST.sprinkler && s.day > doneOn(s, 'forecast'),
     text: () => 'Build a sprinkler to water around it.',
     passive: 6,
-    hold: (s) => !paidOk(s, BUILD_COST.sprinkler) || !buildSpot(s, false),
+    hold: (s) => !paidOk(s, BUILD_COST.sprinkler) || !buildSpot(s, false) || soilOwed(s),
     point: (s) => buildSpot(s, false),
     build: 'sprinkler',
   },
@@ -492,30 +546,15 @@ const LESSONS: Lesson[] = [
     after: ['deliver'],
     unlocks: [],
     ready: (s) => s.learn.includes('pests') && bugsHere(s),
-    // Says to take the hands when something else is in hand (the act button then says Pick).
+    // Says to take the hands when something else is in hand (the act button then says Pick). Round 11: in the rack's word.
     text: (s) => {
       const at = theBugs(s);
       const c = at ? s.plots[Math.floor(at.y) * s.W + Math.floor(at.x)].crop : null;
       const crop = c ? CROPS[c.kind].plural.toLowerCase() : 'crops';
-      return s.tool === 'hands' ? `Bugs on your ${crop}. Pick them off.` : `Take the hands. Pick bugs off the ${crop}.`;
+      return s.tool === 'hands' ? `Bugs on your ${crop}. Pick them off.` : `Tap Hands. Pick bugs off the ${crop}.`;
     },
     point: (s) => theBugs(s),
     done: (s, n) => n('tend') >= 1 || !bugsHere(s),
-  },
-  {
-    // The last days of a season: the picker now offers the next season's seeds.
-    id: 'turn',
-    after: ['plant'],
-    // The board's Seeds tab (every crop and its seasons) comes with the first turn of a season.
-    unlocks: ['seedtab'],
-    ready: (s) => nightsToTurn(s.day) <= 3,
-    text: (s) => `${SEASON_NAMES[season(s.day)]} ends soon. Plant ${SEASON_NAMES[(season(s.day) + 1) % 4].toLowerCase()} seeds.`,
-    // Ends when a next season's seed goes in, or once read while idle.
-    act: 'plant:next',
-    passive: 6,
-    // It says to plant, so it waits for bare soil and points at it (the sixth playtest's chevron sat on a bug).
-    hold: (s) => !bareSpot(s),
-    point: (s) => bareSpot(s),
   },
   {
     // The whole farm in one view, once there is more farm than the close view holds: with the second field (close up,
@@ -523,6 +562,7 @@ const LESSONS: Lesson[] = [
     // View button on a phone. (It came on day 2, when the one field was all on screen already.)
     id: 'wide',
     after: ['plant', 'hoe'],
+    stagger: true,
     unlocks: ['wide'],
     act: 'wide',
     // Once the new field is hoed (or the day after it came), and up long enough to be read: the sixth playtest's line

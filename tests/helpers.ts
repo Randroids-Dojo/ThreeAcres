@@ -81,6 +81,9 @@ export function play(
 
 /** Sunup: mark lessons finished and the features they bring in, as if the farm had been taught them. */
 export function teach(s: WorldState, lessons: string[], features: string[] = []): WorldState {
+  // (Round 11: the sweep lesson is told apart from the lessons a test is about: a farm taught anything has had it. A test of
+  // the sweep lesson takes it off again.)
+  if (!s.learn.includes('lesson:sweep')) s.learn.push('lesson:sweep');
   for (const id of lessons) if (!s.learn.includes(`lesson:${id}`)) s.learn.push(`lesson:${id}`);
   for (const f of features) if (!s.learn.includes(f)) s.learn.push(f);
   return s;
@@ -278,7 +281,7 @@ export function follow(s: WorldState, days: number, opts: Partial<Follower> = {}
         tool('seeds');
         if (s.seed !== c) cmds.push({ type: 'seed', crop: c });
         at(bare);
-      } else if (!/Watch|forecast|fair|smith|View|Press C/.test(line) || s.minute > 600) cmds.push({ type: 'sleep' });
+      } else if (!/Watch|forecast|fair|Fill|smith|View|Press C|Drag|Hold Space/.test(line) || s.minute > 600) cmds.push({ type: 'sleep' });
     }
     const ev = step(s, dt, cmds);
     for (const e of ev) {

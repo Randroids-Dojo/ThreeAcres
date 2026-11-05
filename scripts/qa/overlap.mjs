@@ -65,6 +65,7 @@ const PIECES = {
   seeds: '.seedbar',
   builds: '.buildbar',
   act: '.tb-act',
+  stop: '.stopbtn:not(.gone)',
   stick: '.ts-base',
   line: '.hint.on',
   caption: '.info:not(.empty):not(.quiet)',
@@ -170,7 +171,14 @@ async function run(label, viewport, touch) {
         f.x = 3.5; f.y = 4.5; f.facing = 's';
       });
     }],
-    ['seed picker', async () => p.evaluate(() => window.sunup.hud.pickTool('seeds'))],
+    // Round 11: Stop, in its fixed slot, while three or more taps wait.
+    ['stop button', async () => p.evaluate(async () => {
+      const st = window.sunup.state;
+      st.taps = [0, 1, 2, 3].map((k) => ({ x: 2 + k, y: 5, tool: 'hands' }));
+      Object.assign(st.actors[0], { task: { verb: 'harvest', x: 2, y: 5, t: 0, dur: 30 } });
+      await new Promise((r) => setTimeout(r, 120));
+    })],
+    ['seed picker', async () => p.evaluate(() => { const st = window.sunup.state; st.taps = []; st.actors[0].task = null; window.sunup.hud.pickTool('seeds'); })],
     ['build picker', async () => p.evaluate(() => window.sunup.hud.pickTool('build'))],
     ['toast', async () => p.evaluate(() => { window.sunup.hud.pickTool('hands'); window.sunup.hud.toast('<b>Spring 2</b>, cloudy<br>Sold 4 for 120.', 'big', 5000); })],
     // The board's longest tab must not grow over the shell's corner button.
@@ -380,13 +388,14 @@ async function run(label, viewport, touch) {
         const br = body.getBoundingClientRect();
         const stamps = [...body.querySelectorAll('.item.req.offer .btn')].map((btn) => { const r = btn.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return r.bottom <= br.bottom + 1 && !!hit && btn.contains(hit); });
         const clash = body.querySelector('.clash')?.getBoundingClientRect();
-        return { stamps, clash: !!clash && clash.bottom <= br.bottom + 1 };
+        // (Round 11: once fairs have begun a pair need not compete for the soil, and then has no clash line.)
+        return { stamps, clash: !clash || clash.bottom <= br.bottom + 1 };
       });
       if (first.stamps.length !== 2 || !first.stamps.every(Boolean) || !first.clash) hits.push(`the pair is not all on the board's first screen ${JSON.stringify(first)}`);
       // (Round 10: the board is calm: the morning card is no longer pinned on it again, one of six notes around a single
       // request in the tenth playtest.)
       if (q.card) hits.push(`the morning card is repeated on the board (${q.card})`);
-      if (!/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8) hits.push(`the pair's clash line reads "${q.clash}"`);
+      if (q.clash && (!/^Both need [\d,]+ (plots|coins)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8)) hits.push(`the pair's clash line reads "${q.clash}"`);
       if (!q.onScreen) hits.push('the board runs off the screen');
       if (!q.fits && !q.scrolls) hits.push(`the board's notes run past its foot and do not scroll ${JSON.stringify(q.h)}`);
       if (!q.fits && !q.cue) hits.push('the board has more below but no fade says so');
@@ -469,7 +478,8 @@ async function run(label, viewport, touch) {
         notes: [...document.querySelectorAll('.dialog.on .list > p.legend')].map((e) => e.textContent.trim()),
         close: (() => { const b = document.querySelector('.dialog.on header .btn'); const l = b?.querySelector('.tlbl'); return { word: l?.textContent ?? '', shown: !!l && l.getBoundingClientRect().width > 10, aria: b?.getAttribute('aria-label') ?? '' }; })(),
       }));
-      for (const t of q.notes) if (t.split(/\s+/).length > 10) hits.push(`board note of ${t.split(/\s+/).length} words: "${t}"`);
+      // (Round 11: the fair's one line says what it wants, in eleven.)
+      for (const t of q.notes) if (t.split(/\s+/).length > (/^Fair /.test(t) ? 11 : 10)) hits.push(`board note of ${t.split(/\s+/).length} words: "${t}"`);
       if (q.close.word !== 'Close' || !q.close.shown || q.close.aria !== 'Close') hits.push(`close button ${JSON.stringify(q.close)}`);
     }
     // Round 4: small type read at about 9 and 10 px. The forecast's words 11 px or more, the seed cards' lines 12 or more.

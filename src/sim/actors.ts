@@ -553,6 +553,28 @@ export function tapTool(s: WorldState, inHand: ToolId, x: number, y: number, see
   return inHand;
 }
 
+/**
+ * Round 11: does a drag crossing this plot have a job there for the tool in hand? The tool's own job, with no change of
+ * tool (a stray crossing never takes another): seeds on bare soil, or on a ripe or withered crop they would clear first;
+ * the can on a thirsty crop, even with the can empty (the queue goes by the well); the hands on what is ripe or bugged.
+ */
+export function dragJob(s: WorldState, x: number, y: number, tool: ToolId = s.tool, seed: CropId = s.seed): boolean {
+  if (!homestead(s) || !isField(s, x, y) || !owned(s, x, y)) return false;
+  const r = resolve(s, tool, x, y, seed);
+  if (r.verb && r.ok) return true;
+  if (tool === 'seeds') return clearsFor(s, x, y, seed);
+  return tool === 'can' && r.verb === 'water' && s.water <= 0 && r.reason.startsWith('The can is empty');
+}
+
+/**
+ * Round 11: does a touch that starts here begin a drag across plots (a tap here would do a job), and not a walk stick or
+ * a pan? A tap takes the tool for the job, so a press on a thirsty crop with the hands in hand drags with the can.
+ */
+export function dragStarts(s: WorldState, x: number, y: number): boolean {
+  if (!homestead(s) || !inMap(x, y) || !isField(s, x, y) || !owned(s, x, y)) return false;
+  return dragJob(s, x, y, tapTool(s, s.tool, x, y));
+}
+
 /** Sunup: the wells, nearest first from a point. */
 export function wellsFrom(x: number, y: number): { x: number; y: number }[] {
   return PROPS.filter((p) => p.kind === 'well')
@@ -623,6 +645,12 @@ function tapJob(s: WorldState, tap: Tap): { r: Resolved; tool: ToolId; then?: Ta
  * each other).
  */
 export function doTap(s: WorldState, a: Actor, tap: Tap, ev: SimEvent[]): void {
+  // Round 11: a plot a drag crossed whose job has gone (the copper can watered its row) is passed over, with no word and
+  // no walk; run out of coins for its seed, it says so.
+  if (tap.drag && homestead(s) && !dragJob(s, tap.x, tap.y, tap.tool, tap.seed)) {
+    if (tap.tool === 'seeds' && tap.seed && s.coins < CROPS[tap.seed].seed) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: `${CROPS[tap.seed].name} seeds cost ${CROPS[tap.seed].seed}` });
+    return;
+  }
   let r: Resolved;
   let then: Tap | undefined;
   let tool = tap.tool;

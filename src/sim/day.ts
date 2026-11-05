@@ -183,7 +183,8 @@ export function nightfall(s: WorldState, ev: SimEvent[]): void {
         if (c.dead || inSeason(c.kind, now) || c.stage === 4) continue;
         lostFor(s, c, 'turn');
         p.crop = null;
-        turned++;
+        // (Round 11: a regrowing crop already picked has paid its way: its end is no loss to tell.)
+        if (c.picks === 0) turned++;
       }
       if (turned) report.turned = turned;
       // Round 9: a new season, a new fair (one set for this season by a late Accept stays).

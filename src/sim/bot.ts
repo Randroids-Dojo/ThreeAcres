@@ -1,13 +1,13 @@
 // A simple farmer that plays any mix through commands only, the same way a
 // person would. Used by the tests and by ?autoplay in the browser.
 
-import { fieldPrice, resolve, sowing } from './actions';
+import { fieldPrice, nightsToTurn, resolve, sowing } from './actions';
 import { farmer, wellsFrom } from './actors';
 import type { Command } from './commands';
 import { CROP_IDS, CROPS } from './crops';
 import { homestead } from './actions';
-import { BUILD_COST, TOOL_UPGRADES } from './constants';
-import { canDeliver, canMeet, clearOf, fairNow, forFair, gainOf, isTaken, lastSowOf, offered, stillToSow } from './goals';
+import { BUILD_COST, SEASON_PREVIEW_DAYS, TOOL_UPGRADES } from './constants';
+import { canDeliver, canMeet, clearOf, fairNow, fairTarget, forFair, gainOf, isTaken, lastSowOf, offered, owed, stillToSow } from './goals';
 import { guarded } from './day';
 import { owned } from './world';
 import type { CropId, Order, RequestKind, ToolId, WorldState } from './types';
@@ -36,6 +36,8 @@ export function newBot(pace = 0.05, opts: Partial<Pick<Bot, 'choose' | 'bedtime'
 }
 
 const BOLD = new Set<RequestKind>(['rush', 'long', 'big']);
+/** Round 11: the share of its plots a careful player keeps bare while the fair still wants requests. */
+const KEEP_BARE = 0.35;
 
 /** Which offer on the board the bot takes, by its way of choosing; null for none. Only one it can still meet. */
 export function botPick(s: WorldState, how: Bot['choose']): Order | null {
@@ -266,7 +268,11 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
     }
   }
 
-  const todo = chores(s);
+  let todo = chores(s);
+  // Round 11: a careful player leaves soil for the requests the fair still wants, or the next season's will (a fair counts
+  // only what is taken in its season, filled in full): it sows for market only past that. A farm sown edge to edge has no
+  // room for the next pair.
+  if (homestead(s) && bot.choose === 'fair' && s.fair !== undefined && (fairTarget(s) || nightsToTurn(s.day) <= SEASON_PREVIEW_DAYS) && !owed(s).plots && barePlots(s) <= Math.ceil(farmCount(s).plots * KEEP_BARE)) todo = todo.filter((c) => resolve(s, c.tool, c.x, c.y).verb !== 'plant');
   const outOfMoves = (s.rules.clock === 'turns' && s.ap - s.jobs.length <= 0) || (s.rules.clock === 'day' && s.stamina < 4);
 
   if (s.rules.control === 'point') {
@@ -293,7 +299,10 @@ export function botCommands(s: WorldState, bot: Bot, dt: number): Command[] {
   const busy = s.jobs.length > 0 || f.task || f.path.length || f.aim;
   // A busy player goes to bed at its hour, whatever is left.
   const late = bot.bedtime !== undefined && s.rules.clock === 'day' && s.minute >= bot.bedtime;
-  if (!busy && (outOfMoves || late || !todo.length || (s.rules.clock === 'day' && s.minute > 900))) bot.idle += dt;
+  // Round 11: a careful player stays up on a flock day while crows are still to come (those still to come at bedtime take a
+  // crop each, and a request one crop short no longer counts for the fair).
+  const watching = homestead(s) && bot.choose === 'fair' && !!s.flock && s.crowPlan.length > 0 && s.rules.clock === 'day' && s.minute <= 900 && !outOfMoves;
+  if (!busy && !watching && (outOfMoves || late || !todo.length || (s.rules.clock === 'day' && s.minute > 900))) bot.idle += dt;
   else bot.idle = 0;
   if (s.rules.clock !== 'flow' && bot.idle > 0.5) {
     out.push({ type: 'sleep' });

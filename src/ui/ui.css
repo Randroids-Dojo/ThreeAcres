@@ -743,3 +743,23 @@ svg { width: 100%; height: 100%; display: block; }
 .dialog[data-kind='fair'] .ribbon .ic { width: 26px; height: 26px; color: #f4c95a; }
 .dialog[data-kind='fair'] .fairp { margin: 0; line-height: 1.55; }
 .dialog[data-kind='fair'] .row.ask { justify-content: center; margin-top: 6px; }
+
+/* Round 11: Stop, while three or more taps wait: a fixed slot in the thumb's reach, beside the act button on touch, at
+   the rack's right end for a mouse. */
+.hud .stopbtn { position: absolute; right: 18px; bottom: calc(14px + var(--safe-b)); width: 64px; height: 56px; padding: 3px 0 2px; display: grid; grid-template-rows: 26px auto; place-items: center; align-content: center; gap: 1px; border-radius: 12px; background: #8e2f24; color: var(--cream); border: 1px solid rgba(251, 243, 223, 0.3); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3); pointer-events: auto; z-index: 3; }
+.hud .stopbtn.gone { display: none; }
+.hud .stopbtn .ic { width: 22px; height: 22px; }
+.hud .stopbtn .tlbl { font-size: 12px; font-weight: 700; line-height: 1; color: var(--cream); }
+.hud .stopbtn .kcap { display: none; position: absolute; top: -5px; left: -5px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px; background: #f4e8c8; color: var(--ink); font-size: 9.5px; font-weight: 800; line-height: 15px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+#app[data-device='key'] .hud .stopbtn .kcap, #app[data-device='mouse'] .hud .stopbtn .kcap { display: block; }
+.gameroot.touch-on .hud .stopbtn { right: 110px; bottom: calc(112px + var(--safe-b)); width: 60px; height: 60px; border-radius: 50%; }
+@media (max-width: 640px) {
+  .gameroot.touch-on .hud .stopbtn { right: 104px; bottom: calc(104px + var(--safe-b)); }
+}
+/* Round 11: the coin on an offer's headline, and the fair's star on a taken request that can count for it. */
+.item.req .tx b .ic { display: inline-block; vertical-align: -2px; margin-right: 3px; width: 15px; height: 15px; }
+.item.req .tx b .fairmark { margin-right: 0; margin-left: 4px; float: right; color: #b78a1e; }
+/* Round 11: on touch, Board and View stand low beside Stop's slot, in the thumb's reach; a card's Close hangs at its foot. */
+.hud > .topbtns { position: absolute; right: 176px; bottom: calc(104px + var(--safe-b)); flex-direction: column-reverse; align-items: center; gap: 6px; pointer-events: auto; z-index: 3; }
+.gameroot[data-game='homestead'].touch-on .dialog header .closebtn { position: absolute; right: 12px; bottom: 8px; margin: 0; z-index: 2; }
+.gameroot[data-game='homestead'].touch-on .dialog .body { padding-bottom: 50px; }

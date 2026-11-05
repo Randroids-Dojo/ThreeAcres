@@ -38,8 +38,17 @@ export interface HudHost {
   input: Input;
 }
 
-/** Round 10: taps waiting before the rack says how to stop them (once a farm). */
-export const STOP_HINT_TAPS = 5;
+/** Round 11: taps waiting before the Stop button comes (a tap on the farmer mostly missed him: 0 of 8 at a walk). */
+export const STOP_TAPS = 3;
+
+/**
+ * Round 11: is the Stop button up? From `STOP_TAPS` taps waiting, and, once up, until they have all gone, so it never
+ * slips out from under a thumb on its way to it.
+ */
+export function stopShown(s: WorldState, was = false): boolean {
+  const n = s.taps?.length ?? 0;
+  return homestead(s) && (n >= STOP_TAPS || (was && n > 0));
+}
 
 /** The most clauses the morning card says (the fourth playtest read four or more, and stopped reading). */
 export const MORNING_CLAUSES = 3;
@@ -63,6 +72,9 @@ export function failWords(why: RequestFail | undefined, lost = 0): string {
       return `the turn took ${lost}`;
     case 'late':
       return 'too few planted in time';
+    case 'behind':
+      // Round 11: all were planted, and a dry night or bugs held them back ("too few planted in time" was wrong).
+      return 'not ripe in time';
     case 'soil':
       return 'no room to plant them';
     case 'coins':
@@ -94,8 +106,9 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES, ripeNow?: num
   const bits: [number, number, string][] = [];
   const filled = r.filled ?? [];
   // Round 7: one short of its count is paid for what it got ("paid 285 for 14 of 15").
-  if (filled.length === 1) bits.push([3, 0, `${esc(townName(filled[0].who))} paid ${fmt(filled[0].reward)}${filled[0].of ? ` for ${filled[0].got} of ${filled[0].of}` : ''}`]);
-  else if (filled.length > 1) bits.push([3, 0, `${filled.length} requests paid ${fmt(filled.reduce((a, f) => a + f.reward, 0))}`]);
+  // Round 11: the figure its note said: what it came to in all.
+  if (filled.length === 1) bits.push([3, 0, `${esc(townName(filled[0].who))} paid ${fmt(filled[0].clear ?? filled[0].reward)} in all${filled[0].of ? ` for ${filled[0].got} of ${filled[0].of}` : ''}`]);
+  else if (filled.length > 1) bits.push([3, 0, `${filled.length} requests paid ${fmt(filled.reduce((a, f) => a + (f.clear ?? f.reward), 0))} in all`]);
   // Round 9: the crate paid as each crop went in, so this is yesterday's ("Sold 4 for 220" read as money still to come).
   if (sold) bits.push([4, -0.5, `yesterday you sold ${sold} for ${fmt(value)}`]);
   // Round 9: the season's fair, judged last night: first of all.
@@ -281,6 +294,8 @@ export function pickersAfter(open: { seed: boolean; build: boolean }, tool: Tool
 /** The lesson pointer aims this high over its tile (a crop's top), and its middle sits this many px above that. */
 const POINT_HEIGHT = 0.4;
 const POINT_LIFT = 17;
+/** Round 11: ms after Stop comes up in which a press on it does nothing (it may have come up under a finger tapping plots). */
+const STOP_GRACE = 250;
 
 const WEATHER_ICON: Record<Weather, IconId> = { sun: 'sun', cloud: 'cloud', rain: 'rain', storm: 'storm', heat: 'heat' };
 /** One short word for each day of the forecast. */
@@ -313,6 +328,14 @@ export class Hud {
   private boardBtn = el('button', 'btn iconbtn');
   private viewBtn = el('button', 'btn iconbtn viewbtn');
   private fresh = '';
+  /** Round 11: Stop, in a fixed slot in the thumb's reach, while taps wait. */
+  private stopBtn = el('button', 'btn stopbtn gone', `<span class="ic">${icon('close')}</span><span class="tlbl">Stop</span><span class="kcap">X</span>`);
+  /** When Stop last came up: a press in its first moments was meant for the plot under it. */
+  private stopSince = 0;
+  private topBtns = el('div', 'topbtns');
+  private topRight = el('div', 'topright');
+  /** Round 11: on touch Board and View stand low, in the thumb's reach (the top right is the hardest reach on a phone). */
+  private btnsLow = false;
   private hintEl = el('div', 'hint');
   readonly touch: TouchControls;
   private floaters = el('div', 'floaters');
@@ -366,9 +389,18 @@ export class Hud {
     view.title = 'Whole farm or close up (C)';
     view.setAttribute('aria-label', 'Whole farm or close up');
     view.onclick = () => host.toggleCamera();
-    const btns = el('div', 'topbtns');
+    const stop = this.stopBtn;
+    stop.title = 'Stop (X)';
+    stop.setAttribute('aria-label', 'Stop: let the waiting taps go');
+    stop.addEventListener('pointerdown', (e) => e.stopPropagation());
+    stop.onclick = () => {
+      if (performance.now() - this.stopSince < STOP_GRACE) return;
+      host.send({ type: 'cancelTaps' });
+      host.cue('close');
+    };
+    const btns = this.topBtns;
     btns.append(board, view);
-    const right = el('div', 'topright');
+    const right = this.topRight;
     right.append(this.coins, btns);
     top.append(this.day, el('div', 'spacer'), right);
 
@@ -406,7 +438,7 @@ export class Hud {
       host.cue('tap');
     });
     this.pointer.addEventListener('pointerdown', (e) => e.stopPropagation());
-    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.touch.el, this.pointer, this.toasts, this.floaters);
+    this.root.append(top, this.goals, this.info, this.seedbar, this.buildbar, this.toolbar, this.hintEl, this.touch.el, this.stopBtn, this.pointer, this.toasts, this.floaters);
   }
 
   // ------------------------------------------------------------ per frame
@@ -417,15 +449,19 @@ export class Hud {
     this.updateCoins(s);
     this.updateGoals(s);
     this.updateTools(s);
-    // Round 10: the first time a run of taps waits, how to stop it (the tenth playtest's 31 planting taps hoed instead,
-    // with no way to cancel them). Once a farm.
-    if (homestead(s) && (s.taps?.length ?? 0) >= STOP_HINT_TAPS && !s.learnCount.stopHint) {
-      s.learnCount.stopHint = 1;
-      this.toast(this.touch.shown ? 'Tap the farmer to stop.' : 'Press X to stop.', 'info', 3200);
-    }
+    // Round 11: a run of taps can be let go with Stop, while they wait (the tenth playtest's 31 planting taps hoed
+    // instead, with no way to cancel them; tapping the farmer, at a walk, mostly missed).
+    const was = !this.stopBtn.classList.contains('gone');
+    const up = stopShown(s, was);
+    if (up && !was) this.stopSince = performance.now();
+    if (up !== was) toggle(this.stopBtn, 'gone', !up);
     this.updateInfo(s, aim);
     this.updatePointer();
     this.touch.update();
+    if (homestead(s) && this.touch.shown !== this.btnsLow) {
+      this.btnsLow = this.touch.shown;
+      (this.btnsLow ? this.root : this.topRight).append(this.topBtns);
+    }
     setText(this.hintEl, this.lessonLine);
     toggle(this.hintEl, 'on', !!this.lessonLine);
     toggle(this.info, 'quiet', !!this.lessonLine);
@@ -903,6 +939,9 @@ export class Hud {
           break;
         }
         if (e.quality > 0 && e.by === s.actors[0].id) this.float(e.x + 0.5, e.y + 0.5, `${QUALITY_NAME[e.quality]} ${CROPS[e.crop].name.toLowerCase()}`);
+        // Round 11: a crop of a request's kind that was not planted for it says so as it is picked (ripe market carrots
+        // picked under "Harvest 4 carrots" did nothing for the request, which read as a bug).
+        else if (homestead(s) && e.by === s.actors[0].id && e.req === undefined && s.orders.some((q) => isTaken(q) && q.items[0].crop === e.crop && (q.got ?? 0) < q.items[0].n)) this.float(e.x + 0.5, e.y + 0.5, 'Sold. Not for the request');
         break;
       }
       case 'crowEat':
@@ -932,8 +971,9 @@ export class Hud {
       case 'request':
         // Requests filled or gone overnight are on the morning card; this is one handed over by day, or the other of
         // a pair let go because seed went in for this one.
-        // Round 8: one short earns its share of a reputation point ("+¾ reputation").
-        if (e.done && s.turnover < 0) this.toast(e.of ? `<b>${esc(e.who)}</b> took ${e.got} of ${e.of}. +${fmt(e.reward)} coins${e.rep && repShare(e.rep) ? `, +${repShare(e.rep)} reputation` : ''}.` : `<b>${esc(e.who)}</b> took the crops. +${fmt(e.reward)} coins, +1 reputation.`, 'big', 3200);
+        // Round 8: one short earns its share of a reputation point ("+¾ reputation"). Round 11: one figure for one payment:
+        // what its note says it comes to in all (the note said "+180 in all", this "+90 coins").
+        if (e.done && s.turnover < 0) this.toast(e.of ? `<b>${esc(e.who)}</b> took ${e.got} of ${e.of}. +${fmt(e.clear ?? e.reward)} in all${e.rep && repShare(e.rep) ? `, +${repShare(e.rep)} reputation` : ''}.` : `<b>${esc(e.who)}</b> took the crops. +${fmt(e.clear ?? e.reward)} in all, +1 reputation.`, 'big', 3200);
         // Lost by day, with its cause (round 7), or the other of a pair let go.
         else if (!e.done && s.turnover < 0 && e.crop && e.why) this.toast(`${esc(e.who)} gave up on the ${CROPS[e.crop].plural}${failWords(e.why, e.lost) ? ` (${failWords(e.why, e.lost)})` : ''}.`, 'deny', 3200);
         else if (!e.done && s.turnover < 0 && e.crop) this.toast(`${esc(e.who)} will find ${CROPS[e.crop].plural} elsewhere.`, '', 2800);

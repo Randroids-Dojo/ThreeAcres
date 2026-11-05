@@ -56,7 +56,7 @@ describe('a request keeps its crops', () => {
     s.orders[0].got = 3;
     nightfall(s, []);
     expect(s.orders.some((o) => o.id === 1)).toBe(false);
-    expect(s.report!.filled).toEqual([{ who: 'Mabel', reward: 190 - 3 * CROPS.strawberry.price }]);
+    expect(s.report!.filled?.[0]).toMatchObject({ who: 'Mabel', reward: 190 - 3 * CROPS.strawberry.price });
     expect(s.rep).toBe(1);
   });
 

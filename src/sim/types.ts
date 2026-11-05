@@ -173,6 +173,11 @@ export interface Tap {
   seed?: CropId;
   /** A one-off build from the lesson pointer. */
   build?: BuildKind;
+  /**
+   * Round 11: crossed by a drag, not tapped: when its turn comes, a plot whose job has gone (a copper can already
+   * watered its row) is passed over without a word or a walk.
+   */
+  drag?: boolean;
 }
 
 export interface Job {
@@ -225,11 +230,16 @@ export interface Order {
    * and for requests taken before round 9: they count crops planted since they were pinned.
    */
   from?: number;
+  /**
+   * Sunup, round 11: the day it was accepted: a fair counts only requests taken in its season (the eleventh playtest's
+   * summer 3 and autumn 6 were all taken before those seasons began). Older saves fall back on `made`.
+   */
+  takenOn?: number;
 }
 
 /**
- * Sunup, round 9: the season's fair, on its last day: it wants so many requests filled that season, counted from
- * `start`; met, a ribbon for the house and a point of reputation.
+ * Sunup, round 9: the season's fair, on its last day: it wants so many requests taken that season and filled in full,
+ * counted from `start`; met, a ribbon for the house and a prize.
  */
 export interface Fair {
   start: number;
@@ -238,14 +248,11 @@ export interface Fair {
   got: number;
   /** Round 10: requests the player took while it ran (for the fair-night card's why). Missing in older saves. */
   taken?: number;
-  /**
-   * Round 10: times the player took the side of a pair that did not count for it while it still wanted requests: from
-   * then on both sides count, until it has them.
-   */
-  passed?: number;
-  /** Round 10: requests due by it that were lost, and what took most of them. */
+  /** Round 10: requests that could count for it that were lost, and what took most of them. */
   lost?: number;
   why?: RequestFail;
+  /** Round 11: requests taken while it ran that came up short (paid in part, they do not count). */
+  short?: number;
   /** Round 10: mornings it still wanted a request that could ripen by it and the board had none, for want of free soil. */
   noRoom?: number;
 }
@@ -264,6 +271,10 @@ export interface FairResult {
   why?: RequestFail;
   taken?: number;
   noRoom?: number;
+  /** Round 11: requests taken while it ran that came up short. */
+  short?: number;
+  /** Round 11: what the ribbon brought: a fifth off the next field, or, with none to discount, requests that pay more. */
+  prize?: 'field' | 'pay';
 }
 
 /** What took a crop: crows, bugs, a dry night, a heat wave's night, or the season's turn. */
@@ -272,9 +283,11 @@ export type LossCause = 'crows' | 'bugs' | 'dry' | 'heat' | 'turn';
 /**
  * Why a request the player took went unfilled: a loss on the farm (the crops
  * sown for it were taken), or, with no loss, its sow-by day passed with too
- * little sown ('late'), the soil or the coins ran short, or its day came.
+ * little sown ('late'), all of it sown but held back past its day by a missed
+ * watering or bugs ('behind', round 11), the soil or the coins ran short, or
+ * its day came.
  */
-export type RequestFail = LossCause | 'late' | 'soil' | 'coins' | 'due';
+export type RequestFail = LossCause | 'late' | 'behind' | 'soil' | 'coins' | 'due';
 
 /**
  * Sunup's sorts of request. A pair is one bold request against one safe one:
@@ -341,8 +354,11 @@ export interface DayReport {
   kept?: { crop: CropId; n: number }[];
   /** Sunup: crops the season's turn took (out of season and not yet ripe). */
   turned?: number;
-  /** Sunup: requests filled overnight and what they paid (`got` of `of` when one short of its count was paid in part). */
-  filled?: { who: string; reward: number; got?: number; of?: number }[];
+  /**
+   * Sunup: requests filled overnight and what they paid (`got` of `of` when one short of its count was paid in part).
+   * Round 11: `clear` is what the note and the toast call it: what it came to in all.
+   */
+  filled?: { who: string; reward: number; clear?: number; got?: number; of?: number }[];
   /** Sunup: coins a neighbour left so a farm with nothing left can start again. */
   gift?: number;
   /** Sunup: requests that ran out of time overnight, unfilled, and why (round 6: what took the crops sown for it). */
@@ -492,10 +508,10 @@ export interface WorldState {
    */
   offerWhy?: 'crop' | 'fair' | 'room' | 'coins' | 'soil' | 'pass' | 'full' | 'none' | '';
   /**
-   * Sunup, round 10: requests filled before the fair of the season they are due in was set (due next season, filled
-   * early): their due days, counted when that fair is set.
+   * Sunup, round 11: ribbons won with no field left to discount (or a discount already waiting): each is a lasting
+   * prize: requests pay a tenth more over market from then on (`PRIZE_PAY`). Missing means none.
    */
-  fairAhead?: number[];
+  prizes?: number;
   /** Sunup, round 10: the tool in hand before the Build tool was taken (it comes back after a build). */
   toolBefore?: ToolId;
 }
@@ -534,5 +550,5 @@ export type SimEvent =
   | { type: 'hire'; id: number }
   | { type: 'refill'; x: number; y: number; by: number }
   | { type: 'upgrade'; tool: 'can' | 'hoe'; level: number; /** Sunup: it came with the second field, not from the smith. */ withField?: boolean }
-  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId; /** Paid in part: what it got of its count. */ got?: number; of?: number; /** Lost: what took its crops, or why it could not be met. */ why?: RequestFail; lost?: number; /** Filled: the reputation it earned (a share of a point when short). */ rep?: number }
+  | { type: 'request'; id: number; who: string; done: boolean; reward: number; crop?: CropId; /** Paid in part: what it got of its count. */ got?: number; of?: number; /** Lost: what took its crops, or why it could not be met. */ why?: RequestFail; lost?: number; /** Filled: the reputation it earned (a share of a point when short). */ rep?: number; /** Round 11, filled: what it came to in all, the figure on its note. */ clear?: number }
   | { type: 'unlock'; what: string };

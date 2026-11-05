@@ -28,6 +28,11 @@ export interface InputHost {
    * become a stop, not a tap on the plot under the farmer.
    */
   stopAt?(px: number, py: number): boolean;
+  /**
+   * Round 11: does a touch that starts on this tile begin a drag across plots (a tap here would do a job)? A touch that
+   * starts elsewhere keeps what a drag did before: the walk stick, or a pan of the wide view.
+   */
+  dragFrom?(x: number, y: number): boolean;
 }
 
 interface Touch {
@@ -40,9 +45,13 @@ interface Touch {
   /** Last position used for a one-finger pan. */
   px?: number;
   py?: number;
+  /** Round 11: this finger is dragging across plots, not panning. */
+  sweep?: boolean;
 }
 
 const TAP_SLOP = 10;
+/** Round 11: how far apart (px) a drag's line is read, so a quick finger misses no plot. */
+const SWEEP_STEP = 12;
 
 /** Keys that walk or act on the farm: pressed on a focused HUD button, they take the focus off it and go to the farm. */
 const FARM_KEYS = new Set(['Space', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyB', 'KeyC', 'KeyX', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5']);
@@ -61,7 +70,9 @@ export class Input {
   private touches = new Map<number, Touch>();
   private stroke: { mode: 'paint' | 'erase'; tiles: Set<string>; committed: boolean; first: { x: number; y: number } } | null = null;
   private pinch: { d: number; mx: number; my: number } | null = null;
-  private mouseDrag: { x: number; y: number; button: number } | null = null;
+  private mouseDrag: { x: number; y: number; button: number; swept?: boolean } | null = null;
+  /** Round 11: the plots a drag has crossed, and where it last was (px on the stage). */
+  private sweep: { tiles: Set<string>; x: number; y: number } | null = null;
   private actHeld = 0;
   private touchActHeld = false;
   private padPrev: boolean[] = [];
@@ -122,6 +133,60 @@ export class Input {
     if (this.host.blocked() || this.host.rules().control !== 'walk') return;
     const r = this.stage.getBoundingClientRect();
     this.tapAt(clientX - r.left, clientY - r.top);
+  }
+
+  /**
+   * Round 11: would a press at this point (client px) begin a drag across plots? The walk stick asks as its finger
+   * lands: one on a plot with a job is a drag once it moves, one anywhere else is the stick.
+   */
+  dragAt(clientX: number, clientY: number): boolean {
+    if (this.host.blocked() || this.host.rules().control !== 'walk' || !this.host.dragFrom) return false;
+    const r = this.stage.getBoundingClientRect();
+    const tile = this.host.pick(clientX - r.left, clientY - r.top);
+    return !!tile && this.host.dragFrom(tile.x, tile.y);
+  }
+
+  /** Round 11: a drag across plots starts at a point (client px): the plot under it is tapped, with the tool for its job. */
+  sweepStart(clientX: number, clientY: number): void {
+    const r = this.stage.getBoundingClientRect();
+    this.beginSweep(clientX - r.left, clientY - r.top);
+  }
+
+  /** Round 11: the drag moves on (client px): each plot it crosses queues. */
+  sweepMove(clientX: number, clientY: number): void {
+    const r = this.stage.getBoundingClientRect();
+    this.moveSweep(clientX - r.left, clientY - r.top);
+  }
+
+  /** Round 11: the drag ends. */
+  sweepEnd(): void {
+    this.sweep = null;
+  }
+
+  private beginSweep(px: number, py: number): void {
+    this.sweep = { tiles: new Set(), x: px, y: py };
+    if (this.host.blocked()) return;
+    const tile = this.host.pick(px, py);
+    if (!tile || !this.host.dragFrom?.(tile.x, tile.y)) return;
+    this.sweep.tiles.add(`${tile.x},${tile.y}`);
+    this.queue.push({ type: 'actAt', x: tile.x, y: tile.y });
+  }
+
+  private moveSweep(px: number, py: number): void {
+    const w = this.sweep;
+    if (!w || this.host.blocked()) return;
+    // A quick finger crosses plots between two moves: every plot along the line counts.
+    const steps = Math.max(1, Math.ceil(Math.hypot(px - w.x, py - w.y) / SWEEP_STEP));
+    for (let k = 1; k <= steps; k++) {
+      const tile = this.host.pick(w.x + ((px - w.x) * k) / steps, w.y + ((py - w.y) * k) / steps);
+      if (!tile) continue;
+      const key = `${tile.x},${tile.y}`;
+      if (w.tiles.has(key)) continue;
+      w.tiles.add(key);
+      this.queue.push({ type: 'actAt', x: tile.x, y: tile.y, drag: true });
+    }
+    w.x = px;
+    w.y = py;
   }
 
   /** The touch act button is held: repeat like a held Space bar. */
@@ -246,7 +311,17 @@ export class Input {
         this.host.pan(p.x - d.x, p.y - d.y);
         d.x = p.x;
         d.y = p.y;
-      } else if (d.button === 0) this.continueStroke(p.x, p.y);
+      } else if (d.button === 0) {
+        this.continueStroke(p.x, p.y);
+        // Round 11: under walk control a left drag has no other job: it queues each plot it crosses.
+        if (this.host.rules().control === 'walk') {
+          if (!d.swept && Math.hypot(p.x - d.x, p.y - d.y) > TAP_SLOP) {
+            d.swept = true;
+            this.beginSweep(d.x, d.y);
+          }
+          if (d.swept) this.moveSweep(p.x, p.y);
+        }
+      }
       return;
     }
     const t = this.touches.get(e.pointerId);
@@ -267,6 +342,12 @@ export class Input {
     if (this.host.rules().control === 'point') {
       this.aim = this.host.pick(p.x, p.y);
       if (moved) this.continueStroke(p.x, p.y);
+    } else if (t.sweep) this.moveSweep(p.x, p.y);
+    else if (moved && t.px === undefined && this.startsSweep(t)) {
+      // Round 11: a drag that starts on a plot with a job queues each plot it crosses.
+      t.sweep = true;
+      this.beginSweep(t.sx, t.sy);
+      this.moveSweep(p.x, p.y);
     } else if (moved && this.host.rules().camera === 'wide') {
       // Walk control: one finger drags the wide view around.
       this.host.pan(p.x - (t.px ?? t.sx), p.y - (t.py ?? t.sy));
@@ -281,8 +362,9 @@ export class Input {
       const d = this.mouseDrag;
       this.mouseDrag = null;
       if (d && d.button === 0) {
-        if (this.host.rules().control === 'walk' && Math.hypot(p.x - d.x, p.y - d.y) <= TAP_SLOP) this.tapAt(p.x, p.y);
+        if (this.host.rules().control === 'walk' && !d.swept && Math.hypot(p.x - d.x, p.y - d.y) <= TAP_SLOP) this.tapAt(p.x, p.y);
         this.endStroke();
+        this.sweep = null;
       }
       return;
     }
@@ -290,6 +372,7 @@ export class Input {
     this.touches.delete(e.pointerId);
     if (this.touches.size < 2) this.pinch = null;
     if (!t) return;
+    if (t.sweep) this.sweep = null;
     const tap = Math.hypot(p.x - t.sx, p.y - t.sy) <= TAP_SLOP && performance.now() - t.t < 600;
     if (this.host.rules().control === 'point') {
       if (tap && this.stroke && !this.stroke.committed) this.commitStroke();
@@ -302,7 +385,15 @@ export class Input {
     if (this.touches.size < 2) this.pinch = null;
     this.stroke = null;
     this.mouseDrag = null;
+    this.sweep = null;
   };
+
+  /** Did this finger land on a plot a tap would work (one finger only: two pan and pinch)? */
+  private startsSweep(t: Touch): boolean {
+    if (this.touches.size !== 1 || !this.host.dragFrom) return false;
+    const tile = this.host.pick(t.sx, t.sy);
+    return !!tile && this.host.dragFrom(tile.x, tile.y);
+  }
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();

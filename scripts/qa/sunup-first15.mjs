@@ -317,6 +317,27 @@ const dead = rows.filter(([, d]) => d.jobs < 5 && d.decisions === 0);
 console.log(`  days: ${rows.map(([n, d]) => `${n} (${d.weather ?? '?'}): ${Math.round(d.to - d.from)} s, ${d.jobs} jobs${d.decisions ? `, ${d.decisions} decision${d.decisions > 1 ? 's' : ''}` : ''}`).join(' | ')}`);
 console.log(`  dead days (under 5 jobs, no decision): ${dead.length} (${dead.map(([n]) => n).join(', ') || 'none'}), ${Math.round(dead.reduce((a, [, d]) => a + (d.to - d.from), 0))} s of ${Math.round(secs())} s; days with a decision ${rows.filter(([, d]) => d.decisions > 0).length} of ${rows.length}`);
 console.log(`  morning coins and lines: ${rows.map(([n, d]) => `${n}: ${d.coins} [${[...d.lines].join(' / ')}]`).join(' | ')}`);
+// Round 11: new lessons per day, from each day's own lines: a line whose words are new that day. Urgent lines (a crow, bugs,
+// the new field's hoe, the reminders) and what follows on from the day's new thing (the board's pair, its seed, the can and
+// sleep of the first day's loop) stand apart. Six landed on Spring 9 of the eleventh playtest.
+{
+  const stem = (l) => l.replace(/\d+( more)?/g, '#').replace(/seeds?\b/g, 'seed').replace(/(radish|lettuce|carrot|bean|strawberr|sunflower|corn|pumpkin)[a-z]*/g, 'crop');
+  const apart = /crow|Bugs on|Tap Hands|Take the hands|Hoe the new|Can empty|Fill the can|Heat wave|^Plant # crop for the request|Two requests|Crops grow overnight|Take the can|Tap a crop/;
+  const seen = new Set();
+  const perDay = [];
+  for (const [n, d] of rows) {
+    const fresh = [...d.lines].map(stem).filter((l, k, a) => a.indexOf(l) === k && !seen.has(l));
+    for (const l of fresh) seen.add(l);
+    perDay.push([n, fresh.filter((l) => !apart.test(l))]);
+  }
+  const most = Math.max(...perDay.map(([, l]) => l.length));
+  console.log(`  new lessons a day (no urgent lines, no follow-ons): most ${most}; ${perDay.map(([n, l]) => `${n}: ${l.length}`).join(', ')}`);
+  console.log(`  which: ${perDay.filter(([, l]) => l.length).map(([n, l]) => `${n}: ${l.join(' / ')}`).join(' | ')}`);
+  if (most > 1) {
+    console.log('  FAIL more than one new lesson on a day');
+    errs.push('more than one new lesson on a day');
+  }
+}
 const held = [...fairs.values()];
 console.log(`  fairs judged: ${held.length ? held.map((f) => `day ${f.day}: ${f.got} of ${f.want}, ${f.won ? 'ribbon' : 'no ribbon'}`).join('; ') : 'none'}; met ${held.filter((f) => f.won).length} of ${held.length}`);
 console.log(`  fair cards: ${cards.length ? cards.map((c) => `day ${c.day}${c.night ? ' (in the night)' : ''}: "${c.text}"`).join('; ') : 'none'}`);

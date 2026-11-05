@@ -145,6 +145,11 @@ const screen0 = () =>
   });
 const send = (c) => p.evaluate((c) => window.sunup.input.push(c), c);
 const frames = (n) => p.waitForTimeout(n * 17);
+/**
+ * Round 11: one new thing a day: this check runs several lessons into one game day, so each that wants a day of its own
+ * has one. (`scripts/qa/sunup-first15.mjs` counts new lessons a day over a real run, and the unit tests the rule.)
+ */
+const newDay = () => p.evaluate(() => { const s = window.sunup.state; const c = s.learnCount; for (const k of Object.keys(c)) if (k.startsWith('arrived:')) delete c[k]; if (!s.learn.includes('lesson:sweep')) s.learn.push('lesson:sweep'); });
 // Stand the farmer on tile (x, y) facing a direction and act once.
 const actAt = async (x, y, facing) => {
   await p.evaluate(([x, y, facing]) => {
@@ -319,6 +324,7 @@ await lineAfter('Fill the can at the well.');
 
 // 5b. Round 5: day 2 brought coins, stamina and seeds at once. Stamina comes once the work has worn it down, with its
 // own line, on a day nothing else new came.
+await newDay();
 await p.evaluate(() => (window.sunup.state.stamina = 60));
 await frames(20);
 s = await screen();
@@ -398,11 +404,12 @@ const want = await p.evaluate(() => {
   }
   return { crop: it.crop, n: it.n, spots };
 });
+await newDay();
 await frames(30);
 // (Round 9: the line to plant for it goes the moment its count is met.)
 await lineAfter(sowLine);
 s = await screen();
-check('a crop the request wants is ripe: the line names the crop and count', /^Harvest \d+ [a-z]+\. The crate ships them\.$/.test(s.line), `${s.line} (${want.n} ${want.crop})`);
+check('a crop planted for the request is ripe: the line names the crop and count, and which ones count', /^Harvest \d+ [a-z]+ planted for the request\.$/.test(s.line), `${s.line} (${want.n} ${want.crop})`);
 {
   const pt = await p.evaluate(() => { const e = document.querySelector('.tpoint'); const r = e.getBoundingClientRect(); return { on: e.classList.contains('on'), x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   const near = await Promise.all(want.spots.map((t) => project(t.x + 0.5, t.y + 0.5, 0.5)));
@@ -417,7 +424,7 @@ await frames(20);
 s = await screen();
 await lineAfter(s.line);
 s = await screen();
-check('harvesting what it asks ends the deliver line', !/ships/.test(s.line) && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:deliver'))), s.line);
+check('harvesting what it asks ends the deliver line', !/^Harvest/.test(s.line) && (await p.evaluate(() => window.sunup.state.learn.includes('lesson:deliver'))), s.line);
 check('crows and the forecast are still to come', !s.forecast && !s.tools.includes('build'));
 
 // 6b. A field bought early, before its lesson, by tapping the field itself: the hoe still comes, with a line and a
@@ -491,6 +498,7 @@ await send({ type: 'tool', tool: 'hands' });
 await frames(20);
 s = await screen();
 check('round 6: while the new field is still being hoed, no View line yet', !s.view && s.line !== 'Tap View to see the whole farm.', JSON.stringify(s));
+await newDay();
 await p.evaluate(() => { const st = window.sunup.state; const pc = st.parcels[1]; for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) st.plots[y * st.W + x].tilled = true; });
 await frames(20);
 s = await screen();
@@ -585,7 +593,7 @@ check('bugs land: the bug line', /^Bugs on your [a-z]+\. Pick them off\.$/.test(
 await p.evaluate(() => window.sunup.hud.pickTool('can'));
 await frames(10);
 s = await screen();
-check('with the can in hand, the bug line says to take the hands', /^Take the hands\. Pick bugs off the [a-z]+\.$/.test(s.line), s.line);
+check('with the can in hand, the bug line says to tap Hands', /^Tap Hands\. Pick bugs off the [a-z]+\.$/.test(s.line), s.line);
 await p.evaluate(() => window.sunup.hud.pickTool('hands'));
 await frames(10);
 
@@ -814,7 +822,8 @@ await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + 
   await frames(10);
   s = await screen();
   check('and the forecast still waits for its own day', !s.forecast && !/forecast/i.test(s.line), JSON.stringify(s));
-  await p.evaluate((d) => { const st = window.sunup.state; st.day = d + 2; st.forecast = ['rain', 'heat', 'cloud']; }, crowDay);
+  // (Round 11: the turn's line, with only three days to be said, comes first: this farm is not near one here.)
+  await p.evaluate((d) => { const st = window.sunup.state; st.day = d + 2; st.forecast = ['rain', 'heat', 'cloud']; st.learn.push('lesson:turn'); }, crowDay);
   await frames(30);
   s = await screen();
   const fc = await p.evaluate(() => [...document.querySelectorAll('.daycard .fc .fd')].map((e) => { const l = e.querySelector('.fl'); const r = l?.getBoundingClientRect(); return { word: l?.textContent ?? '', h: r ? r.height : 0, size: l ? parseFloat(getComputedStyle(l).fontSize) : 0 }; }));
@@ -848,7 +857,8 @@ await p.evaluate((b) => { window.sunup.state.plots[b.y * window.sunup.state.W + 
 
 // 9. The last days of a season: the picker offers next season's seeds, marked, and marks what is too late.
 // (The first pair of requests has its own check below, on a page of its own.)
-await p.evaluate(() => { const st = window.sunup.state; st.day = 8; st.coins = 400; });
+await newDay();
+await p.evaluate(() => { const st = window.sunup.state; st.day = 8; st.coins = 400; st.learn = st.learn.filter((w) => w !== 'lesson:turn'); });
 await frames(30);
 s = await screen();
 check('near the turn the line says to plant the next season\u2019s seeds', s.line === 'Spring ends soon. Plant summer seeds.', s.line);
@@ -1153,7 +1163,7 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   const night = (e) => e.overOn !== null && e.day > e.overOn;
   // (Round 9: the line to choose goes with its Accept, and a count line the moment its count is met. Round 10: the
   // plant line counts down too, its words changing with each seed.)
-  const early = (e) => e.id === 'choose' || e.id === 'sowfor' || e.id === 'plant';
+  const early = (e) => e.id === 'choose' || e.id === 'sowfor' || e.id === 'plant' || e.id === 'deliver';
   const short = shown.filter((e) => e.seen < 3.95 && !night(e) && !early(e));
   const onPage = (text) => spans.filter((x) => x.text === text).reduce((a, x) => a + x.ms, 0);
   console.log(`     lesson lines when finished (seconds seen by the tutor; ms in the page): ${shown.map((e) => `${e.id} ${e.seen.toFixed(1)} s, ${onPage(e.text)} ms`).join('; ')}`);

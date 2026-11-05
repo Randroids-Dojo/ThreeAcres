@@ -164,6 +164,7 @@ describe('P1: a pair is always a choice', () => {
   it('over many farms: two different crops every time, never the same crops as the offer before, and the farm cannot take both', () => {
     let pairs = 0;
     let differ = 0;
+    let oneCrop = 0;
     let compete = 0;
     let seconds = 0;
     let repeats = 0;
@@ -173,6 +174,8 @@ describe('P1: a pair is always a choice', () => {
       if (first.length === 2) {
         pairs++;
         if (first[0].items[0].crop !== first[1].items[0].crop) differ++;
+        // Round 11: two of one crop only as a rush against an easy one, the rush bigger: a choice all the same.
+        else if (first.map((o) => o.kind).sort().join() === 'easy,rush' && first.find((o) => o.kind === 'rush')!.items[0].n > first.find((o) => o.kind === 'easy')!.items[0].n) oneCrop++;
         else bad.push(`${s.day}: ${first.map((o) => `${o.items[0].n} ${o.items[0].crop}`).join(' or ')}`);
         const both = [...s.orders, ...first];
         const t = { ...s, orders: both } as WorldState;
@@ -190,7 +193,8 @@ describe('P1: a pair is always a choice', () => {
       }
     }
     expect(pairs).toBeGreaterThan(150);
-    expect(differ, bad.slice(0, 3).join('; ')).toBe(pairs);
+    expect(differ + oneCrop, bad.slice(0, 3).join('; ')).toBe(pairs);
+    expect(oneCrop / pairs).toBeLessThan(0.25);
     expect(compete / pairs).toBeGreaterThanOrEqual(0.9);
     expect(seconds).toBeGreaterThan(150);
     expect(repeats).toBe(0);
@@ -206,7 +210,7 @@ describe('P1: a pair is always a choice', () => {
       expect(c, `${s.day}`).toBeTruthy();
       const words = (dialogs as { clashWords?: (c: unknown) => string }).clashWords?.(c) ?? '';
       // (Round 9: the coins as the coin box shows them, and what is ripe beside them.)
-      expect(words).toMatch(/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+(, plus [\d,]+ ripe)?(, [\d,]+ owed)?\.$/);
+      expect(words).toMatch(/^Both need [\d,]+ (plots|coins)\. You have [\d,]+(, plus [\d,]+ ripe)?(, [\d,]+ owed)?\.$/);
       expect(words.split(/\s+/).length).toBeLessThanOrEqual(c?.kind === 'soil' ? 8 : 13);
       said++;
     }
@@ -284,7 +288,7 @@ describe('P2: one loss no longer voids a request', () => {
     expect(s.report?.filled?.[0]).toMatchObject({ reward: 285, got: 14, of: 15 });
     expect(s.coins - coins).toBe(285);
     expect(s.rep).toBe(rep);
-    expect(hud.morningNews(s)).toMatch(/paid 285 for 14 of 15/);
+    expect(hud.morningNews(s)).toMatch(/paid [\d,]+ in all for 14 of 15/);
   });
 
   it('a loss with days to spare can be planted again: the request still wants one more, by its last day', () => {
@@ -329,10 +333,13 @@ describe('P1 and P2: the sleep question', () => {
   const sleepAsk = (s: WorldState, o: { teaching?: boolean; flock?: boolean; owedToday?: number }) =>
     (actions as { sleepAsk?: (s: WorldState, o: { teaching: boolean; flock: boolean; owedToday: number }) => { ask: boolean } }).sleepAsk?.(s, { teaching: false, flock: false, owedToday: 0, ...o })?.ask;
 
-  it('before evening it always asks, even with nothing left to do; after 6 pm only when the night costs something', () => {
+  it('before evening it asks while a job is left (round 11: never with none left); after 6 pm only when the night costs something', () => {
     const s = farm(29, { coins: 0 });
     s.minute = 9 * 60 + 27; // 3:27 pm
+    expect(sleepAsk(s, {})).toBe(false);
+    plant(s, 2, 5, 'radish', 3);
     expect(sleepAsk(s, {})).toBe(true);
+    plots(s, 2, 5).crop = null;
     s.minute = 13 * 60; // 7 pm
     expect(sleepAsk(s, {})).toBe(false);
     // Never while the first lesson teaches sleep.

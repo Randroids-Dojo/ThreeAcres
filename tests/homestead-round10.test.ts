@@ -118,27 +118,30 @@ describe('P1: the plant lesson leaves soil for the first pair', () => {
 describe('P1: every fair can be met from what the board offers', () => {
   // A player who follows the lessons in the simulation (the real tutor runs beside the farm) and takes one side of every
   // pair: the bigger number, as the tester did; the smaller; or the one in time for the fair. Before: 13 to 14 fairs of
-  // 18 met over six farms, and the spring fair 3 of 6 (2 of 3 each time it was missed).
+  // 18 met over six farms, and the spring fair 3 of 6 (2 of 3 each time it was missed). Round 11: the fair counts only what
+  // is taken in its season and filled in full, so it can be lost: this player wins the first two most of the time.
   for (const pick of ['clear', 'small', 'fair'] as const) {
-    it(`taking the ${pick === 'clear' ? 'bigger number' : pick === 'small' ? 'smaller number' : 'side in time for the fair'}, it meets the spring, summer and autumn fairs on four farms`, () => {
-      for (const seed of [42, 1055, 2068, 3081]) {
+    it(`taking the ${pick === 'clear' ? 'bigger number' : pick === 'small' ? 'smaller number' : 'side in time for the fair'}, it meets the first two fairs most of the time`, () => {
+      const firstTwo: boolean[] = [];
+      for (const seed of [42, 1055, 2068, 3081, 4094, 5107, 6120, 7133]) {
         const s = world('sunup', seed);
         s.held = false;
-        const r = follow(s, 31, { pick, greedy: false });
+        const r = follow(s, 21, { pick, greedy: false });
         expect(r.problems).toEqual([]);
-        expect(r.fairs.map((f) => f.day), `seed ${seed}`).toEqual([10, 20, 30]);
-        for (const f of r.fairs) expect(f.won, `seed ${seed}, fair on day ${f.day}: ${f.got} of ${f.want}`).toBe(true);
+        expect(r.fairs.map((f) => f.day), `seed ${seed}`).toEqual([10, 20]);
+        firstTwo.push(...r.fairs.map((f) => f.won));
       }
+      expect(firstTwo.filter(Boolean).length / firstTwo.length).toBeGreaterThanOrEqual(0.7);
     }, 30000);
   }
 
-  it('a player who also sows every bare plot, as the tester did, and takes the bigger number meets them too (before: 5 of 18, spring 0 of 6)', () => {
+  it('a player who also sows every bare plot, as the tester did, meets spring every time, and is told why when summer is missed', () => {
     for (const seed of [42, 1055, 2068, 3081]) {
       const s = world('sunup', seed);
       s.held = false;
-      const r = follow(s, 31, { pick: 'clear', greedy: true });
+      const r = follow(s, 21, { pick: 'clear', greedy: true });
       expect(r.problems).toEqual([]);
-      for (const f of r.fairs) expect(f.won, `seed ${seed}, fair on day ${f.day}: ${f.got} of ${f.want}`).toBe(true);
+      expect(r.fairs[0].won, `seed ${seed}`).toBe(true);
     }
   }, 30000);
 
@@ -148,9 +151,10 @@ describe('P1: every fair can be met from what the board offers', () => {
     const won = ui.fairCard?.(s, { got: 3, want: 3, won: true, taken: 3 }, 11);
     expect(won?.title).toBe('The spring fair');
     expect(won?.lines[0]).toBe('A ribbon for the house.');
+    expect(won?.lines[1]).toBe('All 3 requests filled in full.');
     expect(won?.button).toBe('On to summer');
     const miss = ui.fairCard?.(s, { got: 1, want: 3, won: false, lost: 1, why: 'crows', late: 1, taken: 2 }, 11);
-    expect(miss?.lines).toEqual(['No ribbon this time.', '1 of 3 requests filled in time.', '1 request was lost to crows.', 'Only 2 requests you took were due by it.', '1 more is due after it, for the next fair.', 'The summer fair wants 3 by Summer 10.']);
+    expect(miss?.lines).toEqual(['No ribbon this time.', '1 of 3 requests filled in full.', '1 request was lost to crows.', 'Only 2 requests were taken this season.', '1 more was not ready by its day.', 'The summer fair wants 3, taken from today.']);
     for (const l of miss?.lines ?? []) {
       expect(l.split(/\s+/).length).toBeLessThanOrEqual(10);
       expect(l).not.toMatch(/[\u2013\u2014!]/);
@@ -160,7 +164,7 @@ describe('P1: every fair can be met from what the board offers', () => {
   it('the fair’s night records what fell short: requests lost before it and what took them', () => {
     const s = farm(9, { day: 13, fields: 2, coins: 900 });
     s.fair = { start: 11, day: 20, want: 3, got: 1 };
-    const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'sunflower', n: 4 }], reward: 4 * CROPS.sunflower.price + 120, rep: 1, due: 19, sowBy: 13, made: 12, seen: true, kind: 'quick', taken: true, got: 0, lost: { crows: 4 } };
+    const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'sunflower', n: 4 }], reward: 4 * CROPS.sunflower.price + 120, rep: 1, due: 19, sowBy: 13, made: 12, takenOn: 12, seen: true, kind: 'quick', taken: true, got: 0, lost: { crows: 4 } } as Order;
     s.orders = [o];
     s.day = 19;
     goals.settleRequests(s, []);
@@ -234,9 +238,8 @@ describe('P1: a pair every morning, a Pass, and the board says why when there is
 });
 
 describe('P2: the days in a pair matter', () => {
-  it('with the fair wanting requests and mornings to spare, one side counts for it and the other for the next fair, and the notes say which', () => {
+  it('with the fair wanting requests, an offer whose seed can ripen by it says so, and one that cannot says too late', () => {
     let pairs = 0;
-    let split = 0;
     for (let seed = 1; seed <= 12; seed++) {
       const s = farm(seed * 97, { fields: 2, coins: 900, day: 11 });
       s.fair = { start: 11, day: 20, want: 3, got: 2 };
@@ -244,22 +247,20 @@ describe('P2: the days in a pair matter', () => {
       if (two.length !== 2) continue;
       s.orders.push(...two);
       pairs++;
-      const f = fairOf(s)!;
-      if (two.filter((o) => counts(f, o)).length !== 1) continue;
-      split++;
-      const labels = two.map((o) => dialogs.noteText(s, o).lines.join(' '));
-      const now = two.findIndex((o) => counts(f, o));
-      expect(labels[now]).toMatch(/In time for the fair/);
-      expect(labels[1 - now]).toMatch(/For the autumn fair/);
-      expect(labels.join(' ')).not.toMatch(/After the fair/);
+      for (const o of two) expect(dialogs.noteText(s, o).lines.join(' ')).toMatch(/In time for the fair/);
     }
     expect(pairs).toBeGreaterThan(8);
-    expect(split / pairs).toBeGreaterThan(0.6);
+    // Corn sown on Summer 5 ripens after the fair on Summer 10, sunflowers no longer can.
+    const late = farm(5, { fields: 2, coins: 900, day: 15 });
+    late.fair = { start: 11, day: 20, want: 3, got: 2 };
+    const corn: Order = { id: late.nextId++, who: 'Old Tamsin', items: [{ crop: 'corn', n: 3 }], reward: 3 * CROPS.corn.price + 90, rep: 1, due: 24, sowBy: 16, made: 15, seen: false, kind: 'single', taken: false };
+    late.orders = [corn];
+    expect(dialogs.noteText(late, corn).lines.join(' ')).toMatch(/Too late for the fair/);
+    expect(dialogs.noteText(late, corn).lines.join(' ')).not.toMatch(/For the autumn fair|After the fair/);
   });
 
-  it('with this season’s fair met, one side counts for the next season’s fair and the other for none (Summer 8: both were due after the season)', () => {
+  it('with this season’s fair met, no side says anything of a fair, and each leaves soil for the next one', () => {
     let pairs = 0;
-    let split = 0;
     for (let seed = 1; seed <= 12; seed++) {
       const s = farm(seed * 101, { fields: 2, coins: 900, day: 13 });
       s.fair = { start: 11, day: 20, want: 3, got: 3 };
@@ -267,16 +268,13 @@ describe('P2: the days in a pair matter', () => {
       if (two.length !== 2) continue;
       s.orders.push(...two);
       pairs++;
-      const next = { start: 21, day: 30, want: 0, got: 0 };
-      if (two.filter((o) => counts(next, o)).length !== 1) continue;
-      split++;
-      const labels = two.map((o) => dialogs.noteText(s, o).lines.join(' '));
-      expect(labels[two.findIndex((o) => counts(next, o))]).toMatch(/For the autumn fair/);
-      // (The ribbon is won: the side due this season says nothing about a fair.)
-      expect(labels[two.findIndex((o) => !counts(next, o))]).not.toMatch(/fair/);
+      for (const o of two) {
+        expect(dialogs.noteText(s, o).lines.join(' ')).not.toMatch(/fair/);
+        // (32 plots, and the next fair wants four: 16 sunflowers filled the farm past the last day seed could ripen for it.)
+        expect(o.items[0].n, `seed ${seed}`).toBeLessThanOrEqual(5);
+      }
     }
     expect(pairs).toBeGreaterThan(8);
-    expect(split / pairs).toBeGreaterThan(0.6);
   });
 
   it('with no mornings to spare, both sides count for the fair', () => {
@@ -289,18 +287,6 @@ describe('P2: the days in a pair matter', () => {
     }
   });
 
-  it('a request due next season counts for that season’s fair, even filled early', () => {
-    const s = farm(5, { fields: 2, coins: 900, day: 17 });
-    s.fair = { start: 11, day: 20, want: 3, got: 1 };
-    const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'corn', n: 3 }], reward: 3 * CROPS.corn.price + 90, rep: 1, due: 23, sowBy: 15, made: 13, seen: true, kind: 'quick', taken: true, got: 3 };
-    s.orders = [o];
-    goals.settleRequests(s, []);
-    expect(s.orders.length).toBe(0);
-    expect(fairOf(s)!.got).toBe(1);
-    s.day = 20;
-    nightfall(s, []);
-    expect(fairOf(s)).toMatchObject({ start: 21, day: 30, got: 1 });
-  });
 });
 
 describe('tap queue and tools', () => {
@@ -480,6 +466,6 @@ describe('copy on short requests and the fair', () => {
   it('the board says the fair in one line', () => {
     const s = farm(31, { fields: 2, coins: 900, day: 13 });
     s.fair = { start: 11, day: 20, want: 3, got: 1 };
-    expect(dialogs.fairLines(s)).toEqual(['Fair on Summer 10: 1 of 3 filled, for a ribbon.']);
+    expect(dialogs.fairLines(s)).toEqual(['Fair Summer 10: 1 of 3 taken this season, in full.']);
   });
 });

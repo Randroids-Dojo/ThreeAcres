@@ -9,7 +9,7 @@ export type Command =
   /** Walk control: use the tool on the tile in front. `held` is a repeat from a held act key or button: it never works a plot behind the farmer. */
   | { type: 'act'; held?: boolean }
   /** Walk control: a tap on a tile. Next to the farmer it acts, further away the farmer walks there. */
-  | { type: 'actAt'; x: number; y: number }
+  | { type: 'actAt'; x: number; y: number; /** Round 11: a drag crossed this plot: it does the tool's own job there, or is passed over. */ drag?: boolean }
   /** Point control: queue a job on a tile with the current tool. */
   | { type: 'paint'; x: number; y: number }
   /** Point control: drop the job on a tile. */

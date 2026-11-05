@@ -2,7 +2,7 @@
 // current clock rule, runs people and crows, and returns what happened.
 
 import { canAfford, daySeconds, fieldPrice, fieldRep, homestead, resolve, resolveBuild } from './actions';
-import { dropJobsOf, facingTile, farmer, hands, queueTap, snapAim, startAction, tapTool, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
+import { dragJob, dropJobsOf, facingTile, farmer, hands, queueTap, snapAim, startAction, tapTool, tickActors, tileOf, walkFarmer, walkTo, wellTap } from './actors';
 import type { Command } from './commands';
 import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
@@ -222,6 +222,8 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
         // (Started by a held key: the walk waits for the work beside it.)
         const task = (f as Actor).task;
         if (task) task.held = true;
+        // Round 11: what the "Hold Space and walk." lesson waits for.
+        if (homestead(s)) s.learnCount.sweep = (s.learnCount.sweep ?? 0) + 1;
       }
       // A held key walking past nothing to do says nothing; a press says why not.
       else if (r.reason && !c.held) ev.push({ type: 'deny', x: t.x, y: t.y, reason: r.reason });
@@ -234,6 +236,18 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       // A tap on a field for sale offers it, from wherever the farmer stands.
       if (r.reason === 'unowned') {
         ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
+        break;
+      }
+      // Round 11: a drag across plots queues each plot it crosses, for the tool in hand. A crossing with no job there, or
+      // a plot already waiting its turn, adds nothing. (A tap here took the tool for the job: the drag keeps that tool.)
+      if (homestead(s) && c.drag) {
+        const drag = { x: c.x, y: c.y, tool: s.tool, ...(s.tool === 'seeds' ? { seed: s.seed } : {}), drag: true };
+        if (dragJob(s, c.x, c.y)) {
+          if (!s.taps?.some((q) => q.x === c.x && q.y === c.y && q.tool === drag.tool && q.seed === drag.seed)) {
+            queueTap(s, f, drag, ev);
+            s.learnCount.sweep = (s.learnCount.sweep ?? 0) + 1;
+          }
+        } else if (r.verb === 'plant' && r.reason.includes('cost')) ev.push({ type: 'deny', x: c.x, y: c.y, reason: r.reason });
         break;
       }
       if (homestead(s)) {

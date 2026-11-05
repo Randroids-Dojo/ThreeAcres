@@ -66,7 +66,11 @@
 // the tester did), the smaller, or the one in time for the fair, sowing every
 // bare plot or only what a line or a request asks. It reads the rules only
 // through what round 9 had too, so it runs on the committed code for a before.
-// npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs] [--mornings] [--follow]
+// Round 11 adds, with --fairs, the fairs over a whole year (41 days, a dozen farms) for the careful bot at a person's pace and
+// for each lesson-following player, what the first two fairs come to, and the pairs on mornings with room for one, in
+// summer and in all; and the coins a farm holds by season over two years, with what the crate paid and what requests
+// gained. It reads the rules only through what round 10 had too, so it runs on the committed code for a before.
+// npx tsx scripts/balance.ts [days] [farms] [--sunup] [--person] [--pairs] [--mornings] [--follow] [--fairs]
 import * as C from '../src/sim/constants';
 import { sowing } from '../src/sim/actions';
 import { PARCELS } from '../src/sim/map';
@@ -86,7 +90,10 @@ const ONLY_MORNINGS = process.argv.includes('--mornings');
 /** Round 10: only the lesson-following players and their fairs. */
 const ONLY_FOLLOW = process.argv.includes('--follow');
 
-if (!ONLY_SUNUP && !ONLY_MORNINGS && !ONLY_FOLLOW) {
+/** Round 11: only the year's fairs, the pairs on mornings with room for one, and two years of coins. */
+const ONLY_FAIRS = process.argv.includes('--fairs');
+
+if (!ONLY_SUNUP && !ONLY_MORNINGS && !ONLY_FOLLOW && !ONLY_FAIRS) {
   for (const id of PRESET_IDS) {
     const s = world(id);
     const t0 = performance.now();
@@ -822,7 +829,7 @@ const fmtH = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60))
 const num = (n: number) => Math.round(n).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}%` : 'n/a');
 // The quick bot, then the bot at a person's pace (about one action every 1.3 seconds, like the playtest).
-for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the bot at a person’s pace', 0.9, false], [`the bot at a person’s pace, buying the second field when the field lesson says (${FIELD_LINE} coins)`, 0.9, true]] as const).filter(([, p]) => !ONLY_MORNINGS && !ONLY_FOLLOW && (!ONLY_PERSON || p))) {
+for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the bot at a person’s pace', 0.9, false], [`the bot at a person’s pace, buying the second field when the field lesson says (${FIELD_LINE} coins)`, 0.9, true]] as const).filter(([, p]) => !ONLY_MORNINGS && !ONLY_FOLLOW && !ONLY_FAIRS && (!ONLY_PERSON || p))) {
   if (follow && PAIRS) continue;
   const farms: Farm[] = [];
   for (let i = 0; i < FARMS; i++) farms.push(sunupFarm(42 + i * 1013, pace, follow));
@@ -1033,11 +1040,87 @@ for (const [label, pace, follow] of ([['the quick bot', undefined, false], ['the
   }
 }
 
-if (!ONLY_FOLLOW) syntheticMornings();
+if (!ONLY_FOLLOW && !ONLY_FAIRS) syntheticMornings();
 
 // Round 10: the fairs a player who follows the lessons meets, by how it picks one side of each pair and whether it
 // sows every bare plot (as the tester did) or only what a line or a request asks.
-if (ONLY_FOLLOW || (!ONLY_MORNINGS && !ONLY_PERSON && !ONLY_SUNUP)) {
+if (ONLY_FAIRS) {
+  const farms = Math.max(FARMS, 12);
+  const line = (name: string, fs: { day: number; got: number; want: number; won: boolean }[]) => {
+    const by = [0, 1, 2, 3].map((k) => fs.filter((f) => Math.floor((f.day - 1) / 10) % 4 === k));
+    const mid = (xs: number[]) => xs.slice().sort((a, b) => a - b)[xs.length >> 1];
+    const two = fs.filter((f) => f.day <= 20);
+    console.log(`  ${name}: fairs won ${fs.filter((f) => f.won).length} of ${fs.length} (${pct(fs.filter((f) => f.won).length, fs.length)}); the first two ${pct(two.filter((f) => f.won).length, two.length)}; ${by.map((xs, k) => (xs.length ? `${['spring', 'summer', 'autumn', 'winter'][k]} ${xs.filter((f) => f.won).length}/${xs.length} (wants ${mid(xs.map((x) => x.want))}, got ${mid(xs.map((x) => x.got))})` : '')).join(', ')}`);
+  };
+  console.log(`\nSunup, a whole year's fairs (${farms} farms, 41 days)`);
+  const careful: { day: number; got: number; want: number; won: boolean }[] = [];
+  for (let i = 0; i < farms; i++) {
+    const s = world('sunup', 42 + i * 1013);
+    s.held = false;
+    const seen = new Set<unknown>();
+    play(s, 41, { pace: 1.3, after: (st) => {
+      const r = st.report as unknown as { day: number; fair?: { got: number; want: number; won: boolean } } | null;
+      if (r && !seen.has(r)) {
+        seen.add(r);
+        if (r.fair) careful.push({ day: r.day, ...r.fair });
+      }
+    } });
+  }
+  line('careful bot, a person\u2019s pace', careful);
+  for (const greedy of [false, true]) {
+    for (const pick of ['clear', 'small', 'fair'] as const) {
+      const fs: { day: number; got: number; want: number; won: boolean }[] = [];
+      const dawns: { day: number; offers: number; why: string }[] = [];
+      for (let i = 0; i < farms; i++) {
+        const s = world('sunup', 42 + i * 1013);
+        s.held = false;
+        const r = follow(s, 41, { pick, greedy });
+        fs.push(...r.fairs);
+        dawns.push(...(r.mornings ?? []));
+      }
+      line(`follows the lessons, ${greedy ? 'sows every plot' : 'sows when told '}, takes the ${pick.padEnd(5)}`, fs);
+      // A morning with room for one: not one with no soil, no seed money, or as many taken as the farm carries.
+      const room = dawns.filter((d) => d.why !== 'soil' && d.why !== 'coins' && d.why !== 'full');
+      const summer = room.filter((d) => d.day >= 11 && d.day <= 20);
+      console.log(`     pairs on mornings with room for one ${pct(room.filter((d) => d.offers === 2).length, room.length)} (${room.length} mornings; of all ${dawns.length}, ${pct(dawns.filter((d) => d.offers === 2).length, dawns.length)}); summer ${pct(summer.filter((d) => d.offers === 2).length, summer.length)} (${summer.length} mornings)`);
+    }
+  }
+  console.log(`\nSunup, two years at a person\u2019s pace (${Math.min(farms, 4)} farms): coins and income, median`);
+  const rows: Record<number, { coins: number[]; crate: number[]; gain: number[]; fields: number[] }> = {};
+  for (let i = 0; i < Math.min(farms, 4); i++) {
+    const s = world('sunup', 42 + i * 1013);
+    s.held = false;
+    let crate = 0;
+    let gain = 0;
+    let last = 0;
+    play(s, 81, { pace: 1.3, after: (st, ev) => {
+      for (const e of ev) {
+        if (e.type === 'coins' && (e as { crate?: boolean }).crate) crate += e.amount;
+        if (e.type === 'request' && e.done) gain += e.reward;
+      }
+      if (st.day !== last) {
+        last = st.day;
+        const r = (rows[st.day] ??= { coins: [], crate: [], gain: [], fields: [] });
+        r.coins.push(st.coins);
+        r.crate.push(crate);
+        r.gain.push(gain);
+        r.fields.push(st.parcels.filter((q) => q.owned).length);
+      }
+    } });
+  }
+  const mid = (xs: number[]) => xs.slice().sort((a, b) => a - b)[xs.length >> 1];
+  let was = { crate: 0, gain: 0 };
+  for (const d of [11, 21, 31, 41, 51, 61, 71, 81]) {
+    const r = rows[d];
+    if (!r) continue;
+    const c = mid(r.crate);
+    const g = mid(r.gain);
+    console.log(`  day ${d}: coins ${num(mid(r.coins))}, fields ${mid(r.fields)}; in the last ten days the crate paid ${num(c - was.crate)}, requests gained ${num(g - was.gain)}`);
+    was = { crate: c, gain: g };
+  }
+}
+
+if (ONLY_FOLLOW || (!ONLY_MORNINGS && !ONLY_PERSON && !ONLY_SUNUP && !ONLY_FAIRS)) {
   const days = Math.max(DAYS, 30) + 1;
   console.log(`\nSunup, a player who follows the lessons (${FARMS} farms, ${days} days, one action every 0.9 s)`);
   for (const greedy of [true, false]) {

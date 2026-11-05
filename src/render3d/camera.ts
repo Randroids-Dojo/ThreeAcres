@@ -35,6 +35,11 @@ const WIDE_TALL_MIN_TILES = 12;
  * 34 px: plots a tap can hit; round 9's View had them at 25). With more fields than that shows, the fields win.
  */
 const WIDE_TALL_PLOT_PX = 36;
+/** Round 11: tiles across the first two columns of fields, with a hair of margin: more than this wants a second stop. */
+const WIDE_TALL_TWO_COLUMNS = 9.5;
+/** Round 11: the row past which the lower fields are owned, and how far from the screen's foot their front then sits (px). */
+const WIDE_TALL_LOWER_ROW = 10;
+const WIDE_TALL_FRONT = 280;
 /** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
 const PITCH_WIDE_TALL_FIELDS = (72 * Math.PI) / 180;
 /** The six fields' plots, with a hair of margin: columns 2 to 15, rows 5 to 13. */
@@ -145,6 +150,8 @@ export function makeRig(): Rig {
   // Wide fit cache.
   let fitKey = '';
   const fit: Pose = { tx: 10, tz: 7.5, dist: 30, pitch: PITCH_WIDE };
+  /** Round 11: how far east a phone's View can pan with fields wider than its frame (Infinity: it pans as it always did). */
+  let wideEast = Infinity;
   const tmpCam = new PerspectiveCamera(FOV, 1, 0.5, 400);
 
   const place = (cam: PerspectiveCamera, p: Pose) => {
@@ -223,9 +230,15 @@ export function makeRig(): Rig {
         // Round 10: across, 12 tiles or 1.3 times the close view's, so View shows clearly more (with two fields it was
         // 9.8 tiles across against 10: "the two views look nearly the same"), as far as plots of 34 px or more allow
         // (1.3 times on a 412 px phone); and always every field owned.
-        const cx = (fields.x0 + fields.x1) / 2;
         const across = Math.min(Math.max(WIDE_TALL_MIN_TILES, 1.3 * tilesForTall(W, H)), w / WIDE_TALL_PLOT_PX);
-        const half = Math.max((fields.x1 - fields.x0) / 2, across / 2);
+        // Round 11: fields wider than that (the third column, fields 5 and 6) would shrink every plot to 27 px, so the
+        // frame stays at its width on the west of them, and a pan (the View button's second stop, or a finger) brings the
+        // east in view. `wideEast` is how far a pan can take it.
+        const wider = fields.x1 - fields.x0 > WIDE_TALL_TWO_COLUMNS;
+        const x1 = wider ? fields.x0 + Math.max(WIDE_TALL_TWO_COLUMNS, across) : fields.x1;
+        wideEast = wider ? Math.max(0, fields.x1 - x1) : Infinity;
+        const cx = (fields.x0 + x1) / 2;
+        const half = Math.max((x1 - fields.x0) / 2, across / 2);
         fitBox(Math.max(0.25, cx - half), fields.z0, Math.min(W - 0.25, cx + half), fields.z1, PITCH_WIDE_TALL_FIELDS, 0.006, fit);
         // The farm is narrower than a phone is tall, so there is height to spare. Round 9: the fields it owns sit in
         // the middle of the clear band, between the day card and the stick, the yard above them (the sixth playtest
@@ -234,12 +247,18 @@ export function makeRig(): Rig {
         const top = Math.min(h * 0.3, WIDE_TALL_TOP);
         const bottom = h - Math.min(h * 0.3, WIDE_TALL_BOTTOM);
         fit.tz = solveZ(fit, (fields.x0 + fields.x1) / 2, 0, (fields.z0 + fields.z1) / 2, (top + bottom) / 2);
-      } else fitBox(-0.2, -0.2, W + 0.2, H + 0.2, PITCH_WIDE, 0.05, fit, 2.2);
+        // Round 11: with the lower fields owned, the farm's front sits just above the lesson line and the act button, so
+        // the screen under the farm is not left blank (a third of it was, at five and six fields), and the yard shows above.
+        if (fields.z1 > WIDE_TALL_LOWER_ROW) fit.tz = solveZ(fit, cx, 0, fields.z1, h - Math.min(h * 0.33, WIDE_TALL_FRONT));
+      } else {
+        wideEast = Infinity;
+        fitBox(-0.2, -0.2, W + 0.2, H + 0.2, PITCH_WIDE, 0.05, fit, 2.2);
+      }
     }
     const zoom = clamp(intent.zoom || 1, 0.6, 2.5);
     goal.pitch = fit.pitch + (zoom - 1) * -0.05;
     goal.dist = fit.dist / zoom;
-    goal.tx = clamp(fit.tx + intent.panX, 0, W);
+    goal.tx = wideEast < Infinity ? clamp(fit.tx + intent.panX, fit.tx, fit.tx + wideEast) : clamp(fit.tx + intent.panX, 0, W);
     goal.tz = clamp(fit.tz + intent.panY, 0, H);
   };
 

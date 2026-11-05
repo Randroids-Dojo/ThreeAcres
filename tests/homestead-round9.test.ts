@@ -101,7 +101,8 @@ describe('P1: a pair is a trade read at a glance', () => {
       for (const [k, o] of offer.entries()) {
         const t = tradeRead(o);
         expect(notes[k].head).toBe(`+${t.clear.toLocaleString('en-US')}`);
-        expect(notes[k].lines[0]).toBe(`for ${t.plots} plots, ${t.days} days`);
+        // (Round 11: a crop that regrows says so.)
+        expect(notes[k].lines[0]).toBe(`for ${t.plots} plots, ${t.days} days${CROPS[o.items[0].crop].regrow ? ', picks again' : ''}`);
         expect(notes[k].lines.join(' ')).not.toMatch(/over market|planted/);
       }
       expect(notes[0].lines.length).toBe(notes[1].lines.length);
@@ -261,8 +262,10 @@ describe('P1: the season’s fair', () => {
       const t = farm(17, { fields: n, day: 21 });
       return g.fairWant?.(t, 21) ?? 0;
     });
-    for (let k = 1; k < want.length; k++) expect(want[k]).toBeGreaterThan(want[k - 1]);
+    // (Round 11: up to what a careful farm can raise before it: five, in autumn.)
+    for (let k = 1; k < want.length; k++) expect(want[k]).toBeGreaterThanOrEqual(want[k - 1]);
     expect(want[0]).toBeGreaterThanOrEqual(2);
+    expect(want[5]).toBeGreaterThan(want[0]);
   });
 
   it('taught in one line once the first request is planted, with one quiet line on the day card', () => {
@@ -277,8 +280,8 @@ describe('P1: the season’s fair', () => {
     for (const i of bare(s).slice(0, o.items[0].n)) plant(s, i % s.W, Math.floor(i / s.W), o.items[0].crop, 0);
     goals.claimCrops(s);
     let line = '';
-    for (let k = 0; k < 40 && !/fair/.test(line); k++) line = t.update(s, 0.1, true).line;
-    expect(line).toMatch(/^The fair wants \d+ requests by Spring 10\.$/);
+    for (let k = 0; k < 40 && !/Fill/.test(line); k++) line = t.update(s, 0.1, true).line;
+    expect(line).toMatch(/^Fill \d+ requests in full by Spring 10\.$/);
     expect(line.split(/\s+/).length).toBeLessThanOrEqual(8);
     for (let k = 0; k < 60; k++) for (const c of t.update(s, 0.1, true).cmds) if (c.type === 'unlock' && !s.learn.includes(c.what)) s.learn.push(c.what);
     expect(s.learn).toContain('fair');
@@ -337,6 +340,8 @@ describe('P2: lessons around paid lessons and offers', () => {
 
   it('the deliver line waits until a crop sown for the request is ripe (from Spring 7 it came with none ripe)', () => {
     const s = farm(31, { day: 7, lessons: [...EARLY, 'requests', 'sowfor', 'choose'] });
+    // (Round 11: reputation comes with the first request filled, which ends this lesson.)
+    s.rep = 0;
     const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'radish', n: 3 }], reward: 140, rep: 1, due: 10, sowBy: 7, made: 6, seen: true, kind: 'easy', taken: true, got: 0, from: s.nextId } as Order;
     s.orders = [o];
     for (const x of [2, 3, 4]) plant(s, x, 5, 'radish', 1);
@@ -344,13 +349,15 @@ describe('P2: lessons around paid lessons and offers', () => {
     const t = new Tutor();
     let line = '';
     for (let k = 0; k < 20; k++) line = t.update(s, 0.1, true).line || line;
-    expect(line).not.toMatch(/crate ships/);
+    expect(line).not.toMatch(/Harvest/);
     for (const x of [2, 3, 4]) plots(s, x, 5).crop!.age = 3;
     for (const x of [2, 3, 4]) plots(s, x, 5).crop!.stage = 4;
+    // (Round 11: the next dawn: only one new thing a day.)
+    s.day = 8;
     const t2 = new Tutor();
     let line2 = '';
     for (let k = 0; k < 5; k++) line2 = t2.update(s, 0.1, true).line || line2;
-    expect(line2).toBe('Harvest 3 radishes. The crate ships them.');
+    expect(line2).toBe('Harvest 3 radishes planted for the request.');
   });
 
   it('a count line goes the instant its count is met ("Plant 1 more radish" stayed about 3 s after the third went in)', () => {
@@ -410,7 +417,7 @@ describe('P2: the clash line, the crate and the cards', () => {
     }
     expect(said).toBeGreaterThan(5);
     // The tester's own: 255 in the box, 265 ripe.
-    expect(dialogs.clashWords({ kind: 'coins', need: 705, have: 520, coins: 255, ripe: 265, owed: 0 } as never)).toBe('Both need 705 of seed. You have 255, plus 265 ripe.');
+    expect(dialogs.clashWords({ kind: 'coins', need: 705, have: 520, coins: 255, ripe: 265, owed: 0 } as never)).toBe('Both need 705 coins. You have 255, plus 265 ripe.');
   });
 
   it('a request whose crops are all in the crate is handed over at once, by day (no Deliver stamp to find)', () => {

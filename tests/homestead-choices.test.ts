@@ -204,9 +204,12 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     expect(even / pairs).toBeGreaterThan(0.98);
   });
 
-  it('is never for a crop that regrows: its seed pays back over many picks, so one pick would read as a poor deal', () => {
+  // Round 11: only on a day fewer than three others can go in (summer had two a request could name, and from Summer 5 one).
+  it('is for a crop that regrows only on a day fewer than three others can go in', () => {
     for (const s of farms()) {
       fillRequests(s, true);
+      const others = CROP_IDS.filter((c) => CROPS[c].regrow === 0 && sowing(s.day, c).ok && (s.rep >= 2 || c !== 'pumpkin')).length;
+      if (others < 3) continue;
       for (const o of s.orders) expect(CROPS[o.items[0].crop].regrow, o.items[0].crop).toBe(0);
     }
   });
@@ -276,6 +279,8 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
       fillRequests(s, true);
       for (const o of s.orders) {
         const d = CROPS[o.items[0].crop];
+        // (Round 11: beans and strawberries sell for less than their seed, so against market their pay reads high.)
+        if (d.regrow) continue;
         const base = o.items[0].n - fresh(s, o);
         ratios.push((o.reward - base * d.price) / (d.price * fresh(s, o)));
       }

@@ -10,8 +10,8 @@
 //   - Tab onto Sleep, Space straight away: the day goes on, the focus is off the button;
 //   - Tab onto Sleep, Enter: the question opens ("Sleep now? It is 3:27 pm."), Escape closes it, the day goes on;
 //   - a mouse click on a HUD button leaves no focus on it; Space after it acts on the farm;
-//   - the sleep question is short (eleven words or fewer) and asks before evening with nothing left to do;
-//     after 6 pm with nothing to do, Enter sleeps without a question;
+//   - the sleep question is short (eleven words or fewer) and asks before evening with a job left;
+//     with no job left, at any hour, Enter sleeps without a question (round 11);
 //   - Space facing the well with the hands in hand fills the can;
 //   - from the house, with the well lesson up, the well it points at is on screen;
 //   - round 10: Escape closes the board and a second Escape at once does not open the game switcher (one a moment
@@ -370,6 +370,108 @@ const well = await p.evaluate(() => { const t = window.sunup.hud['pointAt']; ret
 const isWell = !!well.t && ((Math.floor(well.t.x) === 11 && Math.floor(well.t.y) === 2) || (Math.floor(well.t.x) === 6 && Math.floor(well.t.y) === 9));
 check('from the house, with "Fill the can at the well." up, the well it points at is on screen', well.line === 'Fill the can at the well.' && isWell && well.at.x > 40 && well.at.x < well.w - 40 && well.at.y > 60 && well.at.y < well.h - 120, JSON.stringify(well));
 await p.screenshot({ path: '/tmp/acres-sunup-keys-well.png' });
+
+// Round 11: "Sleep now? It is 6:06 am." asked on days with no job left: with none, Enter sleeps; with one, it asks.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  for (const q of s.plots) q.crop = null;
+  s.crows = [];
+  s.crowPlan = [];
+  s.flock = false;
+  s.minute = 6;
+  s.orders = s.orders.filter((o) => o.taken !== false);
+  for (const o of s.orders) o.seen = true;
+  for (const id of ['pull', 'water', 'sleep', 'broke', 'plant', 'requests', 'sowfor', 'deliver', 'choose', 'fair', 'sweep', 'well', 'hoe', 'wide', 'field', 'turn', 'stamina', 'smith']) if (!s.learn.includes(`lesson:${id}`)) s.learn.push(`lesson:${id}`);
+});
+await p.waitForTimeout(300);
+{
+  const d0 = (await S()).day;
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(500);
+  s = await S();
+  check('round 11: at 6:06 am with no job left, Enter sleeps without a question', (s.night || s.day === d0 + 1) && s.dialog !== 'sleep', JSON.stringify({ night: s.night, day: s.day, dialog: s.dialog }));
+  await p.waitForFunction(() => window.sunup.state.turnover < 0, null, { timeout: 10000 });
+  await p.waitForTimeout(800);
+}
+
+// Round 11: "Hold Space and walk." is taught on a desktop, on a day with a run of work to do (a held-Space zigzag watered 16
+// plots in 8.9 s; single presses used 45 to 62 s of a 60 s day), and a held Space ends it.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  s.learn = s.learn.filter((w) => w !== 'lesson:sweep');
+  delete s.learnCount.sweep;
+  for (const [k] of Object.entries(s.learnCount)) if (k.startsWith('arrived:')) delete s.learnCount[k];
+  s.day = 4;
+  s.minute = 30;
+  s.weather = 'sun';
+  s.water = 40;
+  s.stamina = 100;
+  s.tools.can = 0;
+  s.taps = [];
+  s.orders = [];
+  s.crowPlan = [];
+  s.requested = 2;
+  for (let y = 5; y < 7; y++) for (let x = 2; x < 6; x++) { const q = s.plots[y * s.W + x]; q.tilled = true; q.wet = false; q.moisture = 0; q.crop = { id: s.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: s.day }; }
+  Object.assign(s.actors[0], { x: 2.5, y: 4.5, facing: 'e', angle: 0, task: null, path: [], aim: null });
+  window.sunup.hud.pickTool('can');
+});
+await p.waitForTimeout(600);
+s = await S();
+check('round 11: the line on a desktop says "Hold Space and walk."', s.line === 'Hold Space and walk.', s.line);
+await p.keyboard.down('Space');
+await p.keyboard.down('KeyD');
+await p.waitForTimeout(1300);
+await p.keyboard.up('KeyD');
+await p.keyboard.up('Space');
+await p.waitForTimeout(500);
+{
+  const q = await p.evaluate(() => { const s = window.sunup.state; return { wet: [2, 3, 4, 5].filter((x) => s.plots[5 * s.W + x].wet).length, line: document.querySelector('.hint.on')?.textContent ?? '', done: s.learn.includes('lesson:sweep') }; });
+  check('round 11: holding Space and walking waters the row, and ends the line', q.wet >= 3 && q.done && q.line !== 'Hold Space and walk.', JSON.stringify(q));
+}
+
+// Round 11: a mouse drag across plots queues each plot it crosses, too.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  s.taps = [];
+  s.minute = 60;
+  for (let x = 2; x < 6; x++) { const q = s.plots[6 * s.W + x]; q.crop = { id: s.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: s.day }; }
+  Object.assign(s.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+  window.sunup.hud.pickTool('hands');
+});
+await p.waitForTimeout(1500);
+{
+  const px = (x, y) => p.evaluate(([x, y]) => window.sunup.r3d.project(x + 0.5, y + 0.5, 0), [x, y]);
+  const a = await px(2, 6);
+  const c = await px(5, 6);
+  const h0 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
+  await p.mouse.move(a.x, a.y);
+  await p.mouse.down();
+  await p.mouse.move(c.x, c.y, { steps: 14 });
+  await p.mouse.up();
+  await p.waitForTimeout(3500);
+  const h1 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
+  check('round 11: a mouse drag across a row of four ripe plots picks all four', h1 - h0 === 4, `${h1 - h0} of 4`);
+  // Stop for a mouse: three taps waiting, a click on the button, and X still works.
+  await p.evaluate(() => {
+    const s = window.sunup.state;
+    for (let x = 2; x < 6; x++) { const q = s.plots[6 * s.W + x]; q.crop = { id: s.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: s.day }; }
+    Object.assign(s.actors[0], { x: 3.5, y: 3.5, task: null, path: [], aim: null });
+    s.taps = [];
+  });
+  await p.waitForTimeout(300);
+  for (const x of [2, 3, 4, 5]) {
+    const q = await px(x, 6);
+    await p.mouse.click(q.x, q.y);
+    await p.waitForTimeout(40);
+  }
+  await p.waitForTimeout(350);
+  const stop = await p.evaluate(() => { const e = document.querySelector('.stopbtn'); const r = e.getBoundingClientRect(); return { on: !e.classList.contains('gone'), x: r.x + r.width / 2, y: r.y + r.height / 2, cap: getComputedStyle(e.querySelector('.kcap')).display }; });
+  check('round 11: on a desktop Stop comes too, wearing its key', stop.on && stop.cap !== 'none', JSON.stringify(stop));
+  await p.mouse.click(stop.x, stop.y);
+  await p.waitForTimeout(250);
+  const left = await p.evaluate(() => (window.sunup.state.taps ?? []).length);
+  check('round 11: a click on Stop lets the taps go', left === 0, `${left} left`);
+}
 
 console.log(errs.length ? `FAIL page errors: ${errs.join(' | ')}` : 'ok   no page errors');
 await b.close();

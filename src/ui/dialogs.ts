@@ -4,16 +4,18 @@
 
 import { cropArt } from './crops-art';
 import type { UiCue } from '../contract';
-import { fieldPrice, fieldRep, homestead, priceOf } from '../sim/actions';
+import { fieldPrice, fieldRep, homestead, marketPrice, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { clashOf, clearOf, fairNow, isShort, lastSowOf, MILESTONES, offered, partPay, plantedFor, requestHave, requestProgress, slackOf, sowByOf, stillToSow, stockCount, tradeOf, whyNot } from '../sim/goals';
+import { clashOf, clearOf, fairChances, fairNow, forFair, isShort, lastSowOf, MILESTONES, offered, plantedFor, requestHave, requestProgress, shortClear, slackOf, sowByOf, stillToSow, stockCount, tradeOf, whyNot } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
 import type { BuildKind, CropId, FairResult, LossCause, Order, RequestFail, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
 import { repShare, townName } from './describe';
 import { icon } from './icons';
+
+export { shortClear };
 
 export interface DialogHost {
   state(): WorldState;
@@ -287,8 +289,12 @@ export class Dialogs {
         if (fl) list.append(el('p', 'legend fairline', esc(fl)));
         const taken = s.orders.filter((o) => !offered(o));
         for (const o of taken) list.append(this.requestNote(s, o));
-        // Until the first is filled: how a request is handed over (no stamp to find).
-        if (taken.length && !offers.length && s.rep === 0 && !(s.repPart ?? 0)) list.append(el('p', 'legend', 'The crate ships a request when it is all in.'));
+        // Until the first is filled: which crops count (round 11: a crop planted before Accept does not, and picking one
+        // under the deliver line looked like a bug), and how a request is handed over (no stamp to find).
+        if (taken.length && s.rep === 0 && !(s.repPart ?? 0)) {
+          list.append(el('p', 'legend', 'Only what you plant after Accept counts.'));
+          if (!offers.length) list.append(el('p', 'legend', 'The crate ships a request when it is all in.'));
+        }
         break;
       }
       case 'fields':
@@ -316,7 +322,7 @@ export class Dialogs {
           const d = CROPS[c];
           const off = !inSeason(c, season(s.day));
           const locked = (s.rules.goal === 'almanac' && !s.almanac.unlocked.includes(c)) || off;
-          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob">${cropArt(d.id)}</span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${d.price}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}${off ? ', not now' : ''}</span></span>`);
+          const it = el('div', `item ${locked ? 'done' : ''}`, `<span class="blob">${cropArt(d.id)}</span><span class="tx"><b>${d.name}</b><span>Seeds ${d.seed}, ripe in ${d.days} days${d.regrow ? `, again every ${d.regrow}` : ''}, sells for ${marketPrice(s, c)}. Grows in ${d.seasons.map((n) => SEASON_NAMES[n].toLowerCase()).join(' and ')}${off ? ', not now' : ''}</span></span>`);
           if (!locked) {
             const b = el('button', `btn ${s.seed === c ? 'primary' : ''}`, s.seed === c ? 'In hand' : 'Use');
             b.onclick = () => {
@@ -447,7 +453,10 @@ export class Dialogs {
     // Round 9: an offer's lines each have their place, the same on both notes of a pair: what it clears, its plots and
     // days, what and for whom, what to plant, when it is due (and whether that is in time for the fair).
     const cls = (i: number) => (t.cls ? t.cls[i] ?? '' : i === 1 && t.need ? 'need' : i === t.lines.length - 1 ? 'when' : '');
-    const lines = `<b${offered(o) ? ' class="gain"' : ''}>${keepWhole(t.head)}</b>${t.lines.map((l, i) => `<span${cls(i) ? ` class="${cls(i)}"` : ''}>${keepWhole(l)}</span>`).join('')}`;
+    // Round 11: the headline figure wears the coin, as the coin box does (the first board's "+120" had no mark); a taken
+    // request that can still count for the fair wears the fair's star.
+    const mark = offered(o) ? `<span class="ic cm">${icon('coin')}</span>` : forFair(s, o) ? `<span class="ic fairmark" title="Counts for the fair">${icon('starFill')}</span>` : '';
+    const lines = `<b${offered(o) ? ' class="gain"' : ''}>${mark}${keepWhole(t.head)}</b>${t.lines.map((l, i) => `<span${cls(i) ? ` class="${cls(i)}"` : ''}>${keepWhole(l)}</span>`).join('')}`;
     const note = el('div', `item req${offered(o) ? ' offer' : ' taken'}${isShort(s, o) ? ' short' : ''}`, `<span class="blob">${cropArt(it.crop)}</span><span class="tx">${lines}</span>`);
     note.dataset.crop = it.crop;
     note.dataset.id = String(o.id);
@@ -517,7 +526,10 @@ export class Dialogs {
     const known = s.rep < rep ? ` The land agent sells it to farmers with reputation ${rep}. Yours is ${repText(s)}.` : ` You have ${fmt(s.coins)} coins.${seed}`;
     // Round 8: the second field comes with the copper can, and its card says so.
     const can = homestead(s) && s.tools.can < 1 && s.parcels.filter((q) => q.owned).length === 1 ? ' A copper can comes with it: it waters a whole row.' : '';
-    this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${can}${known}`));
+    // Round 11: a farm of five or six fills the market: the card says so before it is bought.
+    const owned = s.parcels.filter((q) => q.owned).length;
+    const full = homestead(s) && owned >= 4 ? ` With ${owned === 4 ? 'five' : 'six'} fields the crate pays ${owned === 4 ? 'a tenth' : 'a fifth'} less for what is not for a request.` : '';
+    this.body.append(el('p', '', `${homestead(s) ? 'Four by four, meadow now. Hoe it to plant.' : 'Four by four, meadow now. Rich soil that has not been farmed.'}${can}${full}${known}`));
     const row = el('div', 'row ask');
     const short = s.coins < price || s.rep < rep;
     const buy = el('button', 'btn primary', s.rep < rep ? `Reputation ${rep}` : short ? `Need ${fmt(price)}` : `Buy for ${fmt(price)}`);
@@ -559,11 +571,10 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
     // trade at a glance ("+415 over market" put the bigger number on the bold side nearly every time). Nothing planted
     // before Accept counts, so there is no "16 planted" any more.
     const tr = tradeOf(o);
-    const lines = [`for ${tr.plots} ${tr.plots === 1 ? 'plot' : 'plots'}, ${tr.days} ${tr.days === 1 ? 'day' : 'days'}`, `${it.n} ${name} for ${who}`, `Plant ${when}, seed ${fmt(toSow * d.seed)}`, `Due ${dayName(s, o.due)}, ${slack}`];
+    // (Round 11: beans and strawberries hold their plots to the season's end, and pick again: the note says so.)
+    const lines = [`for ${tr.plots} ${tr.plots === 1 ? 'plot' : 'plots'}, ${tr.days} ${tr.days === 1 ? 'day' : 'days'}${d.regrow ? ', picks again' : ''}`, `${it.n} ${name} for ${who}`, `Plant ${when}, seed ${fmt(toSow * d.seed)}`, `Due ${dayName(s, o.due)}, ${slack}`];
     const cls = ['trade', 'what', 'need', 'when'];
-    // While the season's fair still wants requests, each offer says which fair it counts for (round 10: one due next
-    // season counts for that season's fair: "After the fair" was on offers that counted for the autumn fair), and so
-    // does each side of a pair when one of them counts for the next.
+    // While the season's fair still wants requests, each offer says whether it can count for it.
     const label = fairLabel(s, o);
     if (label) {
       lines.push(label.text);
@@ -602,40 +613,30 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
 }
 
 /**
- * Round 9: the season's fair on the board, in notes of ten words at most:
- * when and how far along ("Fair on Spring 10: 1 of 4 requests filled."),
- * and what it gives ("Its prize: a ribbon and a fifth off a field."). None
+ * Round 9: the season's fair on the board. Round 10: in one line. Round 11: with what it wants in it: a fair counts only
+ * requests taken in its season and filled in full ("Fair Spring 10: 1 of 3 taken this season, in full."). None
  * before the first Accept.
  */
 export function fairLines(s: WorldState): string[] {
   const f = s.fair;
   if (!f || !homestead(s)) return [];
   const when = `${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}`;
-  // Round 10: one line, the prize in it (the board stacked six notes around one request).
-  if (s.day < f.start) return [`The fair on ${when} wants ${f.want} requests filled.`];
-  if (f.got >= f.want) return [`Fair on ${when}: the ribbon is yours.`];
-  return [`Fair on ${when}: ${f.got} of ${f.want} filled, for a ribbon.`];
+  if (s.day < f.start) return [`Fair ${when}: wants ${f.want}, taken that season, in full.`];
+  if (f.got >= f.want) return [`Fair ${when}: the ribbon is yours.`];
+  return [`Fair ${when}: ${f.got} of ${f.want} taken this season, in full.`];
 }
 
 /**
- * Round 10: which fair an offer counts for, as its note says it: "In time for the fair" (due by this season's fair,
- * while it still wants requests), or "For the autumn fair" (due next season, so filled then); null otherwise, or
- * while no fair runs.
+ * Round 10: whether an offer counts for the fair, as its note says it. Round 11: "In time for the fair" while seed sown
+ * today would ripen by its day, and "Too late for the fair" beside one that can; null once its ribbon is won, or no crop
+ * can ripen by it any more. A request counts only for the fair of the season it is taken in, so there is no "For the
+ * autumn fair".
  */
 export function fairLabel(s: WorldState, o: Order): { text: string; now: boolean } | null {
   const f = fairNow(s);
-  if (!f || !offered(o)) return null;
-  const counts = (q: Order) => q.due <= f.day;
-  const wants = f.got < f.want;
-  // (With this season's ribbon won, a side due by it says nothing: only the one for the next fair has a line.)
-  if (counts(o)) return wants ? { text: 'In time for the fair', now: true } : null;
-  return { text: `For the ${SEASON_NAMES[season(o.due)].toLowerCase()} fair`, now: false };
-}
-
-/** Round 10: what a short request brings in all: what can come at market and its share of the gain, less its seed. */
-export function shortClear(o: Order, coming: number): number {
-  const it = o.items[0];
-  return coming * CROPS[it.crop].price + partPay(o, coming) - it.n * CROPS[it.crop].seed;
+  if (!f || !offered(o) || f.got >= f.want) return null;
+  if (forFair(s, o)) return { text: 'In time for the fair', now: true };
+  return fairChances(s) > 0 ? { text: 'Too late for the fair', now: false } : null;
 }
 
 /** Round 10: why the board offers one request today, not a pair, or what comes after a Pass. Empty otherwise. */
@@ -662,7 +663,7 @@ export function offerWhyWords(s: WorldState): string {
 const seasonWord = (day: number) => SEASON_NAMES[season(day)].toLowerCase();
 
 /** Round 10: how a request due by the fair was lost, after "1 request was". */
-const FAIR_LOSS: Record<RequestFail, string> = { crows: 'lost to crows', bugs: 'lost to bugs', dry: 'lost to dry nights', heat: 'lost to the heat', turn: 'lost at the turn', late: 'planted too late', soil: 'short of room to plant', coins: 'short of seed money', due: 'not picked in time' };
+const FAIR_LOSS: Record<RequestFail, string> = { crows: 'lost to crows', bugs: 'lost to bugs', dry: 'lost to dry nights', heat: 'lost to the heat', turn: 'lost at the turn', late: 'planted too late', behind: 'not ripe in time', soil: 'short of room to plant', coins: 'short of seed money', due: 'not picked in time' };
 
 /**
  * Round 10: the fair's night, on a card the next morning: the ribbon or the miss, how many it got, why it fell short,
@@ -676,23 +677,27 @@ export function fairCard(s: WorldState, r: FairResult, day = s.day): { title: st
   const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   if (r.won) {
     lines.push('A ribbon for the house.');
-    lines.push(`${r.got} of ${r.want} requests filled in time.`);
-    if ((s.fieldOff ?? 0) > 0) lines.push('Its prize: a fifth off the next field.');
+    // (Round 11: "4 of 3 requests filled" read oddly.)
+    lines.push(r.got > r.want ? `${r.got} requests filled in full. It wanted ${r.want}.` : `All ${r.want} requests filled in full.`);
+    // Round 11: with no field to discount, a prize that lasts (the eleventh playtest's ribbons were only decoration).
+    if (r.prize === 'pay') lines.push('Its prize: requests pay a tenth more.');
+    else if (r.prize === 'field' || (s.fieldOff ?? 0) > 0) lines.push('Its prize: a fifth off the next field.');
   } else {
     lines.push('No ribbon this time.');
-    lines.push(`${r.got} of ${r.want} requests filled in time.`);
-    // Why, three reasons at most: requests lost, mornings the board had nothing for want of free soil (a farm sown
-    // edge to edge), too few taken that were due by it, and those due after it, which count for the next fair.
+    lines.push(`${r.got} of ${r.want} requests filled in full.`);
+    // Why, three reasons at most: requests lost, those that came up short, mornings the board had nothing for want of
+    // free soil (a farm sown edge to edge), too few taken this season, and those not ready by its day.
     const why: string[] = [];
     if (r.lost) why.push(`${n(r.lost, 'request was', 'requests were')} ${FAIR_LOSS[r.why ?? 'due']}.`);
+    if (r.short) why.push(`${n(r.short, 'request', 'requests')} came up short.`);
     if (r.noRoom) why.push(`${n(r.noRoom, 'morning', 'mornings')} had no free soil for a request.`);
     const taken = r.taken ?? 0;
-    if (taken < r.want) why.push(`Only ${n(taken, 'request', 'requests')} you took ${taken === 1 ? 'was' : 'were'} due by it.`);
-    if (r.late) why.push(`${r.late} more ${r.late === 1 ? 'is' : 'are'} due after it, for the next fair.`);
+    if (taken < r.want) why.push(`Only ${n(taken, 'request was', 'requests were')} taken this season.`);
+    if (r.late) why.push(`${r.late} more ${r.late === 1 ? 'was' : 'were'} not ready by its day.`);
     lines.push(...why.slice(0, 3));
   }
   const f = s.fair;
-  if (f && f.day > held) lines.push(`The ${seasonWord(f.day)} fair wants ${f.want} by ${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}.`);
+  if (f && f.day > held) lines.push(`The ${seasonWord(f.day)} fair wants ${f.want}, taken from today.`);
   return { title, lines, button: `On to ${seasonWord(day)}` };
 }
 
@@ -703,8 +708,9 @@ export function fairCard(s: WorldState, r: FairResult, day = s.day): { title: st
  */
 export function clashWords(c: { kind: 'soil' | 'coins'; need: number; have: number; coins?: number; ripe?: number; owed?: number }): string {
   if (c.kind === 'soil') return `Both need ${c.need} plots. You have ${c.have}.`;
-  if (c.coins === undefined) return `Both need ${fmt(c.need)} of seed. You have ${fmt(c.have)}.`;
-  return `Both need ${fmt(c.need)} of seed. You have ${fmt(c.coins)}${c.ripe ? `, plus ${fmt(c.ripe)} ripe` : ''}${c.owed ? `, ${fmt(c.owed)} owed` : ''}.`;
+  // (Round 11: "Both need 255 of seed" said no coins.)
+  if (c.coins === undefined) return `Both need ${fmt(c.need)} coins. You have ${fmt(c.have)}.`;
+  return `Both need ${fmt(c.need)} coins. You have ${fmt(c.coins)}${c.ripe ? `, plus ${fmt(c.ripe)} ripe` : ''}${c.owed ? `, ${fmt(c.owed)} owed` : ''}.`;
 }
 
 /** What the sleep question can name: what is left on the farm, a flock day, and planting a request still needs today. */
@@ -715,6 +721,8 @@ export interface SleepWhy {
   crows?: number;
   flock?: boolean;
   owed?: number;
+  /** Round 11: new notes on the board nobody has read: offers go at the next dawn. */
+  unread?: number;
 }
 
 /**
@@ -730,6 +738,7 @@ export function sleepText(minute: number, why: SleepWhy = {}): string {
   if (why.owed) return `${at} A request needs ${why.owed} more planted today.`;
   if (why.thirsty) return `${at} ${n(why.thirsty, 'crop is', 'crops are')} still thirsty.`;
   if (why.ripe) return `${at} ${n(why.ripe, 'crop is', 'crops are')} ripe to pick.`;
+  if (why.unread) return `${at} New requests on the board go at dawn.`;
   return at;
 }
 

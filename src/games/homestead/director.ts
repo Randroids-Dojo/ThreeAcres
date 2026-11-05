@@ -4,9 +4,9 @@
 
 import type { CameraIntent, FrameView, Renderer, UiCue } from '../../contract';
 import { canAfford, homestead, resolve, sleepAsk } from '../../sim/actions';
-import { facingTile, farmer, snapAim } from '../../sim/actors';
+import { dragStarts, facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
-import { fillRequests, owedToday } from '../../sim/goals';
+import { fillRequests, newRequests, owedToday } from '../../sim/goals';
 import { guardedSure } from '../../sim/day';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
@@ -31,6 +31,14 @@ const PROP_HEIGHT: Record<string, number> = { well: 1.3, board: 1.6 };
 const CLOSE_LEAD = 2.2;
 /** Round 9: the furthest south of a field's top row a wide screen's close camera looks, so that row clears the day card. */
 const FIELD_TOP_CLEAR = 3.5;
+/** Round 11: how far from the farmer (tiles) a wide screen's close camera may stay held while taps wait: across, and north or south of them. */
+const HOLD_ACROSS = 4;
+const HOLD_UP = 1.5;
+const HOLD_DOWN = 3.5;
+/** Round 11: the pan that puts a phone's View at its east stop (the camera keeps it to the fields owned). */
+const EAST_PAN = 8;
+/** Round 11: fields owned from which a phone's View has two stops. */
+const VIEW_STOP_FIELDS = 5;
 
 /** Round 10: how long after a card or a picker closes Escape is ignored (ms). */
 export const ESCAPE_QUIET = 500;
@@ -118,6 +126,7 @@ export class Director {
       hotkey: (k, shift) => this.hotkey(k, shift),
       blocked: () => !this.running || this.dialogs.open,
       stopAt: (px, py) => this.onFarmer(px, py),
+      dragFrom: (x, y) => dragStarts(this.state, x, y),
     });
     const host = {
       state: () => this.state,
@@ -235,8 +244,25 @@ export class Director {
       const t = { x: Math.floor(f.x), y: Math.floor(f.y) };
       const field = this.state.parcels.find((q) => t.x >= q.x - 1 && t.x <= q.x + q.w && t.y >= q.y - 1 && t.y <= q.y + q.h);
       if (field && !(p && p.y > field.y + field.h)) fy = Math.min(fy, Math.max(f.y, field.y + FIELD_TOP_CLEAR));
+      ({ x: fx, y: fy } = this.holdCamera(fx, fy));
     }
     return { mode, focusX: fx, focusY: fy, zoom: c.zoom, panX: mode === 'wide' ? c.panX : 0, panY: mode === 'wide' ? c.panY : 0 };
+  }
+
+  /**
+   * Round 11: a wide screen's close camera, while taps wait or the farmer walks to one, holds still as long as the farmer
+   * stays well inside the frame (a click pass over a field slid it 68 px, and later clicks had to chase their plots).
+   */
+  private camHold: { x: number; y: number } | null = null;
+
+  private holdCamera(fx: number, fy: number): { x: number; y: number } {
+    const s = this.state;
+    const f = farmer(s);
+    const working = (s.taps?.length ?? 0) > 0 || !!f.aim;
+    const h = this.camHold;
+    const out = working && h ? { x: Math.max(f.x - HOLD_ACROSS, Math.min(f.x + HOLD_ACROSS, h.x)), y: Math.max(f.y - HOLD_UP, Math.min(f.y + HOLD_DOWN, h.y)) } : { x: fx, y: fy };
+    this.camHold = out;
+    return out;
   }
 
   private pxPerTile(): number {
@@ -261,8 +287,34 @@ export class Director {
     c.zoom = Math.max(0.6, Math.min(2.5, c.zoom * f));
   }
 
+  /** Round 11: which of a phone's two View stops comes first, and has the second been shown? */
+  private eastFirst = false;
+  private secondStop = false;
+
+  /**
+   * Close up or the whole farm. Round 11: five or six fields span more than a phone's width can show at plots a thumb can
+   * hit (27 px, and a third of the screen empty under them), so there View has two stops, the west fields and the east:
+   * the one the farmer is in first, then the other, then back to close up.
+   */
   toggleCamera(): void {
-    this.input.push({ type: 'rules', patch: { camera: this.state.rules.camera === 'close' ? 'wide' : 'close' } });
+    const s = this.state;
+    const tall = this.stage.clientWidth < this.stage.clientHeight;
+    const far = tall && s.parcels.filter((p) => p.owned).length >= VIEW_STOP_FIELDS;
+    if (far && s.rules.camera === 'wide' && !this.secondStop) {
+      this.secondStop = true;
+      this.cams.wide.panX = this.cams.wide.panX > 0 ? 0 : EAST_PAN;
+      this.ctx.audio.ui('toggle');
+      return;
+    }
+    this.secondStop = false;
+    if (far && s.rules.camera === 'close') {
+      this.eastFirst = farmer(s).x >= 9.5;
+      if (!s.learnCount.viewStops) {
+        s.learnCount.viewStops = 1;
+        this.hud.toast('Tap View again for the other fields.', 'info', 3200);
+      }
+    } else this.eastFirst = false;
+    this.input.push({ type: 'rules', patch: { camera: s.rules.camera === 'close' ? 'wide' : 'close' } });
     this.ctx.audio.ui('toggle');
   }
 
@@ -366,9 +418,10 @@ export class Director {
     // A flock day: crows still to come take a crop each from a farm left early, so the question asks at any hour.
     const flock = this.crowsDue();
     const owed = owedToday(s).reduce((a, x) => a + x.n, 0);
-    const q = sleepAsk(s, { teaching, flock, owedToday: owed });
+    const unread = s.learn.includes('requests') ? newRequests(s) : 0;
+    const q = sleepAsk(s, { teaching, flock, owedToday: owed, unread });
     if (q.ask) {
-      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), { ...q.left, flock, owed });
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), { ...q.left, flock, owed, unread });
       return;
     }
     this.input.push({ type: 'sleep' });
@@ -488,7 +541,8 @@ export class Director {
     // A tap inside the lesson pointer's target tile is a tap on the pointer: for a lesson that builds, it asks first
     // (or says it cannot be paid for) instead of doing the plot's own job. A tap anywhere else does its own job.
     cmds = cmds.filter((c) => {
-      if (c.type !== 'actAt' || this.dialogs.open) return true;
+      // (A plot a drag crossed is the plot's own job.)
+      if (c.type !== 'actAt' || c.drag || this.dialogs.open) return true;
       const t = pointerTap(s, this.lessonTarget.point, this.lessonTarget.build, { x: c.x, y: c.y });
       if (!t) return true;
       this.onPointer(t);
@@ -559,7 +613,10 @@ export class Director {
     this.hud.onEvent(e);
     switch (e.type) {
       case 'rules':
-        if (e.changed.includes('camera')) this.cams[s.rules.camera].panX = this.cams[s.rules.camera].panY = 0;
+        if (e.changed.includes('camera')) {
+          this.cams[s.rules.camera].panX = this.cams[s.rules.camera].panY = 0;
+          if (s.rules.camera === 'wide' && this.eastFirst) this.cams.wide.panX = EAST_PAN;
+        }
         break;
       case 'dawn':
         this.hour = 6;

@@ -312,7 +312,8 @@ await p.evaluate(() => {
 await p.waitForTimeout(150);
 await tapSleep();
 const quiet = await p.evaluate(() => ({ open: window.sunup.dialogs.open, night: window.sunup.state.turnover >= 0, text: document.querySelector('.dialog.on p')?.textContent ?? '' }));
-check('round 7: at 8:30 am with nothing left to do, Sleep still asks, with only the hour', quiet.open && !quiet.night && /^It is 8:\d\d am\.$/.test(quiet.text), JSON.stringify(quiet));
+// (Round 11: it used to ask here, "It is 6:06 am.", with no job left: it asks only with one.)
+check('round 11: at 8:30 am with nothing left to do, Sleep asks nothing', !quiet.open && quiet.night, JSON.stringify(quiet));
 const notNow2 = await p.evaluate(() => { const b = [...document.querySelectorAll('.dialog .ask .btn')].find((e) => e.textContent === 'Not now'); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
 await touch('touchStart', [[notNow2[0], notNow2[1], 13]]);
 await touch('touchEnd', []);
