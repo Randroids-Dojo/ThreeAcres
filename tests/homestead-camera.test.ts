@@ -39,7 +39,9 @@ describe('the phone camera keeps the farm in view', () => {
       }
     });
 
-    it(`${W}x${h}: the middle of the screen is farm edge to edge (no void at the sides), with at least 10 columns`, () => {
+    // (Round 10: at least 8.6 tiles across, so a tall phone's farm runs down to the rack: at 9.8 or more a 412x900 phone
+    // had a blank cream band under the farm, 13% of the screen. Nine columns or more.)
+    it(`${W}x${h}: the middle of the screen is farm edge to edge (no void at the sides), with at least 9 columns`, () => {
       for (const [fx, fy] of SPOTS) {
         const rig = framed(h, fx, fy);
         expect(rig.pick(3, h / 2, 20, 15), `left at ${fx},${fy}`).not.toBeNull();
@@ -47,7 +49,7 @@ describe('the phone camera keeps the farm in view', () => {
         const cols = new Set<number>();
         for (let i = 0; i < 80; i++) cols.add(rig.pick(((i + 0.5) / 80) * W, h / 2, 20, 15)?.x ?? -1);
         cols.delete(-1);
-        expect(cols.size).toBeGreaterThanOrEqual(10);
+        expect(cols.size).toBeGreaterThanOrEqual(9);
       }
     });
 
@@ -85,6 +87,19 @@ describe('the phone camera keeps the farm in view', () => {
     }
   });
 
+  // Round 10: in the yard, from the board on, its well keeps in view as far as the farmer allows (at the farm's tighter
+  // tiles it slid off the right edge from the board).
+  it('in the yard, from the board to the well, the yard’s well is on screen', () => {
+    for (const h of [838, 900]) {
+      for (const fx of [8, 8.5, 10.5, 11.5]) {
+        const rig = framed(h, fx, 3.5);
+        const w = rig.project(11.5, 2.5, 0.6)!;
+        expect(w.x, `well, farmer ${fx},3.5`).toBeLessThanOrEqual(W - 12);
+        expect(rig.project(fx, 3.5, 0)!.x).toBeGreaterThan(12);
+      }
+    }
+  });
+
   it('from the first field, the second field and the notice board are in view', () => {
     for (const h of [838, 900]) {
       const rig = framed(h, 3.5, 6.5);
@@ -101,14 +116,16 @@ describe('the phone camera keeps the farm in view', () => {
 
   // Round 3: from the first field the well was off screen, and on the path between the fields the first field's
   // left column left the screen. Now the west side holds still on the first two fields and the well.
-  it('from the first field and the path beside it, the first field’s left column and the well are both on screen', () => {
+  // (Round 10: a well, the yard's or, since round 8, the one where the field paths cross: with the farm filling the screen
+  // down to the rack the yard's well can sit just off the right edge from the first field.)
+  it('from the first field and the path beside it, the first field’s left column and a well are both on screen', () => {
     for (const h of [838, 900]) {
       for (const [fx, fy] of [[3.5, 6.5], [2.5, 5.5], [6.5, 7], [7.5, 9.5], [5.5, 4.5]]) {
         const rig = framed(h, fx, fy);
         // The left edge of the first field, on every one of its rows.
         for (let y = 5; y < 9; y++) expect(rig.project(2, y + 0.99, 0)!.x, `field 1 at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(0);
-        const well = rig.project(11.5, 2.5, 0.6)!;
-        expect(well.x, `well, farmer ${fx},${fy}`).toBeLessThanOrEqual(W - 12);
+        const wells = [rig.project(11.5, 2.5, 0.6)!, rig.project(6.5, 9.5, 0.6)!];
+        expect(wells.some((w) => w.x >= 12 && w.x <= W - 12), `a well, farmer ${fx},${fy}`).toBe(true);
       }
     }
   });
@@ -117,7 +134,10 @@ describe('the phone camera keeps the farm in view', () => {
   // could not be tapped. Now the camera holds still on the west side as far as the well's front.
   it('from the second field and the well, the middle of the first field’s left column is on screen, with room for a finger', () => {
     for (const h of [838, 900]) {
-      for (const [fx, fy] of [[10.5, 6.5], [10.5, 8.5], [9.5, 7.5], [11.5, 3.5], [10.5, 2.5]]) {
+      // (Round 10: from the yard's well itself, at the farm's tighter tiles, the yard is in view instead: a tap queue now
+      // fills the can at the nearer well on its own, the one between the fields, so no one walks to the yard's well to
+      // water field 1.)
+      for (const [fx, fy] of [[10.5, 6.5], [10.5, 8.5], [9.5, 7.5]]) {
         const rig = framed(h, fx, fy);
         // Its middle 12 px or more in from the edge: with half a tile (about 20 px) to its right, a finger has 32 px.
         for (let y = 5; y < 9; y++) expect(rig.project(2.5, y + 0.5, 0)!.x, `field 1 at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(12);

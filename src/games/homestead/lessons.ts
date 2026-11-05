@@ -182,14 +182,21 @@ const fieldOpen = (s: WorldState, i: number) => {
 const buildSpot = (s: WorldState, guard: boolean) =>
   nearest(s, (_c, i) => bareAt(s, i) && midField(s, i) && (!guard || fieldOpen(s, i))) ?? nearest(s, (_c, i) => bareAt(s, i) && midField(s, i));
 /**
+ * Round 10: where the scarecrow lesson points: bare soil in the middle of a field a crow could visit, else any bare
+ * plot in such a field, else any bare plot.
+ */
+const scarecrowSpot = (s: WorldState) => buildSpot(s, true) ?? nearest(s, (_c, i) => bareAt(s, i) && fieldOpen(s, i)) ?? bareSpot(s);
+/**
  * Round 9: coins the requests want for seed: what the taken ones still owe, and the dearer of what is on offer. A
  * paid lesson (a scarecrow, a sprinkler) waits while paying for it would leave less (the ninth playtest's scarecrow
  * lesson took 40 of 120 coins on the morning an offer needed 60, and a neighbour left seed money three mornings
  * running).
  */
-export function seedWanted(s: WorldState): number {
+export function seedWanted(s: WorldState, cheaper = false): number {
   const offers = s.orders.filter(offered).map((o) => stillToSow(s, o) * CROPS[o.items[0].crop].seed);
-  return owed(s).coins + (offers.length ? Math.max(...offers) : 0);
+  // Round 10: `cheaper`, the cheaper side of what is on offer (only one can be taken): with a pair every morning, the
+  // dearer side held the scarecrow lesson back for days.
+  return owed(s).coins + (offers.length ? (cheaper ? Math.min(...offers) : Math.max(...offers)) : 0);
 }
 /** Round 9: can the farm pay for a build and still sow what its requests want? */
 const paidOk = (s: WorldState, cost: number) => s.coins - cost >= seedWanted(s);
@@ -204,6 +211,13 @@ const smithReady = (s: WorldState) =>
 
 /** Features that arrive with no line of their own: crows and bugs start coming from day 5, once a request is understood. */
 const QUIET: { what: string; after: string[]; when(s: WorldState): boolean }[] = [{ what: 'pests', after: ['deliver'], when: (s) => s.day >= 5 }];
+
+/**
+ * Round 10: the plant lesson asks for this many seeds, then stops, so soil
+ * stays free for the first pair of requests (the tenth playtest's tester sowed
+ * every plot when the line said to plant in the bare soil).
+ */
+export const PLANT_LESSON = 8;
 
 const LESSONS: Lesson[] = [
   {
@@ -260,8 +274,15 @@ const LESSONS: Lesson[] = [
     // Seeds cost coins, so the two come together; stamina waits for a line of its own.
     unlocks: ['coins', 'seeds'],
     ready: (s) => s.coins >= 10,
-    text: () => 'Plant seeds in the bare soil.',
-    done: (_s, n) => n('plant') >= 3,
+    // Round 10: a count, so half the field stays free for the first pair of requests (the tenth playtest's "Plant seeds
+    // in the bare soil." sowed all sixteen plots on Spring 2, and the Spring 3 pair said "Both need 6 plots. You have
+    // 4."; nothing could go in for it until Spring 5).
+    text: (s) => {
+      const left = Math.max(1, PLANT_LESSON - (s.learnCount.plant ?? 0));
+      return left < PLANT_LESSON ? `Plant ${left} more ${left === 1 ? 'seed' : 'seeds'} in the bare soil.` : `Plant ${left} seeds in the bare soil.`;
+    },
+    done: (s, n) => n('plant') >= PLANT_LESSON || !bareSpot(s),
+    instant: true,
     point: (s) => nearest(s, (c, i) => !c && s.plots[i].tilled && !s.builds.some((b) => b.y * s.W + b.x === i)),
   },
   {
@@ -317,7 +338,9 @@ const LESSONS: Lesson[] = [
     instant: true,
     // Round 9: a farm that has taken no request by Spring 6 is not held back by it (the field lesson comes after it).
     pass: (s) => s.day >= 6 && !toSowFor(s),
-    hold: (s) => !bareSpot(s),
+    // Round 10: not while the coin box cannot pay for one seed of it ("Plant 4 radishes for the request." showed at 0
+    // coins; a neighbour leaves seed money at dawn).
+    hold: (s) => !bareSpot(s) || s.coins < CROPS[(toSowFor(s) ?? s.orders.find(isTaken))?.items[0].crop ?? 'radish'].seed,
     point: (s) => bareSpot(s),
   },
   {
@@ -379,7 +402,9 @@ const LESSONS: Lesson[] = [
     // turn behind the request's own lines.
     after: ['choose'],
     unlocks: ['fields'],
-    ready: (s) => s.coins >= s.parcels[1].price + FIELD_SEED && fields(s) === 1,
+    // Round 10: and the seed the requests taken still want, so buying it never leaves the farm broke (with a pair each
+    // morning, three taken by Spring 5 and the field bought that day left 0 coins on Spring 6 to 8, and nothing to do).
+    ready: (s) => s.coins >= s.parcels[1].price + FIELD_SEED + owed(s).coins && fields(s) === 1,
     text: () => 'Buy a second field.',
     done: (s) => fields(s) >= 2,
     // The field itself: a tap on it offers it for sale.
@@ -422,13 +447,15 @@ const LESSONS: Lesson[] = [
     act: 'build:scarecrow',
     // Held until the farm can pay for one (the fifth playtest was told to sleep at 6 am, with a request waiting), and
     // until there is bare soil to build on (the sixth was told to build on bare soil with every plot sown).
-    ready: (s) => s.day > doneOn(s, 'pests') && s.coins >= BUILD_COST.scarecrow,
-    // Round 9: not while the requests want the coins for seed, and only on a bare plot in the middle of a field (with
-    // field 2's middle full it built at a corner, where it watches the least).
-    hold: (s) => !paidOk(s, BUILD_COST.scarecrow) || !buildSpot(s, true),
+    // Round 10: the morning after the crow lesson, or after the first crop a crow took (the tenth playtest's crows took
+    // crops from Summer 1, and the lesson waited until Summer 8 for a bare plot in the middle of a field).
+    ready: (s) => (s.day > doneOn(s, 'pests') || s.day > (s.learnCount.crowAte ?? Infinity)) && s.coins >= BUILD_COST.scarecrow,
+    // Round 9: not while the taken requests want the coins for seed. Round 10: on any bare plot when no plot in the
+    // middle of a field is bare (the middle is still the first choice: a corner watches the least).
+    hold: (s) => s.coins - BUILD_COST.scarecrow < seedWanted(s, true) || !scarecrowSpot(s),
     text: () => 'Build a scarecrow on bare soil.',
     done: (s, _n, acted) => acted || s.builds.some((b) => b.kind === 'scarecrow'),
-    point: (s) => buildSpot(s, true),
+    point: (s) => scarecrowSpot(s),
     build: 'scarecrow',
   },
   {
@@ -603,6 +630,10 @@ export class Tutor {
         break;
       case 'crowScared':
         bump('scare');
+        break;
+      case 'crowEat':
+        // Round 10: the day a crow first took a crop (the scarecrow lesson comes the morning after).
+        s.learnCount.crowAte ??= s.day;
         break;
       case 'rules':
         if (e.changed.includes('camera')) bump('wide');

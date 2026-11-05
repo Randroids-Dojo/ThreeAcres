@@ -178,12 +178,14 @@ describe('P1: a pair is always a choice', () => {
         const t = { ...s, orders: both } as WorldState;
         if (!takesBoth(t, first[0], first[1])) compete++;
       }
-      // The morning after, both let go: the board never offers the same crops again.
+      // The morning after, both let go: the board never offers the same crops again (round 10: unless no other pair
+      // can be made: summer and winter have two crops a request can ask for, and a pair each morning beats one alone).
       if (first.length) {
         const again = offerRequests(s);
         if (again.length) {
           seconds++;
-          if (key(again) === key(first)) repeats++;
+          const kinds = CROP_IDS.filter((c) => CROPS[c].regrow === 0 && sowing(s.day, c).ok && (s.rep >= 2 || c !== 'pumpkin'));
+          if (key(again) === key(first) && kinds.length > 2) repeats++;
         }
       }
     }
@@ -235,7 +237,9 @@ describe('P1: a pair is always a choice', () => {
     const o: Order = { id: s.nextId++, who: 'Old Tamsin', items: [{ crop: 'carrot', n: 6 }], reward: 6 * CROPS.carrot.price + 100, rep: 1, due: 11, sowBy: 4, made: 3, seen: true, kind: 'easy', taken: false };
     s.orders = [o];
     expect(whyNot(s, o)).toBe('');
-    nightfall(s, []);
+    // (Round 10: every offer nobody took goes at the next dawn, for a fresh pair; what is checked here is that it is
+    // not withdrawn as one that cannot be met.)
+    goals.withdrawRequests(s, [], null);
     expect(s.orders.some((q) => q.id === o.id)).toBe(true);
   });
 });
@@ -263,8 +267,10 @@ describe('P2: one loss no longer voids a request', () => {
     expect(s.orders.some((q) => q.id === o.id)).toBe(true);
     expect(requestHave(s, o)).toBe(14);
     expect((goals as { isShort?: (s: WorldState, o: Order) => boolean }).isShort?.(s, o)).toBe(true);
-    // The note says so as soon as it happens.
-    expect(noteText(s, o).lines.join(' ')).toMatch(/14 of 15 can come, pays 285/);
+    // The note says so as soon as it happens. (Round 10: and the figure in all is what the fourteen bring, not "pays
+    // 285" beside a whole "+1,505 in all", which read as a loss.)
+    expect(noteText(s, o).lines.join(' ')).toMatch(/14 of 15 can come/);
+    expect(noteText(s, o).lines.join(' ')).not.toMatch(/pays/);
     // The morning after, it is still there.
     nightfall(s, []);
     expect(s.orders.some((q) => q.id === o.id)).toBe(true);

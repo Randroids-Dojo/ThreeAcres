@@ -12,6 +12,7 @@
 // (offerRequests, fillRequests, the orders, nightfall, step, tapTool), so on
 // the old code they fail on their assertions, not on a missing name.
 import { describe, expect, it } from 'vitest';
+import { REQUEST_GAIN_PER_PLOT } from '../src/sim/constants';
 import { tapTool } from '../src/sim/actors';
 import { CROPS } from '../src/sim/crops';
 import { crowTarget, nightfall } from '../src/sim/day';
@@ -99,8 +100,9 @@ describe('a request pays its premium only on what it has you sow', () => {
         n++;
         expect(requestHave(s, { ...o, taken: true }), `${it.n} ${it.crop}`).toBe(0);
         expect(it.n).toBeGreaterThanOrEqual(3);
-        // What it pays over market is no more than the most a request pays for its own sowing (1.8 times market).
-        expect(o.reward, `${it.n} ${it.crop}, pays ${o.reward}`).toBeLessThanOrEqual(it.n * d.price * 1.8 + 5);
+        // What it pays over market is no more than the most a request pays for its own sowing (1.8 times market; round
+        // 10: 2.2, requests are worth chasing beside the crate).
+        expect(o.reward, `${it.n} ${it.crop}, pays ${o.reward}`).toBeLessThanOrEqual(it.n * d.price * 2.2 + 5);
       }
     }
     expect(n).toBeGreaterThan(15);
@@ -136,7 +138,8 @@ describe('requests are sized to the farm, and capped', () => {
       for (const o of offerRequests(s)) {
         n++;
         const gain = o.reward - o.items[0].n * CROPS[o.items[0].crop].price;
-        expect(gain, `${o.items[0].n} ${o.items[0].crop} on ${plotsOwned} plots`).toBeLessThanOrEqual(14 * plotsOwned);
+        // (Round 10: REQUEST_GAIN_PER_PLOT, 24 now.)
+        expect(gain, `${o.items[0].n} ${o.items[0].crop} on ${plotsOwned} plots`).toBeLessThanOrEqual(REQUEST_GAIN_PER_PLOT * plotsOwned);
         expect(gain).toBeGreaterThan(0);
       }
     }

@@ -13,7 +13,9 @@
 // scarecrow lesson's target open no question and all plant; a run of picks
 // for one request shows one chip, never two over each other; the pair and its
 // clash line are on the board's first screen; from the first field the well
-// beside it is on screen; every seed price wears the coin.
+// beside it is on screen; every seed price wears the coin. Round 10: thirteen
+// plots tapped with eight water are all watered, with a trip to the well
+// mid-queue; a real tap on the farmer lets the waiting taps go.
 // node scripts/qa/sunup-queue.mjs [base url]
 import { chromium } from 'playwright-core';
 
@@ -329,6 +331,64 @@ await p.waitForTimeout(800);
   const coins = await p.evaluate(() => [...document.querySelectorAll('.seedbar .seed')].filter((e) => getComputedStyle(e).display !== 'none').map((e) => { const c = e.querySelector('.pr .cm svg'); const r = c?.getBoundingClientRect(); return { crop: e.dataset.crop, w: r ? Math.round(r.width) : 0, text: e.querySelector('.pr').textContent }; }));
   check('every seed price in the picker wears the coin', coins.length >= 3 && coins.every((c) => c.w >= 9 && /^\d+ · sells \d+$/.test(c.text)), JSON.stringify(coins));
   await p.screenshot({ path: '/tmp/acres-queue-seeds.png' });
+}
+
+// 9. Round 10: thirteen thirsty plots tapped with eight water in the can: the farmer fills it at the well mid-queue and
+// waters all thirteen (the other five were dropped without a word).
+{
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.hud.pickTool('hands');
+    st.orders = [];
+    st.tools.can = 0;
+    st.water = 8;
+    st.minute = 120;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) { const q = st.plots[y * st.W + x]; q.crop = { id: st.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; q.wet = false; q.moisture = 0; }
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    st.taps = [];
+    window.sunup.hud.pickTool('can');
+  });
+  await p.waitForTimeout(1200);
+  const plots = [];
+  for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) plots.push([x, y]);
+  const e0 = await p.evaluate(() => window.sunup.events.length);
+  for (const [x, y] of plots.slice(0, 13)) {
+    await tapTile(x, y);
+    await p.waitForTimeout(110);
+  }
+  await settle(40000);
+  const r = await p.evaluate(([n, e0]) => {
+    const st = window.sunup.state;
+    let wet = 0;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) if ((y - 5) * 4 + (x - 2) < n && st.plots[y * st.W + x].wet) wet++;
+    return { wet, refills: window.sunup.events.slice(e0).filter((e) => e.type === 'refill').length };
+  }, [13, e0]);
+  check('round 10: thirteen plots tapped with eight water: a trip to the well mid-queue, all thirteen watered', r.wet === 13 && r.refills >= 1, JSON.stringify(r));
+}
+
+// 10. Round 10: a real tap on the farmer lets the waiting taps go (31 planting taps hoed for three game hours, with no
+// way to stop them), and the quick taps on the plots around the farmer still queue.
+{
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.hud.pickTool('hands');
+    st.minute = 120;
+    for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) { const q = st.plots[y * st.W + x]; q.crop = { id: st.nextId++, kind: 'radish', age: 3, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; }
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    st.taps = [];
+  });
+  await p.waitForTimeout(1200);
+  for (const [x, y] of [[2, 8], [3, 8], [4, 8], [5, 8], [5, 7], [4, 7]]) {
+    await tapTile(x, y);
+    await p.waitForTimeout(60);
+  }
+  const queued = await p.evaluate(() => (window.sunup.state.taps ?? []).length);
+  const at = await p.evaluate(() => { const f = window.sunup.state.actors[0]; return window.sunup.r3d.project(f.x, f.y, 0.9); });
+  await tapAt(at.x, at.y);
+  await p.waitForTimeout(400);
+  const after = await p.evaluate(() => ({ taps: (window.sunup.state.taps ?? []).length, aim: !!window.sunup.state.actors[0].aim }));
+  check('round 10: six quick taps queue, and a tap on the farmer lets them go', queued >= 4 && after.taps === 0 && !after.aim, JSON.stringify({ queued, ...after }));
+  await settle(8000);
 }
 
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

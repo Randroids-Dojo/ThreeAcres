@@ -33,6 +33,10 @@ export type Command =
   | { type: 'readBoard' }
   /** Sunup, round 9: the board is being read: an offer that no longer fits the farm is made again to fit it. */
   | { type: 'freshen' }
+  /** Sunup, round 10: let today's offer on the board go (a new pair comes tomorrow). */
+  | { type: 'pass' }
+  /** Sunup, round 10: let the waiting taps go, and the walk to one (a tap on the farmer, or the stop key). */
+  | { type: 'cancelTaps' }
   /** Sunup: build one of a kind on a plot, once: walk there and build it; the tool in hand stays in hand. */
   | { type: 'buildAt'; x: number; y: number; kind: BuildKind }
   | { type: 'sell'; crop: CropId }

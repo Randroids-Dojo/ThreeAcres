@@ -23,6 +23,11 @@ export interface InputHost {
   hotkey(key: string, shift: boolean): boolean;
   /** Is a dialog open? Then the farm gets no input. */
   blocked(): boolean;
+  /**
+   * Round 10: does a tap here land on the farmer while taps wait (a tap on the farmer lets them go)? Taps that do
+   * become a stop, not a tap on the plot under the farmer.
+   */
+  stopAt?(px: number, py: number): boolean;
 }
 
 interface Touch {
@@ -40,7 +45,7 @@ interface Touch {
 const TAP_SLOP = 10;
 
 /** Keys that walk or act on the farm: pressed on a focused HUD button, they take the focus off it and go to the farm. */
-const FARM_KEYS = new Set(['Space', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyB', 'KeyC', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5']);
+const FARM_KEYS = new Set(['Space', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyB', 'KeyC', 'KeyX', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5']);
 
 export class Input {
   /** The tile under the mouse or last finger, for the highlight in point control. */
@@ -193,7 +198,9 @@ export class Input {
       return;
     }
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
-    if (!e.repeat && (e.code === 'Space' || e.code === 'KeyE') && !this.host.blocked()) this.queue.push({ type: 'act' });
+    // A fresh press acts at once (it may open the board or a field for sale); a key already down only repeats, as a
+    // held act (round 10: a key down that came again without its repeat flag counted as a fresh press).
+    if (!e.repeat && !this.keys.has(e.code) && (e.code === 'Space' || e.code === 'KeyE') && !this.host.blocked()) this.queue.push({ type: 'act' });
     this.keys.add(e.code);
   };
 
@@ -303,6 +310,11 @@ export class Input {
   };
 
   private tapAt(px: number, py: number) {
+    // Round 10: a tap on the farmer while taps wait lets them go.
+    if (this.host.stopAt?.(px, py)) {
+      this.queue.push({ type: 'cancelTaps' });
+      return;
+    }
     const tile = this.host.pickTap ? this.host.pickTap(px, py) : this.host.pick(px, py);
     if (tile) this.queue.push({ type: 'actAt', x: tile.x, y: tile.y });
   }

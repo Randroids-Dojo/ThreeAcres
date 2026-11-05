@@ -224,6 +224,14 @@ export function startAction(s: WorldState, a: Actor, r: Resolved, x: number, y: 
   if (!perform(s, a, r, x, y, ev)) return false;
   a.task = { verb: r.verb!, x, y, t: 0, dur: actionSeconds(s, a, r.verb!) };
   a.moving = false;
+  // Round 10: after a build with the Build tool, the tool in hand before it comes back (the tenth playtest's next tap,
+  // on a plot a crow had just stripped, built a second scarecrow with no question). Taps already waiting keep the tool
+  // they were tapped with.
+  if (r.verb === 'build' && a.role === 'farmer' && homestead(s) && s.tool === 'build') {
+    const back = s.toolBefore && s.toolBefore !== 'build' && s.toolBefore !== 'smart' ? s.toolBefore : 'hands';
+    s.tool = back;
+    s.kitTool = back;
+  }
   return true;
 }
 
@@ -621,6 +629,15 @@ export function doTap(s: WorldState, a: Actor, tap: Tap, ev: SimEvent[]): void {
   if (tap.build) r = resolveBuild(s, tap.build, tap.x, tap.y);
   else if (homestead(s)) ({ r, tool, then } = tapJob(s, tap));
   else r = resolve(s, s.tool, tap.x, tap.y);
+  // Round 10: the can ran dry with watering still tapped: the farmer fills it at the nearer well first, then waters
+  // there and carries on (the tenth playtest tapped 13 plots with 8 water, and the other 5 were dropped without a word).
+  if (homestead(s) && !tap.build && tool === 'can' && r.verb === 'water' && !r.ok && s.water <= 0) {
+    const w = wellsFrom(a.x, a.y)[0];
+    (s.taps ??= []).unshift(tap);
+    ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: 'Can empty. To the well first' });
+    doTap(s, a, { x: w.x, y: w.y, tool: 'can' }, ev);
+    return;
+  }
   if (r.verb && r.ok && homestead(s)) {
     const tired = canAfford(s, r.verb);
     if (tired) {

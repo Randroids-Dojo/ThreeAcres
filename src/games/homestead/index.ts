@@ -61,8 +61,7 @@ export const game: GameModule = {
     inferLessons(s);
     // Requests are taken on the board now: an old save's pair nobody sowed for is still on offer.
     adoptRequests(s);
-    // Phones play close up; the wide view is a desktop choice (C).
-    if (matchMedia('(pointer: coarse)').matches) s.rules.camera = 'close';
+    // Round 10: the view the farm was left in comes back with it, on a phone too (it reset to close up on reload).
     const d = new Director(s, ctx);
     window.sunup = d;
     await d.start();

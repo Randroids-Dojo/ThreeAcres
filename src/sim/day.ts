@@ -3,7 +3,7 @@
 // and orders.
 
 import { choreNow, hands } from './actors';
-import { AP_MAX, BUG_CHANCE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, FLOCK_CHANCE, FLOCK_HOURS, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
+import { AP_MAX, BUG_CHANCE, CAN_MOISTURE, BUG_SPREAD, CROW_EDGE, CROW_EDGE_FULL, CROW_FIRST, CROW_PECK_MINUTES, DAY_MINUTES, DAYS_PER_SEASON, FLOCK_CHANCE, FLOCK_HOURS, HAND_NIGHT_JOBS, HAND_WAGE, HEAT_DRY, CROW_PER_FIELD, SCARECROW_RADIUS, SPRINKLER_MORNINGS, SUNUP_SCARECROW_RADIUS, SUNUP_SCARECROW_SURE } from './constants';
 import { CROP_IDS, stageOf } from './crops';
 import { claimCrops, endRound, fillOrders, fillRequests, judgeFair, lostFor, offered, ordersOvernight, sellCrop, settleRequests, startFair, startRound, stockCount, updateGoals, wanted, withdrawRequests } from './goals';
 import { homestead, sowing } from './actions';
@@ -224,9 +224,10 @@ function morning(s: WorldState, ev: SimEvent[]): void {
   for (const j of s.jobs) j.claimedBy = null;
   if (s.rules.clock === 'turns') s.jobs = [];
 
-  // Rain and sprinklers.
+  // Rain and sprinklers. Round 10: Sunup's rain waters for one night, as the can does (it soaked for two, so the day
+  // after rain had nothing to water and the tenth playtest's rainy stretches were empty); a sprinkler still soaks.
   if (s.weather === 'rain' || s.weather === 'storm') {
-    for (let i = 0; i < s.plots.length; i++) if (s.tiles[i] === 'field') soak(s.plots[i]);
+    for (let i = 0; i < s.plots.length; i++) if (s.tiles[i] === 'field') soak(s.plots[i], homestead(s) ? CAN_MOISTURE : 3);
   }
   for (const b of s.builds.slice()) {
     if (b.kind !== 'sprinkler') continue;

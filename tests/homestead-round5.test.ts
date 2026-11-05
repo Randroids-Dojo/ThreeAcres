@@ -11,6 +11,7 @@
 // `accept` and `buildAt` were unknown commands there, requests had no kind,
 // and the scarecrow line told a broke farmer to sleep.
 import { describe, expect, it } from 'vitest';
+import { REQUEST_GAIN_PER_PLOT, REQUEST_RATE } from '../src/sim/constants';
 import { CROPS } from '../src/sim/crops';
 import { nightfall } from '../src/sim/day';
 import { fillRequests, offerRequests } from '../src/sim/goals';
@@ -249,8 +250,10 @@ describe('P1: the board headlines the gain over market', () => {
         n++;
         const fresh = (o as Order & { fresh?: number }).fresh ?? o.items[0].n;
         // The gain is no more than the most a request pays for its own sowing: 14 coins a plot of the farm.
-        expect(gain(o)).toBeLessThanOrEqual(14 * 48);
-        expect(gain(o)).toBeLessThanOrEqual(fresh * CROPS[o.items[0].crop].days * 8.5);
+        // (Round 10: REQUEST_GAIN_PER_PLOT, 24 now.)
+        expect(gain(o)).toBeLessThanOrEqual(REQUEST_GAIN_PER_PLOT * 48);
+        // (Round 10: its rate over market is REQUEST_RATE, 6 now, where it was 5.)
+        expect(gain(o)).toBeLessThanOrEqual(fresh * CROPS[o.items[0].crop].days * (REQUEST_RATE + 3.5));
       }
     }
     expect(n).toBeGreaterThan(10);

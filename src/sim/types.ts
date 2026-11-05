@@ -236,6 +236,34 @@ export interface Fair {
   day: number;
   want: number;
   got: number;
+  /** Round 10: requests the player took while it ran (for the fair-night card's why). Missing in older saves. */
+  taken?: number;
+  /**
+   * Round 10: times the player took the side of a pair that did not count for it while it still wanted requests: from
+   * then on both sides count, until it has them.
+   */
+  passed?: number;
+  /** Round 10: requests due by it that were lost, and what took most of them. */
+  lost?: number;
+  why?: RequestFail;
+  /** Round 10: mornings it still wanted a request that could ripen by it and the board had none, for want of free soil. */
+  noRoom?: number;
+}
+
+/**
+ * Round 10: the fair as judged on its night, for the morning card and the fair-night card: what it got of what it
+ * wanted, and why it fell short: requests still open (due after it, or not in the crate in time), requests lost and
+ * their main cause, and how many were taken while it ran.
+ */
+export interface FairResult {
+  got: number;
+  want: number;
+  won: boolean;
+  late?: number;
+  lost?: number;
+  why?: RequestFail;
+  taken?: number;
+  noRoom?: number;
 }
 
 /** What took a crop: crows, bugs, a dry night, a heat wave's night, or the season's turn. */
@@ -331,8 +359,8 @@ export interface DayReport {
   spread?: number;
   /** Sunup, round 9: new requests pinned on the board this morning (the eighth playtest's came with only a badge). */
   offered?: number;
-  /** Sunup, round 9: the fair, judged on the night of its day. */
-  fair?: { got: number; want: number; won: boolean };
+  /** Sunup, round 9: the fair, judged on the night of its day (round 10: with why it fell short). */
+  fair?: FairResult;
 }
 
 export interface WorldState {
@@ -456,6 +484,20 @@ export interface WorldState {
   firstTry?: number;
   /** Sunup, round 9: a fair's prize waiting: this share off the next field bought. */
   fieldOff?: number;
+  /**
+   * Sunup, round 10: why the board offers one request today, not a pair ('crop': only one crop can be asked for,
+   * 'fair': only one can ripen by the fair, 'room' or 'coins': not enough for two), or none ('full': as many taken as
+   * the farm carries; 'soil', 'coins' or 'none': none fits, for want of free soil, of seed money, or neither), or
+   * 'pass': the player let today's offer go. Cleared with each morning.
+   */
+  offerWhy?: 'crop' | 'fair' | 'room' | 'coins' | 'soil' | 'pass' | 'full' | 'none' | '';
+  /**
+   * Sunup, round 10: requests filled before the fair of the season they are due in was set (due next season, filled
+   * early): their due days, counted when that fair is set.
+   */
+  fairAhead?: number[];
+  /** Sunup, round 10: the tool in hand before the Build tool was taken (it comes back after a build). */
+  toolBefore?: ToolId;
 }
 
 /** Things that happened this step. Renderers, audio and UI react to them; none of them change the world. */

@@ -14,7 +14,11 @@ import { clamp, lerp } from './util';
 const FOV = 30;
 const PITCH_CLOSE = (48 * Math.PI) / 180;
 const PITCH_WIDE = (60 * Math.PI) / 180;
-const CLOSE_TILES = 9;
+/**
+ * Tiles across the short side of a wide screen's close view. Round 10: 10.5 (it was 9): at 1280x800, from the yard
+ * above the first field, the field and a well were never on screen together.
+ */
+const CLOSE_TILES = 10.5;
 /** A phone's whole-farm view keeps the six fields below the day card (px). */
 const WIDE_TALL_TOP = 104;
 /**
@@ -24,12 +28,23 @@ const WIDE_TALL_TOP = 104;
  * narrower than the first two), a little steeper, and sits them in the middle of the clear band.
  */
 const WIDE_TALL_BOTTOM = 270;
+/** Round 10: a phone's View is at least this many tiles across (the close view is about nine). */
+const WIDE_TALL_MIN_TILES = 12;
+/**
+ * Round 10: but never so many that a plot in its middle row is under this many px across (its far row is then about
+ * 34 px: plots a tap can hit; round 9's View had them at 25). With more fields than that shows, the fields win.
+ */
+const WIDE_TALL_PLOT_PX = 36;
 /** Phones in portrait look a little more from above, so tiles are less foreshortened and easier to tap. */
 const PITCH_WIDE_TALL_FIELDS = (72 * Math.PI) / 180;
 /** The six fields' plots, with a hair of margin: columns 2 to 15, rows 5 to 13. */
 const FIELDS_BOX = { x0: 1.75, z0: 4.6, x1: 16.25, z1: 14.25 };
-/** Tall screens: steeper, a little wider, and kept inside the farm. */
-export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 9.8, maxTiles: 12, bandTop: 100, bandBottom: 112 };
+/**
+ * Tall screens: steeper, a little wider, and kept inside the farm. Round 10: as few as 8.6 tiles across, so a tall
+ * phone's farm runs down to the rack (at 9.8 at least, a 412x900 phone had a blank cream band under the farm, 13% of
+ * the screen).
+ */
+export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 8.6, maxTiles: 12, bandTop: 100, bandBottom: 96 };
 /** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
 const BOUNDS = { x0: 0.02, x1: 19.98, z1: 15.25 };
 /** The back row of trees, roughly: how high their crowns reach and how far in they stand. */
@@ -96,14 +111,19 @@ export interface Rig {
  * off screen); going further east it slides on to follow the farmer, and it
  * always keeps the farmer inside the screen.
  */
-export function tallX(fx: number, tiles: number): number {
-  const WEST = 6.8;
+export function tallX(fx: number, tiles: number, fy = 5): number {
+  // Round 10: the first field's left column keeps a tenth of a tile from the screen's edge (6.8 at 9.8 tiles across);
+  // in the yard east of the crate (the board and the well), the yard's well comes into view instead, eased in from
+  // the crate to the board, as far as the farmer allows.
+  const field = Math.min(6.8, 1.9 + tiles / 2);
+  const WEST = fy < 4 ? Math.max(field, field + (12.05 - tiles / 2 - field) * clamp((fx - 5) / 3, 0, 1)) : field;
   // From the second field to the well's front it eases a fifth of a tile east, so the well's side has room too.
-  const WELL = 7.0;
+  const WELL = WEST + 0.2;
   const HOLD = 11.6;
   const room = fx <= 9 ? WEST : fx <= HOLD ? WEST + (fx - 9) * ((WELL - WEST) / (HOLD - 9)) : fx >= 15 ? fx : WELL + (fx - HOLD) * ((15 - WELL) / (15 - HOLD));
-  // The farmer keeps 0.6 tiles from the left edge, and 0.45 from the right (the well's front sits near it).
-  return clamp(room, fx - Math.max(0, tiles / 2 - 0.45), fx + Math.max(0, tiles / 2 - 0.6));
+  // The farmer keeps 0.6 tiles from the left edge, and 0.45 from the right (the well's front sits near it); round 10: at
+  // under 8.75 tiles across, a little less on the right, so the first field's left column still takes a finger.
+  return clamp(room, fx - Math.max(0, tiles / 2 - Math.min(0.45, tiles - 8.3)), fx + Math.max(0, tiles / 2 - 0.6));
 }
 
 export function makeRig(): Rig {
@@ -200,7 +220,13 @@ export function makeRig(): Rig {
       fitKey = key;
       // Portrait frames the six fields (columns 1.5 to 16.5), panning reaches the rest; landscape shows the whole slab.
       if (portrait) {
-        fitBox(fields.x0, fields.z0, fields.x1, fields.z1, PITCH_WIDE_TALL_FIELDS, 0.006, fit);
+        // Round 10: across, 12 tiles or 1.3 times the close view's, so View shows clearly more (with two fields it was
+        // 9.8 tiles across against 10: "the two views look nearly the same"), as far as plots of 34 px or more allow
+        // (1.3 times on a 412 px phone); and always every field owned.
+        const cx = (fields.x0 + fields.x1) / 2;
+        const across = Math.min(Math.max(WIDE_TALL_MIN_TILES, 1.3 * tilesForTall(W, H)), w / WIDE_TALL_PLOT_PX);
+        const half = Math.max((fields.x1 - fields.x0) / 2, across / 2);
+        fitBox(Math.max(0.25, cx - half), fields.z0, Math.min(W - 0.25, cx + half), fields.z1, PITCH_WIDE_TALL_FIELDS, 0.006, fit);
         // The farm is narrower than a phone is tall, so there is height to spare. Round 9: the fields it owns sit in
         // the middle of the clear band, between the day card and the stick, the yard above them (the sixth playtest
         // found the top 40% blank sky with the whole slab centred on the screen; the ninth, the bottom 40% blank with
@@ -340,7 +366,7 @@ export function makeRig(): Rig {
     const dist = tall ? tilesForTall(W, H) / (2 * t * aspect) : (CLOSE_TILES * Math.sin(PITCH_CLOSE)) / (2 * t);
     goal.pitch = tall ? TALL.pitch : PITCH_CLOSE;
     goal.dist = dist / zoom;
-    goal.tx = tall ? tallX(intent.focusX, tilesForTall(W, H) / zoom) : intent.focusX;
+    goal.tx = tall ? tallX(intent.focusX, tilesForTall(W, H) / zoom, intent.focusY) : intent.focusX;
     goal.tz = intent.focusY;
     // Both shapes keep to the farm: no void past its edges, no sky below the top of the clear band.
     keepInside(goal, W, H);

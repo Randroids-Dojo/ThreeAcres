@@ -38,6 +38,9 @@ export interface HudHost {
   input: Input;
 }
 
+/** Round 10: taps waiting before the rack says how to stop them (once a farm). */
+export const STOP_HINT_TAPS = 5;
+
 /** The most clauses the morning card says (the fourth playtest read four or more, and stopped reading). */
 export const MORNING_CLAUSES = 3;
 
@@ -255,6 +258,16 @@ export function pickerStep(cards: { id: string; ok: boolean; x: number; y: numbe
 }
 
 /**
+ * Round 10: the rack's places, in order: each tool keeps its own from the
+ * first morning (a peg until its lesson brings it), so a tool that arrives
+ * never moves another (Hoe moved into Seeds' place when Build arrived).
+ */
+export function toolSlots(s: WorldState): ToolId[] {
+  const all: ToolId[] = ['hands', 'can', 'seeds', 'hoe', 'build'];
+  return homestead(s) ? all : all.filter((t) => t !== 'smart');
+}
+
+/**
  * Which pickers are still open after a frame. A picker belongs to its tool:
  * when the tool in hand is not the one it picks for (a tap on a thirsty crop
  * took the can) it is closed, not merely hidden. The sixth playtest's picker
@@ -404,6 +417,12 @@ export class Hud {
     this.updateCoins(s);
     this.updateGoals(s);
     this.updateTools(s);
+    // Round 10: the first time a run of taps waits, how to stop it (the tenth playtest's 31 planting taps hoed instead,
+    // with no way to cancel them). Once a farm.
+    if (homestead(s) && (s.taps?.length ?? 0) >= STOP_HINT_TAPS && !s.learnCount.stopHint) {
+      s.learnCount.stopHint = 1;
+      this.toast(this.touch.shown ? 'Tap the farmer to stop.' : 'Press X to stop.', 'info', 3200);
+    }
     this.updateInfo(s, aim);
     this.updatePointer();
     this.touch.update();
@@ -534,12 +553,21 @@ export class Hud {
   private updateTools(s: WorldState): void {
     const r = s.rules;
     const kit = this.kit(s);
+    const slots = this.slots(s);
     const act = r.clock === 'day' ? (this.knows(s, 'sleep') ? 'Sleep' : '') : r.clock === 'turns' ? 'End day' : '';
-    const key = `${kit.join()}|${act}|${this.knows(s, 'sprinkler')}`;
+    const key = `${kit.join()}|${slots.join()}|${act}|${this.knows(s, 'sprinkler')}`;
     if (key !== this.toolsKey) {
       this.toolsKey = key;
       this.toolbar.innerHTML = '';
-      kit.forEach((t, i) => {
+      // Round 10: each tool has its own place on the rack from the start, a faint peg until its lesson brings it
+      // (the tenth playtest's Hoe moved into Seeds' old place when Build arrived, and 31 planting taps hoed).
+      slots.forEach((t, i) => {
+        if (!kit.includes(t)) {
+          const peg = el('div', 'tool slot');
+          peg.setAttribute('aria-hidden', 'true');
+          this.toolbar.append(peg);
+          return;
+        }
         const b = el('button', 'tool', `<span class="ic">${icon(TOOL_ICON[t])}</span><span class="lbl">${TOOL_NAME[t]}</span><span class="key">${i + 1}</span>`);
         b.dataset.tool = t;
         if (t === 'seeds') b.append(el('span', 'seedchip'));
@@ -556,6 +584,11 @@ export class Hud {
           this.host.cue('tap');
         };
         this.toolbar.append(b);
+      } else if (homestead(s) && r.clock === 'day') {
+        // Round 10: Sleep's place is kept too, so the rack (centred on the screen) never grows when it comes.
+        const peg = el('div', 'tool slot');
+        peg.setAttribute('aria-hidden', 'true');
+        this.toolbar.append(el('div', 'sep'), peg);
       }
       this.renderSeedbar(s);
       this.renderBuildbar();
@@ -787,8 +820,9 @@ export class Hud {
 
   toolByNumber(n: number): void {
     const s = this.host.state();
-    const kit = this.kit(s);
-    if (kit[n - 1]) this.pickTool(kit[n - 1]);
+    // Round 10: the number is the tool's own place on the rack.
+    const t = this.slots(s)[n - 1];
+    if (t && this.kit(s).includes(t)) this.pickTool(t);
   }
 
   private updateInfo(s: WorldState, aim: { x: number; y: number } | null): void {
@@ -982,6 +1016,12 @@ export class Hud {
     const dy = pp.y - cy;
     const k = Math.min((x1 - cx) / Math.max(Math.abs(dx), 1e-3), (y1 - cy) / Math.max(Math.abs(dy), 1e-3));
     this.pointer.style.transform = `translate(${(cx + dx * k).toFixed(0)}px, ${(cy + dy * k).toFixed(0)}px) rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
+  }
+
+  /** Round 10: the rack's places, one per tool, the same from the first morning (`kit` says which hold their tool). */
+  private slots(s: WorldState): ToolId[] {
+    if (s.rules.tools === 'smart') return ['smart', 'seeds', 'build'];
+    return toolSlots(s);
   }
 
   /** Tools on the rack: only the ones a lesson has brought in (Sunup), or the full kit. */

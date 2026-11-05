@@ -163,8 +163,9 @@ describe('a morning offers two requests, and only one can be taken', () => {
       while (s.day <= last) {
         nightfall(s, []);
         withdrawn += s.report?.withdrawn?.length ?? 0;
-        // Each stays up to its own sow-by day and goes the morning after.
-        for (const o of pinned) expect(s.orders.some((q) => q.id === o.id), `day ${s.day}, sow by ${sowByOf(o)}`).toBe(sowByOf(o)! >= s.day);
+        // Round 10: an offer nobody took goes at the next dawn whatever its sow-by day, a fresh pair in its place (the
+        // tenth playtest's untaken Summer 1 offer blocked the board for four days).
+        for (const o of pinned) expect(s.orders.some((q) => q.id === o.id), `day ${s.day}, sow by ${sowByOf(o)}`).toBe(false);
       }
       // Offers nobody took go quietly: the morning card names only requests the player took.
       expect(withdrawn).toBe(0);
@@ -282,12 +283,14 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
     // Round 5: the gain is set by the soil and days a request asks for and its kind, so a slow dear crop gains less
     // against its market value than a quick cheap one (it was 1.3 to 1.8 times market).
     expect(Math.min(...ratios)).toBeGreaterThanOrEqual(1.15);
-    expect(Math.max(...ratios)).toBeLessThanOrEqual(2);
+    // (Round 10: requests pay more over market, so they are worth chasing beside the crate: up to 2.2 times.)
+    expect(Math.max(...ratios)).toBeLessThanOrEqual(2.2);
   });
 
-  // Round 9: the first offer is a small pair of cheap crops (it was three radishes, taken at once); one more pair can
-  // come the morning after it is taken, and nothing more until the first is filled.
-  it('the first is a small pair of cheap crops, and only one more pair comes until it is filled', () => {
+  // Round 9: the first offer is a small pair of cheap crops (it was three radishes, taken at once). Round 10: after it, a
+  // pair every morning (two could be open until the first was filled, and the spring fair's third request could not
+  // ripen in time); yesterday's untaken pair goes at dawn.
+  it('the first is a small pair of cheap crops, and a pair comes each morning after it', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const s = teach(world('sunup', seed * 13), EARLY, EARLY_FEATURES);
       s.day = 3;
@@ -302,26 +305,29 @@ describe('each request needs fresh sowing, fits the purse, says when to sow and 
       }
       step(s, 0.016, [{ type: 'accept', id: s.orders[0].id }]);
       expect(s.orders.length).toBe(1);
-      for (let k = 0; k < 3; k++) fillRequests(s, true);
-      expect(s.orders.length).toBeLessThanOrEqual(3);
-      const taken = s.orders.filter((o) => o.taken !== false).length;
-      for (const o of s.orders.filter((q) => q.taken === false)) step(s, 0.016, [{ type: 'accept', id: o.id }]);
-      for (let k = 0; k < 3; k++) fillRequests(s, true);
-      expect(s.orders.length).toBeLessThanOrEqual(2);
-      expect(taken).toBe(1);
+      let pairs = 0;
+      for (let k = 0; k < 3; k++) {
+        fillRequests(s, true);
+        const offers = s.orders.filter((o) => o.taken === false);
+        if (offers.length === 2) pairs++;
+        // Never more than today's pair on offer: yesterday's went at dawn.
+        expect(offers.length).toBeLessThanOrEqual(2);
+      }
+      expect(pairs, `seed ${seed}`).toBeGreaterThanOrEqual(2);
+      expect(s.orders.filter((o) => o.taken !== false).length).toBe(1);
     }
   });
 
-  it('no new pair while one still waits to be chosen; a new pair the morning after one is chosen', () => {
+  it('a pair not chosen goes at dawn and a fresh one comes; a new pair the morning after one is chosen', () => {
     const s = farm(5, { fields: 2, coins: 900, day: 4 });
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
+    const was = s.orders.map((o) => o.id);
+    // Round 10: not chosen, it goes at the next dawn and a fresh pair takes its place (it blocked the board for days).
     fillRequests(s, true);
     expect(s.orders.length).toBe(2);
+    expect(s.orders.some((o) => was.includes(o.id))).toBe(false);
     const [a] = s.orders;
-    // Not chosen: nothing new comes.
-    fillRequests(s, true);
-    expect(s.orders.length).toBe(2);
     // (Round 9: sown for after Accept, as only that counts.)
     step(s, 0.016, [{ type: 'accept', id: a.id }]);
     sowFor(s, a, fresh(s, a));

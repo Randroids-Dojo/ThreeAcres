@@ -33,8 +33,8 @@
 // after it plant five seeds and build nothing; with no coins a tap on the
 // pointer says what a scarecrow costs and nothing else happens (no tool
 // change, no walk), and the line steps aside until one can be paid for; from
-// the second field and the well's front the first field's left column is on
-// screen and a real tap there works; at no stamina one refusal shows and the
+// the second field and the field well's front the first field's left column
+// is on screen and a real tap there works; at no stamina one refusal shows and the
 // act button is dim.
 // Round 6: the seed picker open, a real tap on a thirsty crop takes the can
 // and closes the picker for good, so the lesson pointer comes back (it stayed
@@ -98,6 +98,10 @@ const act = await p.evaluate(() => { const r = document.querySelector('.tb-act')
 const h0 = (await S()).harvested;
 await touch('touchStart', [[90, 700, 1]]);
 await touch('touchStart', [[90, 700, 1], [act[0], act[1], 2]]);
+// (Round 10: the farm now runs down under the stick, so the thumb on it wiggles as a held thumb does: a touch there
+// that never moves is a tap on the farm under it, a field for sale here. Back to its rest, it walks nowhere.)
+await touch('touchMove', [[104, 700, 1], [act[0], act[1], 2]]);
+await touch('touchMove', [[90, 700, 1], [act[0], act[1], 2]]);
 await p.waitForTimeout(120);
 await touch('touchEnd', [[90, 700, 1]]);
 await touch('touchEnd', []);
@@ -813,8 +817,10 @@ check('walking the row holding Harvest picks all four carrots without stopping a
   check('the edge arrow with no coins says what it costs too, and nothing walks or changes tools', edge.on && !edge.over && said2.filter((t) => t === 'A scarecrow costs 40. You have 0.').length >= 1 && edgeAfter.tool === edge.tool && !edgeAfter.dialog && Math.hypot(edgeAfter.farmer[0] - edge.farmer[0], edgeAfter.farmer[1] - edge.farmer[1]) < 0.05, JSON.stringify({ edge, edgeAfter, said2 }));
 
   // P3: from the second field and from the well's front, the first field's left column is on screen and a real tap
-  // there works (a ripe radish on it is harvested).
-  for (const [fx, fy, label] of [[10.5, 6.5, 'the second field'], [11.5, 3.5, 'the well’s front']]) {
+  // there works (a ripe radish on it is harvested). (Round 10: the front of the well where the field paths cross: the
+  // phone's tiles are bigger, the farm running down to the rack, and from the yard's well the yard keeps in view; a
+  // queue of waterings fills the can at the nearer well on its own.)
+  for (const [fx, fy, label] of [[10.5, 6.5, 'the second field'], [6.5, 8.5, 'the well’s front']]) {
     await p.evaluate(([fx, fy]) => {
       const st = window.sunup.state;
       st.coins = 200;

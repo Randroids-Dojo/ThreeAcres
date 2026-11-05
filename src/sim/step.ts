@@ -7,7 +7,7 @@ import type { Command } from './commands';
 import { CAN_WATER, CROW_FLY_SECONDS, CROW_PECK_MINUTES, CROW_SCARE_RANGE, DAY_MINUTES, FLOW_SECONDS, FLOW_SPEEDS, HAND_HIRE, HAND_NAMES, HANDS_MAX, MIDDAY_MINUTE, NIGHT_SECONDS, SUNUP_CROW_PECK_SECONDS, TOOL_UPGRADES } from './constants';
 import { CROPS } from './crops';
 import { crowTarget, landBugs, nightfall, turnsMinute } from './day';
-import { acceptRequest, checkMilestones, claimCrops, deliver, deliverReady, draft, dropLost, fillOrders, fillRequests, freshenOffers, joinAlmanac, lostFor, readRequests, sellCrop, updateGoals } from './goals';
+import { acceptRequest, checkMilestones, claimCrops, deliver, deliverReady, draft, dropLost, fillOrders, fillRequests, freshenOffers, joinAlmanac, lostFor, passOffers, readRequests, sellCrop, updateGoals } from './goals';
 import { BUNK } from './map';
 import { matchPreset, AXES } from './presets';
 import { rand } from './rng';
@@ -294,6 +294,8 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
       break;
     case 'tool':
       if (c.tool === 'smart' && s.rules.tools !== 'smart') return;
+      // Round 10: the tool in hand before the Build tool was taken comes back after a build.
+      if (c.tool === 'build' && s.tool !== 'build') s.toolBefore = s.tool;
       s.tool = c.tool;
       if (c.tool !== 'smart') s.kitTool = c.tool;
       break;
@@ -361,6 +363,23 @@ function command(s: WorldState, c: Command, ev: SimEvent[]): void {
     case 'freshen':
       if (homestead(s) && s.learn.includes('requests')) freshenOffers(s);
       break;
+    case 'pass':
+      // Round 10: the board's Pass lets today's offer go; a fresh pair comes with the morning.
+      if (homestead(s)) passOffers(s);
+      break;
+    case 'cancelTaps': {
+      // Round 10: a tap on the farmer (or the stop key) lets the waiting taps go, and the walk to one; the job in hand
+      // finishes (the tenth playtest's 31 planting taps turned into "Already hoed" walks, with no way to stop them).
+      if (!homestead(s) || s.rules.control !== 'walk') break;
+      const n = (s.taps?.length ?? 0) + (f.aim ? 1 : 0);
+      if (!n) break;
+      s.taps = [];
+      f.aim = null;
+      f.path = [];
+      const t = tileOf(f);
+      ev.push({ type: 'deny', x: t.x, y: t.y, reason: 'Stopped' });
+      break;
+    }
     case 'buildAt': {
       // Sunup: one build on one plot, from the lesson's pointer once the player has said yes. The tool in hand stays
       // in hand, so the taps after it do their own jobs (the fifth playtest's pointer took the Build tool, and five

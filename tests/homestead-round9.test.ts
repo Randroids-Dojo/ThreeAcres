@@ -231,7 +231,8 @@ describe('P1: the season’s fair', () => {
     s.day = 10;
     fairOf(s)!.got = fairOf(s)!.want;
     nightfall(s, []);
-    expect(s.report?.fair).toEqual({ got: f!.want, want: f!.want, won: true });
+    // (Round 10: the result also says why a fair fell short, for its card.)
+    expect(s.report?.fair).toMatchObject({ got: f!.want, want: f!.want, won: true });
     expect((s as WorldState & { ribbons?: number }).ribbons).toBe(1);
     const price = (actions as { fieldPrice?: (s: WorldState, id: number) => number }).fieldPrice?.(s, 1);
     expect(price).toBe(Math.round((PARCELS[1].price * 0.8) / 50) * 50);
@@ -375,13 +376,16 @@ describe('P2: lessons around paid lessons and offers', () => {
     expect(s.learn).toContain('lesson:wide');
   });
 
-  it('the scarecrow lesson waits for a bare plot in the middle of a field (it built at a corner)', () => {
+  it('the scarecrow lesson points at a bare plot in the middle of a field when there is one (it built at a corner)', () => {
     const s = farm(43, { day: 12, coins: 300 });
     s.learn = s.learn.filter((l) => l !== 'lesson:scarecrow' && l !== 'lesson:forecast' && l !== 'lesson:sprinkler' && l !== 'build');
     s.learnCount['done:pests'] = 11;
-    // Field 1 full but for its corner.
+    // Field 1 full but for its corner. (Round 10: the lesson no longer waits for the middle, which kept it away from
+    // Summer 1 to 8 while crows took crops: it points at the corner, and at the middle once a plot there is bare.)
     for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) if (!(x === 5 && y === 8)) plant(s, x, y, 'radish', 1);
-    expect(new Tutor().update(s, 0.1, true).line).not.toMatch(/scarecrow/);
+    const corner = new Tutor().update(s, 0.1, true);
+    expect(corner.line).toBe('Build a scarecrow on bare soil.');
+    expect(corner.point).toEqual({ x: 5.5, y: 8.5 });
     plots(s, 3, 6).crop = null;
     const out = new Tutor().update(s, 0.1, true);
     expect(out.line).toBe('Build a scarecrow on bare soil.');

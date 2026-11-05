@@ -13,7 +13,7 @@ import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
 import { daylightOf, hourOf, inMap, season, SEASON_NAMES, dayOfSeason } from '../../sim/world';
 import { PROPS, propAt } from '../../sim/map';
-import type { BuildKind, SimEvent, WorldState } from '../../sim/types';
+import type { BuildKind, FairResult, SimEvent, WorldState } from '../../sim/types';
 import { Dialogs } from '../../ui/dialogs';
 import { el } from '../../ui/dom';
 import { Hud, pinnedNews } from '../../ui/hud';
@@ -24,10 +24,43 @@ import type { GameContext } from '../../shell/types';
 
 /** How tall the well and the notice board are drawn, in tiles, for taps on them. */
 const PROP_HEIGHT: Record<string, number> = { well: 1.3, board: 1.6 };
-/** A wide screen's close camera looks this many tiles south of the farmer. */
-const CLOSE_LEAD = 1.4;
+/**
+ * A wide screen's close camera looks this many tiles south of the farmer. Round 10: 2.2 (it was 1.4): from the yard
+ * above the first field, the field and the well below it were never on screen together at 1280x800.
+ */
+const CLOSE_LEAD = 2.2;
 /** Round 9: the furthest south of a field's top row a wide screen's close camera looks, so that row clears the day card. */
 const FIELD_TOP_CLEAR = 3.5;
+
+/** Round 10: how long after a card or a picker closes Escape is ignored (ms). */
+export const ESCAPE_QUIET = 500;
+
+/** Round 10: is Escape still quiet, `now` ms after a card or a picker closed at `closedAt`? */
+export function escapeQuiet(closedAt: number, now: number): boolean {
+  return now - closedAt < ESCAPE_QUIET;
+}
+
+/**
+ * Round 10: does an act command open the notice board? Only a fresh press with the board in reach, never a repeat
+ * from a held key or button (holding Space along the yard path popped the board up mid-walk).
+ */
+export function boardAct(c: { type: 'act'; held?: boolean }, atBoard: boolean): boolean {
+  return atBoard && !c.held;
+}
+
+/**
+ * Round 10: is a tap at (px, py) on the farmer, drawn from `feet` to `head` (screen px), half a tile being the
+ * distance from `feet` to `side`? A finger's width at least (44 px across, or nine tenths of a tile), from a little
+ * over the hat down to just above the feet: a tap at the feet is a tap on the plot the farmer stands on (the queue's
+ * next job, as often as not). On a phone the farmer is drawn about 20 px tall, and walks while taps wait, so the
+ * body alone (24 px across) was missed by a real tap more often than not.
+ */
+export function farmerHit(feet: { x: number; y: number } | null, head: { x: number; y: number } | null, side: { x: number; y: number } | null, px: number, py: number): boolean {
+  if (!feet || !head || !side) return false;
+  const half = Math.max(22, Math.abs(side.x - feet.x) * 0.45);
+  const tall = Math.max(0, feet.y - head.y);
+  return Math.abs(px - (feet.x + head.x) / 2) <= half && py >= head.y - 14 && py <= feet.y - Math.max(3, tall * 0.15);
+}
 
 export class Director {
   state: WorldState;
@@ -55,6 +88,17 @@ export class Director {
   events: SimEvent[] = [];
   /** Round 9: the board is making stale offers again (it steps the farm once, with no time passing). */
   private freshening = false;
+  /**
+   * Round 10: when a card or a picker last closed (ms). Escape is ignored for `ESCAPE_QUIET` after it: the tenth
+   * playtest's Escape, just after a card closed, opened the game switcher, and the next click went to Thistledown.
+   */
+  private closedAt = -Infinity;
+  private wasPicking = false;
+  /**
+   * Round 10: the fair judged in the night, its card to show once the morning is light (it opened mid-night, the
+   * clock stopped under it, and the dark stayed until it was closed).
+   */
+  private fairDue: FairResult | null = null;
 
   constructor(state: WorldState, private ctx: GameContext) {
     this.state = state;
@@ -73,6 +117,7 @@ export class Director {
       zoom: (f) => this.zoom(f),
       hotkey: (k, shift) => this.hotkey(k, shift),
       blocked: () => !this.running || this.dialogs.open,
+      stopAt: (px, py) => this.onFarmer(px, py),
     });
     const host = {
       state: () => this.state,
@@ -94,7 +139,10 @@ export class Director {
     });
     this.dialogs = new Dialogs({
       ...host,
-      onChange: () => undefined,
+      // Round 10: when a card closes, Escape waits a moment before it opens the game switcher.
+      onChange: (open) => {
+        if (!open) this.closedAt = performance.now();
+      },
       keyboard: () => this.input.lastKind === 'key',
       // The last morning card, pinned on the board; after a reload, yesterday's report says it again. Round 8: read
       // again as the farm is now (it still said "4 ripe to pick" after they were picked).
@@ -254,10 +302,14 @@ export class Director {
     if (!this.running) return false;
     // An open picker answers first: arrows and numbers choose, Enter and Escape close it (Escape never reaches
     // the game switcher while a picker is open).
-    if (!this.dialogs.open && this.hud.pickerKey(code)) return true;
+    if (!this.dialogs.open && this.hud.pickerKey(code)) {
+      if (code === 'Escape' || /Enter$/.test(code)) this.closedAt = performance.now();
+      return true;
+    }
     if (code === 'Escape') {
       if (this.dialogs.open) this.dialogs.close();
-      else this.ctx.openSwitcher();
+      // Round 10: not in the moment after a card or a picker closed (a second Escape meant for it).
+      else if (!escapeQuiet(this.closedAt, performance.now())) this.ctx.openSwitcher();
       return true;
     }
     // Enter answers an open question (sleep now?, buy this?) with its main button.
@@ -281,6 +333,10 @@ export class Director {
         return true;
       case 'KeyC':
         this.toggleCamera();
+        return true;
+      case 'KeyX':
+        // Round 10: X stops the farmer: the taps waiting are let go.
+        this.input.push({ type: 'cancelTaps' });
         return true;
       case 'KeyO':
         this.soilOverlay = !this.soilOverlay;
@@ -328,6 +384,18 @@ export class Director {
       if (!guardedSure(s, i % s.W, Math.floor(i / s.W))) return true;
     }
     return false;
+  }
+
+  /**
+   * Round 10: does a tap at this point (stage px) land on the farmer while taps wait, or the farmer walks to one? Then
+   * it stops them. A finger's width over the farmer's body (`farmerHit`), never the plots beside or the farmer's feet,
+   * so a quick run of taps on the plots around the farmer still queues.
+   */
+  private onFarmer(px: number, py: number): boolean {
+    const s = this.state;
+    const f = s.actors[0];
+    if (!homestead(s) || !this.r3d || (!s.taps?.length && !f.aim)) return false;
+    return farmerHit(this.r3d.project(f.x, f.y, 0), this.r3d.project(f.x, f.y, 1.15), this.r3d.project(f.x + 0.5, f.y, 0), px, py);
   }
 
   /** Do what a tap on the lesson pointer means: walk there and act, ask before building, or say why not. */
@@ -429,13 +497,16 @@ export class Director {
     // The notice board is in the yard: act beside it, from any side, or tap it, to read it.
     const aimed = this.aimAt();
     const atBoard = (x: number, y: number) => propAt(x, y)?.kind === 'board';
-    if (cmds.some((c) => (c.type === 'act' && aimed && aimed.useful && atBoard(aimed.x, aimed.y)) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
+    // Round 10: only a fresh press opens it, never a held key or button walking past (it popped up mid-walk).
+    if (cmds.some((c) => (c.type === 'act' && boardAct(c, !!aimed && aimed.useful && atBoard(aimed.x, aimed.y))) || (c.type === 'actAt' && atBoard(c.x, c.y)))) {
       cmds = cmds.filter((c) => c.type !== 'act' && c.type !== 'actAt');
       this.dialogs.board();
       this.tutor.board(s);
     }
     // One lesson at a time: it may bring a tool or a system onto the farm.
     // The line counts as seen only while it can be: no board or picker over it.
+    if (this.wasPicking && !this.hud.picking) this.closedAt = performance.now();
+    this.wasPicking = this.hud.picking;
     const lesson = this.tutor.update(s, dt, this.hud.touch.shown, !this.dialogs.open && !this.hud.picking);
     cmds.push(...lesson.cmds);
     this.hud.setLesson(lesson.line);
@@ -446,6 +517,11 @@ export class Director {
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);
     for (const e of ev) this.dispatch(e);
+    // Round 10: the fair's card, once the night is over and nothing else is open.
+    if (this.fairDue && s.turnover < 0 && !this.dialogs.open && !this.hud.picking) {
+      this.dialogs.fair(this.fairDue);
+      this.fairDue = null;
+    }
 
     this.hour += (hourOf(s.minute) - this.hour) * Math.min(1, dt * 3);
     this.daylight += (daylightOf(s.minute) - this.daylight) * Math.min(1, dt * 3);
@@ -489,6 +565,9 @@ export class Director {
         this.hour = 6;
         this.save();
         this.dialogs.refresh();
+        // Round 10: the morning after the season's fair, its card: the ribbon or the miss, and why (the tenth playtest's
+        // only sign was one clause in the morning card). Shown once the night is over; not for the bot.
+        this.fairDue = s.report?.fair && s.learn.includes('fair') && !this.bot ? s.report.fair : null;
         break;
       case 'buy':
       case 'sell':

@@ -7,6 +7,8 @@
 // at most a fifth over market with a cap, later fields want reputation as
 // well as steeper prices, and the can wets a plot for one night.
 import { describe, expect, it } from 'vitest';
+import { FIELD_REP } from '../src/sim/constants';
+import { PARCELS } from '../src/sim/map';
 import { CROPS } from '../src/sim/crops';
 import { nightfall } from '../src/sim/day';
 import { fillRequests, offerRequests } from '../src/sim/goals';
@@ -44,7 +46,8 @@ describe('requests pay clearly more than market', () => {
           n++;
           const market = o.items.reduce((a, it) => a + CROPS[it.crop].price * it.n, 0);
           expect(o.reward / market, `${o.items[0].n} ${o.items[0].crop}`).toBeGreaterThanOrEqual(1.15);
-          expect(o.reward / market).toBeLessThanOrEqual(2);
+          // (Round 10: up to 2.2 times: requests are worth chasing beside the crate.)
+          expect(o.reward / market).toBeLessThanOrEqual(2.2);
         }
       }
     }
@@ -103,7 +106,12 @@ describe('fields cost more, and the later ones want a good name in town', () => 
     expect(s.parcels[1].owned).toBe(true);
     step(s, 0.016, [{ type: 'buyParcel', id: 2 }]);
     expect(s.parcels[2].owned).toBe(false);
-    s.rep = 2;
+    // (Round 10: three points of reputation now, and a dearer field: the tenth playtest bought field 3 for 800 without
+    // a thought.)
+    s.rep = FIELD_REP[2] - 1;
+    step(s, 0.016, [{ type: 'buyParcel', id: 2 }]);
+    expect(s.parcels[2].owned).toBe(false);
+    s.rep = FIELD_REP[2];
     step(s, 0.016, [{ type: 'buyParcel', id: 2 }]);
     expect(s.parcels[2].owned).toBe(true);
     expect(s.parcels.map((p) => p.price).reduce((a, b) => a + b, 0)).toBeGreaterThan(6000);
@@ -149,13 +157,17 @@ describe('a bot farm at a person’s pace over thirty days', () => {
       // requests at 1.5 times market.
       // (Round 7: every crop is paid for as it goes into the crate, so a harvest is planted again the same day and soil
       // no longer sits bare for want of coins: about a quarter more by day 30, a twentieth more by day 10.)
-      expect(s.stats.earned).toBeLessThan(17000);
+      // (Round 10: requests pay more and come every morning, so a little more is earned, and much more of it from
+      // requests; the fields cost half as much again.)
+      expect(s.stats.earned).toBeLessThan(21000);
       // (Round 9: the fifth and sixth fields cost 3,000 and 4,500, a fair's ribbon takes a fifth off: coins gather for them.)
-      expect(morning[30]).toBeLessThan(3600);
+      // (Round 10: the sixth field costs 5,000: coins gather for it, and never pass it.)
+      expect(morning[30]).toBeLessThan(PARCELS[5].price);
       expect(s.parcels.filter((p) => p.owned).length).toBeLessThanOrEqual(5);
       expect(s.parcels.filter((p) => p.owned).length).toBeGreaterThanOrEqual(2);
       expect(filled).toBeGreaterThanOrEqual(3);
-      expect(filled).toBeLessThanOrEqual(14);
+      // (Round 10: a pair every morning, while fewer than six are taken: requests are most of a season's work now.)
+      expect(filled).toBeLessThanOrEqual(26);
       // (Thirty days of play at a person's pace take a few seconds; under a full parallel run, more than the default.)
     }, 20000);
   }

@@ -8,9 +8,9 @@ import { fieldPrice, fieldRep, homestead, priceOf } from '../sim/actions';
 import type { Command } from '../sim/commands';
 import { BUILD_COST, CAN_WATER, HAND_HIRE, HAND_WAGE, HANDS_MAX, SPRINKLER_MORNINGS, TOOL_UPGRADES } from '../sim/constants';
 import { CROP_IDS, CROPS, inSeason } from '../sim/crops';
-import { clashOf, clearOf, fairNow, forFair, isShort, lastSowOf, MILESTONES, offered, partPay, plantedFor, requestHave, requestProgress, slackOf, sowByOf, stillToSow, stockCount, tradeOf, whyNot } from '../sim/goals';
+import { clashOf, clearOf, fairNow, isShort, lastSowOf, MILESTONES, offered, partPay, plantedFor, requestHave, requestProgress, slackOf, sowByOf, stillToSow, stockCount, tradeOf, whyNot } from '../sim/goals';
 import { dayOfSeason, season, SEASON_NAMES } from '../sim/world';
-import type { BuildKind, CropId, LossCause, Order, WorldState } from '../sim/types';
+import type { BuildKind, CropId, FairResult, LossCause, Order, RequestFail, WorldState } from '../sim/types';
 import { clock, el, esc, fmt, toggle } from './dom';
 import { repShare, townName } from './describe';
 import { icon } from './icons';
@@ -172,6 +172,25 @@ export class Dialogs {
     this.ask('Sleep now?', 'sleep', sleepText(minute, why), 'Sleep', onYes);
   }
 
+  /** Round 10: the fair's card, the morning after it: the ribbon or the miss, and why. */
+  fair(r: FairResult): void {
+    const s = this.host.state();
+    const c = fairCard(s, r);
+    this.show(c.title, 'fair');
+    this.body.innerHTML = '';
+    if (r.won) this.body.append(el('div', 'ribbon', `<span class="ic">${icon('starFill')}</span>`));
+    // One note, the result first in bold, then why, then what the next fair wants.
+    this.body.append(el('p', 'fairp', c.lines.map((l, i) => (i ? esc(l) : `<b>${esc(l)}</b>`)).join('<br>')));
+    const row = el('div', 'row ask');
+    const ok = el('button', 'btn primary', esc(c.button));
+    const go = () => this.close();
+    ok.onclick = go;
+    row.append(ok);
+    this.body.append(row);
+    this.yes = go;
+    this.focusIn(ok);
+  }
+
   /** Re-render the open dialog after the farm changed (a purchase, a delivery). */
   refresh(): void {
     if (!this.open) return;
@@ -230,7 +249,6 @@ export class Dialogs {
         // clash line sat below the fold, under the requests already taken); then the last morning card, pinned here
         // to read again (round 7), the reputation, and the requests taken.
         const shown = new Set<number>();
-        let paired = false;
         const offers = s.orders.filter(offered);
         for (const o of offers) {
           if (shown.has(o.id)) continue;
@@ -238,7 +256,6 @@ export class Dialogs {
           const mate = o.pair !== undefined ? offers.find((q) => q !== o && q.pair === o.pair && !shown.has(q.id)) : undefined;
           if (mate) {
             shown.add(mate.id);
-            paired = true;
             const pair = el('div', 'pair');
             pair.append(this.requestNote(s, o), el('div', 'or', 'or'), this.requestNote(s, mate));
             list.append(pair);
@@ -247,18 +264,31 @@ export class Dialogs {
             if (clash) list.append(el('p', 'clash', clashWords(clash)));
           } else list.append(this.requestNote(s, o));
         }
-        if (offers.length) list.append(el('p', 'legend', paired ? 'Accept one of a pair.' : 'Accept a request to take it on.'));
-        // Round 9: the season's fair, and what it gives.
-        for (const l of fairLines(s)) list.append(el('p', 'legend fairline', esc(l)));
-        const card = this.host.lastCard?.();
-        if (card) list.append(el('div', 'morning', `<b>${esc(card.title)}</b>${esc(card.news)}`));
-        list.append(el('p', 'legend', smithLine(s)));
-        if (!s.orders.length) list.append(el('p', 'legend', 'More requests come with the mornings.'));
+        // Round 10: one request alone says why; and any offer can be let go with Pass, a fresh pair coming tomorrow
+        // (the tenth playtest's untaken Summer 1 offer blocked the board for four days).
+        const why = offerWhyWords(s);
+        if (why) list.append(el('p', 'legend', esc(why)));
+        // (Not on the first pair: Accept is taught first, and Pass comes once a request has been taken.)
+        if (offers.length && s.fair !== undefined) {
+          const row = el('div', 'row passrow');
+          const pass = el('button', 'btn pass', 'Pass');
+          pass.title = 'Let these go. New requests come tomorrow';
+          pass.onclick = () => {
+            this.host.send({ type: 'pass' });
+            this.host.cue('close');
+            setTimeout(() => this.refresh(), 0);
+          };
+          row.append(el('span', 'legend', offers.length > 1 ? 'Accept one, or pass.' : 'Accept it, or pass.'), pass);
+          list.append(row);
+        }
+        // Round 9: the season's fair. Round 10: in one line (the board stacked six notes around one request: the
+        // fair, its prize, the morning card again, reputation and the crate's rule).
+        const fl = fairLines(s)[0];
+        if (fl) list.append(el('p', 'legend fairline', esc(fl)));
         const taken = s.orders.filter((o) => !offered(o));
         for (const o of taken) list.append(this.requestNote(s, o));
-        // (Round 8: it said "The crate keeps what requests need", but every crop pays at the crate at once.) Round 9: the
-        // crate hands a request over the moment its crops are all in it, by day: no stamp to find.
-        if (taken.length && !offers.length) list.append(el('p', 'legend', 'The crate ships a request when it is all in.'));
+        // Until the first is filled: how a request is handed over (no stamp to find).
+        if (taken.length && !offers.length && s.rep === 0 && !(s.repPart ?? 0)) list.append(el('p', 'legend', 'The crate ships a request when it is all in.'));
         break;
       }
       case 'fields':
@@ -531,11 +561,13 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
     const tr = tradeOf(o);
     const lines = [`for ${tr.plots} ${tr.plots === 1 ? 'plot' : 'plots'}, ${tr.days} ${tr.days === 1 ? 'day' : 'days'}`, `${it.n} ${name} for ${who}`, `Plant ${when}, seed ${fmt(toSow * d.seed)}`, `Due ${dayName(s, o.due)}, ${slack}`];
     const cls = ['trade', 'what', 'need', 'when'];
-    // While the season's fair still wants requests, each offer says whether it comes in time for it.
-    const f = fairNow(s);
-    if (f && f.got < f.want) {
-      lines.push(forFair(s, o) ? 'In time for the fair' : 'After the fair');
-      cls.push(forFair(s, o) ? 'fair' : 'fair late');
+    // While the season's fair still wants requests, each offer says which fair it counts for (round 10: one due next
+    // season counts for that season's fair: "After the fair" was on offers that counted for the autumn fair), and so
+    // does each side of a pair when one of them counts for the next.
+    const label = fairLabel(s, o);
+    if (label) {
+      lines.push(label.text);
+      cls.push(label.now ? 'fair' : 'fair late');
     }
     return { head: `+${fmt(tr.clear)}`, lines, need: true, cls };
   }
@@ -550,12 +582,23 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
   const lastWhen = last <= s.day ? 'today' : `by ${dayName(s, last)}`;
   const short = isShort(s, o);
   const coming = requestHave(s, o);
-  const need = short ? `${coming} of ${it.n} can come, pays ${fmt(partPay(o, coming))}` : toSow > 0 && s.day <= last ? `Plant ${toSow}${more} ${s.day <= sowBy ? when : lastWhen}, seed ${fmt(toSow * d.seed)}` : '';
-  const lost = (Object.entries(o.lost ?? {}) as [LossCause, number][]).filter(([, n]) => n > 0).map(([c, n]) => `${n} lost to ${LOSS_WORD[c]}`);
+  // Round 10: short, it says what can come, and the figure in all is what that brings (the tenth playtest read "+1,615
+  // in all" beside "16 of 18 can come, pays 395" as a loss of 1,220).
+  const need = short ? `${coming} of ${it.n} can come` : toSow > 0 && s.day <= last ? `Plant ${toSow}${more} ${s.day <= sowBy ? when : lastWhen}, seed ${fmt(toSow * d.seed)}` : '';
+  // Round 10: losses never count past the request's own count ("1 growing, 5 lost to the heat" on a request for 5).
+  let room = Math.max(0, it.n - p.growing - p.crate);
+  const lost = (Object.entries(o.lost ?? {}) as [LossCause, number][])
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([c, n]) => {
+      const k = Math.min(n, room);
+      room -= k;
+      return k > 0 ? `${k} lost to ${LOSS_WORD[c]}` : '';
+    });
   const have = [p.growing ? `${p.growing} growing` : '', p.crate ? `${p.crate} in the crate` : '', ...lost].filter(Boolean).join(', ');
   const wanted = have ? `${have[0].toUpperCase()}${have.slice(1)}, wanted by ${dayName(s, o.due)}` : `Wanted by ${dayName(s, o.due)}`;
   // Round 9: the same figure the offer was read by: what it clears in all.
-  return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(clearOf(o))} in all`, ...(need ? [need] : []), wanted], need: !!need && !short };
+  return { head: `${it.n} ${name}`, lines: [`For ${who}, +${fmt(short ? shortClear(o, coming) : clearOf(o))} in all`, ...(need ? [need] : []), wanted], need: !!need && !short };
 }
 
 /**
@@ -567,11 +610,90 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
 export function fairLines(s: WorldState): string[] {
   const f = s.fair;
   if (!f || !homestead(s)) return [];
-  const prize = s.parcels.some((p) => !p.owned) ? 'Its prize: a ribbon and a fifth off a field.' : 'Its prize: a ribbon for the house.';
   const when = `${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}`;
-  if (s.day < f.start) return [`The fair on ${when} wants ${f.want} requests filled.`, prize];
+  // Round 10: one line, the prize in it (the board stacked six notes around one request).
+  if (s.day < f.start) return [`The fair on ${when} wants ${f.want} requests filled.`];
   if (f.got >= f.want) return [`Fair on ${when}: the ribbon is yours.`];
-  return [`Fair on ${when}: ${f.got} of ${f.want} requests filled.`, prize];
+  return [`Fair on ${when}: ${f.got} of ${f.want} filled, for a ribbon.`];
+}
+
+/**
+ * Round 10: which fair an offer counts for, as its note says it: "In time for the fair" (due by this season's fair,
+ * while it still wants requests), or "For the autumn fair" (due next season, so filled then); null otherwise, or
+ * while no fair runs.
+ */
+export function fairLabel(s: WorldState, o: Order): { text: string; now: boolean } | null {
+  const f = fairNow(s);
+  if (!f || !offered(o)) return null;
+  const counts = (q: Order) => q.due <= f.day;
+  const wants = f.got < f.want;
+  // (With this season's ribbon won, a side due by it says nothing: only the one for the next fair has a line.)
+  if (counts(o)) return wants ? { text: 'In time for the fair', now: true } : null;
+  return { text: `For the ${SEASON_NAMES[season(o.due)].toLowerCase()} fair`, now: false };
+}
+
+/** Round 10: what a short request brings in all: what can come at market and its share of the gain, less its seed. */
+export function shortClear(o: Order, coming: number): number {
+  const it = o.items[0];
+  return coming * CROPS[it.crop].price + partPay(o, coming) - it.n * CROPS[it.crop].seed;
+}
+
+/** Round 10: why the board offers one request today, not a pair, or what comes after a Pass. Empty otherwise. */
+export function offerWhyWords(s: WorldState): string {
+  const offers = s.orders.filter(offered);
+  if (!offers.length) {
+    if (s.offerWhy === 'pass') return 'New requests come tomorrow.';
+    if (s.offerWhy === 'full') return `${s.orders.length} requests on the go. More come as they are filled.`;
+    if (s.offerWhy === 'soil') return 'No free soil for a request today.';
+    if (s.offerWhy === 'coins') return 'No seed money for a request today.';
+    if (s.offerWhy === 'none') return 'No request fits the farm today. More tomorrow.';
+    return s.orders.length ? '' : 'New requests come with the mornings.';
+  }
+  if (offers.length > 1) return '';
+  const c = offers[0].items[0].crop;
+  if (s.offerWhy === 'crop') return `One today: only ${CROPS[c].plural} can go in now.`;
+  if (s.offerWhy === 'fair') return `One today: only ${CROPS[c].plural} can ripen for the fair.`;
+  if (s.offerWhy === 'coins') return 'One today: seed for two costs more than you have.';
+  if (s.offerWhy === 'room') return 'One today: no room for two.';
+  return '';
+}
+
+/** Round 10: the season names in lower case, for the fair's card ("On to summer"). */
+const seasonWord = (day: number) => SEASON_NAMES[season(day)].toLowerCase();
+
+/** Round 10: how a request due by the fair was lost, after "1 request was". */
+const FAIR_LOSS: Record<RequestFail, string> = { crows: 'lost to crows', bugs: 'lost to bugs', dry: 'lost to dry nights', heat: 'lost to the heat', turn: 'lost at the turn', late: 'planted too late', soil: 'short of room to plant', coins: 'short of seed money', due: 'not picked in time' };
+
+/**
+ * Round 10: the fair's night, on a card the next morning: the ribbon or the miss, how many it got, why it fell short,
+ * and what the next fair wants, in a few plain lines (the tenth playtest's only sign of a missed fair was one clause
+ * of the morning card). `day` is the morning after the fair.
+ */
+export function fairCard(s: WorldState, r: FairResult, day = s.day): { title: string; lines: string[]; button: string } {
+  const held = day - 1;
+  const title = `The ${seasonWord(held)} fair`;
+  const lines: string[] = [];
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  if (r.won) {
+    lines.push('A ribbon for the house.');
+    lines.push(`${r.got} of ${r.want} requests filled in time.`);
+    if ((s.fieldOff ?? 0) > 0) lines.push('Its prize: a fifth off the next field.');
+  } else {
+    lines.push('No ribbon this time.');
+    lines.push(`${r.got} of ${r.want} requests filled in time.`);
+    // Why, three reasons at most: requests lost, mornings the board had nothing for want of free soil (a farm sown
+    // edge to edge), too few taken that were due by it, and those due after it, which count for the next fair.
+    const why: string[] = [];
+    if (r.lost) why.push(`${n(r.lost, 'request was', 'requests were')} ${FAIR_LOSS[r.why ?? 'due']}.`);
+    if (r.noRoom) why.push(`${n(r.noRoom, 'morning', 'mornings')} had no free soil for a request.`);
+    const taken = r.taken ?? 0;
+    if (taken < r.want) why.push(`Only ${n(taken, 'request', 'requests')} you took ${taken === 1 ? 'was' : 'were'} due by it.`);
+    if (r.late) why.push(`${r.late} more ${r.late === 1 ? 'is' : 'are'} due after it, for the next fair.`);
+    lines.push(...why.slice(0, 3));
+  }
+  const f = s.fair;
+  if (f && f.day > held) lines.push(`The ${seasonWord(f.day)} fair wants ${f.want} by ${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}.`);
+  return { title, lines, button: `On to ${seasonWord(day)}` };
 }
 
 /**

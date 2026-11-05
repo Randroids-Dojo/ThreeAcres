@@ -38,14 +38,18 @@ export function baseTiles(): TileKind[] {
   return out;
 }
 
-/** Fields, in the order they are sold. The first is owned from the start. Sunup also wants reputation for the later ones (FIELD_REP). */
+/**
+ * Fields, in the order they are sold. The first is owned from the start. Sunup also wants reputation for the later ones
+ * (FIELD_REP). Round 10: 1,200, 2,200, 3,600 and 5,000 from the third (they were 800, 1,500, 3,000 and 4,500): the
+ * tenth playtest bought field 3 for 800 without a thought, with 2,315 coins on Summer 8.
+ */
 export const PARCELS = [
   { x: 2, y: 5, w: 4, h: 4, price: 0 },
   { x: 7, y: 5, w: 4, h: 4, price: 250 },
-  { x: 2, y: 10, w: 4, h: 4, price: 800 },
-  { x: 7, y: 10, w: 4, h: 4, price: 1500 },
-  { x: 12, y: 5, w: 4, h: 4, price: 3000 },
-  { x: 12, y: 10, w: 4, h: 4, price: 4500 },
+  { x: 2, y: 10, w: 4, h: 4, price: 1200 },
+  { x: 7, y: 10, w: 4, h: 4, price: 2200 },
+  { x: 12, y: 5, w: 4, h: 4, price: 3600 },
+  { x: 12, y: 10, w: 4, h: 4, price: 5000 },
 ] as const;
 
 export type PropKind = 'house' | 'crate' | 'board' | 'bunkhouse' | 'well';

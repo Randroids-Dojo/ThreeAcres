@@ -13,7 +13,11 @@
 //   - the sleep question is short (eleven words or fewer) and asks before evening with nothing left to do;
 //     after 6 pm with nothing to do, Enter sleeps without a question;
 //   - Space facing the well with the hands in hand fills the can;
-//   - from the house, with the well lesson up, the well it points at is on screen.
+//   - from the house, with the well lesson up, the well it points at is on screen;
+//   - round 10: Escape closes the board and a second Escape at once does not open the game switcher (one a moment
+//     later does); walking past the board with Space held never opens it, a fresh press facing it does; Tab
+//     reaches Pass on the board and Enter lets the pair go, and the next morning brings a fresh pair; the morning
+//     after the fair its card says the miss and why, Enter closes it, and an Escape just after it stays in Sunup.
 // node scripts/qa/sunup-keys.mjs [url]
 import { chromium } from 'playwright-core';
 
@@ -227,6 +231,124 @@ await p.waitForTimeout(200);
 await p.keyboard.press('Space');
 await p.waitForTimeout(900);
 check('Space beside the well, facing it, fills the can too', (await S()).water > 0, `water ${(await S()).water}`);
+
+// Round 10: Escape just after a card closed opened the game switcher (and the next click went to Thistledown); held
+// Space walking past the notice board popped it up mid-walk.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  for (const w of ['board', 'requests']) if (!s.learn.includes(w)) s.learn.push(w);
+  for (const id of ['requests', 'sowfor', 'deliver', 'choose']) if (!s.learn.includes(`lesson:${id}`)) s.learn.push(`lesson:${id}`);
+  s.minute = 9 * 60;
+  document.activeElement?.blur?.();
+});
+const switcher = () => p.evaluate(() => !!document.querySelector('.shellover.on'));
+await p.keyboard.press('KeyB');
+await p.waitForTimeout(400);
+const boardOpen = (await S()).dialog === 'board';
+await p.keyboard.press('Escape');
+await p.waitForTimeout(120);
+await p.keyboard.press('Escape');
+await p.waitForTimeout(300);
+const quick = { dialog: (await S()).dialog, switcher: await switcher() };
+check('round 10: Escape closes the board, and a second Escape at once does not open the game switcher', boardOpen && !quick.dialog && !quick.switcher, JSON.stringify({ boardOpen, ...quick }));
+await p.waitForTimeout(600);
+await p.keyboard.press('Escape');
+await p.waitForTimeout(400);
+const later = await switcher();
+check('round 10: an Escape a moment later still opens it', later);
+if (later) {
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(400);
+}
+check('round 10: and Escape closes it again, back in Sunup', !(await switcher()) && (await p.evaluate(() => window.sunup.running !== false)));
+// Walk along the yard past the board with Space held: the board stays shut; a fresh press facing it opens it.
+await p.evaluate(() => {
+  const s = window.sunup.state;
+  const f = s.actors[0];
+  Object.assign(f, { x: 6.5, y: 3.5, facing: 'e', angle: 0, path: [], task: null, aim: null });
+  s.tool = 'hands';
+  s.minute = 9 * 60;
+  document.activeElement?.blur?.();
+});
+await p.waitForTimeout(200);
+await p.keyboard.down('Space');
+await p.keyboard.down('KeyD');
+let popped = false;
+for (let k = 0; k < 14; k++) {
+  await p.waitForTimeout(100);
+  if ((await S()).dialog === 'board') popped = true;
+}
+await p.keyboard.up('KeyD');
+await p.keyboard.up('Space');
+const walked = (await S()).x;
+check('round 10: walking past the board with Space held never opens it', !popped && walked > 9, `x ${walked.toFixed(2)}, opened ${popped}`);
+await p.evaluate(() => {
+  const f = window.sunup.state.actors[0];
+  Object.assign(f, { x: 8.5, y: 3.5, facing: 'n', angle: -Math.PI / 2, path: [], task: null, aim: null });
+});
+await p.waitForTimeout(200);
+await p.keyboard.press('Space');
+await p.waitForTimeout(400);
+check('round 10: a fresh Space facing the board opens it', (await S()).dialog === 'board', (await S()).dialog);
+await p.keyboard.press('Escape');
+await p.waitForTimeout(700);
+
+// Round 10: Pass on the board from the keyboard (Tab onto it, Enter): the offer goes and the board says new ones come
+// tomorrow, and they do. Then the fair's card the morning after it: it opens at dawn, says the miss and why, and Enter
+// closes it (the tenth playtest's only sign of a missed fair was one clause of the morning card).
+{
+  await p.evaluate(() => {
+    const s = window.sunup.state;
+    for (const w of ['fair']) if (!s.learn.includes(w)) s.learn.push(w);
+    if (!s.learn.includes('lesson:fair')) s.learn.push('lesson:fair');
+    s.parcels[1].owned = true;
+    for (const q of s.parcels.slice(0, 2)) for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) { const c = s.plots[y * s.W + x]; c.tilled = true; c.crop = null; }
+    Object.assign(s, { coins: 900, rep: 3, requested: 2, orders: [], minute: 9 * 60 });
+    s.fair = { start: 1, day: s.day + 1, want: 4, got: 0, taken: 1 };
+    window.sunup.pinRequests();
+    window.sunup.dialogs.board('requests');
+  });
+  await p.waitForTimeout(400);
+  const before = await p.evaluate(() => window.sunup.state.orders.filter((o) => o.taken === false).length);
+  let onPass = false;
+  for (let k = 0; k < 14 && !onPass; k++) {
+    await p.keyboard.press('Tab');
+    onPass = await p.evaluate(() => !!document.activeElement?.matches?.('.dialog .btn.pass'));
+  }
+  if (onPass) await p.keyboard.press('Enter');
+  await p.waitForTimeout(400);
+  const after = await p.evaluate(() => ({ offers: window.sunup.state.orders.filter((o) => o.taken === false).length, words: [...document.querySelectorAll('.dialog.on .legend')].map((e) => e.textContent).join(' / ') }));
+  check('round 10: Tab reaches Pass on the board and Enter lets the pair go; the board says new ones come tomorrow', before === 2 && onPass && after.offers === 0 && /New requests come tomorrow\./.test(after.words), JSON.stringify({ before, onPass, ...after }));
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(700);
+  // Sleep through the fair's night: the morning brings a fresh pair and the fair's card.
+  const day1 = (await S()).day;
+  await p.evaluate(() => {
+    const s = window.sunup.state;
+    s.fair.day = s.day;
+    s.minute = 13 * 60;
+    s.crows = [];
+    document.activeElement?.blur?.();
+  });
+  // (Enter sleeps; with something left to do it asks first, and Enter says yes.)
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(500);
+  if ((await S()).dialog === 'sleep') await p.keyboard.press('Enter');
+  let card = null;
+  for (let k = 0; k < 120 && !card; k++) {
+    await p.waitForTimeout(200);
+    card = await p.evaluate(() => (document.querySelector('.dialog.on')?.dataset.kind === 'fair' ? { title: document.querySelector('.dialog.on .title, .dialog.on h2')?.textContent ?? '', text: document.querySelector('.dialog.on .fairp')?.innerText ?? '', button: document.querySelector('.dialog.on .btn.primary')?.textContent ?? '', day: window.sunup.state.day, night: window.sunup.state.turnover >= 0, offers: window.sunup.state.orders.filter((o) => o.taken === false).length } : null));
+  }
+  check('round 10: the morning after the fair its card says the miss and why, in a few short lines, once the night is over', !!card && card.day === day1 + 1 && !card.night && /^No ribbon this time\./.test(card.text) && card.text.split('\n').length <= 6 && card.text.split('\n').every((l) => l.split(/\s+/).length <= 10), JSON.stringify(card));
+  check('round 10: a fresh pair is on the board the morning after a Pass', !!card && card.offers === 2, JSON.stringify(card));
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(400);
+  check('round 10: Enter closes the fair card', (await S()).dialog === '', (await S()).dialog);
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(300);
+  check('round 10: and an Escape just after it does not open the game switcher', !(await switcher()));
+  await p.waitForTimeout(600);
+}
 
 // From the house with the well lesson up, the well is on screen.
 await p.goto(`${base}/?game=homestead&fresh`);

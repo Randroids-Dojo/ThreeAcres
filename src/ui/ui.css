@@ -594,6 +594,12 @@ svg { width: 100%; height: 100%; display: block; }
 .seed .pr { font-size: 12px; }
 .seed .wh { font-size: 12px; }
 @media (max-width: 640px) { .seedbar { max-width: calc(4 * 90px + 12px); } .seed { min-width: 84px; } }
+/* Round 10: four seeds to a row on a phone (three left a season's last days on three rows over the field). */
+@media (max-width: 640px) {
+  .seedbar { max-width: calc(4 * 91px + 3 * 4px + 12px); }
+  .seed { min-width: 91px; max-width: 91px; padding: 4px 1px; }
+  .seed .wh { white-space: nowrap; letter-spacing: -0.2px; }
+}
 /* A request note says when it will be ripe and when it is wanted. */
 .item.req .tx .when { color: var(--ink); }
 /* With words on the board and view buttons, their key caps sit at the top left, clear of the words (the count badge is top right). */
@@ -723,3 +729,17 @@ svg { width: 100%; height: 100%; display: block; }
 }
 /* On the tool in hand (cream), its key cap turns ink, so it still reads. */
 .tool.on .key { background: var(--ink); color: #f4e8c8; }
+/* Round 10: each tool keeps its place on the rack; a tool not yet brought in is a faint peg (Hoe moved into Seeds'
+   place when Build arrived). */
+.tool.slot { box-sizing: border-box; cursor: default; pointer-events: none; display: grid; place-items: center; }
+.tool.slot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: rgba(0, 0, 0, 0.28); box-shadow: 0 1px 0 rgba(255, 220, 170, 0.12); }
+/* Round 10: the board's Pass, under the pair: accept one, or let both go for tomorrow's. */
+.list .passrow { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.list .passrow .legend { margin: 0; }
+.list .passrow .btn.pass { min-width: 72px; }
+/* Round 10: the fair's card, the morning after it. */
+.dialog[data-kind='fair'] .body { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.dialog[data-kind='fair'] .ribbon { align-self: center; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: #b8322a; box-shadow: 0 3px 0 #7d1f19, 0 6px 12px rgba(0, 0, 0, 0.3); }
+.dialog[data-kind='fair'] .ribbon .ic { width: 26px; height: 26px; color: #f4c95a; }
+.dialog[data-kind='fair'] .fairp { margin: 0; line-height: 1.55; }
+.dialog[data-kind='fair'] .row.ask { justify-content: center; margin-top: 6px; }

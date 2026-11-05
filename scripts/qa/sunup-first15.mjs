@@ -20,7 +20,12 @@
 // It reports: the real decisions (a board with two or more offers that could
 // be accepted, and fields or tools bought), the day and minute of the first
 // one, each day's real seconds and jobs, and the dead days (fewer than five
-// jobs and no decision) and their seconds.
+// jobs and no decision) and their seconds. Round 10: and each season's fair
+// as it was judged (requests filled against those wanted, ribbon or not), so
+// a run to Summer 10 says whether a lesson-following player meets the fairs,
+// and the fair card it read the morning after each (and whether it came in
+// the night, which it must not); with more than fifteen minutes it also sums
+// the first fifteen on their own.
 // node scripts/qa/sunup-first15.mjs [base url] [minutes] [last day]
 import { chromium } from 'playwright-core';
 
@@ -81,8 +86,11 @@ const look = () =>
     const crow = s.crows.find((c) => c.phase === 'in' || c.phase === 'peck');
     const dialog = document.querySelector('.dialog.on');
     const busy = !!(f.task || f.path.length || f.aim || (s.taps && s.taps.length));
-    // A taken request that still wants seed.
-    const want = s.orders.find((o) => o.taken !== false && o.items[0].n > 0);
+    // A taken request that still wants seed, the one to sow soonest first, as the lesson line says (round 10: with a
+    // pair every morning it was always the first taken, and the others went unsown).
+    const want = s.orders
+      .filter((o) => o.taken !== false && o.items[0].n - (o.got ?? 0) - s.plots.filter((q) => q.crop && !q.crop.dead && q.crop.for === o.id).length > 0)
+      .sort((a, b) => (a.sowBy ?? 0) - (b.sowBy ?? 0))[0];
     const learnt = (w) => s.learn.includes(w);
     return {
       day: s.day,
@@ -110,6 +118,9 @@ const look = () =>
       fields: s.parcels.filter((q) => q.owned).length,
       events: d.events.length,
       camera: s.rules.camera,
+      weather: s.weather,
+      fair: s.report && s.report.fair ? { day: s.report.day, ...s.report.fair } : null,
+      fairNow: s.fair ? { ...s.fair } : null,
     };
   });
 
@@ -129,6 +140,9 @@ const dayOf = (d) => {
   return days.get(d);
 };
 const decisions = [];
+/** Round 10: the fairs judged, by the day they were held, and the fair cards read the morning after. */
+const fairs = new Map();
+const cards = [];
 let seenEvents = 0;
 let lastDay = 0;
 const JOBS = new Set(['harvest', 'water', 'plant', 'till', 'tend', 'build', 'clear', 'refill']);
@@ -148,12 +162,17 @@ while (secs() < MINUTES * 60) {
   seenEvents = v.events;
   const day = dayOf(v.day);
   day.to = secs();
-  if (day.coins < 0 && !v.night) day.coins = v.coins;
+  if (day.coins < 0 && !v.night) {
+    day.coins = v.coins;
+    day.weather = v.weather;
+  }
   if (v.line) day.lines.add(v.line);
+  if (v.fair && !fairs.has(v.fair.day)) fairs.set(v.fair.day, v.fair);
   for (const e of fresh) if (JOBS.has(e.type) && e.by === 1) day.jobs++;
   if (v.day !== lastDay) lastDay = v.day;
   if (v.day > LAST_DAY) break;
-  if (v.night) continue;
+  // (A card open in the night is answered too: the clock waits under any card.)
+  if (v.night && !v.dialog) continue;
   // A new line or card is read first.
   if ((v.line && v.line !== lastLine) || (v.dialog && v.dialog !== lastDialog)) {
     lastLine = v.line;
@@ -193,6 +212,12 @@ while (secs() < MINUTES * 60) {
         decisions.push({ at: secs(), day: v.day, what: 'buy' });
         day.decisions++;
       } else await tapEl('.dialog.on button', /^Not now$/);
+      continue;
+    }
+    if (v.dialog === 'fair') {
+      // Round 10: the fair's card, the morning after it: read, then its button ("On to summer").
+      cards.push({ day: v.day, at: secs(), night: v.night, text: await p.evaluate(() => document.querySelector('.dialog.on .fairp')?.innerText.replace(/\n/g, ' / ') ?? '') });
+      await tapEl('.dialog.on button.primary');
       continue;
     }
     if (v.dialog === 'sleep') {
@@ -280,13 +305,22 @@ while (secs() < MINUTES * 60) {
 }
 
 const rows = [...days.entries()].filter(([n, d]) => d.from < MINUTES * 60 && n <= LAST_DAY);
+const fifteen = (rs) => {
+  const ds = decisions.filter((d) => d.at < 900);
+  const dd = rs.filter(([n, d]) => d.from < 900 && d.jobs < 5 && d.decisions === 0);
+  return `first 15 minutes: to day ${Math.max(...rs.filter(([, d]) => d.from < 900).map(([n]) => n))}, real decisions ${ds.length} (first ${ds.length ? `${(ds[0].at / 60).toFixed(1)} min, day ${ds[0].day}` : 'never'}), dead days ${dd.length} (${dd.map(([n]) => n).join(', ') || 'none'})`;
+};
 console.log(`Sunup, Spring 1 to day ${LAST_DAY} on a phone, at most ${MINUTES} minutes (${base}): reached day ${Math.min(lastDay, LAST_DAY + 1)} in ${(secs() / 60).toFixed(1)} min`);
 console.log(`  real decisions ${decisions.length}: ${decisions.map((d) => `${d.what} (day ${d.day}, ${(d.at / 60).toFixed(1)} min)`).join('; ') || 'none'}`);
 console.log(`  first decision at ${decisions.length ? `${(decisions[0].at / 60).toFixed(1)} min, day ${decisions[0].day}` : 'never'}; pairs chosen ${decisions.filter((d) => d.what.startsWith('pair')).length}`);
 const dead = rows.filter(([, d]) => d.jobs < 5 && d.decisions === 0);
-console.log(`  days: ${rows.map(([n, d]) => `${n}: ${Math.round(d.to - d.from)} s, ${d.jobs} jobs${d.decisions ? `, ${d.decisions} decision${d.decisions > 1 ? 's' : ''}` : ''}`).join(' | ')}`);
+console.log(`  days: ${rows.map(([n, d]) => `${n} (${d.weather ?? '?'}): ${Math.round(d.to - d.from)} s, ${d.jobs} jobs${d.decisions ? `, ${d.decisions} decision${d.decisions > 1 ? 's' : ''}` : ''}`).join(' | ')}`);
 console.log(`  dead days (under 5 jobs, no decision): ${dead.length} (${dead.map(([n]) => n).join(', ') || 'none'}), ${Math.round(dead.reduce((a, [, d]) => a + (d.to - d.from), 0))} s of ${Math.round(secs())} s; days with a decision ${rows.filter(([, d]) => d.decisions > 0).length} of ${rows.length}`);
 console.log(`  morning coins and lines: ${rows.map(([n, d]) => `${n}: ${d.coins} [${[...d.lines].join(' / ')}]`).join(' | ')}`);
+const held = [...fairs.values()];
+console.log(`  fairs judged: ${held.length ? held.map((f) => `day ${f.day}: ${f.got} of ${f.want}, ${f.won ? 'ribbon' : 'no ribbon'}`).join('; ') : 'none'}; met ${held.filter((f) => f.won).length} of ${held.length}`);
+console.log(`  fair cards: ${cards.length ? cards.map((c) => `day ${c.day}${c.night ? ' (in the night)' : ''}: "${c.text}"`).join('; ') : 'none'}`);
+if (MINUTES > 15) console.log(`  ${fifteen(rows)}`);
 console.log(`  page errors: ${errs.length}${errs.length ? ` (${errs[0]})` : ''}`);
 await b.close();
 process.exit(errs.length ? 1 : 0);

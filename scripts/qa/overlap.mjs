@@ -229,8 +229,21 @@ async function run(label, viewport, touch) {
       window.sunup.dialogs.board('requests');
       await new Promise((r) => setTimeout(r, 300));
     })],
+    // Round 10: the fair's card the morning after it, with a ribbon and with a miss and its reasons (the tenth
+    // playtest's only sign of a missed fair was one clause of the morning card).
+    ['fair card, a ribbon', async () => p.evaluate(() => {
+      window.sunup.dialogs.close(true);
+      const st = window.sunup.state;
+      Object.assign(st, { day: 11, fieldOff: 0.2 });
+      st.fair = { start: 11, day: 20, want: 3, got: 0, taken: 0 };
+      window.sunup.dialogs.fair({ got: 3, want: 3, won: true, taken: 3 });
+    })],
+    ['fair card, no ribbon', async () => p.evaluate(() => {
+      window.sunup.dialogs.close(true);
+      window.sunup.dialogs.fair({ got: 1, want: 3, won: false, lost: 1, why: 'crows', late: 1, taken: 2 });
+    })],
     // Round 5: the lesson pointer asks before it builds.
-    ['build question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.dialogs.confirmBuild('scarecrow', 220, () => {}); })],
+    ['build question', async () => p.evaluate(() => { window.sunup.dialogs.close(true); window.sunup.state.day = 4; window.sunup.dialogs.confirmBuild('scarecrow', 220, () => {}); })],
     // The forecast's three words sit inside the day card.
     ['forecast words', async () => p.evaluate(() => { window.sunup.dialogs.close(true); const st = window.sunup.state; st.weather = 'storm'; st.forecast = ['cloud', 'storm', 'heat']; })],
     // Round 5: "Heat wave" wrapped the day card onto two lines.
@@ -370,7 +383,9 @@ async function run(label, viewport, touch) {
         return { stamps, clash: !!clash && clash.bottom <= br.bottom + 1 };
       });
       if (first.stamps.length !== 2 || !first.stamps.every(Boolean) || !first.clash) hits.push(`the pair is not all on the board's first screen ${JSON.stringify(first)}`);
-      if (!/^Spring 4, cloudy(Yesterday you sold 8 for 340, )?Old Tamsin paid 145/.test(q.card)) hits.push(`no morning card pinned on the board (${q.card})`);
+      // (Round 10: the board is calm: the morning card is no longer pinned on it again, one of six notes around a single
+      // request in the tenth playtest.)
+      if (q.card) hits.push(`the morning card is repeated on the board (${q.card})`);
       if (!/^Both need [\d,]+ (plots|of seed)\. You have [\d,]+\.$/.test(q.clash) || q.clash.split(/\s+/).length > 8) hits.push(`the pair's clash line reads "${q.clash}"`);
       if (!q.onScreen) hits.push('the board runs off the screen');
       if (!q.fits && !q.scrolls) hits.push(`the board's notes run past its foot and do not scroll ${JSON.stringify(q.h)}`);

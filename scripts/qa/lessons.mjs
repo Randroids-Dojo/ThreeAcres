@@ -50,6 +50,9 @@
 // tutor's own count when it finishes, and the words in the page, frame by
 // frame); a passive line (the View line here) is not used up while the
 // farmer is busy; at 10 pm in a storm or rain a hoed field reads (frame luma).
+// Round 10: the plant line asks for eight seeds and counts down, leaving soil
+// bare; and no tool, nor Sleep, moves on the rack once it has arrived (Hoe
+// moved into Seeds' old place when Build came), measured at every step.
 // node scripts/qa/lessons.mjs [base url]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -103,8 +106,25 @@ const check = (name, ok, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `  (${detail})` : ''}`);
 };
-const screen = () =>
+// Round 10: where each tool (and Sleep) sits on the rack when first seen, and every move after (Hoe moved into
+// Seeds' old place when Build arrived, and 31 planting taps hoed).
+const rackAt = new Map();
+const rackMoves = [];
+const screen = async () => {
+  const v = await screen0();
+  for (const [t, x] of Object.entries(v.rack)) {
+    if (!rackAt.has(t)) rackAt.set(t, { x, line: v.line });
+    else if (Math.abs(rackAt.get(t).x - x) > 1.5) rackMoves.push(`${t} ${Math.round(rackAt.get(t).x)} to ${Math.round(x)} at "${v.line}"`);
+  }
+  return v;
+};
+const screen0 = () =>
   p.evaluate(() => {
+    const rack = {};
+    for (const t of document.querySelectorAll('.toolbar .tool[data-tool], .toolbar .tool.act')) {
+      const r = t.getBoundingClientRect();
+      if (r.width > 0) rack[t.dataset.tool ?? 'sleep'] = r.left + r.width / 2;
+    }
     const vis = (sel) => {
       const e = document.querySelector(sel);
       return !!e && getComputedStyle(e).display !== 'none' && !e.closest('.gone') && e.getBoundingClientRect().width > 0;
@@ -120,6 +140,7 @@ const screen = () =>
       notes: document.querySelectorAll('.goals .slip').length,
       info: vis('.info:not(.empty):not(.quiet)'),
       view: vis('.topbtns .viewbtn'),
+      rack,
     };
   });
 const send = (c) => p.evaluate((c) => window.sunup.input.push(c), c);
@@ -264,13 +285,22 @@ check('one line: plant seeds', /sow|seed/i.test(s.line), s.line);
 check('no board or requests yet', !s.board && s.notes === 0);
 await shot('4-plant');
 
-// 4. Plant three radishes in the bare row (y=7).
+// 4. Round 10: the line asks for eight seeds and counts down ("Plant seeds in the bare soil." sowed all sixteen plots,
+// and the first pair had no soil). Plant three radishes in the bare row (y=7): it says five more; then five more.
+check('round 10: the plant line asks for eight seeds', s.line === 'Plant 8 seeds in the bare soil.', s.line);
 await send({ type: 'seed', crop: 'radish' });
 await send({ type: 'tool', tool: 'seeds' });
 for (let x = 2; x < 5; x++) await actAt(x, 6, 's');
 await frames(10);
-await lineAfter('Plant seeds in the bare soil.');
 s = await screen();
+check('round 10: after three, it counts down: "Plant 5 more seeds in the bare soil."', s.line === 'Plant 5 more seeds in the bare soil.', s.line);
+await actAt(5, 6, 's');
+for (let x = 2; x < 6; x++) await actAt(x, 7, 's');
+await frames(10);
+const left = await p.evaluate(() => { const st = window.sunup.state; let n = 0; for (let y = 5; y < 9; y++) for (let x = 2; x < 6; x++) if (!st.plots[y * st.W + x].crop) n++; return n; });
+await lineAfter('Plant 1 more seed in the bare soil.');
+s = await screen();
+check('round 10: at eight the plant line goes, and soil stays bare for the first pair', !/^Plant/.test(s.line) && left >= 4, `line "${s.line}", ${left} bare`);
 check('after planting, nothing new until day 3', !s.board, `line "${s.line}"`);
 await shot('5-after-plant');
 
@@ -354,9 +384,12 @@ const want = await p.evaluate(() => {
   const o = st.orders.find((q) => q.taken !== false);
   const it = o.items[0];
   const spots = [];
-  for (let i = 0; i < st.plots.length && spots.length < it.n; i++) {
+  // (Round 10: the plant lesson sows eight, so a request for five may find fewer bare plots in the first field: then
+  // crops sown for market there make way, as a harvest would.)
+  for (let pass = 0; pass < 2; pass++) for (let i = 0; i < st.plots.length && spots.length < it.n; i++) {
     const q = st.plots[i];
-    if (st.parcelOf[i] !== 0 || q.crop) continue;
+    if (st.parcelOf[i] !== 0 || st.tiles[i] !== 'field' || spots.some((t) => t.y * st.W + t.x === i)) continue;
+    if (q.crop && (pass === 0 || q.crop.for !== undefined)) continue;
     q.tilled = true;
     // (Round 6: sown for the request, as only crops sown for it count.)
     q.crop = { id: st.nextId++, kind: it.crop, age: 99, stage: 4, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day, for: o.id };
@@ -438,8 +471,8 @@ const fieldStamps = await p.evaluate(() => [...document.querySelectorAll('.dialo
 // Round 3: fields 3 to 6 hid their prices behind "Reputation 4". Each card says its price once: on the stamp, or in
 // its words when the stamp shows the reputation it wants.
 const fieldCards = await p.evaluate(() => [...document.querySelectorAll('.dialog .list .item')].filter((e) => e.querySelector('.btn')).map((e) => e.textContent));
-// (Round 9: the fifth and sixth fields cost 3,000 and 4,500.)
-const prices = [800, 1500, 3000, 4500].map((n) => n.toLocaleString('en-US'));
+// (Round 9: the fifth and sixth fields cost 3,000 and 4,500. Round 10: 1,200, 2,200, 3,600 and 5,000.)
+const prices = [1200, 2200, 3600, 5000].map((n) => n.toLocaleString('en-US'));
 check('each field\u2019s price shows once (on its stamp, or in its words when the stamp asks for reputation)', fieldStamps.length === 4 && fieldStamps.every((t) => /^Reputation \d+$/.test(t)) && fieldCards.every((t, i) => t.split(prices[i]).length - 1 === 1), JSON.stringify(fieldCards));
 await p.evaluate(() => window.sunup.dialogs.close(true));
 await frames(10);
@@ -1118,8 +1151,9 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   const spans = await p.evaluate(() => window.__spans);
   const shown = ends.filter((e) => e.seen > 0);
   const night = (e) => e.overOn !== null && e.day > e.overOn;
-  // (Round 9: the line to choose goes with its Accept, and a count line the moment its count is met.)
-  const early = (e) => e.id === 'choose' || e.id === 'sowfor';
+  // (Round 9: the line to choose goes with its Accept, and a count line the moment its count is met. Round 10: the
+  // plant line counts down too, its words changing with each seed.)
+  const early = (e) => e.id === 'choose' || e.id === 'sowfor' || e.id === 'plant';
   const short = shown.filter((e) => e.seen < 3.95 && !night(e) && !early(e));
   const onPage = (text) => spans.filter((x) => x.text === text).reduce((a, x) => a + x.ms, 0);
   console.log(`     lesson lines when finished (seconds seen by the tutor; ms in the page): ${shown.map((e) => `${e.id} ${e.seen.toFixed(1)} s, ${onPage(e.text)} ms`).join('; ')}`);
@@ -1179,6 +1213,8 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   check('round 7: and it is still night: the soil far darker than at noon', storm.soil < noon.soil * 0.5, JSON.stringify({ noon, storm }));
   await q.close();
 }
+// Round 10: no tool, nor Sleep, moves on the rack once it is there (the rack grew from its middle as tools came).
+check(`round 10: every tool and Sleep keep their place on the rack from the morning they arrive (${[...rackAt.keys()].join(', ')})`, rackAt.size >= 6 && rackMoves.length === 0, rackMoves.slice(0, 4).join('; '));
 check('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 console.log(failed ? `LESSONS FAILED (${failed})` : 'LESSONS OK', `shots in ${out}`);

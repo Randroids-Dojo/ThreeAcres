@@ -99,6 +99,17 @@ export const FIRST_PAIR_MOST = 5;
 export const FAIR_MORE = 2;
 export const FAIR_LEAN = [0, 1, -1, 0] as const;
 export const FAIR_OFF = 0.2;
+/**
+ * Round 10: a pair comes every morning while fewer than this many requests are taken (two could be open before the
+ * first was filled, and four after: the third spring request could not ripen by the fair, and the late-spring offers
+ * for summer crops, which count for the summer fair, never came).
+ */
+export const TAKEN_MOST = 6;
+/**
+ * Round 10: mornings to spare (beyond the requests the fair still wants) before a pair's days may matter to it: one
+ * side due by the fair, the other after it, for the next season's. With fewer, both sides count for the fair.
+ */
+export const FAIR_SPARE = 2;
 /** Round 9: a fair needs at least this many days of its season left when it is first set, or it waits for the next season. */
 export const FAIR_LEAD = 6;
 /**
@@ -110,9 +121,11 @@ export const FAIR_LEAD = 6;
  * pumpkins are worth more at market, and the choice was a sum. Now the safe
  * one is worth the pair's average market rate plus this, and the bold one
  * (rush, long or big) a little more (`REQUEST_EDGE`), so the choice turns on
- * risk, timing and plots.
+ * risk, timing and plots. Round 10: 6 (it was 5): "the crate earns much more
+ * than requests", 18% of what a farm earned came from their gains; now about
+ * a quarter, with a pair every morning.
  */
-export const REQUEST_RATE = 5;
+export const REQUEST_RATE = 6;
 /**
  * Round 8: how much more the bold one of a pair is worth for each plot-day
  * than the safe one: a rush has no day to spare and cannot be replanted, a
@@ -123,8 +136,11 @@ export const REQUEST_EDGE = { rush: 0.15, long: 0.1, big: 0.1 } as const;
 export const REQUEST_CLOSE = 0.2;
 /** Round 7: a request pays at least this share over what its crops fetch at market, once the gain cap has scaled it. */
 export const REQUEST_FLOOR = 0.15;
-/** The most a request's gain over market can be: this much for each plot of owned field, so requests grow with the farm. */
-export const REQUEST_GAIN_PER_PLOT = 14;
+/**
+ * The most a request's gain over market can be: this much for each plot of owned field, so requests grow with the farm.
+ * Round 10: 24 (it was 14), so the cap scales a request down less than its rate does.
+ */
+export const REQUEST_GAIN_PER_PLOT = 24;
 /** How a bold request is sized against its safe partner, in plot-days: a long crop about twice, a big one about 2.2 times. */
 export const REQUEST_SPAN = { long: 2, big: 2.2 } as const;
 /** No request asks for more than this share of the farm's plots (a pair is a choice, not the whole farm). */
@@ -144,9 +160,10 @@ export const REQUEST_SHARE = { rush: 0.32, easy: 0.3, quick: 0.3, small: 0.18, s
 export const REQUEST_GRACE = { rush: 0, easy: 2, other: 1 } as const;
 /**
  * Sunup's fields beyond the first: the reputation the land agent wants before he sells each (by field id). Round 5
- * eased the later ones (2, 4, 6, 8): the fifth playtest sat on 1,755 coins by Summer 9 with nothing to buy.
+ * eased the later ones (2, 4, 6, 8): the fifth playtest sat on 1,755 coins by Summer 9 with nothing to buy. Round 10:
+ * 3, 5, 8 and 12 (they were 2, 3, 5 and 7): a pair every morning brings reputation about twice as fast.
  */
-export const FIELD_REP = [0, 0, 2, 3, 5, 7] as const;
+export const FIELD_REP = [0, 0, 3, 5, 8, 12] as const;
 /** Sunup: in the last days of a season the next season's seeds can go in, so the turn takes nothing you could have planned for. */
 export const SEASON_PREVIEW_DAYS = 3;
 export const HAND_SLOWER = 1.4;
