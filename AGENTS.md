@@ -46,6 +46,7 @@ node scripts/qa/shell-keys.mjs [url]   # the switcher on a keyboard: Escape and 
 node scripts/qa/sunup-keys.mjs [url]   # Sunup on a keyboard: a focused button never takes Space, Sleep before evening asks, Space works at the well
 node scripts/qa/sunup-queue.mjs [url]  # Sunup's tap queue with real touch: each tap keeps its seed, well trips never merge, crows go first, no question eats the queue
 node scripts/qa/sunup-first15.mjs [url] # Sunup's first fifteen minutes on a phone: when the first real choice comes, how many, and dead days
+node scripts/qa/sunup-view.mjs [url]   # Sunup's two views: how much farm each frames on a phone and a desktop, blank bands, field and well together
 node scripts/qa/shot.mjs "preset=patchwork&fresh" /tmp/x.png 412 900
 npx tsx scripts/balance.ts             # thirty bot days per game, money and harvest numbers
 npx tsx scripts/ranch-sell-aim.ts      # Thistledown: share of blows that sell from 1.6 to 8 m with aiming errors, and whether the sell crosshair told the truth
@@ -54,12 +55,16 @@ node scripts/deck-board.mjs            # Seedbound: how the board persists (crop
 npx tsx scripts/deck-seasons.ts        # Seedbound: per-season clear rates for years 1 to 3 with the decent, strict and guided bots
 npx tsx scripts/deck-strategies.ts     # Seedbound: year 1, year 2 and win rates for each stall strategy (is one dominant?)
 npx tsx scripts/deck-twists.ts         # Seedbound: what each twist really costs or pays a run, against the quota it moves
+npx tsx scripts/deck-crops.ts          # Seedbound: does each engine change what you plant (each crop's share of the take, per engine)
+npx tsx scripts/deck-guided-days.ts    # Seedbound: the guided spring day by day, for the careful line and the decent bot
 npx tsx scripts/ranch-orders.ts        # Thistledown: how varied each morning's orders are and whether they compete
 npx tsx scripts/ranch-catch.ts         # Thistledown: catch success per kind for a careless thumb against a careful one
 npx tsx scripts/ranch-first15.ts       # Thistledown: a scripted player's first fifteen minutes: dead walking, idle time, gaps between new things
 npx tsx scripts/ranch-hunt.ts          # Thistledown: how long a rare downy's hunt takes a careful player, clue to catch
 node scripts/ranch-catch-real.mjs      # the same with real touch in the browser (RANCH_URL=...)
 node scripts/ranch-pest-night.mjs      # Thistledown: pests readable at night (eye glow measured from the frame)
+node scripts/ranch-tell-body.mjs       # Thistledown: the tug's tell on the downy's body, measured from the frame at 6 to 10 m (RANCH_URL=...)
+node scripts/ranch-pen-real.mjs        # Thistledown: starter food, emptying a feeder and Pull's sorting with real touch (RANCH_URL=...)
 node scripts/render2d-shots.mjs        # 2D contact sheet; also render2d-perf, -flicker, -actors, -crops, -game
 node scripts/render3d-flash.mjs        # 3D frame readback for black or NaN pixels; also render3d-shots, -perf, -pick, -leak
 node scripts/audio-check.mjs           # audio levels, latency, crossfades, bursts (writes WAVs to /tmp/acres-audio-2)
