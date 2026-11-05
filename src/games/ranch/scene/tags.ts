@@ -4,6 +4,7 @@
 // and away; the rest fold up when you walk off.
 
 import { BoxGeometry, CanvasTexture, Color, DoubleSide, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector3, type Camera } from 'three';
+import { TAG_MAX } from '../menu';
 import type { MenuOption } from '../sim';
 import { canvas, paintTag, tex } from './paint';
 
@@ -20,7 +21,7 @@ export interface Rail {
 
 const TW = 0.56;
 const TH = 0.28;
-const MAX = 6;
+const MAX = TAG_MAX;
 
 interface Tag {
   pivot: Group;

@@ -557,7 +557,7 @@ describe('P2: a new kind\'s food is easy to get the day you bring it home', () =
       const stocked = evs.filter((e) => (e.t as string) === 'stock');
       expect(stocked.length, 'once').toBe(1);
       // (Round 9: a pen with no feeder gets one, the sack in it: lying by the gate, a pull at the fluff took 9 of 12.)
-      expect(s.pads[4].feeder).toEqual({ t: 'sweetroot', n: 12 });
+      expect(s.pads[4].feeder).toMatchObject({ t: 'sweetroot', n: 12 });
       expect(s.pads[4].ups).toContain('feeder');
       expect(roots).toBe(0);
     }

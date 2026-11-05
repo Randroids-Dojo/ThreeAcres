@@ -10,6 +10,9 @@ import type { MenuOption } from './sim';
 
 export type PickDev = 'touch' | 'mouse' | 'pad';
 
+/** The most tags a post hangs (round 10: every menu stays within it, so every option can be taken). */
+export const TAG_MAX = 6;
+
 /** Radians of your own looking after the tags come down before the crosshair may choose one. */
 const LOOK_FIRST = 0.02;
 

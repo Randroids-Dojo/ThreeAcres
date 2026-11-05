@@ -57,6 +57,14 @@ const res = await page.evaluate(() => {
   take(post(1));
   set('pen', ['feeder'], { feeder: { t: 'cloverhead', n: 12 } });
   take(post(1));
+  // (Round 10: a clover pen's feeder of sweetroots says how to empty it; one of two foods says both.)
+  const cl = sim.spawn('clover', 0, 0, true);
+  cl.pen = 1;
+  set('pen', ['feeder'], { feeder: { t: 'sweetroot', n: 12 } });
+  take(post(1));
+  set('pen', ['feeder'], { feeder: { t: 'sweetroot', n: 12, t2: 'cloverhead', n2: 18 } });
+  take(post(1));
+  cl.gone = true;
   set('pen', ['feeder', 'high', 'trough', 'hedge', 'chute']);
   take(post(1));
   set('garden');
@@ -370,6 +378,18 @@ await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
 check('the price board chalks up the morning\'s offers: what (by noon, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by noon|by dusk|after 9 pm)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+// Round 10: the first order runs to the next day's dusk; the chalk says "by dusk tomorrow", as its tag does (it said
+// "by dusk" beside a tag reading "By dusk tomorrow").
+const firstSays = await page.evaluate(() => {
+  const r = window.ranch;
+  const s = r.sim.s;
+  const keep = s.orders;
+  s.orders = [{ kind: 'clover', n: 4, got: 0, paid: 0, mult: 2, pay: 48, state: 'offer', until: s.day + 1 }];
+  const out = { chalk: r.boardOrders()[0], tag: r.sim.offerTag(s.orders[0]) };
+  s.orders = keep;
+  return out;
+});
+check('round 10: the first order\'s chalk and tag agree: "by dusk tomorrow"', /by dusk tomorrow/.test(firstSays.chalk) && /By dusk tomorrow/.test(firstSays.tag.note), JSON.stringify(firstSays));
 // The board's tags: one per offer, its note saying what it earns, fitting the tag.
 const boardTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -379,7 +399,7 @@ const boardTags = await page.evaluate(() => {
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
 // Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
 // Round 8: each with its condition first (due by noon, by dusk or after dark; the hunt's in its title).
-check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|By dusk tomorrow|Sell after 9 pm)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today)))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|By dusk tomorrow|Sell after 9 pm)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
 // Round 8: every condition's tag fits at its longest (big numbers, the longest kind names).
 const condTags = await page.evaluate(() => {
   const r = window.ranch;
@@ -690,36 +710,59 @@ await b.close();
     return { shut, open: true, tags, during, after: r.props.gates.ridge.tag.visible };
   });
   check('phone (round 9): the gate\'s painted board steps aside while its tag hangs, and is back after (so its price shows once)', gateB.open && gateB.shut && gateB.tags === 1 && !gateB.during && gateB.after, JSON.stringify(gateB));
-  // Round 9 (shot 110): a garden post's five tags, a lone one in the bottom row: the Use button stays by the thumb
+  // Round 9 (shot 110): a garden post's tags with a lone one in the bottom row: the Use button stays by the thumb
   // buttons, clear of every tag (it jumped to the top middle, as the box round all the tags covered its place).
-  const g5 = await ph.evaluate(() => {
+  // Round 10: a bare garden post keeping clover, ember and brook, every upgrade known (a feed run next door): six tags,
+  // every option it has hung (a seventh, "Plant dewberries", never did), and with three rows of tags the Use button
+  // still sits low on the right by the thumb (it jumped to the top middle, y about 230): in Jump's place, Jump aside.
+  const garden = async (crop) => {
+    const g = await ph.evaluate((crop) => {
+      const r = window.ranch;
+      const s = r.sim.s;
+      r.closeMenu();
+      s.hour = 10;
+      for (const w of ['lesson:plant', 'up:garden', 'garden', 'up:run', 'lesson:feeder']) s.learn.includes(w) || s.learn.push(w);
+      s.pads[0].kind = 'garden';
+      s.pads[0].crop = crop;
+      s.pads[0].ups = [];
+      s.pads[1].kind = 'pen';
+      s.pads[1].ups = ['feeder'];
+      s.pads[4].kind = 'pen';
+      r.sim.phys.setPads(s.pads);
+      for (const [k, x, z] of [['ember', 6, 43.5], ['clover', 17, 26.5], ['brook', 6, 44.5]]) if (!s.downies.some((d) => !d.gone && d.tame && d.kind === k)) r.sim.spawn(k, x, z, true).g5 = true;
+      const p = s.player;
+      p.x = 4.6; p.z = 34; p.y = r.sim.phys.floor(4.6, 34);
+      r.aimAt(3.8 + 0.6, r.sim.phys.floor(3.8, 31.8) + 1.6, 31.8);
+      return r.sim.menu({ kind: 'pad', id: 0, label: '', x: 0, y: 0, z: 0 }).map((o) => o.id);
+    }, crop);
+    await frames(ph, 6);
+    const actG = await centre('.rt-act.show');
+    if (actG) await tap(actG[0], actG[1], 4);
+    await ph.waitForTimeout(900);
+    const LG = await layout();
+    const hung = await ph.evaluate(() => window.ranch.menuOptions());
+    const jumpGone = await ph.evaluate(() => { const j = document.querySelector('.rt-jump'); return !j || getComputedStyle(j).display === 'none' || j.getBoundingClientRect().width === 0; });
+    return { g, LG, hung, jumpGone };
+  };
+  for (const crop of [null, 'cloverhead']) {
+    const { g, LG, hung, jumpGone } = await garden(crop);
+    const homeish = LG.act.l > LG.w * 0.55 && LG.act.t > LG.h * 0.6;
+    const all = g.every((id) => hung.includes(id)) && g.length === hung.length;
+    console.log(`   garden post (${crop ? 'growing' : 'bare'}): ${g.length} options [${g.join(', ')}], ${LG.rects.length} tags hang; Use at ${Math.round(LG.act.l)},${Math.round(LG.act.t)} (Jump ${jumpGone ? 'aside' : 'in place'})`);
+    check(`phone (round 10): a ${crop ? 'growing' : 'bare'} garden post keeping three kinds hangs every option it has as a tag (${g.length}), "Plant dewberries" among them`, all && LG.rects.length === g.length && g.includes('garden:sow:dewberry'), JSON.stringify({ g, hung }));
+    check(`phone (round 10): with ${LG.rects.length} tags hanging the Use button stays low on the right by the thumb, clear of every tag`, homeish && !LG.rects.some((q) => hit(LG.act, q)), JSON.stringify({ act: LG.act, rects: LG.rects.map((q) => [Math.round(q.l), Math.round(q.t), Math.round(q.r), Math.round(q.b)]) }));
+    await ph.screenshot({ path: `/tmp/ranch-tags-garden-${crop ? 'growing' : 'bare'}.png` });
+  }
+  // Every option at every post on a busy ranch fits in the tags a post hangs (six).
+  const most = await ph.evaluate(() => {
     const r = window.ranch;
-    const s = r.sim.s;
-    r.closeMenu();
-    s.hour = 10;
-    for (const w of ['lesson:plant', 'up:garden', 'garden']) s.learn.includes(w) || s.learn.push(w);
-    s.pads[0].kind = 'garden';
-    s.pads[0].crop = null;
-    s.pads[0].ups = [];
-    s.pads[4].kind = 'pen';
-    r.sim.phys.setPads(s.pads);
-    if (!s.downies.some((d) => !d.gone && d.tame && d.kind === 'ember')) r.sim.spawn('ember', 6, 43.5, true).g5 = true;
-    if (!s.downies.some((d) => !d.gone && d.tame && d.kind === 'clover')) r.sim.spawn('clover', 17, 26.5, true).g5 = true;
-    const p = s.player;
-    p.x = 4.6; p.z = 34; p.y = r.sim.phys.floor(4.6, 34);
-    r.aimAt(3.8 + 0.6, r.sim.phys.floor(3.8, 31.8) + 1.6, 31.8);
-    return r.sim.menu({ kind: 'pad', id: 0, label: '', x: 0, y: 0, z: 0 }).length;
+    const out = [];
+    for (let i = 0; i < 6; i++) out.push(r.sim.menu({ kind: 'pad', id: i, label: '', x: 0, y: 0, z: 0 }).length);
+    return out;
   });
-  await frames(ph, 6);
-  const actG = await centre('.rt-act.show');
-  if (actG) await tap(actG[0], actG[1], 4);
-  await ph.waitForTimeout(900);
-  const LG = await layout();
-  const homeish = LG.act.l > LG.w * 0.55 && LG.act.t > LG.h * 0.5;
-  check('phone (round 9): a garden post\'s five tags hang, and the Use button stays by the thumb buttons (right, low), clear of every tag', g5 === 5 && LG.rects.length === 5 && homeish && !LG.rects.some((q) => hit(LG.act, q)), JSON.stringify({ g5, act: LG.act, rects: LG.rects.map((q) => [Math.round(q.l), Math.round(q.t), Math.round(q.r), Math.round(q.b)]) }));
-  await ph.screenshot({ path: '/tmp/ranch-tags-garden5.png' });
-  // (Put back as it was: the downies it spawned go with the pen, so none is left loose as a stray.)
-  await ph.evaluate(() => { const r = window.ranch; r.closeMenu(); const s = r.sim.s; for (const d of s.downies) if (d.g5) d.gone = true; s.pads[0].crop = 'cloverhead'; s.pads[4].kind = 'empty'; r.sim.phys.setPads(s.pads); });
+  check('phone (round 10): no post on the busy ranch offers more options than the six tags a post hangs', most.every((n) => n <= 6), most.join(', '));
+  // (Put back as it was: the downies it spawned go with the pens, so none is left loose as a stray.)
+  await ph.evaluate(() => { const r = window.ranch; r.closeMenu(); const s = r.sim.s; for (const d of s.downies) if (d.g5) d.gone = true; s.pads[0].crop = 'cloverhead'; s.pads[0].ups = []; s.pads[4].kind = 'empty'; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
   // A lesson chooses the tag it teaches: the garden lesson, at an empty plot. (Round 7: it comes from the second morning.)
   await ph.evaluate(() => { const r = window.ranch; const s = r.sim.s; r.closeMenu(); s.learn = s.learn.filter((w) => !['lesson:garden', 'lesson:plant', 'garden'].includes(w)); s.coins = 400; s.day = Math.max(2, s.day); s.night = s.day; s.hour = 10; s.pads[1].kind = 'empty'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); });
   await ph.waitForFunction(() => window.ranch.seen().lesson === 'garden' && window.ranch.seen().line !== '', null, { timeout: 8000 });

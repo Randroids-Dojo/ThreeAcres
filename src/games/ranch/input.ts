@@ -98,6 +98,12 @@ export class Input {
   private holds = new Map<string, { t0: number; slot: number; dir: number; fired: boolean }>();
   private mouseL = false;
   private mouseR = false;
+  /** Round 10, no pointer lock: where and when the right button went down, and whether it has dragged (a look). */
+  private rFrom = { x: 0, y: 0, t: 0 };
+  private rDrag = false;
+  /** Pixels a right press may move and still be a pull, and milliseconds it waits still before pulling (no lock). */
+  static readonly R_DRAG = 6;
+  static readonly R_STILL = 120;
   private mouseM = false;
   private lastMX = 0;
   private lastMY = 0;
@@ -276,6 +282,8 @@ export class Input {
       this.ev.puff = true;
     } else if (e.button === 2) {
       this.mouseR = true;
+      this.rFrom = { x: e.clientX, y: e.clientY, t: performance.now() };
+      this.rDrag = false;
     } else if (e.button === 1) {
       this.mouseM = true;
       e.preventDefault();
@@ -295,7 +303,9 @@ export class Input {
       this.ev.lookY += e.movementY * this.sens;
       if (e.movementX || e.movementY) this.ev.looked = true;
     } else if (this.mouseR || this.mouseM) {
-      // No pointer lock: right-drag (or middle-drag) looks.
+      // No pointer lock: right-drag (or middle-drag) looks. (Round 10: a right press that drags is a look and only a
+      // look, never a pull: it both looked and pulled.)
+      if (this.mouseR && Math.hypot(e.clientX - this.rFrom.x, e.clientY - this.rFrom.y) > Input.R_DRAG) this.rDrag = true;
       const dx = e.clientX - this.lastMX;
       const dy = e.clientY - this.lastMY;
       this.ev.lookX += dx * 0.0042;
@@ -563,6 +573,29 @@ export class Input {
 
   private actAt = '';
 
+  /** Round 10: Jump's centre (CSS px) as it sits, or null if it is not on screen. */
+  jumpSpot(): { x: number; y: number } | null {
+    const b = this.btn.jump;
+    if (!b.classList.contains('tucked')) {
+      const r = b.getBoundingClientRect();
+      if (r.width > 0) this.jumpAt = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    return this.jumpAt;
+  }
+  private jumpAt: { x: number; y: number } | null = null;
+
+  /** Round 10: Jump steps aside while the Use button takes its place (six tags hanging over Use's own). */
+  tuckJump(on: boolean): void {
+    const b = this.btn.jump;
+    if (b.classList.contains('tucked') === on) return;
+    b.classList.toggle('tucked', on);
+    if (on && this.held.has(b)) {
+      this.held.delete(b);
+      b.classList.remove('down');
+      this.tJump = false;
+    }
+  }
+
   setAct(label: string | null): void {
     this.btn.act.classList.toggle('show', !!label);
     const lb = this.btn.act.querySelector('.lb');
@@ -587,8 +620,16 @@ export class Input {
 
   // ------------------------------------------------------------ gamepad
 
+  /** When the pad was last read (ms), so its look turns at the same rate whatever the frame rate. */
+  private padT = -1;
+
   private pollPad(f: Frame): void {
     const pads = navigator.getGamepads?.();
+    // (Round 10: the stick turned 2.8/60 rad a frame, so at 30 fps half as fast: a loaded machine's 0.4 s of right
+    // stick fell short of the look lesson's 0.6 rad. Seconds since the last read, a 60th at most a tenth.)
+    const now = performance.now();
+    const dt = this.padT < 0 ? 1 / 60 : Math.min(0.1, Math.max(0, (now - this.padT) / 1000));
+    this.padT = now;
     if (!pads) return;
     const gp = Array.from(pads).find((p) => p && p.connected);
     if (!gp) return;
@@ -606,7 +647,7 @@ export class Input {
       f.moveX = lx;
       f.moveZ = -ly;
     }
-    const look = 2.8 / 60;
+    const look = 2.8 * dt;
     if (rx || ry) {
       f.lookX += rx * Math.abs(rx) * look;
       f.lookY += ry * Math.abs(ry) * look;
@@ -654,7 +695,9 @@ export class Input {
     f.sprint = k.has('ShiftLeft') || k.has('ShiftRight') || this.stick.rim;
     f.jump = k.has('Space') || this.tJump;
     f.jumpPressed = this.ev.jump;
-    f.draw = this.mouseR || this.tDraw || k.has('KeyF');
+    // (With no pointer lock, a right press pulls only held still: a right-drag is a look.)
+    const rPull = this.mouseR && (this.locked || (!this.rDrag && performance.now() - this.rFrom.t >= Input.R_STILL));
+    f.draw = rPull || this.tDraw || k.has('KeyF');
     f.puff = this.mouseL || this.tPuff;
     f.puffPressed = this.ev.puff;
     f.interact = this.ev.interact;

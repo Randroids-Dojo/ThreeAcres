@@ -593,14 +593,19 @@ if (!process.env.EVENING) {
   check('phone: the ring goes warm while it pulls back', meadowPull.warm, JSON.stringify(meadowPull));
   // (Round 8: once the tug is learned a wild one can get away, a duel, so a thumb that lost it walks up to the
   // nearest and pulls again, as a player would; the first pull back and its line are the checks above.)
-  for (let again = 0; again < 3 && !(await k.finished('meadow')); again++) {
+  // (Round 10: two in the one trip: after the first, "Catch one more while you are out.", so the loop never sends you
+  // out again for "another".)
+  const meadowLines = [...meadowPull.lines];
+  for (let again = 0; again < 5 && !(await k.finished('meadow')); again++) {
     const q = await k.downy('wild');
     if (!q) break;
     await page.waitForTimeout(1700);
     await k.place(q.x + 4.2, q.z + 2, q.x, q.y + 0.25, q.z);
-    await pullReading(12000, 17, async () => { const w = await k.downy('wild'); if (w) await k.aim(w.x, w.y + 0.25, w.z); }, () => k.finished('meadow'));
+    const more = await pullReading(12000, 17, async () => { const w = await k.downy('wild'); if (w) await k.aim(w.x, w.y + 0.25, w.z); }, () => k.finished('meadow'));
+    meadowLines.push(...more.lines);
   }
-  check('phone: letting go through its pull and pulling again catches the wild downy, ending the meadow lesson and the tug line', (await k.finished('meadow')) && (await k.finished('ease')), await k.why());
+  check('phone (round 10): after the first catch the meadow line asks for one more while you are out', meadowLines.includes('Catch one more while you are out.'), JSON.stringify(meadowLines));
+  check('phone: letting go through its pull and pulling again catches the wild downies, ending the meadow lesson and the tug line', (await k.finished('meadow')) && (await k.finished('ease')), await k.why());
   s = await k.st();
   // Round 5: hunger runs again, but the afternoon stays at half past four through the loop lesson (the fifth
   // playtest's loop ran from 16:30 through the pests to 2:40 am, and the sleep line lapsed both nights).
@@ -618,7 +623,11 @@ if (!process.env.EVENING) {
   if (cw >= 0 && (await k.st()).sel !== cw) await tapWindow(cw);
   await k.place(17, 34.5, 17, 6.6, 26.5);
   await frames(page, 3);
-  await press('.rt-puff', 90, 34);
+  // (Round 10: two caught in the meadow, two to blow in.)
+  for (let b = 0; b < 3 && (await page.evaluate(() => window.ranch.sim.s.slots.some((q) => q.t === 'clover' && q.n > 0))); b++) {
+    await press('.rt-puff', 90, 34);
+    await page.waitForTimeout(500);
+  }
   check('phone: blown into the pen, nothing is left aboard to pen', await k.waitFor(() => !window.ranch.sim.s.slots.some((q) => (q.t === 'clover') && q.n > 0) && window.ranch.sim.s.downies.filter((d) => !d.gone && d.pen === 1).length >= 2, null, 5000), await k.why());
   // A downy of yours gets hungry: it shows the food it wants, and the line says what to do about it.
   // (Fluff comes first in the loop, so clear any picked up in the meadow to look at the feeding step.)
@@ -671,8 +680,8 @@ if (!process.env.EVENING) {
   await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.sell = (s.learnCount.sell ?? 0) + 6; s.learnCount['sell:blown'] = (s.learnCount['sell:blown'] ?? 0) + 6; });
   await page.waitForTimeout(600);
   check('phone: six plain sales do not finish the loop lesson', (await k.seen()).lesson === 'farm');
-  await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.cycle = (s.learnCount.cycle ?? 0) + 3; });
-  check('phone: three turns of the loop finish it', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:farm'), null, 3000), JSON.stringify(await page.evaluate(() => { const s = window.ranch.sim.s; return { from: s.learnCount['farm:from'], cycle: s.learnCount.cycle, now: window.ranch.tutor.current }; })));
+  await page.evaluate(() => { const s = window.ranch.sim.s; s.learnCount.cycle = (s.learnCount.cycle ?? 0) + 2; });
+  check('phone: two turns of the loop finish it (round 10: it was three)', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:farm'), null, 3000), JSON.stringify(await page.evaluate(() => { const s = window.ranch.sim.s; return { from: s.learnCount['farm:from'], cycle: s.learnCount.cycle, now: window.ranch.tutor.current }; })));
   // ---- the day's orders: the first is on the board the moment the loop lesson ends (the fourth playtest's
   // came the next dawn), and its lesson takes the page, pointing at the board: take it there.
   check('phone: the first order brings its lesson', await k.lessonOn('order', 4000));
@@ -682,7 +691,7 @@ if (!process.env.EVENING) {
   const sameMorning = await page.evaluate(() => { const s = window.ranch.sim.s; return { day: s.day, hour: s.hour, posted: s.orderDay }; });
   check('phone: the first order is on the board as soon as the loop lesson ends, the same afternoon, and the clock runs on', sameMorning.posted === sameMorning.day && sameMorning.hour < 17 && (await k.st()).learn.includes('time'), JSON.stringify(sameMorning));
   check('phone: "Take an order at the price board.", the arrow on the board', u.page === 'Take an order at the price board.' && atBoard, `${u.page} ${atBoard}`);
-  check('phone: the price board chalks the offer up: four clover fluff by dusk, and what it pays', board.length === 1 && /^4 clover fluff by dusk, pays [\d,]+$/.test(board[0]), JSON.stringify(board));
+  check('phone: the price board chalks the offer up: four clover fluff by dusk tomorrow (round 10: as its tag says), and what it pays', board.length === 1 && /^4 clover fluff by dusk tomorrow, pays [\d,]+$/.test(board[0]), JSON.stringify(board));
   await k.place(-4.2, 34.6, -4.2, 5.2, 37.6);
   await frames(page, 6);
   await k.shot('phone-14a-order');
@@ -707,7 +716,7 @@ if (!process.env.EVENING) {
   check("phone: the order's first fluff into the crate counts", await k.waitFor(() => window.ranch.sim.s.orders[0].got >= 1, null, 4000), await k.why());
   // With no lesson up, the journal shows the order with its tally, and the next goal under it.
   await page.waitForTimeout(2000);
-  const tally = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), goal: window.ranch.sim.openGoals(1)[0]?.text, o: window.ranch.sim.s.orders[0] }));
+  const tally = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), goal: window.ranch.journalGoal?.() || window.ranch.sim.openGoals(1)[0]?.text, o: window.ranch.sim.s.orders[0] }));
   check('phone: with no lesson up, the journal shows the order\'s tally ("Clover fluff, 1 of N.") and the next goal', tally.lesson === '' && tally.page[0] === `Clover fluff, ${tally.o.got} of ${tally.o.n}.` && tally.o.got >= 1 && tally.page.includes(tally.goal), JSON.stringify(tally));
   await k.shot('phone-14b-goal');
   // ---- Round 6: the feeder before the first night (the sixth playtest's garden lesson left 88 coins against a 300
@@ -851,7 +860,7 @@ if (!process.env.EVENING) {
   check('phone: back to ten or fewer, the pen limit line ticks', await k.waitFor(() => window.ranch.sim.s.learn.includes('lesson:crowd'), null, 6000));
   // No lesson can come yet (150 coins): the journal shows the next goal, calmly, never a blank page.
   await page.waitForTimeout(2200);
-  const calm = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.sim.openGoals(1)[0]?.text }));
+  const calm = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.journalGoal?.() || window.ranch.sim.openGoals(1)[0]?.text }));
   check('phone: with no lesson up, the journal shows the next goal', calm.lesson === '' && !!calm.goal && calm.page.includes(calm.goal), JSON.stringify(calm));
   await page.evaluate(() => { const s = window.ranch.sim.s; s.coins = 260; });
   check('phone: 200 coins bring the garden lesson', await k.lessonOn('garden', 4000));
@@ -868,7 +877,16 @@ if (!process.env.EVENING) {
   await tapTag('build:garden');
   check('phone: building a garden ends the lesson', await k.finished('garden'));
   check('phone: plant lesson comes next', await k.lessonOn('plant'));
-  check('phone: plant line', (await k.ui()).page === 'Blow some food onto the bare soil.');
+  // (Round 10: with no food aboard it says to fetch some first, the arrow on a bed with food on it.)
+  const plantFood = await page.evaluate(() => window.ranch.sim.s.slots.some((q) => q.t && ['cloverhead', 'sweetroot', 'dewberry'].includes(q.t) && q.n > 0));
+  if (!plantFood) {
+    const fetchLine = (await k.ui()).page;
+    const onStarter = await page.evaluate(() => { const m = window.ranch.tutor.mark; return m.on && Math.hypot(m.x - 6, m.z - 26.5) < 1.5; });
+    check('phone (round 10): with no food aboard, "Pull food from a garden first." with the arrow on the starter garden', fetchLine === 'Pull food from a garden first.' && onStarter, fetchLine);
+    await page.evaluate(() => { const s = window.ranch.sim.s; const i = s.slots.findIndex((q) => !q.t); s.slots[i] = { t: 'cloverhead', n: 3 }; });
+    await page.waitForTimeout(500);
+  }
+  check('phone: plant line', (await k.ui()).page === 'Blow some food onto the bare soil.', (await k.ui()).page);
   const ch2 = await k.slotOf('cloverhead');
   if (ch2 >= 0 && (await k.st()).sel !== ch2) await tapWindow(ch2);
   await k.place(28, 32.6, 28, 4.2, 26.8);
@@ -915,7 +933,7 @@ if (!process.env.EVENING) {
   const earnedGate = await k.waitFor(() => (document.querySelector('.rh-page.up h4')?.textContent ?? '') === 'Earned 200 coins', null, 4000);
   check('phone: the opened gate\'s goal shows done with what it earned, after the lesson line', earnedGate);
   await k.waitFor(() => !document.querySelector('.rh-page.up h4'), null, 5000);
-  const after = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.sim.openGoals(1)[0]?.text }));
+  const after = await page.evaluate(() => ({ lesson: window.ranch.seen().lesson, page: document.querySelector('.rh-page').classList.contains('up') ? document.querySelector('.rh-page').textContent.trim() : '', goal: window.ranch.journalGoal?.() || window.ranch.sim.openGoals(1)[0]?.text }));
   check('phone: every lesson done, the journal goes on with the next goal (never blank)', after.lesson === '' && !after.page.includes('Open the gate to Ember') && !!after.goal && after.page.includes(after.goal), JSON.stringify(after));
   // Frame by frame: from the "Earned" page to the next goal, the page never went down and never showed the gate's goal undone.
   await page.waitForTimeout(600);
@@ -992,7 +1010,7 @@ if (!process.env.EVENING) {
   const rareTag = await page.evaluate(() => { const r = window.ranch; const opts = r.sim.menu({ kind: 'board', id: 0, label: '', x: 0, y: 0, z: 0 }); const i = opts.findIndex((o) => /, by (noon|dusk)$/.test(o.title) && /^By the /.test(o.note)); const trip = r.sim.offers().find((o) => o.live && !o.rare); return i < 0 ? null : { id: opts[i].id, title: opts[i].title, note: opts[i].note, all: opts.map((o) => `${o.title}: ${o.note}`), trip: trip ? trip.n * trip.pay : 0 }; });
   const rarePay = Number((rareTag?.note.match(/Pays ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
   // (Round 8: each with its condition: the fluff order and the trip due by noon, by dusk or after dark, the hunt by noon or dusk at its set place.)
-  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds by the week's end once penned (round 9), each with its condition (round 8)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /^(By noon|By dusk|Sell after 9 pm)\. Pays [\d,]+ on top of sales$/.test(t.split(': ')[1])) && rareTag.all.some((t) => /(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/.test(rareTag.note), JSON.stringify(rareTag));
+  check("phone: the board's tags offer a fluff order, a trip and the rare one, which says where it was seen, what it pays and what it adds over five days once penned (round 10), each with its condition (round 8)", !!rareTag && rareTag.all.length === 3 && rareTag.all.some((t) => /^(By noon|By dusk|Sell after 9 pm)\. Pays [\d,]+ on top of sales$/.test(t.split(': ')[1])) && rareTag.all.some((t) => /(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays/.test(t)) && /^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/.test(rareTag.title) && /^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days)$/.test(rareTag.note), JSON.stringify(rareTag));
   check("phone: the rare one's coins today are no more than the trip's (the playtest's 2,680 was 3.8 times it; round 8: a downy's worth, its worth is the lasting one)", !!rareTag && rarePay > 0 && rarePay <= rareTag.trip, `${rarePay} against ${rareTag?.trip}`);
   await k.shot('phone-18d-rare-tags');
   if (rareTag) await takeTag(rareTag.id);
@@ -1164,10 +1182,21 @@ if (!process.env.EVENING) {
     p.x = -5;
     p.z = 34;
     window.__begins = [];
+    // (Round 10: the longest the clock waited at 6 pm with no line up, and in all; it waited out 30 s twice.)
+    window.__held = { longest: 0, all: 0, from: -1 };
     let last = '';
     const t0 = performance.now();
+    let prev = performance.now();
     const tick = () => {
       const v = r.seen();
+      const now = performance.now();
+      const H = window.__held;
+      if (sim.clockHeld && s.hour >= 18 && !v.line) {
+        if (H.from < 0) H.from = now;
+        H.all += (now - prev) / 1000;
+        H.longest = Math.max(H.longest, (now - H.from) / 1000);
+      } else H.from = -1;
+      prev = now;
       if (v.lesson && v.line && v.lesson !== last) {
         window.__begins.push({ id: v.lesson, t: (performance.now() - t0) / 1000, hour: s.hour, day: s.day });
         last = v.lesson;
@@ -1204,7 +1233,13 @@ if (!process.env.EVENING) {
   const ids = begins.map((b) => b.id);
   check('evening: order, feeder, filling it, dusk, then night, in that order (no garden)', ids.join() === 'order,ups,feeder,dusk,night', ids.join());
   const gaps = begins.slice(1).map((b, i) => b.t - begins[i].t);
-  check('evening: no two new lesson lines within 30 real seconds of each other', gaps.length >= 4 && gaps.every((g) => g >= 29.5), gaps.map((g) => g.toFixed(1)).join(', '));
+  // (Round 10: but while the clock waits at 6 pm the next line comes at once: the spacing stops lines piling up, and
+  // with the clock held it only made you wait, about 30 s twice with no line.)
+  const heldAt = (b) => b.day === 1 && b.hour >= 18 && b.hour < 18.31;
+  check('evening: no two new lesson lines within 30 real seconds of each other, but with the clock held at 6 pm', gaps.length >= 4 && gaps.every((g, i) => g >= 29.5 || heldAt(begins[i + 1]) || heldAt(begins[i])), gaps.map((g, i) => `${begins[i + 1].id} ${g.toFixed(1)}`).join(', '));
+  const held = await page.evaluate(() => window.__held);
+  console.log(`   held at 6 pm with no line: ${held.all.toFixed(1)} s in all, longest ${held.longest.toFixed(1)} s`);
+  check('evening (round 10): the clock held at 6 pm never waits with no line (longest under 3 s)', held.longest < 3, JSON.stringify(held));
   const late = begins.filter((b) => b.id !== 'night' && (b.hour >= 19 || b.day > 1));
   check('evening: no lesson but the night one starts after 7 pm', late.length === 0, late.map((b) => `${b.id} ${b.hour.toFixed(2)}`).join(', '));
   check('evening: the feeder is filled before dusk comes (dusk waited at 6 pm for it)', feederTicked > 0 && feederTicked < 18.3, feederTicked.toFixed(2));
@@ -1426,6 +1461,8 @@ if (!process.env.EVENING) {
   await page.evaluate(() => (window.__pad.axes[0] = 0));
   await frames(page, 4);
   check('pad: the look line names the right stick', (await k.ui()).page === 'Use the right stick to look around.', (await k.ui()).page);
+  // (0.4 s of right stick is 1.1 rad at any frame rate. Round 10: it turned 2.8/60 rad a frame, and on a loaded
+  // machine at 30 fps 0.4 s fell short of the lesson's 0.6 rad, two runs in five.)
   await page.evaluate(() => (window.__pad.axes[2] = 1));
   await page.waitForTimeout(400);
   await page.evaluate(() => (window.__pad.axes[2] = 0));

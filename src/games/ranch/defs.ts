@@ -175,6 +175,9 @@ export type GoalId =
   | 'thistle'
   | 'orders5'
   | 'prized'
+  | 'late'
+  | 'streak'
+  | 'rares'
   | 'fullclover'
   | 'fullember'
   | 'fullbrook'
@@ -205,6 +208,12 @@ export const GOALS: { id: GoalId; text: string; reward: number }[] = [
   { id: 'thistle', text: 'Catch a thistle downy.', reward: 250 },
   { id: 'orders5', text: 'Fill five orders.', reward: 150 },
   { id: 'prized', text: 'Fill a prized order.', reward: 250 },
+  // (Round 10: goals that use what you have built, each one line: the tenth playtest had 14 of 19 goals done by day 5,
+  // and the rest were four full pens and 10,000 coins. An order for after 9 pm, orders on three days running, and a
+  // rare downy of every kind.)
+  { id: 'late', text: 'Fill an order after 9 pm.', reward: 150 },
+  { id: 'streak', text: 'Fill an order three days running.', reward: 200 },
+  { id: 'rares', text: 'Keep a rare downy of every kind.', reward: 300 },
   { id: 'fullclover', text: 'Keep ten clover downies in one pen.', reward: 150 },
   { id: 'fullember', text: 'Keep ten ember downies in one pen.', reward: 250 },
   { id: 'fullbrook', text: 'Keep ten brook downies in one pen.', reward: 300 },

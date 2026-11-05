@@ -444,11 +444,86 @@ export const PRIZED_CAP = 1.5;
 export const OFFER_GAP = 2;
 /** The sack of food a new kind's first pen comes with (see stockFirst). */
 export const STOCK = 12;
+
+type Feeder = RanchState['pads'][number]['feeder'];
+/**
+ * A feeder's foods, the first in first (round 10: it holds up to two, so one feeder serves a mixed pen; the tenth
+ * playtest's clover pen had a feeder of sweetroots, and clover heads bounced off it for two and a half days).
+ */
+export function feederFoods(fd: Feeder): { t: Food; n: number }[] {
+  const out: { t: Food; n: number }[] = [];
+  if (fd.t && fd.n > 0) out.push({ t: fd.t, n: fd.n });
+  if (fd.t2 && (fd.n2 ?? 0) > 0) out.push({ t: fd.t2, n: fd.n2! });
+  return out;
+}
+/** Everything in a feeder, both foods. */
+export const feederTotal = (fd: Feeder): number => Math.max(0, fd.n) + Math.max(0, fd.n2 ?? 0);
+/** Tidy a feeder: an empty first food gives way to the second; an empty food is no food. */
+function feederTidy(fd: Feeder): void {
+  if ((fd.n2 ?? 0) <= 0 || !fd.t2) {
+    fd.t2 = null;
+    fd.n2 = 0;
+  }
+  if (fd.n <= 0 || !fd.t) {
+    fd.t = fd.t2 ?? null;
+    fd.n = fd.t2 ? (fd.n2 ?? 0) : 0;
+    fd.t2 = null;
+    fd.n2 = 0;
+  }
+  if (!fd.t) fd.n = 0;
+}
+/** Put k of a food in a feeder (it must take it: see Sim.feederRefuses); returns how many went in. */
+function feederAdd(fd: Feeder, food: Food, k: number): number {
+  const add = Math.max(0, Math.min(k, FEEDER_CAP - feederTotal(fd)));
+  if (add <= 0) return 0;
+  if (!fd.t || fd.n <= 0 || fd.t === food) {
+    if (fd.t !== food) fd.n = 0;
+    fd.t = food;
+    fd.n += add;
+  } else {
+    if (fd.t2 !== food) fd.n2 = 0;
+    fd.t2 = food;
+    fd.n2 = (fd.n2 ?? 0) + add;
+  }
+  feederTidy(fd);
+  return add;
+}
+/** Take one of a food out of a feeder. */
+function feederTake(fd: Feeder, food: Food): boolean {
+  if (fd.t === food && fd.n > 0) fd.n--;
+  else if (fd.t2 === food && (fd.n2 ?? 0) > 0) fd.n2 = (fd.n2 ?? 0) - 1;
+  else return false;
+  feederTidy(fd);
+  return true;
+}
+/** Seconds between the things a Pull at a feeder's hopper draws out of it (round 10: a feeder can be emptied). */
+export const HOPPER_PULL = 0.14;
+/** How near the crosshair's line must pass a hopper's middle to pull from it (m). */
+export const HOPPER_AIM = 0.6;
+/** Seconds after a press that a steady aim settling on a penned downy still makes it a sort (round 10). */
+export const SORT_LATE = 0.3;
+/** How near the crosshair's line must pass a piece of food or fluff for you to be on it, not the downy past it (m). */
+export const THING_AIM = 0.22;
 /** A trip due by noon pays this much more a downy than one due by dusk (it costs you the morning at home); one after dark more again (your night, with the pests about). */
 export const NOON_TRIP = 1.2;
 export const NIGHT_TRIP = 1.3;
 /** Meals a penned downy eats in a game day, fed (measured: 3.67 for pens of three, six and ten), for a rare one's worth. */
 export const PEN_MEALS = 3.7;
+/**
+ * Round 10: a rare one's pen sheds at most this many more fluff a day (one more a meal from each downy in it until
+ * then), and its tag counts that over RARE_DAYS days. The tenth playtest's day 2 rare one read "Pays 65, then 1,550
+ * more by day 7" beside a trip of 400 and a fluff order of 420: no contest. Now its five days are about a trip's pay
+ * (a clover pen's 300 against trips of 130 to 400; an ember's 500, a brook's 650, against 220 to 700).
+ */
+export const RARE_EXTRA = 5;
+export const RARE_DAYS = 5;
+/** The kinds that come rare (a gold clover, a rose ember, a silver brook). */
+export const RARE_KINDS: DownyKind[] = ['clover', 'ember', 'brook'];
+/**
+ * Round 10: a thistle fluff order is a prized one only with this many thistles kept; with one (the tenth playtest's
+ * paid 922 in one sale, more than its pen of eight clovers made in a day) or two it is a plain one.
+ */
+export const THISTLE_PRIZED = 3;
 
 /** An offer's sort, kind and deadline, for "never the same as one of yesterday's". */
 export function orderKey(o: { kind: DownyKind; live?: boolean; rare?: unknown; by?: number }): string {
@@ -472,8 +547,13 @@ export function rarePenOf(s: RanchState, countAboard = true): number {
   const aboard = countAboard ? s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? (q.downs ?? []).filter((r) => r.rare).length : 0), 0) : 0;
   return open[aboard] ?? -1;
 }
-/** An empty Blow still pushes a puff of air: it sends a pest within this many metres in front of you rolling. */
-export const AIR_REACH = 5;
+/**
+ * An empty Blow still pushes a puff of air: it sends a pest within this many metres in front of you (along the
+ * ground; round 10: it was by the eye, so a pest 4.8 m off was out of reach) rolling.
+ */
+export const AIR_REACH = 5.5;
+/** A pest in front of an empty Blow within this many metres but out of its reach: "Get closer." (round 10). */
+export const PEST_NEAR = 16;
 /**
  * How pests get about (the seventh playtest's sat in the ranch's north-east corner at speed 0, roaming for 40 s,
  * and leaving from 20:52 until after 7 am). leave: walking speed off north at dawn. stuck: seconds of getting
@@ -667,6 +747,19 @@ export class Sim {
   /** This press of Pull started aimed at food or fluff, or has drawn some in: it leaves penned downies be. */
   private pressFood = false;
   private wasDraw = false;
+  /**
+   * Round 10: this press of Pull started squarely on a penned downy of yours: it takes that kind from that pen only,
+   * and no food or fluff, until it is let go (the tenth playtest's six tries to pull 2 embers out of a mixed pen also
+   * took 2 clovers, 9 fluff and a root).
+   */
+  private pressKind: DownyKind | null = null;
+  private pressPen = -1;
+  /** Round 10: this press started on a feeder's hopper: it draws the feeder's food back into the jar. */
+  private pressHopper = -1;
+  private hopperT = 0;
+  /** Seconds this press has been down, and whether it started with the crosshair on food or fluff. */
+  private pressAge = 0;
+  private pressThing = false;
   /** Numbers the meals you give; fluff from one carries it, and its first sale closes the loop. */
   private feedSerial = 0;
   private cycled = new Set<number>();
@@ -1147,16 +1240,40 @@ export class Sim {
     this.lastAim[2] = aim.dz;
     if (dt > 0) this.aimSpin = damp(this.aimSpin, turn / dt, 14, dt);
     // A press that starts aimed at food or fluff (even past Pull's reach) is a pull for that, and never takes a penned downy.
-    if (c.draw && !this.wasDraw) this.pressFood = this.aimedAtThing(aim);
+    if (c.draw && !this.wasDraw) {
+      this.pressFood = this.aimedAtThing(aim);
+      this.pressKind = null;
+      this.pressPen = -1;
+      this.pressAge = 0;
+      // Fluff or food you can see the crosshair on at the press: a pull for that for good (round 3).
+      this.pressThing = this.squareThing(aim) !== null && this.sortTarget(aim) === null;
+      this.pressSorted(aim);
+      // (And one that starts on a feeder's hopper empties it, taking no downy.)
+      this.pressHopper = !this.pressFood && this.pressKind === null ? this.aimedHopper(aim) : -1;
+      if (this.pressHopper >= 0) this.pressFood = true;
+      this.hopperT = 0;
+    } else if (c.draw && this.pressKind === null && this.pressHopper < 0 && !this.pressThing && this.pressAge <= SORT_LATE) {
+      // Round 10: a real thumb's aim is still settling as it comes down. Measured with real touch on a hopping ember, a
+      // press a moment off its body went on sweeping up 9 fluff and a root for the whole hold, two rounds in six.
+      this.pressSorted(aim);
+    }
+    if (c.draw) this.pressAge += dt;
+    else {
+      this.pressKind = null;
+      this.pressPen = -1;
+      this.pressHopper = -1;
+    }
     this.wasDraw = c.draw;
     if (c.draw) {
       // Downies come only when the crosshair is on them: the cone sweeps up food
       // and fluff, never a downy standing beside them.
-      const aimed = this.aimedDowny(aim);
+      const sorting = this.pressKind !== null;
+      const aimed = sorting ? this.aimedSort(aim) : this.aimedDowny(aim);
       // A pull with food or fluff in its cone never takes a penned downy of yours (the third playtest's
-      // sweeps of a pen's fluff took a penned downy 3 times in 9).
+      // sweeps of a pen's fluff took a penned downy 3 times in 9). (A sorting press takes no food or fluff.)
       let sweeping = false;
       for (const it of s.items) {
+        if (sorting) break;
         if (it.gone || it.noPull > 0 || (it.flyT >= 0 && it.flyT < 0.3)) continue;
         if (this.inCone(aim, it.x, it.y, it.z) > 0) {
           sweeping = true;
@@ -1175,7 +1292,7 @@ export class Sim {
           d.drawn = 0;
           if (d !== aimed) continue;
           const penned = d.tame && d.pen >= 0;
-          if (penned && (this.pressFood || this.sweptT < SWEPT || this.aimSpin > STEADY)) {
+          if (penned && !sorting && (this.pressFood || this.sweptT < SWEPT || this.aimSpin > STEADY)) {
             d.tug = 0;
             continue;
           }
@@ -1249,6 +1366,10 @@ export class Sim {
           if (this.stow(d.kind, 0, { h: d.hunger, c: wildOne ? s.day : d.caught, ...(d.rare ? { rare: true } : {}) })) {
             d.gone = true;
             s.stats.drawn++;
+            // (Round 10: its window is chosen, so the next Blow sends the downy, not the food that was chosen: the tenth
+            // playtest's Blow after a catch sent a clover head into the pen.)
+            const w = s.slots.findIndex((q) => q.t === d.kind && q.n > 0);
+            if (w >= 0) s.sel = w;
             this.emit({ t: 'suck', thing: d.kind, x: d.x, y: d.y, z: d.z, wild: !d.tame && !d.keep });
             if (!s.caught.includes(d.kind)) {
               s.caught.push(d.kind);
@@ -1266,7 +1387,7 @@ export class Sim {
       let fight = false;
       for (const d of s.downies) if (!d.gone && !d.tame && !d.keep && (d.strain > 0 || d.drawn > 0)) fight = true;
       for (const it of s.items) {
-        if (it.gone || (it.flyT >= 0 && it.flyT < 0.3) || it.noPull > 0 || fight) {
+        if (it.gone || (it.flyT >= 0 && it.flyT < 0.3) || it.noPull > 0 || fight || sorting) {
           it.drawn = 0;
           continue;
         }
@@ -1323,6 +1444,30 @@ export class Sim {
           this.siloT = 0.14;
         });
       }
+      // A press that started on a feeder's hopper draws its food back out, one at a time, the first food first
+      // (round 10: a feeder of food nobody in its pen eats could not be emptied).
+      if (this.pressHopper >= 0) {
+        this.hopperT -= dt;
+        const i = this.pressHopper;
+        const q = feederFoods(s.pads[i].feeder)[0];
+        if (this.hopperT <= 0 && q && !fight && this.aimedHopper(aim) === i && this.accept(q.t) >= 0) {
+          feederTake(s.pads[i].feeder, q.t);
+          const h = padSpots(i).hopper;
+          const hy = this.phys.floor(h.x, h.z) + h.y + 0.1;
+          // (Just out of the hopper towards you, so the hopper does not catch it straight back.)
+          const tx = aim.ex - h.x;
+          const tz = aim.ez - h.z;
+          const tl = Math.hypot(tx, tz) || 1;
+          const it = newItem(s, q.t, h.x + (tx / tl) * 0.95, hy, h.z + (tz / tl) * 0.95);
+          it.vx = (tx / tl) * 2;
+          it.vz = (tz / tl) * 2;
+          it.vy = 1;
+          it.flyT = 0.4;
+          s.items.push(it);
+          this.hopperT = HOPPER_PULL;
+          if (feederTotal(s.pads[i].feeder) <= 0) this.emit({ t: 'feeder', pad: i, n: 0, why: '' });
+        }
+      }
     } else {
       for (const d of s.downies) d.drawn = 0;
       for (const it of s.items) it.drawn = 0;
@@ -1376,6 +1521,8 @@ export class Sim {
     if (this.aimedDowny(aim)) return 'target';
     // Only what is under the crosshair and within Pull's reach: not something at the cone's edge while you aim past it.
     for (const it of s.items) if (!it.gone && it.noPull <= 0 && this.underAim(aim, it.x, it.y, it.z)) return 'target';
+    // (Round 10: a feeder's hopper with food in it, which a Pull empties.)
+    if (this.aimedHopper(aim) >= 0) return 'target';
     return null;
   }
 
@@ -1426,6 +1573,95 @@ export class Sim {
       if (ang / Math.max(Math.atan2(d.r, dist), 0.035) < 0.6) return false;
     }
     return true;
+  }
+
+  /** This press sorts from now on if the aim is steady on a penned downy with nothing you can see in front of it. */
+  private pressSorted(aim: Aim): void {
+    if (this.aimSpin > STEADY) return;
+    const d = this.sortTarget(aim);
+    if (!d) return;
+    this.pressKind = d.kind;
+    this.pressPen = d.pen;
+    this.pressFood = false;
+  }
+
+  /** The food or fluff the crosshair's line passes nearest (within THING_AIM metres of the line, within reach), or null. */
+  private squareThing(aim: Aim): { off: number } | null {
+    let best: { off: number } | null = null;
+    for (const it of this.s.items) {
+      if (it.gone || it.noPull > 0) continue;
+      const dx = it.x - aim.ex;
+      const dy = it.y - aim.ey;
+      const dz = it.z - aim.ez;
+      const along = dx * aim.dx + dy * aim.dy + dz * aim.dz;
+      if (along <= 0 || along > this.range + 0.4) continue;
+      const off = Math.hypot(dx - aim.dx * along, dy - aim.dy * along, dz - aim.dz * along);
+      if (off < THING_AIM && (!best || off < best.off)) best = { off };
+    }
+    return best;
+  }
+
+  /**
+   * The penned downy a press would sort, or null: the one squarely under the crosshair, unless the crosshair's line
+   * passes nearer a piece of food or fluff than the downy's middle (aimed through a downy at the fluff just behind it,
+   * a pull for the fluff: round 3). In a fed pen there is nearly always some within the cone's half metre of the line,
+   * at the downy's feet or to the side; that is not what you are aiming at.
+   */
+  private sortTarget(aim: Aim): Downy | null {
+    const d = this.squarePenned(aim);
+    if (!d) return null;
+    const dx = d.x - aim.ex;
+    const dy = d.y + 0.25 - aim.ey;
+    const dz = d.z - aim.ez;
+    const along = dx * aim.dx + dy * aim.dy + dz * aim.dz;
+    const off = Math.hypot(dx - aim.dx * along, dy - aim.dy * along, dz - aim.dz * along);
+    const t = this.squareThing(aim);
+    return t && t.off < off ? null : d;
+  }
+
+  /** A penned downy of yours squarely under the crosshair, within reach (the nearest to its middle), or null. */
+  private squarePenned(aim: Aim): Downy | null {
+    const R = this.range + 0.4;
+    let best: Downy | null = null;
+    let bs = 1;
+    for (const d of this.s.downies) {
+      if (d.gone || !d.tame || d.pen < 0 || d.noPull > 0 || (d.flyT >= 0 && d.flyT < 0.35)) continue;
+      const dx = d.x - aim.ex;
+      const dy = d.y + 0.25 - aim.ey;
+      const dz = d.z - aim.ez;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > R || dist < 1e-3) continue;
+      const r = Math.acos(clamp((dx * aim.dx + dy * aim.dy + dz * aim.dz) / dist, -1, 1)) / Math.max(Math.atan2(d.r, dist), 0.035);
+      if (r < bs) {
+        bs = r;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * A sorting press's next downy (round 10): of the kind it started on, in that pen, under the crosshair with a
+   * thumb's give (0.3 m round its body); never another kind, never food or fluff.
+   */
+  private aimedSort(aim: Aim): Downy | null {
+    const R = this.range + 0.4;
+    let best: Downy | null = null;
+    let bs = 1;
+    for (const d of this.s.downies) {
+      if (d.gone || !d.tame || d.pen !== this.pressPen || d.kind !== this.pressKind || d.noPull > 0 || (d.flyT >= 0 && d.flyT < 0.35)) continue;
+      const dx = d.x - aim.ex;
+      const dy = d.y + 0.25 - aim.ey;
+      const dz = d.z - aim.ez;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > R || dist < 1e-3) continue;
+      const r = Math.acos(clamp((dx * aim.dx + dy * aim.dy + dz * aim.dz) / dist, -1, 1)) / Math.max(Math.atan2(d.r + 0.3, dist), 0.07);
+      if (r < bs) {
+        bs = r;
+        best = d;
+      }
+    }
+    return best;
   }
 
   /**
@@ -1741,8 +1977,11 @@ export class Sim {
    * their first night with no root source, and its brooks got out starving with no fruit): `STOCK` of its favourite
    * into the pen's feeder. Round 9: a pen without one gets one, with the sack in it (the sack lay by the gate, where
    * the pen's fluff gathers, and pulling the fluff at the ninth playtest's new ember pen took 9 of its 12 sweetroots
-   * into the jar). Only if its feeder holds another food does the sack lie in the pen, on the far side from the gate,
-   * out of a pull at the fluff. Clover has the starter garden; a thistle eats anything. Once a kind.
+   * into the jar). Round 10: only into the feeder of a pen that holds just that kind (the tenth playtest blew its
+   * first embers into its clover pen, whose feeder was empty: "12 sweetroots in the feeder", and clover heads bounced
+   * off it for two and a half days). A pen with other kinds in it (or a feeder that will not take it) gets the sack on
+   * its floor, on the far side from the gate, out of a pull at the fluff, and no feeder. Clover has the starter
+   * garden; a thistle eats anything. Once a kind.
    */
   private stockFirst(k: DownyKind, pen: number): void {
     const s = this.s;
@@ -1751,18 +1990,22 @@ export class Sim {
     const food = wantedFood(k);
     const pad = s.pads[pen];
     const fd = pad.feeder;
-    const gave = !pad.ups.includes('feeder');
-    if (gave) {
-      pad.ups.push('feeder');
-      fd.t = null;
-      fd.n = 0;
-      this.phys.setPads(s.pads);
-    }
-    if ((fd.t === null || fd.t === food || fd.n === 0) && fd.n + STOCK <= FEEDER_CAP) {
-      fd.t = food;
-      fd.n += STOCK;
-      this.emit({ t: 'stock', pad: pen, food, n: STOCK, feeder: true, gave });
-      return;
+    const only = s.downies.every((d) => d.gone || d.pen !== pen || d.kind === k);
+    if (only) {
+      const gave = !pad.ups.includes('feeder');
+      if (gave) {
+        pad.ups.push('feeder');
+        fd.t = null;
+        fd.n = 0;
+        fd.t2 = null;
+        fd.n2 = 0;
+        this.phys.setPads(s.pads);
+      }
+      if (!this.feederRefuses(pen, food) && feederTotal(fd) + STOCK <= FEEDER_CAP) {
+        feederAdd(fd, food, STOCK);
+        this.emit({ t: 'stock', pad: pen, food, n: STOCK, feeder: true, gave });
+        return;
+      }
     }
     const P = PADS[pen];
     const far = gatherSpot(pen, 2);
@@ -1824,21 +2067,31 @@ export class Sim {
       // things about, and says why nothing came out if it moved no pest.
       this.emit({ t: 'puff', thing: null });
       let shooed = false;
+      let ahead = false;
+      let near = false;
       for (const n of s.nettles) {
-        if (n.gone || n.mode === 'roll') continue;
+        if (n.gone) continue;
         const dx = n.x - aim.ex;
         const dy = n.y + 0.25 - aim.ey;
         const dz = n.z - aim.ez;
         const d = Math.hypot(dx, dy, dz);
-        if (d > AIR_REACH || (dx * aim.dx + dy * aim.dy + dz * aim.dz) / (d || 1) < 0.8) continue;
-        const hl = Math.hypot(dx, dz) || 1;
+        // (Round 10: its reach is along the ground, so a pest 4.8 m off is in reach whatever the eye's height; the
+        // tenth playtest's empty Blows at 4.8 to 6 m said "Nothing in the jar." under "Blow anything at the pest.")
+        const flat = Math.hypot(dx, dz);
+        const facing = (dx * aim.dx + dy * aim.dy + dz * aim.dz) / (d || 1);
+        if (facing >= 0.8 && flat <= PEST_NEAR) ahead = true;
+        if (facing >= 0.8 && flat <= AIR_REACH) near = true;
+        if (n.mode === 'roll' || flat > AIR_REACH || facing < 0.8) continue;
+        const hl = flat || 1;
         n.mode = 'roll';
         n.vx = (dx / hl) * 6;
         n.vz = (dz / hl) * 6;
         this.emit({ t: 'nettlehit', x: n.x, y: n.y, z: n.z });
         shooed = true;
       }
-      if (pressed && !shooed) this.emit({ t: 'deny', why: 'Nothing in the jar.' });
+      // Nothing came out and no pest was moved: why. A pest in front, out of the puff's reach: closer (round 10);
+      // else the jar is empty. A pest just shooed says nothing.
+      if (pressed && !shooed && !near) this.emit({ t: 'deny', why: ahead ? 'Get closer.' : 'Nothing in the jar.' });
       for (const it of s.items) {
         if (it.gone) continue;
         const dx = it.x - aim.ex;
@@ -1976,6 +2229,9 @@ export class Sim {
   private penKinds: number[][] = PADS.map(() => [0, 0, 0, 0]);
   /** A rare one of yours is in this pen: everyone in it sheds one more fluff a meal. */
   private penRare: boolean[] = PADS.map(() => false);
+  /** The extra fluff each rare pen has shed today (round 10: at most RARE_EXTRA a day), and the day. Not saved. */
+  private rareGiven: number[] = PADS.map(() => 0);
+  private rareDay = -1;
   /** Night: penned downies doze, and their hunger runs slower. */
   private dozing = false;
 
@@ -2600,8 +2856,18 @@ export class Sim {
     if (d.fright <= 0 && !crowded && (d.tame || d.keep)) {
       let n = fav ? 2 : 1;
       if (d.kind === 'brook' && d.pen >= 0 && s.pads[d.pen].ups.includes('trough')) n++;
-      // A rare one of yours in the pen: everyone in it sheds one more, for good (the hunt's lasting reward).
-      if (d.pen >= 0 && this.penRare[d.pen]) n++;
+      // A rare one of yours in the pen: everyone in it sheds one more, for good (the hunt's lasting reward), up to
+      // RARE_EXTRA more a day from the pen (round 10).
+      if (d.pen >= 0 && this.penRare[d.pen]) {
+        if (this.rareDay !== s.day) {
+          this.rareDay = s.day;
+          this.rareGiven.fill(0);
+        }
+        if (this.rareGiven[d.pen] < RARE_EXTRA) {
+          this.rareGiven[d.pen]++;
+          n++;
+        }
+      }
       d.shedQ = n;
       d.shedT = 0.75;
     }
@@ -2895,24 +3161,71 @@ export class Sim {
       } else if (p.kind === 'pen' && p.ups.includes('feeder') && isFood(it.type)) {
         if (!this.inHopper(i, it.x, it.y, it.z)) continue;
         const fd = p.feeder;
-        if ((fd.t === null || fd.t === it.type) && fd.n < FEEDER_CAP) {
-          fd.t = it.type;
-          fd.n++;
+        const why = this.feederRefuses(i, it.type);
+        if (!why) {
+          feederAdd(fd, it.type, 1);
           it.gone = true;
           this.emit({ t: 'store', x: it.x, y: it.y, z: it.z, where: 'feeder', pad: i });
-          this.emit({ t: 'feeder', pad: i, n: fd.n, why: '' });
+          this.emit({ t: 'feeder', pad: i, n: feederTotal(fd), why: '' });
           return true;
         }
-        // Refused (another food in it, or full): it bounces off the hopper, and says why, instead of vanishing into the pen.
+        // Refused (two other foods in it, or full): it bounces off the hopper, and says why, instead of vanishing into the pen.
         it.vy = 3.2;
         it.vx = -it.vx * 0.25;
         it.vz = -it.vz * 0.25;
         it.flyT = 3;
-        this.emit({ t: 'feeder', pad: i, n: fd.n, why: fd.n >= FEEDER_CAP ? 'The feeder is full.' : `This feeder holds ${thingName(fd.t!, 2)}.` });
+        this.emit({ t: 'feeder', pad: i, n: feederTotal(fd), why });
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Why pen i's feeder would refuse a food, or '' if it takes it (round 10): it holds up to two foods, so a mixed
+   * pen's feeder holds each kind's (it held one, and a clover pen with a feeder of sweetroots could not be fed).
+   */
+  feederRefuses(i: number, food: Food): string {
+    const p = this.s.pads[i];
+    if (!p || p.kind !== 'pen' || !p.ups.includes('feeder')) return 'No feeder here.';
+    const fd = p.feeder;
+    if (feederTotal(fd) >= FEEDER_CAP) return 'The feeder is full.';
+    const has = feederFoods(fd);
+    if (has.length < 2 || has.some((q) => q.t === food)) return '';
+    return `This feeder holds ${thingName(has[0].t, 2)} and ${thingName(has[1].t, 2)}.`;
+  }
+
+  /** Does pen i's feeder hold food that a downy in the pen eats? */
+  private feederFeeds(i: number): boolean {
+    const foods = feederFoods(this.s.pads[i].feeder);
+    return this.s.downies.some((d) => !d.gone && d.pen === i && foods.some((q) => eats(d.kind, q.t)));
+  }
+
+  /**
+   * The pen whose feeder hopper the crosshair is on (within Pull's reach, the line passing within HOPPER_AIM of
+   * its middle), with something in it, or -1 (round 10: a Pull at the hopper takes its food back into the jar).
+   */
+  aimedHopper(aim: Aim): number {
+    const s = this.s;
+    let best = -1;
+    let bd = Infinity;
+    for (let i = 0; i < s.pads.length; i++) {
+      const p = s.pads[i];
+      if (p.kind !== 'pen' || !p.ups.includes('feeder') || feederTotal(p.feeder) <= 0) continue;
+      const h = padSpots(i).hopper;
+      const hy = this.phys.floor(h.x, h.z) + h.y;
+      const dx = h.x - aim.ex;
+      const dy = hy - aim.ey;
+      const dz = h.z - aim.ez;
+      const along = dx * aim.dx + dy * aim.dy + dz * aim.dz;
+      if (along <= 0 || along > this.range + 0.4) continue;
+      const off = Math.hypot(dx - aim.dx * along, dy - aim.dy * along, dz - aim.dz * along);
+      if (off < HOPPER_AIM && off < bd) {
+        bd = off;
+        best = i;
+      }
+    }
+    return best;
   }
 
   /** Inside a feeder's hopper (the funnel at its top). */
@@ -2936,7 +3249,7 @@ export class Sim {
     const food = slot.t;
     const pens: number[] = [];
     s.pads.forEach((p, i) => {
-      if (p.kind === 'pen' && p.ups.includes('feeder') && (p.feeder.t === null || p.feeder.t === food) && p.feeder.n < FEEDER_CAP) pens.push(i);
+      if (p.kind === 'pen' && p.ups.includes('feeder') && !this.feederRefuses(i, food)) pens.push(i);
     });
     if (!pens.length) return -1;
     const p = s.player;
@@ -3369,10 +3682,7 @@ export class Sim {
           // A feed run sends the crop straight into the next pen's feeder, while it has room.
           const run = p.ups.includes('run') ? this.runTarget(i) : -1;
           if (run >= 0) {
-            const fd = s.pads[run].feeder;
-            const add = Math.min(yieldN, FEEDER_CAP - fd.n);
-            fd.t = p.crop;
-            fd.n += add;
+            const add = feederAdd(s.pads[run].feeder, p.crop, yieldN);
             yieldN -= add;
             const h = padSpots(run).hopper;
             this.emit({ t: 'store', x: h.x, y: this.phys.floor(h.x, h.z) + h.y, z: h.z, where: 'feeder', pad: run, auto: true });
@@ -3407,9 +3717,7 @@ export class Sim {
               p.tip -= add;
               p.grow = 0;
               if (add > 0) {
-                const fd = s.pads[next].feeder;
-                fd.t = p.crop;
-                fd.n = Math.min(FEEDER_CAP, fd.n + add);
+                feederAdd(s.pads[next].feeder, p.crop, add);
                 const h = padSpots(next).hopper;
                 this.emit({ t: 'store', x: h.x, y: this.phys.floor(h.x, h.z) + h.y, z: h.z, where: 'feeder', pad: next, auto: true });
               }
@@ -3419,16 +3727,21 @@ export class Sim {
         }
       } else if (p.kind === 'pen' && p.ups.includes('feeder')) {
         p.feedT -= dt;
-        if (p.feedT > 0 || p.feeder.n <= 0 || !p.feeder.t) return;
-        const food = p.feeder.t;
-        let hungry = false;
-        for (const d of s.downies) if (!d.gone && d.pen === i && d.hunger > 0.5 && eats(d.kind, food)) hungry = true;
-        if (!hungry) return;
-        let lying = 0;
-        for (const it of s.items) if (!it.gone && it.type === food && this.phys.penAt(it.x, it.z) === i) lying++;
-        if (lying > 0) return;
-        p.feeder.n--;
-        if (p.feeder.n <= 0) p.feeder.t = null;
+        if (p.feedT > 0 || feederTotal(p.feeder) <= 0) return;
+        // (Round 10: of its two foods, one a hungry downy in the pen eats and none of it lying in the pen.)
+        let food: Food | null = null;
+        for (const q of feederFoods(p.feeder)) {
+          let hungry = false;
+          for (const d of s.downies) if (!d.gone && d.pen === i && d.hunger > 0.5 && eats(d.kind, q.t)) hungry = true;
+          if (!hungry) continue;
+          let lying = 0;
+          for (const it of s.items) if (!it.gone && it.type === q.t && this.phys.penAt(it.x, it.z) === i) lying++;
+          if (lying > 0) continue;
+          food = q.t;
+          break;
+        }
+        if (!food) return;
+        feederTake(p.feeder, food);
         p.feedT = 2.5;
         const h = padSpots(i).hopper;
         const fl = this.phys.floor(h.x, h.z);
@@ -3466,11 +3779,14 @@ export class Sim {
     for (const j of [i - 1, i + 1]) {
       if (j < 0 || j >= s.pads.length || Math.floor(j / 3) !== Math.floor(i / 3)) continue;
       const p = s.pads[j];
-      if (p.kind !== 'pen' || !p.ups.includes('feeder') || p.feeder.n >= FEEDER_CAP) continue;
-      if (p.feeder.t !== null && p.feeder.t !== crop) continue;
-      if (p.feeder.t === null && s.downies.some((d) => !d.gone && d.pen === j && !eats(d.kind, crop))) continue;
-      if (p.feeder.n < bn) {
-        bn = p.feeder.n;
+      if (p.kind !== 'pen' || !p.ups.includes('feeder') || this.feederRefuses(j, crop)) continue;
+      // (Round 10: a food it holds already, or one a downy in the pen eats, so a mixed pen's feeder gets both.)
+      const holds = feederFoods(p.feeder).some((q) => q.t === crop);
+      if (!holds && feederTotal(p.feeder) > 0 && !s.downies.some((d) => !d.gone && d.pen === j && eats(d.kind, crop))) continue;
+      if (feederTotal(p.feeder) === 0 && s.downies.some((d) => !d.gone && d.pen === j && !eats(d.kind, crop))) continue;
+      const n = feederTotal(p.feeder);
+      if (n < bn) {
+        bn = n;
         best = j;
       }
     }
@@ -3609,6 +3925,8 @@ export class Sim {
   private checkGoals(): void {
     const s = this.s;
     if (s.earned >= 10000) this.complete('rich');
+    // A rare downy of every kind kept (round 10).
+    if (!s.goals.includes('rares') && this.rareKinds().length >= RARE_KINDS.length) this.complete('rares');
     // Five downies in one pen, any kind (round 9).
     if (!s.goals.includes('herd')) {
       const n = s.pads.map(() => 0);
@@ -3650,9 +3968,11 @@ export class Sim {
       if (p.kind !== 'pen' || this.warned < 0) return;
       if (!s.downies.some((d) => !d.gone && d.pen === i)) return;
       const feeder = p.ups.includes('feeder');
-      if (feeder && p.feeder.n > 0) return;
+      // (Round 10: food in it that someone in the pen eats.)
+      if (feeder && this.feederFeeds(i)) return;
       if (!feeder && s.items.some((it) => !it.gone && isFood(it.type) && this.phys.penAt(it.x, it.z) === i)) return;
-      this.emit({ t: 'hungrynight', pen: i, feeder });
+      // (A feeder of food nobody in the pen eats is no feeder for the night: "A pen has no food", not "A feeder is empty".)
+      this.emit({ t: 'hungrynight', pen: i, feeder: feeder && feederTotal(p.feeder) <= 0 });
       // (One word an evening: the first such pen.)
       this.warned = -s.day;
     });
@@ -3805,10 +4125,26 @@ export class Sim {
     s.earned += bonus;
     s.stats.filled++;
     if (o.mult > 2) s.stats.prized++;
+    // (Round 10: days running with an order filled.)
+    const last = s.stats.lastFill ?? -9;
+    if (last !== s.day) s.stats.streak = last === s.day - 1 ? (s.stats.streak ?? 0) + 1 : 1;
+    s.stats.lastFill = s.day;
+    s.stats.filledAt = s.day * 24 + s.hour;
     this.complete('order');
     if (s.stats.filled >= 5) this.complete('orders5');
     if (o.mult > 2) this.complete('prized');
+    if (o.from !== undefined) this.complete('late');
+    if ((s.stats.streak ?? 0) >= 3) this.complete('streak');
     return bonus;
+  }
+
+  /** The kinds of rare downy you keep (penned, loose or in the jar), for the goal of one of every kind. */
+  rareKinds(): DownyKind[] {
+    const s = this.s;
+    const out = new Set<DownyKind>();
+    for (const d of s.downies) if (!d.gone && d.tame && d.rare) out.add(d.kind);
+    for (const q of s.slots) if (q.t && isDowny(q.t) && (q.downs ?? []).some((r) => r.rare)) out.add(q.t);
+    return [...out];
   }
 
   /** How many of each kind you keep: tame ones penned, loose or in the jar. */
@@ -3965,13 +4301,17 @@ export class Sim {
     // playtest from 104 to 2,685 coins in a day).
     const plains = choices.filter((c) => c.kind !== 'thistle');
     const plainDay = Math.max(0, ...(plains.length ? plains : choices).map((c) => c.n * this.price(c.kind)));
-    const capped = (o: Order): Order => (o.mult > 2 && plainDay > 0 ? { ...o, pay: Math.min(o.pay, Math.round((plainDay * PRIZED_CAP) / 5) * 5) } : o);
+    // (Round 10: a small thistle ranch's plain thistle order, no more than that plain order: with two thistles, no
+    // longer prized, it paid 594 against the capped prized 405.)
+    const capAt = (o: Order): number => (o.mult > 2 ? PRIZED_CAP : o.kind === 'thistle' && plains.length ? 1 : 0);
+    const capped = (o: Order): Order => (capAt(o) > 0 && plainDay > 0 ? { ...o, pay: Math.min(o.pay, Math.round((plainDay * capAt(o)) / 5) * 5) } : o);
     const fluff = (c: { kind: DownyKind; n: number }, big: boolean, by: number): Order | null => {
       const o = fluffRaw(c, big, by);
       return o ? capped(o) : null;
     };
     const fluffRaw = (c: { kind: DownyKind; n: number }, big: boolean, by: number): Order | null => {
-      const prized = big || c.kind === 'thistle';
+      // (Round 10: a thistle's is prized only on a ranch of three thistles or more.)
+      const prized = big || (c.kind === 'thistle' && kept.thistle >= THISTLE_PRIZED);
       const mult = prized ? 3 : 2;
       if (by === ORDER_NOON) {
         const make = this.makes(c.kind, hour, ORDER_NOON);
@@ -4041,7 +4381,9 @@ export class Sim {
     let hunt: Order | null = null;
     if (left >= 4 && rarePenOf(s) >= 0) {
       const open = fresh('rare', this.liveKinds(), (k) => k);
-      const rk = this.pickWeighted(open, (k) => (1 + this.stale(k, 'rare')) * (live && k === live.kind && open.length > 1 ? 0.3 : 1));
+      // (Round 10: with the goal of a rare one of every kind up, a kind you have no rare one of yet comes first.)
+      const want = s.goals.includes('prized') && !s.goals.includes('rares') ? this.rareKinds() : null;
+      const rk = this.pickWeighted(open, (k) => (1 + this.stale(k, 'rare')) * (live && k === live.kind && open.length > 1 ? 0.3 : 1) * (want && !want.includes(k) ? 4 : 1));
       const spots = SIGHTINGS.map((q, i) => ({ q, i })).filter((o) => o.q.kind === rk);
       const by = rk ? when('rare', rk, live?.by === ORDER_NOON || first?.by === ORDER_NOON ? ORDER_BY : coin()) : null;
       if (rk && spots.length && by !== null) {
@@ -4182,20 +4524,32 @@ export class Sim {
     const s = this.s;
     const i = rarePenOf(s);
     if (i < 0) return 0;
-    let v = 0;
-    for (const d of s.downies) if (!d.gone && d.pen === i) v += PEN_MEALS * this.price(d.kind);
-    return Math.round(v / 10) * 10;
+    return Math.round(this.rareDaily(i) / 10) * 10;
   }
 
   /**
-   * What a rare one adds over the rest of the week once penned (round 9): its pen's extra fluff a day (`rareWorth`)
-   * for each day left to the week's end (days 7, 14, ...), today counted only when it is the last; the week's last day.
+   * Coins a day a rare one adds to pen i: one more fluff a meal from each downy in it (PEN_MEALS a day each), at
+   * today's prices, up to RARE_EXTRA more fluff a day (round 10).
    */
-  rareWeek(): { coins: number; days: number; end: number } {
-    const day = this.s.day;
-    const end = Math.ceil(day / 7) * 7;
-    const days = Math.max(1, end - day);
-    return { coins: Math.round((this.rareWorth() * days) / 10) * 10, days, end };
+  rareDaily(i: number): number {
+    const s = this.s;
+    let v = 0;
+    let n = 0;
+    for (const d of s.downies) {
+      if (d.gone || d.pen !== i) continue;
+      v += PEN_MEALS * this.price(d.kind);
+      n += PEN_MEALS;
+    }
+    return n > RARE_EXTRA ? (v / n) * RARE_EXTRA : v;
+  }
+
+  /**
+   * What a rare one adds over the next few days once penned (round 9: over the rest of the week; round 10: over
+   * RARE_DAYS days, as "then 140 more today" on a week's last day read as paying later today): its pen's extra fluff
+   * a day (`rareWorth`), capped (RARE_EXTRA), times RARE_DAYS.
+   */
+  rareWeek(): { coins: number; days: number } {
+    return { coins: Math.round((this.rareWorth() * RARE_DAYS) / 10) * 10, days: RARE_DAYS };
   }
 
   /** The board's rare downy, wild and waiting where it was seen, if it is out today. */
@@ -4221,7 +4575,7 @@ export class Sim {
       // biggest pay), over the rest of the week rather than "a day" (round 9: "140 a day" against a one-off 255 read as
       // the obvious pick, whatever the days left).
       const w = this.rareWeek();
-      return { title: `${r[0].toUpperCase()}${r.slice(1)}, by ${due}`, note: w.coins > 0 ? `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, then ${fmtCoins(w.coins)} more ${w.days > 1 ? `by day ${w.end}` : 'today'}` : `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
+      return { title: `${r[0].toUpperCase()}${r.slice(1)}, by ${due}`, note: w.coins > 0 ? `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, then ${fmtCoins(w.coins)} over ${w.days} days` : `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
     }
     // (Round 9: "Caught today, after dark" read as "catch them after dark".)
     if (o.live) return { title: `${o.n} ${name} downies`, note: night ? `Caught today. Sell after 9 pm. Pays ${fmtCoins(o.n * o.pay)}` : `Caught by ${due}. Pays ${fmtCoins(o.n * o.pay)}` };
@@ -4324,6 +4678,8 @@ export class Sim {
     const pad = this.s.pads[i];
     if (pad.kind === 'empty') return true;
     if (pad.kind === 'pen') return pad.ups.includes('feeder') || PEN_UPS.some((u) => !pad.ups.includes(u.id) && this.upKnown(u.id));
+    // (Round 10: a bare garden with nothing to buy or plant hangs no tags, so it offers none.)
+    if (pad.kind === 'garden') return this.menu({ kind: 'pad', id: i } as Interactable).length > 0;
     return true;
   }
 
@@ -4338,12 +4694,19 @@ export class Sim {
         for (const k of ['pen', 'garden', 'silo'] as const) if (this.buildKnown(k)) out.push({ id: `build:${k}`, title: BUILD_NAME[k], price: BUILD_COST[k], ok: can(BUILD_COST[k]), note: k === 'pen' ? 'A round corral' : k === 'garden' ? 'Blow food in to plant' : 'Stores four kinds' });
       } else if (pad.kind === 'pen') {
         for (const u of PEN_UPS) if (!pad.ups.includes(u.id) && this.upKnown(u.id)) out.push({ id: `pen:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
-        if (pad.ups.includes('feeder')) out.push({ id: 'info', title: pad.feeder.n ? `Feeder: ${pad.feeder.n}` : 'Feeder empty', price: null, ok: false, note: 'Blow food in at the top' });
+        // (Round 10: food in it that nobody in the pen eats says how to get it out: a Pull at the top.)
+        if (pad.ups.includes('feeder')) {
+          const n = feederTotal(pad.feeder);
+          const stale = n > 0 && feederFoods(pad.feeder).some((q) => !s.downies.some((d) => !d.gone && d.pen === i && eats(d.kind, q.t))) && s.downies.some((d) => !d.gone && d.pen === i);
+          out.push({ id: 'info', title: n ? `Feeder: ${n}` : 'Feeder empty', price: null, ok: false, note: stale ? 'Pull at the top to empty it' : 'Blow food in at the top' });
+        }
       } else if (pad.kind === 'garden') {
         // The feed run hangs only where it would reach a pen with a feeder, the next plot on the row (the fourth
         // playtest's hung beside no pen at all, a 300 coin trap).
         if (this.upKnown('garden')) for (const u of GARDEN_UPS) if (!pad.ups.includes(u.id) && (u.id !== 'run' || (this.upKnown('run') && this.runNeighbours(i).length > 0))) out.push({ id: `garden:${u.id}`, title: u.name, price: u.cost, ok: can(u.cost), note: u.line });
-        out.push({ id: 'garden:clear', title: pad.crop ? 'Pull the crop' : 'Bed is empty', price: null, ok: !!pad.crop, note: pad.crop ? 'Then blow in something new' : 'Blow food in to plant it' });
+        // (Round 10: no "Bed is empty" tag, which only told you what the bare bed shows: with three kinds kept it was a
+        // seventh tag, and "Plant dewberries" never hung, as six is all a post hangs.)
+        if (pad.crop) out.push({ id: 'garden:clear', title: 'Pull the crop', price: null, ok: true, note: 'Then blow in something new' });
         // Round 8: the food of each kind you keep, sown with a tap, so a new kind's food is a garden away the day you
         // bring it home (the eighth playtest ran 87 s to the ridge for 9 wild sweetroots).
         if (this.knows('lesson:plant')) for (const f of this.sowable()) if (pad.crop !== f) out.push({ id: `garden:sow:${f}`, title: `Plant ${thingName(f, 2)}`, price: null, ok: true, note: pad.crop ? `In place of the ${thingName(pad.crop, 2)}` : 'Grows from today' });

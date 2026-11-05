@@ -330,7 +330,7 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       // (Round 8: its deadline in the title, its set place in the note.)
       expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/);
       // (Round 7: what it is worth a day once penned, as a number, when it has a pen to join.)
-      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/);
+      expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days)$/);
       places.add(tag.note.split('.')[0]);
     }
     expect(seen).toBe(20);
@@ -470,11 +470,13 @@ describe('P2: the clock holds through the loop lesson', () => {
     w.y = sim.phys.floor(w.x, w.z);
     go(0.5);
     expect(tutor.current).toBe('meadow');
-    tutor.add(s, 'catch:wild');
+    // (Round 10: two in the one trip out.)
+    tutor.add(s, 'catch:wild', 2);
     go(2);
     expect(Tutor.finished(s, 'meadow')).toBe(true);
     expect(tutor.current).toBe('farm');
-    const d = s.downies.find((q) => q.pen === 1)!;
+    // (Round 10: the loop gives the hungriest of three an appetite at once; watch the least hungry.)
+    const d = s.downies.filter((q) => q.pen === 1).sort((a, b) => a.hunger - b.hunger)[0];
     const h0 = d.hunger;
     go(90);
     // A minute and a half of the loop: still half past four, no dusk, but the penned downies are getting hungry.

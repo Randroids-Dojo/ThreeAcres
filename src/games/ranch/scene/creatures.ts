@@ -352,6 +352,15 @@ export interface Muzzle {
   z: number;
 }
 
+/**
+ * Round 10: how a wild downy's tell shows on its body, so you watch the downy and not only the ring. A real one turns
+ * to face you, swells by `swell`, rears up by `stretch` more (it grows from its feet, so its top rises out past the
+ * tug ring round the crosshair, which sits on its middle and hid round 8's swell of a third at 8 to 10 m) and leans
+ * back `lean` radians; a fake swells by `fake` only, which stays inside the ring. `ranch-tell-body.mjs` measures it by
+ * frame readback on the phone at 6 to 10 m, with round 9's body as the control.
+ */
+export const TELL_BODY = { swell: 0.36, stretch: 0.22, lean: 0.25, fake: 0.1 };
+
 const CAP = 96;
 const ITEM_CAP = 320;
 
@@ -373,6 +382,12 @@ export class CreatureView {
   private shadowA: InstancedBufferAttribute;
   /** Shared geometries for the canister's tiny contents. */
   readonly geos: { body: Record<DownyKind, G>; eyes: G; scowl: G; item: Record<'cloverhead' | 'sweetroot' | 'dewberry' | 'tuft', G> };
+  /**
+   * How far each wild downy in a tug has turned to face you for its tell (0 to 1, by id): it turns over about a tenth
+   * of a second and back after its pull, rather than flipping round in a frame (round 10).
+   */
+  private face = new Map<number, number>();
+  private lastT = -1;
 
   constructor() {
     const body = {} as Record<DownyKind, G>;
@@ -475,8 +490,13 @@ export class CreatureView {
     const n: Record<DownyKind, number> = { clover: 0, ember: 0, brook: 0, thistle: 0 };
     let ne = 0;
     let ns = 0;
+    const dt = this.lastT < 0 ? 0 : clamp(t - this.lastT, 0, 0.1);
+    this.lastT = t;
     for (const d of s.downies) {
-      if (d.gone) continue;
+      if (d.gone) {
+        this.face.delete(d.id);
+        continue;
+      }
       const k = d.kind;
       if (n[k] >= CAP) continue;
       // Squash and stretch, volume kept.
@@ -496,18 +516,45 @@ export class CreatureView {
         roll = Math.sin(t * 40 + d.id) * 0.06;
       }
       // Puffing up to pull back (the duel's tell): it swells towards the pull, and stays a little big through it.
+      // Round 10: the tell is on its body as much as on the ring, so you can watch the downy and not the crosshair: a
+      // real one turns to face you, swells to TELL_BODY.swell and leans back away from you (TELL_BODY.lean), and holds
+      // the lean through its pull; a fake swells less (TELL_BODY.fake), shivers and never leans.
+      let facing = false;
       if (d.tell > 0 && d.tellLen > 0) {
         const p = 1 - d.tell / d.tellLen;
-        const puff = 1 + 0.34 * p * (2 - p);
-        scale *= puff;
+        const e = p * (2 - p);
+        scale *= 1 + TELL_BODY.swell * e;
+        sy *= 1 + TELL_BODY.stretch * e;
+        pitch -= TELL_BODY.lean * e;
+        facing = true;
       } else if (d.feint > 0 && d.feintLen > 0) {
         // A fake puff (round 9): it puffs up only a little, shivers and sags, and does not pull.
         const p = 1 - d.feint / d.feintLen;
-        scale *= 1 + 0.16 * Math.sin(Math.PI * p);
+        scale *= 1 + TELL_BODY.fake * Math.sin(Math.PI * p);
         roll += Math.sin(t * 46 + d.id) * 0.09;
-      } else if (d.back > 0 && !d.tame) scale *= 1.12;
+      } else if (d.back > 0 && !d.tame) {
+        scale *= 1 + TELL_BODY.swell * 0.35;
+        sy *= 1 + TELL_BODY.stretch * 0.5;
+        pitch -= TELL_BODY.lean * 0.8;
+        facing = true;
+      }
+      // Turning to face you (and back after), eased: a tenth of a second round, a fifth of a second back.
+      const f0 = this.face.get(d.id) ?? 0;
+      // (With time standing still, as for a check's frames, it is at once.)
+      const f = dt <= 0 ? (facing ? 1 : 0) : facing ? Math.min(1, f0 + dt / 0.1) : Math.max(0, f0 - dt / 0.2);
+      if (f > 0) this.face.set(d.id, f);
+      else this.face.delete(d.id);
+      let yaw = d.yaw;
+      if (f > 0) {
+        const want = Math.atan2(muzzle.x - d.x, muzzle.z - d.z);
+        let dy = (want - d.yaw) % (Math.PI * 2);
+        if (dy > Math.PI) dy -= Math.PI * 2;
+        if (dy < -Math.PI) dy += Math.PI * 2;
+        const k = f * f * (3 - 2 * f);
+        yaw = d.yaw + dy * k;
+      }
       const wob = d.mood === 'hungry' ? 0 : Math.sin(t * 2 + d.id) * 0.015;
-      _e.set(pitch, d.yaw, roll + wob, 'YXZ');
+      _e.set(pitch, yaw, roll + wob, 'YXZ');
       _q.setFromEuler(_e);
       // Pivot squash around the feet so landing squashes into the ground.
       _m.compose(_v.set(d.x, d.y, d.z), _q, _s.set(sxz * scale, sy * scale, sxz * scale));

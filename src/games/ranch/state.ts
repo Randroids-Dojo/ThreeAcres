@@ -224,7 +224,12 @@ export interface Pad {
   grow: number;
   silo: { t: ItemType; n: number }[];
   siloSel: number;
-  feeder: { t: Food | null; n: number };
+  /**
+   * What the feeder holds: a food and how many (t, n), and a second food (t2, n2; round 10: a mixed pen's feeder
+   * holds each kind's food, and the tenth playtest's clover pen was blocked two and a half days by a feeder of
+   * sweetroots its clovers would not eat). When the first runs out the second moves up.
+   */
+  feeder: { t: Food | null; n: number; t2?: Food | null; n2?: number };
   feedT: number;
   chute: number[];
   /** A full garden bed's share of its crop owed to the feeder next door, part way to the next whole one. Not saved. */
@@ -311,6 +316,11 @@ export interface Stats {
   kinds?: Partial<Record<DownyKind, number>>;
   /** Live downies sent to the crate for orders. */
   live?: number;
+  /** Round 10: days running with an order filled, and the last day one was. */
+  streak?: number;
+  lastFill?: number;
+  /** Round 10: when the last order was filled (day times 24 plus the hour): "Order filled." shows for an hour after. */
+  filledAt?: number;
 }
 
 export function emptyPad(): Pad {

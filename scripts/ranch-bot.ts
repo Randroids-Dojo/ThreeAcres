@@ -55,7 +55,7 @@ export class Bot {
   /** What it did this frame, and the moments something new happened. */
   doing: Doing = 'idle';
   readonly news: { t: number; what: string }[] = [];
-  readonly frames: { t: number; doing: Doing; lesson: string; line: string; zone: string; page: boolean }[] = [];
+  readonly frames: { t: number; doing: Doing; lesson: string; line: string; zone: string; page: boolean; held: boolean; goal: string }[] = [];
   /** This frame's intents. */
   private move: Pt | null = null;
   private moveStop = 1.5;
@@ -313,7 +313,8 @@ export class Bot {
     if (page && !this.lastPage) this.mark('page');
     this.lastLine = v.done ? this.lastLine : v.line;
     this.lastPage = page;
-    this.frames.push({ t: this.t, doing: this.puffCool > 0 && doing === 'idle' ? 'act' : doing, lesson: this.tutor.current, line: v.line, zone: zoneAt(p.x, p.z), page });
+    // (Round 10: whether the clock is held, the late afternoon or the first dusk, for the seconds held with no line up.)
+    this.frames.push({ t: this.t, doing: this.puffCool > 0 && doing === 'idle' ? 'act' : doing, lesson: this.tutor.current, line: v.line, zone: zoneAt(p.x, p.z), page, held: this.sim.clockHeld, goal: this.sim.openGoals(1)[0]?.id ?? '' });
     this.doing = doing;
     this.t += DT;
     this.puffCool -= DT;
@@ -653,11 +654,13 @@ function penRoom(s: RanchState): number {
 }
 
 /** Blow the downy aboard into a pen with room, from the lane side. */
-function penDowny(b: Bot): boolean {
+function penDowny(b: Bot, kind?: DownyKind): boolean {
   const s = b.s;
-  if (!has(s, isDowny)) return false;
-  b.choose(isDowny);
-  const i = penRoom(s);
+  if (!has(s, kind ? (t) => t === kind : isDowny)) return false;
+  b.choose(kind ? (t) => t === kind : isDowny);
+  // (Round 10: a kind's own pen, or an empty one, where there is one; else the nearest with room.)
+  const own = kind ? s.pads.findIndex((p, k) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === k).length < 10 && s.downies.filter((d) => !d.gone && d.pen === k).every((d) => d.kind === kind)) : -1;
+  const i = own >= 0 ? own : penRoom(s);
   if (i < 0) return false;
   const P = PADS[i];
   const post = padSpots(i).post;
@@ -903,6 +906,18 @@ export function eager(b: Bot): void {
       }
       return;
     }
+    case 'home': {
+      // (Round 10: downies aboard with no pen for them: build one where the arrow is, or sell fluff towards it.)
+      if (m.on) {
+        const i = PADS.findIndex((_p, k) => Math.hypot(padSpots(k).post.x + 0.9 - m.x, padSpots(k).post.z - m.z) < 0.3);
+        if (i >= 0) {
+          const post = padSpots(i).post;
+          b.useAt('pad', post.x + 0.9, post.z, () => 'build:pen');
+          return;
+        }
+      }
+      break;
+    }
     case 'crowd': {
       const i = s.pads.findIndex((p) => p.kind === 'pen');
       const post = padSpots(Math.max(0, i)).post;
@@ -937,12 +952,32 @@ export function eager(b: Bot): void {
     b.useAt('door', DOOR.x, DOOR.z - 1.6, () => 'sleep', 2.4);
     return;
   }
+  // Embers (or brooks) aboard with a pen of their own to go in: into it.
+  for (const k of ['ember', 'brook'] as DownyKind[]) {
+    if (!has(s, (t) => t === k) || open?.kind === k) continue;
+    const forThem = s.pads.some((p, i) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === i).every((d) => d.kind === k));
+    if (forThem && penDowny(b, k)) return;
+  }
   if (tend(b)) return;
   const g = sim.openGoals(1)[0];
-  // More downies for the pen (the herd goal, and the loop's way to more fluff): catch one and pen it.
+  // More downies for the pen (the herd goal, and the loop's way to more fluff): catch them and pen them. (Round 10: the
+  // goal counts the pen, "3 so far", so out in the meadow it catches as many as the pen still wants before going back.)
   if (g && g.id === 'herd') {
-    if (has(s, isDowny)) penDowny(b);
+    const inPen = Math.max(0, ...s.pads.map((_p, i) => s.downies.filter((d) => !d.gone && d.pen === i).length));
+    const aboard = s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
+    if (aboard > 0 && (inPen + aboard >= 5 || zoneAt(s.player.x, s.player.z) === 'ranch')) penDowny(b);
     else catchWild(b, 'clover');
+    return;
+  }
+  // An ember to catch once the ridge is open (round 10: the bot stood about for minutes under "Catch an ember downy."):
+  // out to the ridge for one, and with embers aboard and a pen for them, into it (the journal says to build one first).
+  if (g && g.id === 'ember' && s.gates.ridge) {
+    if (has(s, (t) => t === 'ember')) {
+      const forThem = s.pads.some((p, i) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === i).every((d) => d.kind === 'ember'));
+      if (forThem) penDowny(b, 'ember');
+      return;
+    }
+    catchWild(b, 'ember');
     return;
   }
   // A goal with a place (a gate you can open now): go and open it.

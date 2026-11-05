@@ -12,6 +12,10 @@
 //   idle: seconds with nothing to do (waiting on fluff, a downy, the clock)
 //   lesson gaps: seconds with no lesson line up, and the longest such stretch
 //   the longest stretch with nothing new, and where the game had got to
+//   (round 10) seconds with the clock held (the late afternoon, the first dusk) and no line on the page
+//   (round 10) trips out of the ranch and back, by what the page said as it left, and the repeats: trips
+//     for the same line again (the tenth playtest was asked to catch another clover five times, the same
+//     23 s round trip each time)
 // over several seeds, and the walks that cost most, by lesson.
 //   npx tsx scripts/ranch-first15.ts [seeds] [seconds]
 import { rng } from '../src/games/ranch/noise';
@@ -41,6 +45,13 @@ interface Run {
   coins: number;
   byLesson: Map<string, { walk: number; dead: number; idle: number; act: number }>;
   gaps: { from: number; to: number }[];
+  /** Seconds the clock was held with no line up, and with the clock held at all. */
+  heldNoLine: number;
+  held: number;
+  /** Idle seconds with no lesson up, by the journal goal on the page. */
+  idleBy: Map<string, number>;
+  /** Trips out of the ranch and back: what the page said as it left, and how long each took. */
+  trips: { why: string; secs: number; catches: number }[];
 }
 
 function play(seed: number): Run {
@@ -65,6 +76,14 @@ function play(seed: number): Run {
   let longestQuiet = 0;
   let quietAt = '';
   const gaps: { from: number; to: number }[] = [];
+  let heldNoLine = 0;
+  let held = 0;
+  const idleBy = new Map<string, number>();
+  const trips: { why: string; secs: number; catches: number }[] = [];
+  let tripFrom = -1;
+  let tripWhy = '';
+  let lastLine = '';
+  const catches = b.news.filter((n) => n.what === 'catch').map((n) => n.t);
   const byLesson = new Map<string, { walk: number; dead: number; idle: number; act: number }>();
   for (const f of b.frames) {
     while (k < news.length && news[k] <= f.t) last = news[k++];
@@ -91,6 +110,21 @@ function play(seed: number): Run {
       if (f.lesson) lessonIdle += dt;
     } else row.act += dt;
     byLesson.set(key, row);
+    if (!f.lesson && f.doing === 'idle') idleBy.set(f.goal || '(none)', (idleBy.get(f.goal || '(none)') ?? 0) + dt);
+    if (f.held) {
+      held += dt;
+      if (!f.line) heldNoLine += dt;
+    }
+    if (f.line) lastLine = f.line;
+    // A trip: out of the ranch and back in. What the page said as it left (a lesson's line, else the journal's goal).
+    if (f.zone !== 'ranch' && tripFrom < 0) {
+      tripFrom = f.t;
+      // (With no lesson up, the journal's goal: two trips for different goals are not the same trip.)
+      tripWhy = f.line || (f.lesson ? lastLine : `(journal: ${f.goal || 'none'})`);
+    } else if (f.zone === 'ranch' && tripFrom >= 0) {
+      trips.push({ why: tripWhy, secs: f.t - tripFrom, catches: catches.filter((c) => c >= tripFrom && c <= f.t).length });
+      tripFrom = -1;
+    }
     const lessonUp = !!f.lesson;
     if (!lessonUp) {
       noLesson += dt;
@@ -125,7 +159,29 @@ function play(seed: number): Run {
     coins: s.coins,
     byLesson,
     gaps,
+    heldNoLine,
+    held,
+    trips,
+    idleBy,
   };
+}
+
+/** Trips for a line already gone out for once: the repeats, and their seconds. */
+function repeats(r: Run): { n: number; secs: number; lines: string[] } {
+  const seen = new Map<string, number>();
+  let n = 0;
+  let secs = 0;
+  const lines: string[] = [];
+  for (const t of r.trips) {
+    const k = seen.get(t.why) ?? 0;
+    if (k > 0) {
+      n++;
+      secs += t.secs;
+      if (!lines.includes(t.why)) lines.push(t.why);
+    }
+    seen.set(t.why, k + 1);
+  }
+  return { n, secs, lines };
 }
 
 console.log(`Thistledown, the first ${SECS} real seconds of a fresh phone game: an eager player, ${SEEDS} seeds (dead walking: walking over ${DEAD} s since anything new)`);
@@ -135,11 +191,18 @@ for (let seed = 1; seed <= SEEDS; seed++) {
   runs.push(r);
   const hh = Math.floor(r.hour);
   const mm = String(Math.floor((r.hour % 1) * 60)).padStart(2, '0');
+  const rep = repeats(r);
+  console.log(`   seed ${r.seed}: clock held ${r.held.toFixed(0)} s, of it with no line ${r.heldNoLine.toFixed(0)} s; ${r.trips.length} trips out (${r.trips.map((t) => `${t.secs.toFixed(0)} s`).join(', ')}), ${rep.n} for a line already gone out for (${rep.secs.toFixed(0)} s: ${rep.lines.map((l) => `"${l}"`).join(', ')})`);
   console.log(`   seed ${r.seed}: under a lesson line: walking ${r.lessonWalk.toFixed(0)} s, of it dead ${r.lessonDead.toFixed(0)} s, idle ${r.lessonIdle.toFixed(0)} s; in all: walking ${r.walk.toFixed(0)} s, of it dead ${r.dead.toFixed(0)} s; idle ${r.idle.toFixed(0)} s; no lesson line ${r.noLesson.toFixed(0)} s (longest ${r.longestGap.toFixed(0)} s); longest with nothing new ${r.longestQuiet.toFixed(0)} s (${r.quietAt}); ${r.news} new things; reached day ${r.day} ${hh}:${mm}, ${r.coins} coins, ${r.learned.length} lessons (last: ${r.learned.slice(-3).join(', ')})`);
 }
 const mean = (f: (r: Run) => number) => runs.reduce((a, r) => a + f(r), 0) / runs.length;
 console.log(`   mean under a lesson line: walking ${mean((r) => r.lessonWalk).toFixed(0)} s, dead walking ${mean((r) => r.lessonDead).toFixed(0)} s, idle ${mean((r) => r.lessonIdle).toFixed(0)} s`);
+console.log(`   mean clock held ${mean((r) => r.held).toFixed(0)} s, with no line ${mean((r) => r.heldNoLine).toFixed(0)} s; trips out ${mean((r) => r.trips.length).toFixed(1)}, repeated trips ${mean((r) => repeats(r).n).toFixed(1)} (${mean((r) => repeats(r).secs).toFixed(0)} s)`);
 console.log(`   mean in all: walking ${mean((r) => r.walk).toFixed(0)} s, dead walking ${mean((r) => r.dead).toFixed(0)} s, idle ${mean((r) => r.idle).toFixed(0)} s, no lesson line ${mean((r) => r.noLesson).toFixed(0)} s, longest gap ${mean((r) => r.longestGap).toFixed(0)} s, longest quiet ${mean((r) => r.longestQuiet).toFixed(0)} s, ${mean((r) => r.news).toFixed(0)} new things, ${mean((r) => r.learned.length).toFixed(1)} lessons`);
+// With no lesson up, the idle seconds by the goal the journal showed (mean a game).
+const ib = new Map<string, number>();
+for (const r of runs) for (const [k, v] of r.idleBy) ib.set(k, (ib.get(k) ?? 0) + v / runs.length);
+console.log(`   idle with no lesson, by the journal's goal (mean seconds a game): ${[...ib].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ')}`);
 // Where the dead walking and the waits went, by lesson (summed over the seeds).
 const all = new Map<string, { walk: number; dead: number; idle: number; act: number }>();
 for (const r of runs) for (const [k, v] of r.byLesson) {

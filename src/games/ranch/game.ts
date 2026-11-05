@@ -30,7 +30,7 @@ import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
 import { PORCH } from './physics';
 import { Fx } from './scene/fx';
-import { CreatureView } from './scene/creatures';
+import { CreatureView, TELL_BODY } from './scene/creatures';
 import { GroundTex, buildFluff, buildGrass } from './scene/grass';
 import { Marker } from './scene/marker';
 import { U, armNaNWatch } from './scene/mat';
@@ -86,6 +86,8 @@ export class Ranch {
   private props: Props;
   private pads = new PadView();
   readonly creatures = new CreatureView();
+  /** For checks (round 10): how the tell shows on a downy's body; a check may set round 9's to compare. */
+  readonly tellBody = TELL_BODY;
   readonly fx = new Fx();
   readonly vm: Viewmodel;
   private tags = new TagMenu();
@@ -399,7 +401,11 @@ export class Ranch {
     }
   }
 
+  /** For checks (round 10): time stands still for the frame (grass, sky, drifting fluff, the sim), so frames compare. */
+  still = false;
+
   private tick(dt: number): void {
+    if (this.still) dt = 0;
     this.t += dt;
     U.uTime.value = this.t;
     const f = this.input.frame();
@@ -674,7 +680,8 @@ export class Ranch {
   /** What the board chalks for an order: "20 clover fluff by dusk", "3 brook downies by dusk", "gold clover downy, the old oak". */
   private boardText(o: Order): string {
     const name = KIND[o.kind].name.replace(' downy', '');
-    const due = o.from !== undefined ? 'after 9 pm' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : 'by dusk';
+    // (Round 10: the first order runs to the next day's dusk, and the chalk says so as its tag does.)
+    const due = o.from !== undefined ? 'after 9 pm' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : (o.until ?? this.sim.s.day) > this.sim.s.day ? 'by dusk tomorrow' : 'by dusk';
     if (o.rare) return `${RARE_NAME[o.kind]} downy, ${SIGHTINGS[o.rare.spot].name}`;
     return o.live ? `${o.n} ${name} downies ${due}` : `${o.n} ${name} fluff ${due}`;
   }
@@ -992,6 +999,11 @@ export class Ranch {
   /** The calm page with no lesson up: the day's orders (news with no box), then the next goal. */
   private goalRows(goal: string, orders: string[]): { text: string; done: boolean; plain?: boolean }[] {
     return [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : [])];
+  }
+
+  /** For checks (round 10): the next journal goal as the page words it (some count: "Sell 20 fluff, 7 so far."). */
+  journalGoal(): string {
+    return this.goalLine();
   }
 
   /** The next journal goal, shown calmly whenever no lesson is up, so the page is never blank while there is something to do (a gate's goal counts the coins towards it). */
@@ -1583,6 +1595,7 @@ export class Ranch {
     const home = { x0: this.w - 22 - 2 * R - 10, x1: this.w - 12, y0: this.h - 214 - 2 * R - 44, y1: this.h - 214 + 26 };
     if (!box) {
       this.input.placeAct(null);
+      this.input.tuckJump(false);
       return;
     }
     // Round 9: against each tag, not the box round them all (shot 110: a lone tag in the bottom row put the box over
@@ -1604,6 +1617,7 @@ export class Ranch {
     };
     if (!hits(home.x0, home.y0, home.x1, home.y1)) {
       this.input.placeAct(null);
+      this.input.tuckJump(false);
       return;
     }
     const hx = (home.x0 + home.x1) / 2;
@@ -1627,8 +1641,19 @@ export class Ranch {
     }
     if (bestX >= 0) {
       this.input.placeAct(bestX, bestY);
+      this.input.tuckJump(false);
       return;
     }
+    // Round 10: six tags (three rows) cover its place and everything up and to the left of it, and it jumped to the
+    // top middle (y about 230), out of the thumb's reach. Jump's place, just below, is free of them: it takes that
+    // while the tags hang, and Jump steps aside (nothing there wants a jump).
+    const j = this.input.jumpSpot();
+    if (j && !hits(j.x - R - 5, j.y - R - 5, j.x + R + 5, j.y + R + 22)) {
+      this.input.placeAct(j.x, j.y);
+      this.input.tuckJump(true);
+      return;
+    }
+    this.input.tuckJump(false);
     // The button with its word under it: 32 px up, 32 + 22 px down from its centre.
     const floor = this.h * 0.7;
     const top = 120;

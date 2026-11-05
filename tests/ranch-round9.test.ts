@@ -472,7 +472,8 @@ describe('P2: picking an offer is a real decision: a prized bonus capped, no sor
   }
 
   it('thirty mornings with thistles kept: a prized order pays at most half again what a plain fluff order by dusk pays (it paid 1,116 for 9 thistle fluff)', () => {
-    const sim = ranch(['clover', 'ember', 'thistle'], [10, 8, 2]);
+    // (Round 10: a thistle's order is prized only with three thistles kept.)
+    const sim = ranch(['clover', 'ember', 'thistle'], [10, 8, 3]);
     let prized = 0;
     for (let d = 2; d < 32; d++) {
       sim.s.day = d;
@@ -532,10 +533,11 @@ describe('P2: picking an offer is a real decision: a prized bonus capped, no sor
     sim.s.orders = [{ kind: 'clover', live: true, n: 1, got: 0, paid: 0, mult: 2, pay: 65, state: 'offer', rare: { spot: 0 }, by: 19 }];
     const note = sim.offerTag(sim.s.orders[0]).note;
     expect(note).not.toMatch(/a day/);
-    expect(note).toMatch(/^By the old oak\. Pays 65, then [\d,]+ more by day 7$/);
+    // (Round 10: over five days, not to the week's end.)
+    expect(note).toMatch(/^By the old oak\. Pays 65, then [\d,]+ over 5 days$/);
     const perDay = (sim as unknown as { rareWorth(): number }).rareWorth();
-    const total = Number(note.match(/then ([\d,]+) more/)![1].replace(/,/g, ''));
-    expect(Math.abs(total - perDay * 4)).toBeLessThanOrEqual(10);
+    const total = Number(note.match(/then ([\d,]+) over/)![1].replace(/,/g, ''));
+    expect(Math.abs(total - perDay * 5)).toBeLessThanOrEqual(10);
   });
 });
 

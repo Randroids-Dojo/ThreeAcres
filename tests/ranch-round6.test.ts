@@ -195,7 +195,7 @@ describe('P1: the rare downy is a hunt', () => {
     const s = sim.s;
     const sp = SIGHTINGS[0];
     // (Round 7: and what it is worth a day once penned.)
-    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, (and stays|then [\d,]+ more (by day \d+|today))$/);
+    expect(sim.offerTag(s.orders[0]).note).toMatch(/^By the old oak\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days)$/);
     const floor = (x: number, z: number) => sim.phys.floor(x, z);
     const mark = { on: false, icon: 'arrow' as const, x: 0, y: 0, z: 0, rx: 0, rz: 0, r: 0, slot: -1 };
     // In the meadow, 40 m off: the clue only.

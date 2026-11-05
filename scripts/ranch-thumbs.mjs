@@ -357,8 +357,10 @@ await p.evaluate(() => {
 });
 const pullBtn = await box('.rt-draw');
 await touch('touchStart', [[pullBtn.x, pullBtn.y, 23]]);
+// (Round 10: pull until it is well under way, not for a fixed time: a puff-up holds the pull still, and a pull of
+// 0.25 or less let go is only a short Pull, which leaves a wild downy where it is.)
 let tugMax = 0;
-for (let i = 0; i < 9; i++) {
+for (let i = 0; i < 50 && tugMax <= 0.36; i++) {
   await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
   await p.waitForTimeout(60);
   tugMax = Math.max(tugMax, await p.evaluate(() => window.__wild.tug));

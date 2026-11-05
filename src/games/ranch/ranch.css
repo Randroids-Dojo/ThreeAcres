@@ -218,6 +218,8 @@
 .rt-act.show { display: grid; }
 /* While tags hang, the Use button sits off them (placed from the tags' place on screen). */
 .rt-act.free { right: auto; bottom: auto; margin: 0; }
+/* Round 10: Jump steps aside while Use takes its place (six tags hanging over Use's own). */
+.rt-jump.tucked { display: none; }
 .rt-pause { right: 14px; top: calc(72px + var(--safe-t)); width: 40px; height: 40px; border-width: 1.5px; }
 .rt-pause .ic { width: 40%; height: 40%; }
 #app[data-device='touch'] .rh-click { display: none; }

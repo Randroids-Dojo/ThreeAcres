@@ -154,8 +154,10 @@ function lasting(sim: Sim, o: Order): number {
     const here = inPen(sim, i);
     // (A pen of ten has no room for it: more than ten get frazzled and hop out.)
     if (!here.length || here.length >= 10 || here.some((d) => d.rare)) return;
-    // (Round 7: 3.7 meals a day each, as measured for the tag's number), one more fluff each meal, at today's price.
-    const v = here.reduce((a, d) => a + PEN_MEALS * sim.price(d.kind), 0) * LASTING_DAYS;
+    // (Round 7: 3.7 meals a day each, as measured for the tag's number), one more fluff each meal, at today's price;
+    // round 10: up to five more fluff a day from the pen (the sim's own figure, where it has one).
+    const daily = (sim as unknown as { rareDaily?: (i: number) => number }).rareDaily;
+    const v = (daily ? daily.call(sim, i) : here.reduce((a, d) => a + PEN_MEALS * sim.price(d.kind), 0)) * LASTING_DAYS;
     pen = Math.max(pen, v);
   });
   return best + pen;
@@ -250,6 +252,9 @@ for (const r of RANCHES) {
   let avoidable = 0;
   const seen2: Set<string>[] = [];
   let rareNote = '';
+  // Round 10: the rare one's figure on its tag (its lasting worth: to the week's end before, five days now) against the
+  // trip beside it that morning (the tenth playtest's day 2: "then 1,550 more by day 7" beside a trip of 400).
+  const figTrip: number[] = [];
   const DAYS = 30;
   for (let d = 2; d < 2 + DAYS; d++) {
     s.day = d;
@@ -280,6 +285,10 @@ for (const r of RANCHES) {
     const rr = os.find((o) => o.rare);
     if (rr && f) rares.push(worth(rr) / f.pay);
     if (rr && l) rareTrip.push(worth(rr) / worth(l));
+    if (rr && l) {
+      const wk = (sim as unknown as { rareWeek?: () => { coins: number } }).rareWeek?.();
+      if (wk && wk.coins > 0) figTrip.push(wk.coins / worth(l));
+    }
     if (rr) rarePay = Math.max(rarePay, rr.pay);
     // What each offer is best at: the most coins today, a reward that lasts, or no trip out at all. A real choice
     // when every offer on the board is best at something (the sixth playtest's rare one paid most for least work).
@@ -329,6 +338,10 @@ for (const r of RANCHES) {
     rareTrip.sort((a, b) => a - b);
     console.log(`      the rare one's coins against the trip's: ${rareTrip[0].toFixed(2)} to ${rareTrip[rareTrip.length - 1].toFixed(2)} (most it paid: ${rarePay}; the playtest's 2,680 was 3.8 times its trip)`);
   }
+  if (figTrip.length) {
+    figTrip.sort((a, b) => a - b);
+    console.log(`      round 10: the rare one's tag figure against the trip beside it: ${figTrip[0].toFixed(2)} to ${figTrip[figTrip.length - 1].toFixed(2)}, middle ${figTrip[Math.floor(figTrip.length / 2)].toFixed(2)} (${figTrip.length} mornings)`);
+  }
   console.log(`      most coins today: fluff order ${best.fluff}, trip ${best.trip}, hunt ${best.hunt} of ${DAYS}; its pen bonus lasts (a pen with no rare one yet; every pen holds one from morning 11) on ${lastingDays}`);
   console.log(`      a real choice, every offer best at something (most coins today, a reward that lasts, no trip out): ${real} of ${DAYS}`);
   console.log(`      round 8: three offers on ${three} of ${DAYS} mornings; offers repeating one of yesterday's (sort, kind and deadline): ${repeats}; conditions: ${Object.entries(conds).map(([k, v]) => `${k} ${v}`).join(', ')}`);
@@ -340,6 +353,33 @@ for (const r of RANCHES) {
   allPicks.careless.fluff += picks.careless.fluff;
   allPicks.careless.trip += picks.careless.trip;
   allPicks.careless.hunt += picks.careless.hunt;
+}
+// Round 10: small thistle ranches (the tenth playtest's one thistle's prized order paid 922 in one sale, more than its
+// pen of eight clovers made in a day): the most a thistle fluff order paid on top, against what that clover pen makes
+// in a day (eight clovers, 3.7 meals each, two fluff a meal, at the day's price).
+for (const th of [1, 2, 3]) {
+  const sim = build({ name: '', pens: [{ pad: 1, kind: 'clover', n: 8, ups: ['feeder'] }, { pad: 2, kind: 'thistle', n: th, ups: ['feeder', 'high'] }], gardens: [{ pad: 0, crop: 'cloverhead', ups: ['sprinkler'] }], ridge: true, hollow: false }, 7);
+  const s = sim.s;
+  let most = 0;
+  let mostDay = 0;
+  let prizedN = 0;
+  let thN = 0;
+  for (let d = 2; d < 32; d++) {
+    s.day = d;
+    s.hour = 6;
+    sim.postOrders(true);
+    for (const o of sim.offers()) {
+      if (o.kind !== 'thistle' || o.live) continue;
+      thN++;
+      if (o.mult > 2) prizedN++;
+      const pen = 8 * 3.7 * 2 * sim.price('clover');
+      if (o.pay / pen > most) {
+        most = o.pay / pen;
+        mostDay = o.pay;
+      }
+    }
+  }
+  console.log(`   Small thistle ranch (clover 8, thistle ${th}): ${thN} thistle fluff orders in thirty mornings, ${prizedN} prized; the most one paid on top ${mostDay}, ${most.toFixed(2)} times the clover pen's day of fluff`);
 }
 console.log(`   Over all four ranches, the best pick: careful fluff order ${allPicks.careful.fluff}, trip ${allPicks.careful.trip}, hunt ${allPicks.careful.hunt}; careless fluff order ${allPicks.careless.fluff}, trip ${allPicks.careless.trip}, hunt ${allPicks.careless.hunt} (each kind of offer the best pick on some mornings: ${(['fluff', 'trip', 'hunt'] as const).every((k) => allPicks.careful[k] + allPicks.careless[k] > 0) ? 'yes' : 'no'})`);
 console.log(`   (A trip costs a careful catcher, running: clover ${Math.round(tripSecs('clover', 3))} s for 3, careless ${Math.round(tripSecs('clover', 3, 'careless'))} s; ember ${Math.round(tripSecs('ember', 3))} s for 3, brook ${Math.round(tripSecs('brook', 3))} s for 3. Live downies pay ${Object.entries(LIVE_EACH).map(([k, v]) => `${k} ${v}`).join(', ')} each.)\n`);

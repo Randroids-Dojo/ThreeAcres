@@ -179,7 +179,8 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     s.day++;
     sim.postOrders(true);
     expect(s.orders.find((o) => !o.live)!.n).toBeGreaterThan(small);
-    fill(sim, 2, 'thistle', 2);
+    // (Round 10: prized, triple, with three thistles kept; one or two make a plain order.)
+    fill(sim, 2, 'thistle', 3);
     s.day++;
     sim.postOrders(true);
     const th = s.orders.find((o) => o.kind === 'thistle');
@@ -687,15 +688,15 @@ describe('P3: the feeder has a crosshair mark and says why it refuses', () => {
     let found = false;
     for (let up = -0.4; up <= 1.6 && !found; up += 0.05) if (sim.aimTarget(aimAt(sim, h.x, hy + up, h.z)) === 'feeder') found = true;
     expect(found).toBe(true);
-    // A feeder full of another food: it bounces off and says so.
-    sim.s.pads[1].feeder = { t: 'sweetroot', n: 3 };
+    // A feeder of two other foods: it bounces off and says so. (Round 10: a feeder holds up to two foods; it held one.)
+    sim.s.pads[1].feeder = { t: 'sweetroot', n: 3, t2: 'dewberry', n2: 2 };
     const it = newItem(sim.s, 'cloverhead', h.x, hy, h.z);
     it.flyT = 0.1;
     it.blown = true;
     sim.s.items.push(it);
     for (let t = 0; t < 0.2; t += 1 / 30) sim.update(1 / 30, idle, ahead(sim));
     const said = sim.events.find((e): e is Extract<Ev, { t: 'feeder' }> => e.t === 'feeder');
-    expect(said?.why).toBe('This feeder holds sweetroots.');
+    expect(said?.why).toBe('This feeder holds sweetroots and dewberries.');
   });
 
   it('every new line is eight words or fewer, uses the plain words, and no lesson line names a key on touch', () => {

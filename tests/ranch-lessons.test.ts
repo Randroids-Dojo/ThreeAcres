@@ -429,7 +429,7 @@ describe('selling, step by step', () => {
 });
 
 describe('the loop, after the meadow', () => {
-  it('says what to do with food and fluff, a step at a time, until three whole turns of the loop', () => {
+  it('says what to do with food and fluff, a step at a time, until two whole turns of the loop', () => {
     const { sim, tutor, run, view } = ranch();
     const s = sim.s;
     for (const id of ['look', 'walk', 'draw', 'puff', 'feed', 'sell', 'pen', 'penin', 'meadow', 'slots', 'jump']) s.learn.push(`lesson:${id}`);
@@ -482,8 +482,7 @@ describe('the loop, after the meadow', () => {
     s.slots[0].n = 0;
     run(0.5);
     expect(view().line).toBe('Catch another downy out in Clover Meadow.');
-    // Two turns of the loop, then dusk takes over; morning hands back, and the count carries on.
-    tutor.add(s, 'cycle');
+    // A turn of the loop, then dusk takes over; morning hands back, and the count carries on.
     tutor.add(s, 'cycle');
     run(0.1);
     s.hour = 18.4;
@@ -496,8 +495,8 @@ describe('the loop, after the meadow', () => {
     run(2);
     expect(tutor.current).toBe('farm');
     expect(s.learn).not.toContain('lesson:farm');
-    // The third makes it: it ticks and ends.
-    expect(FARM_CYCLES).toBe(3);
+    // The second makes it: it ticks and ends. (Round 10: two turns; it was three, each step taught once, then on.)
+    expect(FARM_CYCLES).toBe(2);
     tutor.add(s, 'cycle');
     run(0.1);
     expect(view().done).toBe(true);

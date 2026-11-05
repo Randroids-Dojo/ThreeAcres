@@ -205,7 +205,7 @@ describe('P1: the tug is a skill you read: it pulls back, holding on slips it fr
 // ---------------------------------------------------------------- P1 3: the first evening, one thing at a time
 
 describe('P1: the first evening puts its lessons up 30 s apart, none after 7 pm but the night\'s, and the garden waits for morning', () => {
-  it('an eager player through the first evening: order, feeder, filling it, dusk and night, each 30 s or more after the last', () => {
+  it('an eager player through the first evening: order, feeder, filling it, dusk and night, each 30 s or more after the last (round 10: but none waits with the clock held at 6 pm)', () => {
     const sim = quiet(16.5);
     sim.teaching = true;
     const s = sim.s;
@@ -224,11 +224,13 @@ describe('P1: the first evening puts its lessons up 30 s apart, none after 7 pm 
     let last = '';
     let t = 0;
     let feederDone = -1;
+    let heldBare = 0;
     for (; t < 400; t += 1 / 30) {
       sim.update(1 / 30, idle, ahead(sim));
       for (const e of sim.events) tutor.onEvent(s, e);
       sim.events.length = 0;
       const v = tutor.update(s, 1 / 30, touch, floor);
+      if (sim.clockHeld && s.hour >= 18 && !v.line) heldBare += 1 / 30;
       if (v.line && !v.done && v.id !== last) {
         begins.push({ id: v.id, t, hour: s.hour, day: s.day });
         last = v.id;
@@ -250,8 +252,11 @@ describe('P1: the first evening puts its lessons up 30 s apart, none after 7 pm 
     }
     const ids = begins.map((b) => b.id);
     expect(ids).toEqual(['order', 'ups', 'feeder', 'dusk', 'night']);
-    // No two new lesson lines within 30 real seconds of each other.
-    for (let i = 1; i < begins.length; i++) expect(begins[i].t - begins[i - 1].t, `${begins[i - 1].id} to ${begins[i].id}`).toBeGreaterThanOrEqual(29.99);
+    // No two new lesson lines within 30 real seconds of each other, but while the clock waits at 6 pm (round 10: the
+    // spacing stops lines piling up; with the clock held it only made you wait, about 30 s twice with no line).
+    const held = (b: { hour: number; day: number }) => b.day === 1 && b.hour >= 18 && b.hour < 18.31;
+    for (let i = 1; i < begins.length; i++) if (!held(begins[i]) && !held(begins[i - 1])) expect(begins[i].t - begins[i - 1].t, `${begins[i - 1].id} to ${begins[i].id}`).toBeGreaterThanOrEqual(29.99);
+    expect(heldBare, 'seconds held at 6 pm with no line').toBeLessThan(2.5);
     // None after 7 pm but the night's; the feeder filled before dusk came (dusk waited at 6 pm).
     for (const b of begins) if (b.id !== 'night') expect(b.hour < 19 && b.day === 1, `${b.id} at ${b.hour.toFixed(2)}`).toBe(true);
     expect(feederDone).toBeGreaterThan(0);
@@ -316,12 +321,13 @@ describe('P2: no second rare one for a pen that has one, and the tag says what o
     const r = sim.offers().find((o) => o.rare);
     expect(r).toBeTruthy();
     const note = sim.offerTag(r!).note;
-    // (Round 9: over the days left in the week, not "a day": on day 3, the four days to day 7.)
-    const m = /then ([\d,]+) more by day 7$/.exec(note);
+    // (Round 9: over the days left in the week, not "a day". Round 10: over five days, the pen's extra fluff capped at
+    // RARE_EXTRA a day: "then 140 more today" on a week's last day read as paying later today.)
+    const m = /then ([\d,]+) over 5 days$/.exec(note);
     expect(m, note).toBeTruthy();
-    // Six clovers, one more fluff a meal each, about 3.7 meals a day, at today's clover price.
-    const want = Math.round((6 * 3.7 * sim.price('clover')) / 10) * 10;
-    expect(Number(m![1].replace(/,/g, ''))).toBe(Math.round((want * 4) / 10) * 10);
+    // Six clovers, one more fluff a meal each, about 3.7 meals a day, up to five more fluff a day, at today's clover price.
+    const want = Math.round((Math.min(6 * 3.7, 5) * sim.price('clover')) / 10) * 10;
+    expect(Number(m![1].replace(/,/g, ''))).toBe(Math.round((want * 5) / 10) * 10);
   });
 });
 
