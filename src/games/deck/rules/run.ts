@@ -120,7 +120,7 @@ export function cloneRun(s: RunState): RunState {
 }
 
 function cloneTally(t: Tally): Tally {
-  return { ...t, kinds: { ...t.kinds }, rows: [...t.rows], rowKinds: t.rowKinds.map((r) => ({ ...r })), from: { ...t.from } };
+  return { ...t, kinds: { ...t.kinds }, rows: [...t.rows], rowKinds: t.rowKinds.map((r) => ({ ...r })), from: { ...t.from }, empty: t.empty && [...t.empty] };
 }
 
 /** Every card the player owns, wherever it is. */
@@ -430,6 +430,7 @@ export function endDay(s: RunState): Ev[] {
   // Round 9: not on a day the quota was already met (the ninth playtest's scoop was refused for "1 scoop a day sat
   // unused", the scoops of days played after the quota was met).
   if (s.earned < s.quota) s.idle = { scoops: (s.idle?.scoops ?? 0) + s.energy, days: (s.idle?.days ?? 0) + 1 };
+  duskTally(s);
   const max = handSize(s);
   if (s.hand.length > max) {
     const extra = s.hand.splice(0, s.hand.length - max);
@@ -445,6 +446,20 @@ export function endDay(s: RunState): Ev[] {
     startDay(s, ev);
   }
   return ev;
+}
+
+/**
+ * Round 10: the room the plot had at dusk, by row (bare plots), for pricing frost by the plots it would take against the
+ * room left elsewhere.
+ */
+function duskTally(s: RunState): void {
+  const t = s.tally;
+  if (!t) return;
+  t.empty ??= new Array(s.rows).fill(0);
+  t.dusks = (t.dusks ?? 0) + 1;
+  s.plots.forEach((p, i) => {
+    if (isEmpty(p)) t.empty![Math.floor(i / s.cols)] = (t.empty![Math.floor(i / s.cols)] ?? 0) + 1;
+  });
 }
 
 function seasonEnd(s: RunState, ev: Ev[]): void {
@@ -719,6 +734,25 @@ export function twistsDue(s: RunState): boolean {
 export interface Aim {
   t: Twist;
   v: number;
+  /** Round 10: the share of `v` a careful player still pays (frost: by the room the rest of the plot had), if not `adapt`'s. */
+  f?: number;
+}
+
+/**
+ * Round 10: the share of a frosted row's coins a careful player still loses, by the room the rest of the plot had: the
+ * bare plots at dusk on the other rows, on average over the season just played. With no room every sowing there is lost;
+ * with five bare plots or more about half (what the plot's layout loses), measured with deck-twists' play-ahead.
+ */
+export function frostShare(t: Tally, row: number): number {
+  const a = TUNING.frostRoom;
+  if (!t.dusks || !t.empty) return TUNING.adapt.frost ?? 0.5;
+  const room = (t.empty.reduce((x, y) => x + y, 0) - (t.empty[row] ?? 0)) / t.dusks;
+  return Math.max(a.least, Math.min(a.most, a.top - a.per * room));
+}
+
+/** Round 10: a crop no hitch is aimed at: a free one (a radish), which the run can sow again anywhere for nothing. */
+export function freeCrop(k: SeedId): boolean {
+  return !TUNING.freeHitch && CARDS[k].cost === 0;
 }
 
 const byCoins = (m: Partial<Record<SeedId, number>>): SeedId[] => (Object.keys(m) as SeedId[]).filter((k) => (m[k] ?? 0) > 0).sort((a, b) => (m[b] ?? 0) - (m[a] ?? 0));
@@ -744,9 +778,12 @@ export function hitchAims(s: RunState): Aim[] {
   const out: Aim[] = [];
   // Round 9: the second and third crop and row too, a lighter hitch for a run whose top one would cost more than a
   // quota can be cut (the ninth playtest's corn: "About 320 fewer coins" against a help of 220, the cut at its cap).
-  for (const k of byCoins(t.kinds).slice(0, 3)) out.push({ t: { id: 'glut', crop: k }, v: (1 - TUNING.glutTimes) * ((t.kinds[k] ?? 0) / t.take) });
-  const rows = t.rows.map((v, i) => ({ v, i })).filter((r) => r.v > 0).sort((a, b) => b.v - a.v).slice(0, 3);
-  for (const r of rows) out.push({ t: { id: 'frost', row: r.i, crop: byCoins(t.rowKinds[r.i] ?? {})[0] }, v: r.v / t.take });
+  // Round 10: never a glut of a free crop, nor frost on a row that paid mostly in free crops (the tenth playtest's "Frost on
+  // your radishes' row" cut 280 off a quota and cost nothing: radishes go anywhere), and frost names the row's paid crop.
+  for (const k of byCoins(t.kinds).filter((k) => !freeCrop(k)).slice(0, 3)) out.push({ t: { id: 'glut', crop: k }, v: (1 - TUNING.glutTimes) * ((t.kinds[k] ?? 0) / t.take) });
+  const freeOf = (i: number) => (Object.keys(t.rowKinds[i] ?? {}) as SeedId[]).filter(freeCrop).reduce((a, k) => a + (t.rowKinds[i][k] ?? 0), 0);
+  const rows = t.rows.map((v, i) => ({ v, i })).filter((r) => r.v > 0 && freeOf(r.i) < 0.5 * r.v).sort((a, b) => b.v - a.v).slice(0, 3);
+  for (const r of rows) out.push({ t: { id: 'frost', row: r.i, crop: byCoins(t.rowKinds[r.i] ?? {}).filter((k) => !freeCrop(k))[0] }, v: r.v / t.take, f: frostShare(t, r.i) });
   const p = bySeason(TUNING.crowChance, nextSeason(s));
   const scarecrow = s.plots.some((pl) => pl.obj === 'scarecrow') || allCards(s).some((c) => c.id === 'scarecrow');
   if (p > 0 && !scarecrow) out.push({ t: { id: 'crows' }, v: (TUNING.days * Math.max(0, TUNING.crowEvery - p)) / Math.max(1, t.harvests) });
@@ -783,15 +820,41 @@ export function easeOf(v: number): number {
 
 /** What a hitch would still cost a careful player who plays round it, as a share of a season's take (round 8). */
 export function hitchCost(a: Aim): number {
-  return a.v * (TUNING.adapt[a.t.id] ?? 0.5);
+  return a.v * (a.f ?? TUNING.adapt[a.t.id] ?? 0.5);
 }
 
 /**
- * The share a hitch would take off the quota before bounds (round 8): what it still costs a careful player, and the
- * worth of the help offered beside it, so the two are worth the same by the rules' own estimate.
+ * The share a hitch would take off the quota before bounds: what it still costs a careful player, and (round 10) a
+ * share of the worth of the help offered beside it (`helpShare`), both in coins of the take (`r`, the run's take over
+ * its quota: `takeRatio`). Round 8 added the help's whole worth so the two weighed the same by the rules' estimate, and
+ * the cut came out two to three times what a hitch cost when played (deck-twists: frost cut 347 coins and cost 167):
+ * the tenth playtest took the hitch at all nine stalls.
  */
-export function hitchCut(a: Aim, worth = TUNING.hitchMargin): number {
-  return (hitchCost(a) + worth) * (TUNING.easeTimes[a.t.id] ?? 1);
+export function hitchCut(a: Aim, worth = TUNING.hitchMargin, r = 1): number {
+  return (hitchCost(a) + TUNING.helpShare * worth) * r * (TUNING.easeTimes[a.t.id] ?? 1);
+}
+
+/**
+ * Round 10: the worth of a help (a share of the take) that weighs the same as a hitch costing `c` of the take, for a run
+ * taking `r` times its quota: a hitch that cuts what it costs leaves the take over the quota the same as a help of
+ * w = c (r - 1) / (1 - c r). A run just meeting its quota gains nothing from such a hitch, so the help beside it is the
+ * lightest there is. The cut's small share of the help (`helpShare`) is left out, so the hitch keeps that much of an edge:
+ * with it counted the bot took the hitch at 38% of stalls, with it left out at 42 to 44%.
+ */
+export function pairWorth(c: number, r: number): number {
+  const d = 1 - c * r;
+  return d > 0.05 ? Math.max(0, (c * (r - 1)) / d) : 1;
+}
+
+/**
+ * Round 10: the season just played's take over its quota, between 1 and `takeMax`: a twist's share of a take is said and
+ * cut in coins of the take the run is making, not of the quota (the stall said "About 112 fewer coins." for a frost
+ * that cost 167 played, and "About 182 more coins." for a buyer that brought 152 against a quota 1.45 times smaller).
+ */
+export function takeRatio(s: RunState): number {
+  const t = s.tally;
+  if (!t || t.take <= 0 || s.quota <= 0) return 1;
+  return Math.max(1, Math.min(TUNING.takeMax, t.take / s.quota));
 }
 
 /**
@@ -816,7 +879,9 @@ export function sameAim(a: Twist, b: Twist): boolean {
  * better depends on how the plot is played. Both carry what they would do in coins (`worth`), which the stall says.
  * Round 7 took a hitch's whole expected cost off: frost cut 25% and cost 10.5% played. Neither repeats the season just
  * played, and nothing the last stall offered is aimed the same way again (the eighth playtest's carrots went glut,
- * buyer, glut, buyer; "Trellis rests" came up 6 times in 15 stalls).
+ * buyer, glut, buyer; "Trellis rests" came up 6 times in 15 stalls). Round 10: the hitch is drawn first, the cut is its
+ * careful cost and a share of the help's worth (`hitchCut`), both in coins of the run's take (`takeRatio`), and the help
+ * is one that weighs the same (`pairWorth`).
  */
 export function offerTwists(s: RunState): Twist[] {
   const last = s.twist?.id;
@@ -835,42 +900,62 @@ export function offerTwists(s: RunState): Twist[] {
   // Round 9: only a pair whose cut stays within bounds, so the hitch takes off its careful cost and the help's worth in
   // full and the two still weigh the same (when the cut hit its cap the ninth playtest read "About 220 more coins"
   // beside "About 320 fewer coins. Summer asks 600, not 920.", the hitch the worse by the help's worth).
-  const fits = (h: Aim, g: Aim) => hitchCut(h, g.v) <= TUNING.easeMax + 1e-9 && !sameAim(h.t, g.t);
+  const r = takeRatio(s);
+  const fits = (h: Aim, g: Aim) => hitchCut(h, g.v, r) <= TUNING.easeMax + 1e-9 && !sameAim(h.t, g.t);
   let h: Aim | undefined;
   let g: Aim | undefined;
   let ceiling = TUNING.easeMax;
   // Fresh for two stalls with the usual helps, then with a wider choice of help; only if none of those can be weighed
   // fairly, a hitch the stall before last offered (never the last stall's: round 8).
   for (const [hs, gs] of [[fresh2, goods], [fresh2, wider], [fresh1, goods], [fresh1, wider]] as const) {
-    const paired = hs.filter((x) => x.v >= TUNING.minHit && gs.some((y) => fits(x, y)));
-    if (!paired.length) continue;
-    h = pick(s, paired);
-    // The help: a kind at random (buyers come one to a crop), then one of it, among those that keep the cut in bounds.
-    const from = gs.filter((x) => fits(h!, x));
-    const kind = pick(s, [...new Set(from.map((x) => x.t.id))]);
-    g = pick(s, from.filter((x) => x.t.id === kind));
+    // Round 10: a help is worth about what the hitch is worth to this run (`pairWorth`). With the cut at the hitch's cost
+    // and a small share, a big help beside a light hitch was the better pick every time (deck-twists: the help played
+    // +18.1%, the hitch +5.8%, and the bot took the hitch at 34% of stalls), as a coupon of a hitch was before. A help is
+    // worth 8% or more, so a hitch too light to weigh against any help stays off the offer if another can (`pairSpread`).
+    const opts = hs
+      .filter((x) => x.v >= TUNING.minHit)
+      .map((x) => {
+        const want = pairWorth(hitchCost(x), r);
+        const from = gs.filter((y) => fits(x, y)).map((y) => ({ y, off: Math.abs(y.v - want) }));
+        return { x, from, best: Math.min(...from.map((p) => p.off)) };
+      })
+      .filter((o) => o.from.length);
+    if (!opts.length) continue;
+    const top = Math.min(...opts.map((o) => o.best));
+    const o = pick(s, opts.filter((a) => a.best <= Math.max(top, TUNING.pairSpread) + 1e-9));
+    h = o.x;
+    // Any help within `pairNear` of the worth that weighs the same, else the nearest: a kind at random first, as before
+    // (buyers come one to a crop), then one of it.
+    const near = o.from.filter((p) => p.off <= Math.max(o.best, TUNING.pairNear) + 1e-9).map((p) => p.y);
+    const kind = pick(s, [...new Set(near.map((x) => x.t.id))]);
+    g = pick(s, near.filter((x) => x.t.id === kind));
     break;
   }
   if (!h || !g) {
     // No pair in bounds (or a save with no tally): the lightest hitch there is and the lightest help worth having, and
     // the cut takes off both in full, past the usual most (the promise holds: the two still weigh the same). A run with
     // no tally to read (a save from before round 7): a glut of its top crop.
-    const lean = topCrops(s)[0] ?? 'carrot';
-    const spare = ([{ id: 'glut', crop: lean }, { id: 'frost', row: s.rows - 1 }, { id: 'glut', crop: lean === 'carrot' ? 'radish' : 'carrot' }] as Twist[]).find((t) => t.id !== last && !before.some((b) => sameAim(b, t))) ?? { id: 'frost', row: 0 };
-    // Fresh for two stalls if there is one, else for one (round 8).
-    const fresh = fresh2.some((x) => x.v >= TUNING.minHit) ? fresh2 : fresh1;
-    const hits = fresh.filter((x) => x.v >= TUNING.minHit);
-    const hh: Aim = [...(hits.length ? hits : fresh)].sort((a, b) => a.v - b.v)[0] ?? { t: spare, v: 0.15 };
+    const lean = topCrops(s, 9).filter((k) => !freeCrop(k))[0] ?? 'carrot';
+    const spare = ([{ id: 'glut', crop: lean }, { id: 'frost', row: s.rows - 1 }, { id: 'glut', crop: lean === 'carrot' ? 'beans' : 'carrot' }] as Twist[]).find((t) => t.id !== last && !before.some((b) => sameAim(b, t))) ?? { id: 'frost', row: 0 };
+    // Fresh for two stalls if there is one, else for one (round 8), the lightest by what it costs. Round 10 prices a hitch
+    // in coins of the take, so the only one fresh for two stalls could be Tall Rows resting, 65% of a season, for a cut of
+    // 80% of the quota: one the cut cannot cover goes to a lighter one the stall before last offered.
+    const lightest = (a: Aim[]) => [...a.filter((x) => x.v >= TUNING.minHit)].sort((x, y) => hitchCost(x) - hitchCost(y))[0];
+    const two = lightest(fresh2);
+    const hh: Aim = (two && hitchCut(two, TUNING.minWorth, r) <= TUNING.easeHard ? two : (lightest(fresh1) ?? two)) ?? [...fresh1].sort((x, y) => x.v - y.v)[0] ?? { t: spare, v: 0.15 };
     const ok = (goods.length ? goods : wider).filter((x) => !sameAim(hh.t, x.t));
-    g = [...ok].sort((x, y) => x.v - y.v)[0] ?? [...helps].sort((x, y) => y.v - x.v)[0] ?? { t: { id: last === 'company' ? 'calm' : 'company' }, v: 0 };
+    // Round 10: a help worth having even if the last stall offered it, before one worth less than `minWorth`.
+    const again = boonAims(s).filter((x) => x.v >= TUNING.minWorth && x.t.id !== last && !sameAim(hh.t, x.t));
+    g = [...ok].sort((x, y) => x.v - y.v)[0] ?? [...again].sort((x, y) => x.v - y.v)[0] ?? [...helps].sort((x, y) => y.v - x.v)[0] ?? { t: { id: last === 'company' ? 'calm' : 'company' }, v: 0 };
     h = hh;
     ceiling = TUNING.easeHard;
   }
   const known = !!s.tally && s.tally.take > 0;
-  const gv = round2(g.v);
-  const ease = Math.min(ceiling, Math.max(TUNING.easeMin, Math.round(hitchCut(h, gv) * 100) / 100));
-  const cost = Math.min(hitchCost(h), ease);
-  const b: Twist = known ? { ...h.t, ease, worth: round2(cost) } : { ...h.t, ease };
+  // Round 10: what each says it would do is a share of the quota in coins of the run's take (`takeRatio`).
+  const gv = round2(g.v * r);
+  const ease = Math.min(ceiling, Math.max(TUNING.easeMin, Math.round(hitchCut(h, g.v, r) * 100) / 100));
+  const cost = Math.min(round2(hitchCost(h) * r), ease);
+  const b: Twist = known ? { ...h.t, ease, worth: cost } : { ...h.t, ease };
   const a: Twist = known ? { ...g.t, worth: gv } : { ...g.t };
   return rand(s) < 0.5 ? [a, b] : [b, a];
 }

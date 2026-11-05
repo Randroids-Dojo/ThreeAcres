@@ -4,7 +4,7 @@
 // another crop is about what stands next to it, so the board shows it.
 
 import { baseChips, CARDS, SEEDS } from './cards';
-import { around, bySeason, chiliTimes, engineNum, guarded, immune, isEmpty, isRipe, isTall, neighbours, newTally, pageOn, perennial, picksOf, twistOn, TUNING } from './board';
+import { around, bySeason, chiliTimes, engineNum, guarded, immune, isEmpty, isRipe, isRoot, isTall, neighbours, newTally, pageOn, perennial, picksOf, twistOn, TUNING } from './board';
 import { pick, rand } from './rng';
 import type { Crop, Ev, Harvest, NightGrowth, ObjectId, RunState, SeedId, Step } from './types';
 
@@ -98,11 +98,15 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
     hives++;
     bees++;
   }
+  // Round 10: an engine page's bonus never lands on radishes or carrots, so each engine wants its own layout. The tenth
+  // playtest's beans run took its coins from radishes (3,349) and carrots (3,303), not beans (1,064): every engine
+  // multiplied the same carrot ringed by radishes.
+  const mine = TUNING.engineRoots || !isRoot(kind);
   // Busy Bees: one multiplier for a crop a beehive blooms, however many there are (it used to double every bee); its
   // level (round 8) sets how much.
-  if (bees && page('bees')) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: engineNum(s, 'bees') });
+  if (bees && page('bees') && mine) mult.push({ label: 'busy bees', icon: 'bees', op: 'x', v: engineNum(s, 'bees') });
   // Trellis (round 7): beans and strawberries bloom each crop beside them.
-  if (page('vines') && (TUNING.vinesSelf || (kind !== 'beans' && kind !== 'strawberry'))) {
+  if (page('vines') && mine && (TUNING.vinesSelf || (kind !== 'beans' && kind !== 'strawberry'))) {
     const vines = nb.filter((j) => snap.crops[j]?.kind === 'beans' || (TUNING.vinesBerry && snap.crops[j]?.kind === 'strawberry')).slice(0, TUNING.vinesCap);
     for (const j of vines) mult.push({ label: `${snap.crops[j]!.kind === 'beans' ? 'beans' : 'a strawberry'} beside it`, icon: 'vines', op: '+', v: engineNum(s, 'vines'), from: j });
   }
@@ -115,8 +119,9 @@ export function scoreHarvest(s: RunState, i: number, snap: Snapshot, o: ScoreOpt
     if (b !== undefined) mult.push({ label: 'next to beans', icon: 'beans', op: 'x', v: 1.5, from: b });
   }
   if (kind === 'pumpkin' && nb.every((j) => !snap.crops[j] && !snap.objs[j])) mult.push({ label: 'room to sprawl', icon: 'alone', op: 'x', v: 2 });
-  // Round 9: Hot Beds' level sets a chili's bloom (x1.5 without the page).
-  const hot = chiliTimes(s, o.night ?? 0);
+  // Round 9: Hot Beds' level sets a chili's bloom (x1.5 without the page). Round 10: not on radishes and carrots, which
+  // keep the chili's own x1.5.
+  const hot = mine ? chiliTimes(s, o.night ?? 0) : 1.5;
   for (const j of near('chili').slice(0, pageOn(s, 'hot', o.night ?? 0) ? TUNING.chiliCap : 99)) mult.push({ label: 'chili next to it', icon: 'chili', op: 'x', v: hot, from: j });
   // A buyer pays double for one crop this season; a glut halves another's pay.
   if (tw?.id === 'buyer' && tw.crop === kind) mult.push({ label: 'a buyer', icon: 'buyer', op: 'x', v: TUNING.buyerTimes });

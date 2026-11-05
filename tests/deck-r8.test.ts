@@ -108,9 +108,11 @@ describe('round 8: the help says what it would bring, in the same coins as the h
       const n = Number(/About (\d+)/.exec(note)?.[1] ?? NaN);
       const worth = (help as Twist & { worth?: number }).worth ?? -1;
       expect(Math.abs(n - worth * q)).toBeLessThanOrEqual(10);
-      // It is the rules' own estimate: what `boonAims` priced it at (a fallback help has none, and says 0 more).
+      // It is the rules' own estimate: what `boonAims` priced it at (a fallback help has none, and says 0 more). Round 10:
+      // in coins of the run's take (`takeRatio`), as the hitch's.
       const aim = X.boonAims?.(s).find((a) => a.t.id === help.id && a.t.crop === help.crop);
-      if (aim) expect(Math.abs(worth - aim.v)).toBeLessThanOrEqual(0.0051);
+      const r = (R as unknown as { takeRatio?: (s: RunState) => number }).takeRatio?.(s) ?? 1;
+      if (aim) expect(Math.abs(worth - aim.v * r)).toBeLessThanOrEqual(0.0051);
       // The hitch says it in the same coins: what it would still cost, beside the quota it takes off.
       const hn = X.twistNote?.(s, hitch) ?? '';
       expect(hn).toMatch(/^About \d+ fewer coins\.$/);
@@ -141,7 +143,7 @@ describe('round 8: engine pages level up at the stall', () => {
     expect(X.buyLevel?.(s)).toBeTruthy();
     expect(s.coins).toBe(7);
     expect((s as RunState & { levels?: Record<string, number> }).levels?.bees).toBe(2);
-    // Busy Bees II: a carrot by a hive pays at the next level's times.
+    // Busy Bees II: a lettuce by a hive pays at the next level's times (round 10: the pages leave carrots out).
     const ii = (TUNING as unknown as { levelUp?: Record<string, number[]> }).levelUp?.bees[0] ?? TUNING.beesTimes;
     expect(ii).toBeGreaterThan(TUNING.beesTimes);
     leaveShop(s);
@@ -150,10 +152,10 @@ describe('round 8: engine pages level up at the stall', () => {
       p.obj = null;
     });
     s.plots[0].obj = 'beehive';
-    s.plots[5].crop = crop(1, 'carrot', 2, 2);
+    s.plots[5].crop = crop(1, 'lettuce', 2, 2);
     s.twist = null;
-    const h = harvests(endDay(s)).find((x) => x.kind === 'carrot')!;
-    expect(h.score).toBe(Math.round(10 * ii));
+    const h = harvests(endDay(s)).find((x) => x.kind === 'lettuce')!;
+    expect(h.score).toBe(Math.round(8 * ii));
     // The next stall offers III, dearer.
     toStall(s);
     const iii = shopLevel(s);
@@ -175,16 +177,16 @@ describe('round 8: engine pages level up at the stall', () => {
     hot.pages = ['hot'];
     (hot as RunState & { levels?: Record<string, number> }).levels = { hot: 2 };
     hot.plots[0].crop = crop(1, 'chili', 0, 2);
-    hot.plots[1].crop = crop(2, 'carrot', 2, 2);
-    const hc = harvests(endDay(hot)).find((h) => h.kind === 'carrot')!;
+    hot.plots[1].crop = crop(2, 'lettuce', 2, 2);
+    const hc = harvests(endDay(hot)).find((h) => h.kind === 'lettuce')!;
     expect(hc.mult.find((st) => st.icon === 'chili')?.v).toBeGreaterThan(TUNING.hotTimes[0]);
     // Trellis II and Tall Rows II: more bloom.
     const vines = table(['radish'], { year: 2 });
     vines.pages = ['vines'];
     (vines as RunState & { levels?: Record<string, number> }).levels = { vines: 2 };
     vines.plots[0].crop = crop(1, 'beans', 0, 3);
-    vines.plots[1].crop = crop(2, 'carrot', 2, 2);
-    const c = harvests(endDay(vines)).find((h) => h.kind === 'carrot')!;
+    vines.plots[1].crop = crop(2, 'lettuce', 2, 2);
+    const c = harvests(endDay(vines)).find((h) => h.kind === 'lettuce')!;
     expect(c.mult.find((st) => st.icon === 'vines')?.v).toBeGreaterThan(TUNING.vinesBloom);
   });
 
@@ -238,7 +240,9 @@ describe('round 8: a difficulty curve that rises with the run', () => {
 
   it('year 2 opens with no walkover: the decent bot takes under 1.45 times its first quota (round 7: 1.85)', () => {
     const ratios: number[] = [];
-    for (let i = 0; i < 12; i++) {
+    // Round 10: 120 runs (12 before): these seeds' medians run 1.64 at 12, 1.61 at 40, 1.48 at 100, then settle at 1.41 from
+    // 120 to 200, so a dozen said little.
+    for (let i = 0; i < 120; i++) {
       const seed = 1000 + i * 7919;
       const { s } = newRun(seed, null, false);
       const dice = new Dice((77 + i) ^ seed);
@@ -251,9 +255,9 @@ describe('round 8: a difficulty curve that rises with the run', () => {
       if (l) ratios.push(l.earned / l.quota);
     }
     ratios.sort((a, b) => a - b);
-    expect(ratios.length).toBeGreaterThan(8);
+    expect(ratios.length).toBeGreaterThan(80);
     expect(ratios[ratios.length >> 1]).toBeLessThan(1.45);
-  }, 120000);
+  }, 400000);
 });
 
 describe('round 8: a returning player has the whole table', () => {

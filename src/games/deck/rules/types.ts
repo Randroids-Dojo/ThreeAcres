@@ -61,6 +61,13 @@ export interface Tally {
   company: number;
   /** Perennials' last picks: what one more pick of each would have paid. */
   last: number;
+  /**
+   * Round 10: plots left bare at dusk, by row, summed over the season's days (`dusks` of them): frost is priced by the
+   * plots it takes against the room the rest of the plot had (a row of free radishes that could have gone anywhere cost
+   * the tenth playtest nothing, and its quota fell 280).
+   */
+  empty?: number[];
+  dusks?: number;
 }
 
 /** 0 spring, 1 summer, 2 autumn, 3 winter. */

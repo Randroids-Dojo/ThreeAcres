@@ -48,7 +48,7 @@ export interface DeckDebug {
   frames(): number;
   frameMs(): number[];
   shop: { buy(i: number): boolean; page(i: number, replace?: string): boolean; reroll(): boolean; twist(i: number): boolean; engine(i: number): boolean; leave(): boolean };
-  /** What the ledger says is still to go over the last two days ("64 to go"), or empty. */
+  /** What the ledger says is still to go from day 4 ("64 to go"), or empty. */
   toGo(): string;
   /** The season's twist line in the lesson strip, as shown (empty when none or a lesson covers it). */
   twist(): string;

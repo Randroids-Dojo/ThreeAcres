@@ -37,6 +37,7 @@ import {
   SEASON_NAMES,
   SEEDS,
   targetsFor,
+  toGo,
   toss,
   TUNING,
   twistText,
@@ -656,7 +657,8 @@ export class Table {
       place(this.purse, sx + P - 56, 16, 56, 56);
       // Round 8: wide enough for its word (it spilled past the book's edge).
       place(this.book, sx + P - 64, 80, 64, 44);
-      place(this.peg, sx, 116, P - 66, 32);
+      // Round 10: a pegboard you can read from arm's length (the tenth playtest called the desktop's 32 px board tiny).
+      place(this.peg, sx, 114, P - 66, 46);
       // The bench is the desktop's controls: it takes the side panel's lower half at a size a mouse
       // finds at once (it was 200 px tall, its labels 11.5 px, with 500 px of bare table above it).
       // Round 9: clear of the screen's foot (the ninth playtest's "End day" label sat at y 785 of 800).
@@ -664,8 +666,8 @@ export class Table {
       const benchY = H - benchH - 24;
       // The lesson strip (and the season's twist) right under the pegboard, the pages kept under it, the bench at the
       // foot: the fifth playtest found about 330 px of bare table between the pegboard and the scoops.
-      this.hintBox = { x: sx, y: 158, w: P, h: 52 };
-      place(this.pages, sx, 220, P, Math.max(60, benchY - 10 - 220));
+      this.hintBox = { x: sx, y: 168, w: P, h: 52 };
+      place(this.pages, sx, 228, P, Math.max(60, benchY - 10 - 228));
       place(this.bench, sx, benchY, P, benchH);
       boardBox = { x: 66, y: 10, w: sx - 66 - 16, h: H - handH - 14 };
       this.handRect = { x: 66, y: H - handH, w: sx - 66, h: handH };
@@ -722,10 +724,10 @@ export class Table {
     const take = Math.round(this.shownEarned);
     // Four-digit takes and quotas stack the take over "of 1550" (the phone's purse covered the last digit: "1239 of 15").
     this.ledger.classList.toggle('big', Math.max(String(take).length, String(s.quota).length) >= 4);
-    // Over the last two days, what is still to go (the seventh playtest's last day read only "286 of 350").
-    const left = s.quota - take;
-    const late = (s.phase === 'day' || this.busy) && this.shownDay >= TUNING.days - 1 && left > 0;
-    this.ledTally.innerHTML = `<b>${take}</b> <span>of ${s.quota}</span>${late ? `<i>${left} to go</i>` : ''}`;
+    // What is still to go (the seventh playtest's last day read only "286 of 350"). Round 10: from day 4, not 5 (the
+    // tenth playtest's first spring ended 158 of 160 before any choice).
+    const left = (s.phase === 'day' || this.busy) ? toGo(s, take, this.shownDay) : 0;
+    this.ledTally.innerHTML = `<b>${take}</b> <span>of ${s.quota}</span>${left > 0 ? `<i>${left} to go</i>` : ''}`;
     this.purse.classList.toggle('big', String(Math.round(this.shownCoins)).length >= 5);
     this.purse.innerHTML = `<b>${Math.round(this.shownCoins)}</b><span>coins</span>`;
     this.placePegs();
@@ -2586,7 +2588,7 @@ export class Table {
     return this.ledTally.textContent ?? '';
   }
 
-  /** What the ledger says is still to go over the last two days ("64 to go"), or empty. */
+  /** What the ledger says is still to go from day 4 ("64 to go"), or empty. */
   get toGoText(): string {
     return this.ledTally.querySelector('i')?.textContent ?? '';
   }

@@ -24,15 +24,17 @@ A roguelike deckbuilder about one small plot and a run of seasons. Original rule
 
 **Four engines on offer, none that decides the run, and a first quarter hour with a real choice.** The ninth playtest scored the first quarter hour 7 of 10 (engagement 6: "spring is set hands, so there are no real decisions until summer") and the game 5. The engine a run was handed decided it: the tall run took 618 against 360 in year 1 summer and won with 8,908 coins unspent, corn making 71% of the take; the hot run's best harvest was 42 and it died in year 1 autumn; two of the runs were never offered the bees. A run died on the draw before any engine (no carrot in the first two hands); the crow lesson said "Your scarecrow keeps watch." while the carrot on D4 sat outside it; the reason line named crops the aimed seed had nothing to do with. Now the first stall offers all four engines; Hot Beds gives a chili's neighbours x1.6 bloom from level I and its levels raise that, not its picks; Tall Rows brings two corn and climbs gently (+1.5, +1.8, +2.1); every engine page has a level IV for the late coins. A run's first hand is dealt a carrot and a radish, and the first spring asks 160. The guided day 3 deals a radish or a carrot, one of the two, and the previews show the trade. The crow lesson names the ripe crops outside the scarecrow's ground and the plate washes that ground while a crow is about; previews grey a bonus from a crop the crow may take first; the reason line speaks only for the aimed plot. A hitch's cut is never clipped, a help is worth 8% or more, and a hitch is seldom aimed as either of the last two stalls aimed one. See Balance, round 9.
 
+**Each engine its own garden, twists that cost what they cut, a climb with no wall.** The tenth playtest found no P0 or P1 for the first time and scored the first quarter hour 7 of 10 and the game 5.5: "I'd start another run for year 1. I wouldn't play a full three years twice: every board is the same carrot ring, the twists are free discounts, and year 3 comes down to the draw." The beans run took its coins from radishes (3,349) and carrots (3,303), not beans (1,064); the hitch was the pick at all nine stalls ("Frost on your radishes' row. About 110 fewer coins." cut a summer from 1,030 to 750 and cost nothing); year 2 ran at 1.3 to 2.1 times its quotas and year 3 autumn was the wall. Now no engine page works on radishes and carrots, so each engine wants its own layout and its own crops take the most in nearly every season (see Engines); the tall engine brings three corn. A hitch is never aimed at a free crop, frost is priced by the room the rest of the plot has, the quota comes down by what a hitch costs and a little more, and both twists are said in coins of the take the run is making. Years 2 and 3 are refitted so each season asks about the same share of its take. A seed that ripens next season says so first, on a pale slip. The ledger says what is still to go from day 4, and the first spring asks 150. See Balance, round 10.
+
 ## Run structure
 
 - **Run:** three years, twelve seasons. The last winter (year 3) is the finish line: meet it and the run is won (`TUNING.years`), **the night it is met**: the days left are not played (the playtest's winning run stood at 959 of 960 after day 4, and days 5 and 6 were busywork). The stall before it points "On to the last winter", the almanac says "Season 7 of 12", and a note at its first dawn says "The last winter: meet it to win."
   - Why three: on the committed round 3 build the strong builds' engines were built by the end of year 3 (pages full, three or four scoops bought) and took about the same from then on (a roots build took a median 1,393 a season in year 3, 1,384 in year 4, 1,394 in year 5) while their unspent coins doubled every year (3,183, 6,530, 11,748).
 - **Year:** 4 seasons of 6 days each.
 - **Quotas:** coins earned within the season.
-  - Year 1: spring 160, summer 380, autumn 500, winter 640 (170, 360, 480, 590 before round 9; 320, 400, 470 before round 8; 260, 300, 350 before round 7).
-  - Year 2: spring 840, summer 1,030, autumn 1,200, winter 1,370 (730, 920, 1,080, 1,220 before round 9; 540, 860, 1,060, 1,200 before round 8; 430, 620, 740, 830 before round 7; 600, 710, 790 from summer before round 6).
-  - Year 3: spring 1,560, summer 1,760, autumn 1,940, winter 2,000 (1,440, 1,640, 1,820, 2,000 before round 9; 1,250, 1,350, 1,450, 1,550 before round 8; 900, 980, 1,060, 1,140 before round 7). **Round 9: no engine runs away.** Every engine is on offer and their starts are evened, so year 1 from summer and years 2 and 3 rise until no engine's median season runs past about 1.6 times its quota, and year 2 spring asks up to a third more than year 1 winter (a quarter before: the stall before it brings the engine's level II and the first twist, and every bot took 1.55 to 1.76 times it). See Balance, round 9. **Round 8: a curve that rises with the run.** With an engine year 1 was a walkover (the bot took a median 1.62 times its quotas with bees, 1.65 with corn) and year 2 spring asked less than year 1 winter's take (1.85 times), then year 2 summer to winter were the wall (the decent bot met them 87, 78 and 82% of the time) and year 3 eased. Now year 1 asks more from summer, the engines start gentler, year 2 spring asks a quarter more than year 1 winter (the most a year's turn steps), and years 2 and 3 climb a step each season to meet the engine page's levels (priced with deck-fit against the four engines and the bots; see Balance, round 8). Round 7 raised every row from summer of year 1, since every run now takes an engine at its first stall: priced with deck-fit against the four engines, each wins 31 to 40% at these rows (see Balance, round 7). **A fixed row, the same for every run: nothing the run earns moves a quota.** Round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter: the sixth playtest's year 2 took 1,064, 1,788 and 2,311 and every year 3 quota went to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given), and every extra coin in year 2 raised next year's quotas, so holding back paid. Each year has its own row: with scoops coming back from pulled crops, takes rise fast through year 1 and flatten through year 3. Rounded to a 5 (under 100) or a 10.
+  - Year 1: spring 150, summer 410, autumn 540, winter 680 (160, 380, 500, 640 before round 10; 170, 360, 480, 590 before round 9; 320, 400, 470 before round 8; 260, 300, 350 before round 7).
+  - Year 2: spring 880, summer 1,090, autumn 1,250, winter 1,540 (840, 1,030, 1,200, 1,370 before round 10; 730, 920, 1,080, 1,220 before round 9; 540, 860, 1,060, 1,200 before round 8; 430, 620, 740, 830 before round 7; 600, 710, 790 from summer before round 6).
+  - Year 3: spring 1,700, summer 1,860, autumn 2,020, winter 2,250 (1,560, 1,760, 1,940, 2,000 before round 10; 1,440, 1,640, 1,820, 2,000 before round 9; 1,250, 1,350, 1,450, 1,550 before round 8; 900, 980, 1,060, 1,140 before round 7). **Round 9: no engine runs away.** Every engine is on offer and their starts are evened, so year 1 from summer and years 2 and 3 rise until no engine's median season runs past about 1.6 times its quota, and year 2 spring asks up to a third more than year 1 winter (a quarter before: the stall before it brings the engine's level II and the first twist, and every bot took 1.55 to 1.76 times it). See Balance, round 9. **Round 8: a curve that rises with the run.** With an engine year 1 was a walkover (the bot took a median 1.62 times its quotas with bees, 1.65 with corn) and year 2 spring asked less than year 1 winter's take (1.85 times), then year 2 summer to winter were the wall (the decent bot met them 87, 78 and 82% of the time) and year 3 eased. Now year 1 asks more from summer, the engines start gentler, year 2 spring asks a quarter more than year 1 winter (the most a year's turn steps), and years 2 and 3 climb a step each season to meet the engine page's levels (priced with deck-fit against the four engines and the bots; see Balance, round 8). Round 7 raised every row from summer of year 1, since every run now takes an engine at its first stall: priced with deck-fit against the four engines, each wins 31 to 40% at these rows (see Balance, round 7). **A fixed row, the same for every run: nothing the run earns moves a quota.** Round 5 set year 3 at least 0.95 times the run's own year 2 autumn and winter: the sixth playtest's year 2 took 1,064, 1,788 and 2,311 and every year 3 quota went to a flat 1,550 ("Spring asks 1550", up from 630, with no reason given), and every extra coin in year 2 raised next year's quotas, so holding back paid. Each year has its own row: with scoops coming back from pulled crops, takes rise fast through year 1 and flatten through year 3. Rounded to a 5 (under 100) or a 10.
   - **A hitch takes its share off its season's quota** (see The season's twist); Cold Frame takes a fifth off a winter.
   - **Round 9: the guided year without a walkover in it.** Its spring asks 75 (90 before), since day 3 deals a radish or a carrot, not both (see Teaching); its summer 330 (240: the ninth playtest took 457 of 240 and met it on night 3, and the careful line took a median 1.82 times it); its autumn and winter 0.88 of the raised row, 440 and 560 (420 and 520). Tighter, at 340 and 0.92, every season fell to 1.27 to 1.42 times its quota for the bots but the guided bot cleared year 1 only 76% of the time. See Balance, round 9.
   - A new player's first run (the guided one) has its own spring quota of 90 (`TUNING.guidedQuota`; 70 until round 7, met on day 5 every time, so day 6 did nothing: the bot took 85 to 89 by day 5, the seventh playtest 88; at 90 the careful line, 89 by day 5, meets it on the last night with day 6's second radish), since its days are set hands, **its own summer of 240** (`TUNING.guidedSummer`; 180 in round 6, raised in round 7 since the guided run now takes an engine at its first stall and the bot took a median 2.3 times 180), and the rest of its year 1 at 88% of the usual, because its first stall had fewer coins to spend. The summer was 230 (88% of 260): a cliff from 70 with set hands, the tightest season of year 1 for the guided bot (a median take of 1.19 times it, against 1.40 to 1.59 for the rest), and the sixth playtest missed it by 5 playing carefully with every preview. Its year 2 asks 93% of the usual (`TUNING.guidedYear2`: 680, 860, 1,000, 1,130 since round 8; 400, 580, 690, 770 at first, about round 5's row): at round 6's raised row the guided bot cleared year 2 22% of the time against the decent bot's 30%. (Its year 2 was at 88% until round 5, then at the full rate.)
@@ -55,7 +57,7 @@ A roguelike deckbuilder about one small plot and a run of seasons. Original rule
 
 ## A day
 
-1. Draw up to 5 cards (hand size 5). A run's first hand is dealt a carrot and a radish from the tin first (round 9, `TUNING.firstHand`; not the guided run, whose days are set): the ninth playtest's run 4 drew no carrot in its first two hands and its spring ended at 146 of 170. The three seed scoops on the bench refill (`energy` in the code), and the bench holds one more for each crop pulled up in the night, two at most (`saved`, then `bench` for the day's total).
+1. Draw up to 5 cards (hand size 5). A run's first hand is dealt a carrot and a radish from the tin first (round 9, `TUNING.firstHand`; not the guided run, whose days are set): the ninth playtest's run 4 drew no carrot in its first two hands and its spring ended at 146 of 170. Round 10: the first spring asks 150 (160), since the tenth playtest's no-engine run ended it 158 of 160 before making a choice. The three seed scoops on the bench refill (`energy` in the code), and the bench holds one more for each crop pulled up in the night, two at most (`saved`, then `bench` for the day's total).
 2. Play cards, each costing the scoops printed on it: nothing to three. Unplayed cards are kept in hand. Excess over the hand size is discarded at the end of the day, oldest first.
 3. Once a day you may toss a card from hand onto the spent heap and draw a fresh one. This keeps a hand of unplayable cards (a full plot, nothing affordable) from locking a run.
 4. Blow out the lantern (End day). Then, in order:
@@ -77,7 +79,7 @@ Decisions made while building:
 - **Scoops back:** a crop pulled up puts a scoop on the next morning's bench, two at most a night, and flies there at night once the bench has been brought in. Uncapped, the bench grew to 9 to 12 scoops and the budget bound on 5% of days; one a night left the plot nearly as bare as before. The scoops a season's last night puts back come to the next season's first dawn, like the plot. A crop cut with the shears puts its scoop on today's bench.
 - **Market Day shows.** With Market Day kept, tonight's fifth (tenth, fifteenth) crop in reading order wears a red-ringed ×2 stamp by its moon, and the previews and readings count it, on whatever night a crop is pulled (`harvestIndex` in `preview.ts`). While a card is aimed, the stamp shows where it would fall after the play, so a radish that would come in first moves it; neighbours' chips never show a ×2 or ×0.5 for the move. It used to depend on reading order nobody could see: a plot read "pays 18" and paid 36.
 - **The last winter** carries nothing over: a seed that would ripen after its last night previews no slip, only "Too late to ripen before the end.", and its reading says "too late to ripen".
-- **Previews are timed.** A bonus only counts if the crop giving it still stands on the night the other is pulled. The forecast (`forecast` in `board.ts`) runs calm nights forward, past the season's end since the plot carries over: each crop's next pick, and the night it leaves. A radish beside a carrot that ripens tomorrow shows its own +2 (the carrot stands tonight) and the carrot's +1 bloom greyed and struck, with "The radish is pulled before the carrot ripens." A seed that ripens after the season's last night previews what it will pay then on a grey slip, with "Ripens next season." (it counts toward next season's quota). The old struck "too late" preview went with the cleared plot.
+- **Previews are timed.** A bonus only counts if the crop giving it still stands on the night the other is pulled. The forecast (`forecast` in `board.ts`) runs calm nights forward, past the season's end since the plot carries over: each crop's next pick, and the night it leaves. A radish beside a carrot that ripens tomorrow shows its own +2 (the carrot stands tonight) and the carrot's +1 bloom greyed and struck, with "The radish is pulled before the carrot ripens." A seed that ripens after the season's last night previews what it will pay then on a pale slip with a dashed edge and grey ink, with "Ripens next season." (it counts toward next season's quota). Round 10: that line comes first, before any lost bonus (the tenth playtest's corn on autumn day 6 previewed "12 x 3.2 = 38" with "The beans are pulled before the corn ripens.", and the run ended that night without it), and the slip is pale, not a shade off tonight's dark one (deck-overlap reads its luminance against the same corn on day 1). The old struck "too late" preview went with the cleared plot.
 - **Objects** (scarecrow, beehive) stand on their plot from season to season for the rest of the run; the card stays out on the plot (the tin lists it under "Out on the plot").
 - **Weather stacks:** two rains are two extra nights.
 - **No order rules.** The old carrot ("+1 bloom for each radish pulled before it tonight") and chili ("the next crop pulled after it") depended on reading order, which nobody could see. Both are now neighbour rules. The old wheat counted every wheat on the plot; it now counts the wheat beside it.
@@ -182,7 +184,7 @@ From year 2 spring (`TUNING.twistFrom`), each stall offers two twists for the se
 
 **Round 7: both are aimed at this run and priced for it.** The rules keep a tally of each season as it is played (`Tally`: coins by crop, by the row a sown crop was pulled from, what each bonus added, what pests took, what good company and one more pick would have added), and the stall reads the season just played:
 
-- **A hitch** is aimed at what the run relies on, and costs what it would cost this run if it played the season as it played the last (`hitchAims`). It takes exactly that share off the quota (`twistEase`, rounded to a whole percent, 5 to 35%; the clipping says "Summer asks 590, not 660."). A hitch that would cost under 6% (`minHit`) is never offered, nor one heavier than the most a quota is cut. The seventh playtest took "sunflowers face up" with no sunflower planted and crows with a scarecrow standing: each knocked 60 to 70 off for free.
+- **A hitch** is aimed at what the run relies on, and costs what it would cost this run if it played the season as it played the last (`hitchAims`). It takes exactly that share off the quota (`twistEase`, rounded to a whole percent, 5 to 35%, 45% since round 10; the clipping says "Summer asks 590, not 660."). A hitch that would cost under 6% (`minHit`) is never offered, nor one heavier than the most a quota is cut. The seventh playtest took "sunflowers face up" with no sunflower planted and crows with a scarecrow standing: each knocked 60 to 70 off for free.
 - **A help** is priced from what the plot and the tin already hold (`boonAims`, scaled to what it brought when played ahead: `worthTimes`, from deck-twists). A help under 4% (`minWorth`) is not offered: the playtest's "buyer for sunflowers (yield 3) is close to worthless next to 60 off".
 - **Paired by worth.** A careful player plays round part of a hitch (sows elsewhere under frost, grows another crop in a glut; `adapt`, measured: the decent bot pays about half of frost's expected cost, 60% of a glut's, nearly all of a page at rest). What is left of the cut is the hitch's worth, and the help offered beside it is the one nearest that worth (any within 3 points, at random), so which is better depends on the plot.
 
@@ -201,10 +203,18 @@ From year 2 spring (`TUNING.twistFrom`), each stall offers two twists for the se
 - **A help is worth 8% or more** (`minWorth`, 4% before).
 - **No hitch aimed as either of the last two stalls aimed one** where any other pair can be weighed (`pastTwists`); frost on the same crop's row is the same hitch whichever row it is. The stall before last's may come back only when nothing else can (7 of 98 stalls in a bot run, against 15 of 102 before); never the last stall's (round 8).
 
+**Round 10: a hitch costs about what it cuts.** The tenth playtest took the hitch at all nine stalls and the bots at 58 to 69%: "Frost on your radishes' row. About 110 fewer coins." cut a summer by 280 and cost nothing, since radishes are free and go anywhere (the beans run's hitches aimed at radishes at 5 of 7 stalls); deck-twists had frost cutting 348 coins and costing 158, a glut cutting 399 and costing 211. Now:
+
+- **No hitch on a free crop** (`freeCrop`, `hitchAims`): no glut of radishes, no frost on a row that took half its coins or more from radishes; a frost names the row's paid crop.
+- **Frost is priced by the room left** (`frostShare`): the plots left bare at dusk on the other rows (`Tally.empty`, `dusks`). With none, every sowing on the frosted row is lost and it costs about all its coins; with five or more bare plots about half. It was 0.42 of the row's coins, whatever the plot.
+- **The cut is the cost and a little more** (`hitchCut`): what the hitch still costs a careful player and a quarter of the help's worth (`helpShare`; round 8 added all of it, so the cut ran about twice the cost).
+- **Both said in coins of the take** (`takeRatio`, the last season's take over its quota, 1 to 1.6): a run taking 1.45 times its quota read "About 112 fewer coins." for a frost that cost 167. The hitch's and helps' multipliers (`adapt`, `worthTimes`) were set again against play ahead as the run plays (two plays deep, after the stall's shopping): what the clipping says is now within about a tenth of what it plays.
+- **Paired to weigh the same** (`pairWorth`): with the cut near the cost, a big help beside a light hitch was the better pick every time, so a hitch too light for any help worth 8% stays off the offer if another can be weighed (`pairSpread`), and the help is one within `pairNear` of the worth that gives the same take over quota. If nothing fits, the lightest hitch by cost; a hitch fresh for two stalls unless its cut cannot be covered (Tall Rows resting, 65% of a season, asked a cut of 80%), and a help worth 8% even if the last stall offered it. The usual most a quota is cut is 45% (35%), since a cut is in coins of a take that can be 1.6 times its quota.
+
 | Twist | Kind | Aimed at, and priced by | Line |
 |---|---|---|---|
 | Glut | in the way | the crop that took the most; half its coins | "Your carrots sell for half." (x0.5 bloom) |
-| Frost | in the way | the row whose sown crops paid most; their coins | "Frost on your carrots' row." (no sowing there; the clipping's little map and the board show the row) |
+| Frost | in the way | the row whose sown crops paid most, if not half in radishes (round 10); their coins, by the room elsewhere | "Frost on your carrots' row." (no sowing there; the clipping's little map and the board show the row) |
 | Crows | in the way | only while the run owns no scarecrow (round 8: in the tin too); the extra crows (one every morning), each taking a crop of the mean pay | "A crow comes every morning." |
 | Rest | in the way | the page whose bonuses added the most, the run's own engine page or one no engine owns (round 8); what it added | "Busy Bees rests this season." (the page does nothing) |
 | Buyer | helps | any crop but the top one; double its coins | "A buyer pays double for your beans." (x2 bloom) |
@@ -258,9 +268,9 @@ The shop opens between seasons.
 |---|---|---|
 | Rain Barrel | 80 | Column A grows an extra night every night |
 | Root Cellar | 100 | Radishes and carrots get +2 yield, and +1 bloom beside each other |
-| Busy Bees | 110 | Crops near a beehive get x1.3 bloom (the bee engine's page; II x1.5, III x1.8, IV x2) |
-| Hot Beds | 110 | Chilies stay and pick for 3 nights; their neighbours get x1.6 bloom (the hot engine's page; II x1.75, III x1.9, IV x2) |
-| Trellis | 110 | Beans and strawberries give the other crops beside them +2.5 bloom (once; the vines engine's page; II +3.5, III +4.5, IV +5) |
+| Busy Bees | 110 | Crops near a beehive get x1.5 bloom, not radishes or carrots (the bee engine's page; II x1.7, III x2, IV x2.3) |
+| Hot Beds | 110 | Chilies pick for 3 nights; their neighbours get x1.7 bloom, radishes and carrots the chili's own x1.5 (the hot engine's page; II x1.8, III x1.9, IV x2) |
+| Trellis | 110 | Beans and strawberries give neighbours +1.25 bloom, each other too, not radishes or carrots (once; the vines engine's page; II +1.45, III +1.7, IV +1.9) |
 | Tall Rows | 110 | Corn ripens two nights sooner; tall crops (corn and sunflowers) get +1 bloom for each neighbour (the tall engine's page; II +1.5, III +1.8, IV +2.1) |
 | Green Thumb | 170 | One more seed scoop every day (pinned only for a bench that ran short last season) |
 | Big Basket | 140 | Hand size +1 |
@@ -282,10 +292,17 @@ Round 7. A run's first stall (the guided run's after its guided spring, any othe
 
 | Engine | Takes home | Its page (level I) | Level II, level III | The stall keeps |
 |---|---|---|---|---|
-| Bees | a beehive | Busy Bees: crops near a beehive get x1.3 bloom | x1.5, x1.8, x2 | beehives, sunflowers |
-| Hot | four chilies | Hot Beds: chilies stay and pick for 3 nights; their neighbours get x1.6 bloom | x1.75, x1.9, x2 | chilies |
-| Vines | beans | Trellis: beans and strawberries give the other crops beside them +2.5 bloom | +3.5, +4.5, +5 | beans, strawberries |
-| Tall | two corn | Tall Rows: corn ripens two nights sooner; tall crops get +1 bloom for each neighbour | +1.5, +1.8, +2.1 | corn, sunflowers |
+| Bees | a beehive | Busy Bees: crops near a beehive get x1.5 bloom, not radishes or carrots | x1.7, x2, x2.3 | beehives, sunflowers |
+| Hot | four chilies | Hot Beds: chilies pick for 3 nights; neighbours get x1.7 bloom, radishes and carrots x1.5 | x1.8, x1.9, x2 | chilies |
+| Vines | beans | Trellis: beans and strawberries give neighbours +1.25 bloom, not radishes or carrots | +1.45, +1.7, +1.9 | beans, strawberries |
+| Tall | three corn | Tall Rows: corn ripens two nights sooner; tall crops get +1 bloom for each neighbour | +1.5, +1.8, +2.1 | corn, sunflowers |
+
+**Round 10: each engine a different way to play.** The tester's biggest fun change: "every board is the same carrot ring". No engine page's bonus lands on a radish or a carrot (`isRoot`, `TUNING.engineRoots`; they keep what their own cards and the Root Cellar give, a chili's own x1.5 and a beehive's +1 bloom), so each engine pays only on its own crops and needs its own layout:
+
+- **Busy Bees:** set the beehive in the middle of your dear crops (strawberries, beans, a pumpkin) and grow any radish and carrot ring outside its 3 by 3.
+- **Hot Beds:** plant chilies side by side, each blooming the others, with beans and strawberries round the block; a chili stands three nights, so sow its neighbours to ripen beside it.
+- **Trellis:** grow beans and strawberries in one bed: they bloom each other (`vinesSelf`, round 10; not before) and any crop beside them but a root.
+- **Tall Rows:** sow corn where crops stand on all four sides, beans among them for its x1.5; any crop counts as a neighbour, radishes too, since the bonus is the corn's. Three corn to take home (`ENGINES`; two before), so a season seldom goes without one.
 
 **Round 8: the engine page levels up at the stall.** From the stall that opens year 2 (`TUNING.levelFrom`), the cork board pins the run's engine page at its next level, one level a stall, beside room for one more page: "Busy Bees II, 800 coins", then III at 1,800 (`levelPrice`, the same in every year; `levelDue`, `buyLevel`, `s.levels`). Its first tap says what the level does in the page's own words, against what it does now ("Busy Bees II. Crops near a beehive get x1.6 bloom, not x1.2. Tap again to buy, 800 coins."; `levelChange`); the second buys it, and the page reads "Busy Bees II" in the kept pages, the side panel, the won page and on the beehive's face (its x1.6). The level stays with the page; tearing the page out loses it.
 - Why: the eighth playtest's top fun change. Every run died with 1,979 to 5,711 coins unspent: the scoop was refused, the page slot doubled to 4,000, improving added a few coins, and year 3 takes stayed flat (957, 1,454, 1,019, 1,227) while the quotas climbed. The decent bot bought level II in nearly every run that reached year 2 and level III in most that reached year 3 (see Balance, round 8).
@@ -301,7 +318,7 @@ Round 7. A run's first stall (the guided run's after its guided spring, any othe
 
 - Why: the seventh playtest's biggest fun change, "a guaranteed choice of engine at each run's first stall". With beehives and Busy Bees nights paid 150 to 320, without them 60 to 110, perennials topped out at 36, and the beehive was a rare stall roll.
 - The stall's clipping says the gift and the page in words: "A beehive and Busy Bees. Crops near a beehive get x1.2 bloom." ("Four chilies and Hot Beds.", "Corn and Tall Rows."). Once one is picked, three small clippings side by side on the desktop, one under another on the phone, each with the card's face.
-- The Root Cellar stays a page on the cork board: the start deck is the roots build, and every engine is played on top of it.
+- The Root Cellar stays a page on the cork board: the start deck is the roots build. Round 10: an engine is no longer played on top of it, since no engine page lands on a root.
 
 ## Look and feel
 
@@ -325,7 +342,7 @@ A card game on a warm oak table, with the plot as a painted almanac plate. Its o
 - **Coins by a coin (round 7):** a preview's totals (a neighbour's new total on its dark chip, the aimed seed's slip) show the coins they pay by a gold coin; the basket means yield everywhere else (the seventh playtest read "14 basket" as yield). The aimed seed's slip keeps the basket on its yield when it shows the arithmetic: "basket 5 × 3 = coin 15".
 - **A crop the can brings in tonight shows what it will pay** (round 7): its moon +1 and its total on the dark chip (the seventh playtest watered a carrot that then paid 21 and saw only "+1 moon"). Rain and storms, which touch every crop, still show chips without totals.
 - **The reason line covers no chip** (round 7): under the aimed seed's slip if that is clear, else just above the aimed plot, else under the bed or above it, wherever it covers none of the chips it explains (the seventh playtest's "The beans are pulled before the sunflower ripens." hid the beans' +2 bloom and their new total of 9).
-- **Over the last two days the ledger says what is still to go** (round 7): "286 of 350" with "64 to go" under it on the phone and beside it on the desktop, on days 5 and 6 until the quota is met (the playtest's last day read only "286 of 350", and runs died with hundreds of coins unspent).
+- **From day 4 the ledger says what is still to go** (round 7, days 5 and 6; round 10 from day 4, `toGo`, `TUNING.toGoFrom`): "286 of 350" with "64 to go" under it on the phone and beside it on the desktop, until the quota is met (the seventh playtest's last day read only "286 of 350", and runs died with hundreds of coins unspent; the tenth playtest's no-engine run ended its first spring 158 of 160 before the ledger had said anything).
 - **The board explains while you play:** while a card is held, every plot where a bonus would apply carries a small chip in its corner (a "+2" by a basket, a red "+1" by a flower, a "×1.5", or a moon "+1" for an extra night), and the plot under the finger, pointer or keyboard cursor shows what the seed would score there ("4", or "5 × 3 = 15") along with what its neighbours would gain. A crop already standing whose pay the play changes also shows **its new total on a dark chip** under its gains, like the aimed seed's own slip (a radish aimed beside a carrot: the radish's "4" and, on the carrot, "+1" and "36"; the sixth playtest saw the carrot's 36 only by tapping its plot); weather, which touches every crop, shows its chips without totals. A bonus the night will not pay shows greyed, dashed and struck through, and under the aimed plot one plain line says why ("The radish is pulled before the carrot ripens.", "The other beans are pulled before these ripen.", "Too late to ripen this season."). A card that would do nothing says "No effect now."; a scarecrow before the crows come says "Keeps crows off from now on." and a beehive with nothing round it "Blooms crops around it from now on.", since both stand for the rest of the run. Dragged over the plot, the card shrinks above the finger and goes see-through so the preview shows. Previews come from `previewPlay` in the rules, run on a copy of the run.
 - **Shop:** the seed merchant's stall, its own scene against a plank wall: a painted sign, almanac pages pinned on cork, a wooden tray of goods with kraft price tags, a tin bucket (throw out), a rubber stamp (improve), a hand bell (fresh stock) and from year 2 a scoop on the tray's lip, and a signpost on to the next season.
 - **Run end:** the account scrolls with a soft shade at its foot while there is more below (round 7: the desktop's row of new cards was cut off with no sign). "The almanac, year N": a ruled entry per season, then the best harvest, coins, seasons met of twelve and new cards ("New in the merchant's catalogue: pumpkin, shears and mint."). A won run has its own page instead (see Run structure). The account scrolls in a long run, its ruling scrolling with it; "Turn to a fresh page" stays in sight under it, with the wax seal beside it for a won run.
@@ -343,6 +360,8 @@ A card game on a warm oak table, with the plot as a painted almanac plate. Its o
 - **Round 9: the reason line speaks for the aimed plot only** (`previewReason`): a greyed bonus the aimed seed takes or gives, else no line. The ninth playtest's radish over B4 said "The other corn is pulled before this one ripens.", a corn's loss that was there before the radish. It also keeps off the plate's caption.
 - **Round 9: a harvest's slip in three lines** under the sum: the yield's bonuses, the bloom added, then the multipliers; bonuses of one kind from one source share a chip whose number grows (Tall Rows +4, not four +1s), and a page's bonus names the page ("Busy Bees ×1.3"). A big corn's slip had nine bonus icons and an unnamed "x1.2" beside a bloom of 7.2.
 - **Round 9: the stall's head keeps each sentence on one line** ("Autumn starts with 54." wrapped "54." onto a line of its own).
+- **Round 10: a pegboard you can read at arm's length.** On the desktop it is 46 px tall (32), its pegs and holes grow with it. The side panel's bareness in the guided season stays: the bench and the kept pages come with their lessons, and a returning table's longest bare stretch is 76 px.
+- **Round 10: a seed tin with more below says so.** The improve and throw-out sheets cut off their last row (the cans and the compost) at the screen's foot with no sign; a soft shade at the tin's foot now shows while there is more to scroll (`.sb-tinview.more`), and deck-overlap's scroll check covers it.
 - **The plate's caption** sits between the bed and the printed frame; the margin under the bed is sized from the caption and the frame's two rules, so the rules never strike through it at any size.
 
 ## Teaching: the guided first season
@@ -813,6 +832,68 @@ The summer walkover is gone (1.82 to 1.45 for the careful line, 1.65 to 1.31 for
 
 - What the stall says against what the twist played (after): a buyer 13.7% said and 15.0% played, good company 21.9% and 18.6%, long picks 15.4% and 17.4%, a glut 14.5% and 12.4%, a page at rest 26.9% and 32.0%; frost is said at 7.6% and costs 12.0% played (its careful share, `adapt.frost` 0.42, is low).
 
+### Round 10: each engine on its own crops, hitches priced by what they cost, a level climb
+
+The tenth playtest found no P0 or P1 and scored the first quarter hour 7 of 10 and the game 5.5. Measured before (the committed round 9 build, a `git archive` copy, with this round's scripts) and after, 200 runs each unless said.
+
+**The engine table** (`deck-strategies.ts` and the new `deck-crops.ts`, whole catalogue, all four on offer to the policy committed to one): clears of years 1 and 2, wins; the share of seasons (from year 1 summer) the engine's own crops took the most, the median share of a season's take from them, from radishes and carrots, and from its page's bonus on those:
+
+| Engine | Before: Y1, Y2, wins | After | Own crops top, before and after | Own crops' share | Radishes and carrots' share | Bonus on them |
+|---|---|---|---|---|---|---|
+| Bees | 87%, 58%, 34% | 87%, 53%, 32% | 87%, 93% | 78%, 86% | 19%, 11% | 16%, 0% |
+| Hot | 87%, 67%, 40% | 87%, 59%, 37% | 98%, 98% | 81%, 84% | 9%, 7% | 5%, 3% (the chili's own x1.5) |
+| Vines | 87%, 52%, 34% | 87%, 63%, 37% | 48%, 100% | 64%, 93% | 36%, 6% | 35%, 0% |
+| Tall | 86%, 59%, 36% | 82%, 50%, 34% | 97%, 97% | 72%, 76% | 6%, 5% | 0%, 0% |
+| The bot's own buying (a random engine) | 90%, 66%, 42% | 90%, 61%, 33% | | | | |
+| No engine | 3%, 0%, 0% | 1%, 0%, 0% | | | | |
+
+- **Every engine's own crops top the season 93 to 100% of the time; the engines win 32 to 37%,** 5 points apart, and clear year 1 82 to 87%. A season's top crop: bees strawberries, beans and pumpkins (40, 35, 16%), hot chilies (81%), vines beans and strawberries (52, 43%), tall corn (97%).
+- **Busy Bees' top crop still changes most** (68% of the seasons in years 2 and 3), Tall Rows' least (9%). A crop near a hive is the bees' own, whichever crop.
+- How the numbers were set: `deck-crops` at 100 runs per trial and `deck-fit play` for all nine players (150 and 200 runs), then `fit` over rows. Year 1: three corn took the tall engine's median take to 1.59 times round 9's row, past the round 8 test's 1.5; +0.9 bloom or a cap of three neighbours brought it down only with year 1 clears of 78 to 81% (its low tail sits at the quota), so the row rose instead (summer 410, autumn 540, winter 680). Tall Rows' levels are round 9's (+1.3, +1.55, +1.8 won 25%); Trellis at +1.2 won 38% and at +1.3 45%, so +1.25; Hot Beds x1.65, then x1.7 and x1.8 at I and II.
+
+**Corn, feast or famine** (`deck-crops`, tall engine, before and after): a season's biggest harvest is a median 26% of it and p90 40% (the same), and a corn came once or not at all in 1% of seasons (the same). The bot plays its corn better than the tester did: the third corn gives a person more chances of one in hand, and the bot's figures do not move. This is a change for a person's draws, not one the sims can show.
+
+**The first summers** (`deck-crops`): the tenth playtest's Hot Beds run missed by 1 with a carrot at 8 and a strawberry at 10. Hot Beds now takes a median of 537 in year 1 summer (505 before), its crops 76% (72%), its best harvest 56 (49).
+
+**The curve** (`deck-seasons.ts`, the decent bot with a new player's catalogue and a random engine): pass rate and median take over quota per season, and the clear rates:
+
+| Decent bot | spring | summer | autumn | winter | clears the year |
+|---|---|---|---|---|---|
+| Year 1, before (160, 380, 500, 640) | 99%, 1.36 | 99%, 1.47 | 97%, 1.46 | 95%, 1.47 | 90% |
+| Year 1, after (150, 410, 540, 680) | 100%, 1.44 | 100%, 1.35 | 95%, 1.40 | 93%, 1.40 | 88% |
+| Year 2, before (840, 1,030, 1,200, 1,370) | 93%, 1.52 | 86%, 1.44 | 85%, 1.37 | 93%, 1.48 | 57% |
+| Year 2, after (900, 1,090, 1,250, 1,540) | 87%, 1.43 | 90%, 1.40 | 89%, 1.42 | 94%, 1.44 | 57% |
+| Year 3, before (1,560, 1,760, 1,940, 2,000) | 89%, 1.37 | 91%, 1.51 | 78%, 1.26 | 95%, 1.12 | 35% (won) |
+| Year 3, after (1,700, 1,860, 2,020, 2,250) | 86%, 1.35 | 85%, 1.35 | 88%, 1.48 | 89%, 1.12 | 33% (won) |
+
+- **The wall is gone:** year 3 autumn is met 88% of the time (78%), and no season's pass falls below 85%. From year 1 summer to year 3 autumn the medians run 1.35 to 1.48 (1.26 to 1.52). The last winter ends the night it is met, so its take stops at the quota.
+- **Above the round's aim of 1.1 to 1.4, on purpose:** a row raised far enough to bring every median under 1.4 took the wins under 30%: the takes spread too widely from run to run for every season to sit that close to its quota. The most any engine's median season reached before the last winter: bees 1.48, hot 1.55, vines 1.43, tall 1.66 (1.57, 1.61, 1.63, 1.61 before); the tall engine's spread is the widest.
+- The strict bot clears years 1 to 3 at 83%, 44% and 27% (83%, 46%, 28%); the guided run at 83%, 53% and 28% (86%, 54%, 25%); the careful line at 88%, 44% and 24%.
+
+**The twists** (`deck-twists.ts --depth=2 --buys`, the bot's own buying, 200 runs before and 400 after, played ahead as the run plays): in coins, what the clipping says, what it played, the quota cut:
+
+| | Before | After |
+|---|---|---|
+| The bot took the hitch | 62% of 991 stalls | 45% of 1,935 |
+| Frost: said, played, cut; played over cut | 113, 158, 348; 0.45 | 262, 245, 334; 0.77 |
+| A glut | 197, 211, 399; 0.48 | 341, 323, 414; 0.78 |
+| A page at rest | 328, 430, 509; 0.78 | 425, 426, 491; 0.84 |
+| Every hitch, the sum of costs over the sum of cuts | 0.52 | 0.78 |
+| Hitches aimed at a free crop | 24 of 991 | 0 of 1,935 |
+| A buyer: said, played | 186, 199 | 243, 255 |
+| Good company | 292, 263 | 357, 346 |
+| Long picks | 221, 263 | 298, 293 |
+| Per stall: the help played, the hitch played (its cut less its cost); the hitch the better | +15.5%, +16.5%; 53% | +18.2%, +9.7%; 31% |
+
+- By the decent bot's own stalls (`deck-seasons`, a new player's catalogue) the hitch is picked 41% of the time (61%), the strict bot's 40% (62%), the guided run's 43% (68%). The engines differ: vines 33%, hot 41%, bees 47%, tall 51%. A season is met after the hitch 92% of the time and after the help 87%.
+- **A person weighs it otherwise than the bot:** at a cut near its cost a hitch leaves about the same coins over the quota as no twist, and a help adds to them, so the coins over the quota favour the help. The bot, reading take over quota, sees a smaller quota with less at risk. The tester's "the hitch is always right" is answered; whether a person now always takes the help is for the next playtest.
+- How the numbers were set: `adapt` and `worthTimes` against said and played; `helpShare` 0.1 to 0.25 and `pairNear`, `pairSpread` for the pick rate. A twist judged two plays deep instead of one left the pick at 40% (no change kept: the bot's own depth is not what favoured the help); a pair chosen to weigh the same, then the share of the help left out of the parity, moved it from 34 to 45%.
+- A hitch aimed as the one two stalls back comes at 5% of stalls (3% before), at 25% for the tall engine (13%), whose season has little but corn to aim at. Stalls with no help worth 8%: 0.8%, a season with nearly all its coins in one crop.
+
+**The first spring** (`deck-strategies`): the ledger says what is still to go from day 4, and it asks 150 (160). No-engine runs meet it 100% of the time, and clear year 1 1% (3%): the engine is still what makes year 1.
+
+**The guided spring** (`deck-guided-days.ts`, 100 and 200 runs, by night): kept at 75. The careful line has 73 by night 5 and 84 by night 6 with the day 3 radish, 80 and 97 with the carrot, the line the tenth playtest took. Asked 80, with a third radish on day 6, the decent bot met it on night 6 in 94 to 98% of runs, but deck-lessons' line by the notes ended its desktop spring at 75 of 80; asked 85, the decent bot missed it in 11% of its runs. Deferred: stakes on day 6 are not worth a first season lost by following the notes.
+
 ## Checks
 
 With a dev server running (`npx vite --config scripts/deck-vite.config.ts` on 5252, or the lead server on 5247; each script takes a base url as its first argument):
@@ -869,6 +950,16 @@ npx vitest run tests/deck-r9.test.ts     # round 9: all four engines at the pick
                                          #   III; no idle scoops after the quota is met; a lesson waiting behind a note; no engine
                                          #   page on the engine stall's cork board; the year's stock at the stall after winter.
                                          #   Each of the 16 fails on round 8 on an assertion (a `git archive` copy)
+npx vitest run tests/deck-r10.test.ts    # round 10: Busy Bees, Hot Beds and Trellis on their own crops and not on radishes and carrots; three corn; no
+                                         #   hitch on a free crop; frost dearer with no room elsewhere; the cut the hitch's cost and a small share of
+                                         #   the help; "Ripens next season." first; "to go" from day 4 and a first spring of 150; a cut in coins of the
+                                         #   take; a help that weighs the same with every kind still offered. Each of the 8 fails on round 9 on an
+                                         #   assertion (a `git archive` copy)
+npx tsx scripts/deck-crops.ts 200 [policy]   # round 10: for each engine, the share of the take from its own crops and how often they top a season, the
+                                         #   share from radishes and carrots and its bonus on them, the top crop by season, the biggest harvest's
+                                         #   share (feast), seasons its own crop came once or not at all (famine), and year 1 summer; --tune=key:value
+npx tsx scripts/deck-guided-days.ts 200 [--pair=radish|carrot] [--quota=n] [--deal=6:a,b,c]
+                                         # round 10: the guided spring's take by night, careful line and decent bot, and the night the quota is met
 node scripts/deck-returning.mjs          # round 8: a returning player's second run, phone (real touch) and desktop (mouse): the
                                          #   guided run ended, the loss ledger lists each season's twist, a fresh page by a real
                                          #   tap, every piece of the table there from the first dawn (the spent heap and the
@@ -880,7 +971,11 @@ npx tsx scripts/deck-twists.ts 30 [--policy=name]
                                          #   dice and bot): its expected cost or worth when offered against its played one, and
                                          #   the quota cut; hitches offered that would cost under `minHit`; round 8: what the
                                          #   stall says each would do, and per stall the help's played gain against the hitch's
-                                         #   played net (its cut less its cost) and how often the hitch was the better
+                                         #   played net (its cut less its cost) and how often the hitch was the better;
+                                         #   round 10: the share of stalls taking the hitch, each hitch's played cost over its quota cut in coins,
+                                         #   said against played against cut in coins, hitches at a free crop; --depth=2 --buys plays ahead as the
+                                         #   run plays (two plays deep, after the stall's shopping); --json=path, --first=n and --merge=a,b for
+                                         #   chunks run side by side; --tune=key:value
 npx tsx scripts/deck-strategies.ts 200 [policy...] --seasons [--noTwists]
                                          # round 9: the most a season's median take over quota reached (the snowball), the
                                          #   median single harvest and best harvest of year 2's seasons, coins at the end of a
@@ -975,7 +1070,7 @@ node scripts/deck-overlap.mjs            # no two labels, buttons, cards or slip
                                          #   round 7: the first stall's engines and a tap picking one, the reason line clear of
                                          #   every chip and the slip (the playtest's beans case), coin totals by a gold coin (read
                                          #   from the canvas) and the can's crop showing tonight's pay (and the night paying it),
-                                         #   "64 to go" on days 5 and 6 inside the ledger, the hand closing its gaps after a rest,
+                                         #   "64 to go" from day 4 (round 10) inside the ledger, the hand closing its gaps after a rest,
                                          #   tall crops painting nothing over the plot above or the key letters' margin, one-line
                                          #   kept pages all in sight at 1280 by 800, and in every state no panel or body cutting
                                          #   off content without scrolling and its shade (the run's end with six new cards);
@@ -988,6 +1083,9 @@ node scripts/deck-overlap.mjs            # no two labels, buttons, cards or slip
                                          #   a big corn's slip in three lines with Busy Bees and Tall Rows named and Tall Rows'
                                          #   neighbours on one chip; the "End day" label clear of the screen's foot; four engines;
                                          #   a refused scoop saying "Not now"; the year's stock at the stall after winter
+                                         # round 10 (ONLY="round 10"): a seed that ripens next season says so first, on a slip
+                                         #   paler by pixel luminance than the same seed's on day 1; the throw-out and improve
+                                         #   sheets with a full tin scroll and shade while more is below (`.sb-tinview`)
                                          # deck-lessons, round 9: guided day 3's pair ringed with "or", its line, the previews of
                                          #   the trade, the other back in the tin; deck-returning: four engines at the pick
 node scripts/deck-caption.mjs            # the plate's caption against the printed frame at eight sizes, by pixel readback

@@ -370,15 +370,19 @@ async function run(label, viewport, touch) {
           const box = (e) => e.getBoundingClientRect();
           // Round 9: bonuses of one kind share a chip that grows, so an arc landing on its own chip is fine.
           const chips = [...document.querySelectorAll('.sb-slip:not(.total) .sb-chip:not(.waiting)')].map((e) => ({ r: box(e), slip: box(e.closest('.sb-slip')), k: e.dataset.k }));
-          const arcs = [...document.querySelectorAll('.sb-arc')].filter((e) => Number(e.style.opacity || 1) > 0.5).map((e) => Object.assign(box(e).toJSON(), { k: e.dataset.k }));
+          const arcs = [...document.querySelectorAll('.sb-arc')].filter((e) => Number(e.style.opacity || 1) > 0.5).map((e) => Object.assign(box(e).toJSON(), { k: e.dataset.k, op: Number(e.style.opacity || 1) }));
           const out = [];
           const over = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
           for (let i = 0; i < chips.length; i++) {
             const c = chips[i];
             if (c.r.left < c.slip.left - 1 || c.r.right > c.slip.right + 1 || c.r.bottom > c.slip.bottom + 1) out.push('a chip runs off its slip');
             for (let j = i + 1; j < chips.length; j++) if (over(c.r, chips[j].r)) out.push('two chips overlap');
-            // A bonus passing over the slip in flight is fine; one that settles on a chip already there hides it.
-            for (const a of arcs) if (a.k !== c.k && over(c.r, a) && before.some((b) => Math.abs(b.x - a.left) < 4 && Math.abs(b.y - a.top) < 4)) out.push(`a landing bonus settles over a chip already on the slip (${a.k} over ${c.k})`);
+            // A bonus passing over the slip in flight is fine; one that settles on a chip already there hides it. Round 10:
+            // only in its last fifth, where it fades, and by more than a graze (a bonus setting off from under the slip moves
+            // as slowly as one landing, and one landing brushes the row above by 2 or 3 px at half opacity: the check failed
+            // about one run in three on any build).
+            const hides = (a) => Math.min(c.r.right, a.right) - Math.max(c.r.left, a.left) > 5 && Math.min(c.r.bottom, a.bottom) - Math.max(c.r.top, a.top) > 5;
+            for (const a of arcs) if (a.k !== c.k && a.op < 1 && hides(a) && before.some((b) => Math.abs(b.x - a.left) < 4 && Math.abs(b.y - a.top) < 4)) out.push(`a landing bonus settles over a chip already on the slip (${a.k} over ${c.k})`);
           }
           // Lines of chips, allowing for the slip's slight tilt.
           const tops = chips.map((c) => c.r.top).sort((a, b) => a - b);
@@ -1367,10 +1371,11 @@ async function run(label, viewport, touch) {
       if (q.tot && !paid.includes(Number(q.tot.text))) extra.push(`the chip said ${q.tot.text}, the night paid ${paid.join(', ')}`);
       console.log(`       ${label} the can on row 3: carrot chip ${q.tot?.text} (${q.gold} gold pixels), the night paid ${paid.join(', ')}`);
     }],
-    ['round 7: the last two days say what is still to go', async () => {
+    // Round 10: from day 4 (the tenth playtest's first spring ended 158 of 160 before it had said anything).
+    ['round 7: from day 4 the ledger says what is still to go', async () => {
       await fresh(4242);
       const rows = [];
-      for (const [day, earned] of [[4, 100], [5, 286], [6, 286], [6, 400]]) {
+      for (const [day, earned] of [[3, 100], [4, 100], [5, 286], [6, 286], [6, 400]]) {
         const q = await p.evaluate(([day, earned]) => {
           const t = window.deck.table;
           const s = t.run;
@@ -1383,7 +1388,7 @@ async function run(label, viewport, touch) {
           const i = document.querySelector('.sb-led-tally i');
           return { go: window.deck.toGo(), led: box(document.querySelector('.sb-ledger')), words: i ? words(i) : null, tally: words(document.querySelector('.sb-led-tally b')) };
         }, [day, earned]);
-        const want = day >= 5 && earned < 350 ? `${350 - earned} to go` : '';
+        const want = day >= 4 && earned < 350 ? `${350 - earned} to go` : '';
         if (q.go !== want) extra.push(`day ${day} at ${earned} of 350: the ledger says "${q.go}", want "${want}"`);
         if (q.words && (q.words.r > q.led.r - 1 || q.words.b > q.led.b + 0.5 || q.words.l < q.led.l)) extra.push(`"${q.go}" runs out of the ledger`);
         rows.push(`day ${day}, ${earned}: "${q.go}"`);
@@ -1670,6 +1675,68 @@ async function run(label, viewport, touch) {
       console.log(`       ${label} crow about: kept ground ${guard.join(',')}; greyed ${risk.join(', ')}; reason "${q.reason?.text}" at y ${Math.round(q.reason?.y ?? 0)}, caption at y ${Math.round(q.cap.y)}`);
       await p.evaluate(() => window.deck.table.putDown(true));
     }],
+    // Round 10: the tenth playtest's corn on autumn day 6 previewed "12 x 3.2 = 38" with "The beans are pulled before the
+    // corn ripens."; the rules had it ripening next season. The line says so first, and the slip is pale, not the dark
+    // slip of a pay that comes tonight or this season (measured by pixel luminance against the same corn on day 1).
+    ['round 10: a seed that ripens next season says so first, on a pale slip', async () => {
+      await fresh(4545);
+      const aim = async (day) => {
+        await p.evaluate((day) => {
+          const s = window.deck.state();
+          s.twist = null;
+          s.crow = false;
+          s.pages = ['tall'];
+          s.season = 2;
+          s.day = day;
+          for (const q of s.plots) { q.crop = null; q.obj = null; q.boost = 0; }
+          s.plots[5].crop = { uid: 9601, kind: 'beans', age: 3, days: 3, up: false, compost: 0, rot: false, picks: 2, pest: 0, sprout: false };
+          s.energy = 5;
+          window.deck.hand(['corn']);
+        }, day);
+        await settle(400);
+        const r = await p.evaluate(() => { const x = window.deck.rects(); const c = (b) => [b.left + b.width / 2, b.top + b.height / 2]; return { card: c(x.cards[0]), plot: c(x.plots[6]) }; });
+        const go = async ([x, y]) => {
+          if (touch) {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 15 }] });
+            await p.waitForTimeout(40);
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          } else await p.mouse.click(x, y);
+          await settle(250);
+        };
+        await go(r.card);
+        if (touch) await go(r.plot);
+        else {
+          await p.mouse.move(...r.plot, { steps: 4 });
+          await settle(300);
+        }
+        const q = await p.evaluate(() => {
+          const b = window.deck.table.board;
+          const slip = b.totalSlip;
+          let lum = null;
+          if (slip) {
+            const g = b.canvas.getContext('2d');
+            const k = b.canvas.width / b.canvas.getBoundingClientRect().width;
+            const d = g.getImageData(Math.round((slip.x + 2) * k), Math.round((slip.y + 2) * k), Math.max(1, Math.round((slip.w - 4) * k)), Math.max(1, Math.round((slip.h - 4) * k))).data;
+            let sum = 0;
+            for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+            lum = Math.round(sum / (d.length / 4));
+          }
+          return { reason: b.reasonBox?.text ?? null, late: !!slip?.late, text: slip?.text ?? null, lum, cap: b.captionBox(), box: b.reasonBox };
+        });
+        await p.evaluate(() => window.deck.table.putDown(true));
+        await settle(200);
+        return q;
+      };
+      const late = await aim(6);
+      const now = await aim(1);
+      if (late.reason !== 'Ripens next season.') extra.push(`the late corn's line: "${late.reason}"`);
+      if (!late.late) extra.push('the late corn\'s slip is not marked late');
+      if (now.late) extra.push('the day 1 corn\'s slip is marked late');
+      if (late.lum === null || now.lum === null || late.lum - now.lum < 80) extra.push(`the late slip is not clearly paler: luminance ${late.lum} against ${now.lum}`);
+      const cross = (a, c) => a && c && Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 0.5 && Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 0.5;
+      if (cross(late.box, late.cap)) extra.push('the late line sits over the plate\'s caption');
+      console.log(`       ${label} late corn: "${late.reason}", slip "${late.text}" luminance ${late.lum}; day 1 corn: "${now.reason}", slip "${now.text}" luminance ${now.lum}`);
+    }],
     ['round 9: a big harvest\'s slip in three lines, its page named', async () => {
       await fresh(77);
       await p.evaluate(() => {
@@ -1876,6 +1943,40 @@ async function run(label, viewport, touch) {
       const q = await p.evaluate(() => ({ shown: document.querySelectorAll('.sb-tincard').length, owned: window.deck.state().draw.length + window.deck.state().hand.length + window.deck.state().discard.length + window.deck.state().placed.length }));
       if (q.shown !== q.owned) extra.push(`the tin shows ${q.shown} of ${q.owned} cards`);
     }],
+    // Round 10: the throw-out and improve sheets with a tin as full as the tenth playtest's (its last row, the cans and
+    // the compost, was cut off at the screen's foot with no shade): every card reachable, a shade while more is below.
+    ...['remove', 'upgrade'].map((pick) => [`round 10: the ${pick === 'remove' ? 'throw-out' : 'improve'} sheet with a full tin`, async () => {
+      await toStall(95, 900, (s) => {
+        for (const id of ['beans', 'beans', 'strawberry', 'chili', 'chili', 'corn', 'compost', 'can', 'ladybirds', 'garlic', 'sunflower']) s.draw.push({ uid: s.nextUid++, id, up: false });
+      });
+      await p.evaluate((pick) => {
+        window.deck.table.tutor.unlock('services');
+        window.deck.table.sheets.deck('all', pick);
+      }, pick);
+      await settle(400);
+      const q = await p.evaluate(() => {
+        const v = document.querySelector('.sb-tinview');
+        const cards = [...document.querySelectorAll('.sb-tincard')];
+        const vb = v.getBoundingClientRect();
+        const last = cards[cards.length - 1].getBoundingClientRect();
+        const r = { n: cards.length, below: Math.round(last.bottom - vb.bottom), scroll: Math.round(v.scrollHeight - v.clientHeight), more: v.classList.contains('more') };
+        v.scrollTop = v.scrollHeight;
+        v.dispatchEvent(new Event('scroll'));
+        const l2 = cards[cards.length - 1].getBoundingClientRect();
+        r.reached = l2.bottom <= v.getBoundingClientRect().bottom + 1;
+        r.endMore = v.classList.contains('more');
+        v.scrollTop = 0;
+        v.dispatchEvent(new Event('scroll'));
+        return r;
+      });
+      if (q.scroll > 2 && !q.more) extra.push(`the sheet scrolls ${q.scroll} px with no shade`);
+      if (!q.reached) extra.push('the last row cannot be scrolled into view');
+      if (q.scroll > 2 && q.endMore) extra.push('the shade stays at the end of the scroll');
+      console.log(`       ${label} ${q.n} cards, the last row ${q.below} px below the sheet's foot, scrolls ${q.scroll} px, shade ${q.more}, cleared at the end ${!q.endMore}`);
+      // Back to a day on the table: the states after this one read the hand.
+      await p.evaluate(() => window.deck.table.sheets.close());
+      await fresh(4242);
+    }]),
     ['the spent heap', async () => {
       await p.evaluate(() => window.deck.table.sheets.deck('spent'));
     }],
@@ -2018,7 +2119,8 @@ async function run(label, viewport, touch) {
     // desktop kept pages showed half of Big Basket, and the run's end cut off its new cards with no shade).
     for (const q of await p.evaluate(() => {
       const out = [];
-      for (const e of document.querySelectorAll('.sb-pages, .sb-entry-body, .sb-stall-body')) {
+      // Round 10: the seed tin too (the improve and throw-out sheets cut off their last row with no shade).
+      for (const e of document.querySelectorAll('.sb-pages, .sb-entry-body, .sb-stall-body, .sb-tinview')) {
         const st = getComputedStyle(e);
         if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue;
         const r = e.getBoundingClientRect();

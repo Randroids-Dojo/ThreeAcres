@@ -1583,10 +1583,14 @@ describe('round 5: a run that ends on its last quota, year 3 against your own ye
       kinds: { carrot: 400, beans: 150, strawberry: 140, sunflower: 120, radish: 100, lettuce: 90 },
       rows: [100, 150, 200, 300],
       rowKinds: [{ radish: 100 }, { beans: 150 }, { lettuce: 200 }, { carrot: 300 }],
-      from: { bees: 150, sunflower: 300 },
-      pests: 800,
-      company: 140,
-      last: 90,
+      // Round 10: sunflowers all round brings about a fifth of their bloom's coins (deck-twists), so it is offered only
+      // where they added a lot.
+      from: { bees: 150, sunflower: 450 },
+      // Round 10: a help is paired with a hitch by worth, so calm and good company are worth about what a hitch here costs.
+      pests: 600,
+      company: 160,
+      // Round 10: long picks bring about their estimate, not 1.5 times it (deck-twists).
+      last: 120,
     });
     /** Play to the stall, the season's tally set before its last night. */
     const toStallWith = (s: RunState, t: Tally) => {

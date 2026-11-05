@@ -904,15 +904,27 @@ export class Board {
       const y0 = c.y + T / 2 - h * 0.45;
       ctx.beginPath();
       ctx.roundRect(x0, y0, w, h, 5);
-      ctx.fillStyle = t.late ? 'rgba(90, 84, 72, 0.92)' : 'rgba(42, 30, 18, 0.92)';
+      // Round 10: a seed that ripens next season shows its pay on a pale slip with a dashed edge and grey ink, clearly
+      // not tonight's dark slip (the tenth playtest read a late corn's "12 x 3.2 = 38" as this season's; the grey was
+      // 'rgba(90, 84, 72)', a shade off the usual dark brown).
+      ctx.fillStyle = t.late ? 'rgba(226, 219, 202, 0.95)' : 'rgba(42, 30, 18, 0.92)';
       ctx.fill();
+      if (t.late) {
+        ctx.save();
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = 'rgba(70, 62, 50, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+      const ink = t.late ? '#4f473b' : '#f6ecd0';
       let x = x0 + 6;
       if (showBloom) {
-        basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, '#f6ecd0');
+        basket(ctx, x + icon / 2, y0 + h / 2, icon * 0.95, ink);
         x += icon + 2;
       }
       parts.forEach((s, k) => {
-        const col = showBloom && k === 2 ? '#f39aa8' : '#f6ecd0';
+        const col = showBloom && k === 2 ? (t.late ? '#8a5a60' : '#f39aa8') : ink;
         if (k === parts.length - 1) {
           coin(ctx, x + icon / 2, y0 + h / 2, icon * 0.85);
           x += icon + 2;
@@ -921,7 +933,7 @@ export class Board {
         x += widths[k] + 3;
       });
       slip = { x: x0, y: y0, w, h };
-      this.totalSlip = { ...slip, text: parts.join(' '), coin: true };
+      this.totalSlip = { ...slip, text: parts.join(' '), coin: true, late: !!t.late };
       under = y0 + h + 3;
     }
     // Why: one plain line under the aimed plot.
@@ -1049,7 +1061,7 @@ export class Board {
   stakes: { x: number; y: number; w: number; h: number }[] = [];
 
   /** The aimed seed's slip and the reason line painted this frame, for checks (canvas CSS px). */
-  totalSlip: { x: number; y: number; w: number; h: number; text: string; coin: boolean } | null = null;
+  totalSlip: { x: number; y: number; w: number; h: number; text: string; coin: boolean; late?: boolean } | null = null;
   reasonBox: { x: number; y: number; w: number; h: number; text: string } | null = null;
 
   /** Preview chips painted this frame, for checks: a gain, a greyed bonus, or a neighbour's new total (canvas px). */

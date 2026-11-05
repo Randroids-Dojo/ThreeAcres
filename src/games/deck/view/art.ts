@@ -299,23 +299,24 @@ export function pegboardUrl(w: number, h: number, holes: number): { url: string;
     g.strokeStyle = '#3a2410';
     g.lineWidth = 1.2;
     g.stroke();
-    // Holes, every fifth set a little apart by a burned tick.
+    // Holes, every fifth set a little apart by a burned tick. Round 10: they grow with a taller board (the desktop's).
     const cy = h * 0.5;
+    const k = Math.max(1, Math.min(1.6, h / 30));
     xs.forEach((x, i) => {
       g.beginPath();
-      g.arc(x, cy, 2.4, 0, Math.PI * 2);
+      g.arc(x, cy, 2.4 * k, 0, Math.PI * 2);
       g.fillStyle = '#2a1608';
       g.fill();
       g.beginPath();
-      g.arc(x + 0.4, cy + 0.5, 1.6, 0, Math.PI * 2);
+      g.arc(x + 0.4, cy + 0.5, 1.6 * k, 0, Math.PI * 2);
       g.fillStyle = '#120802';
       g.fill();
       if (i % 5 === 0 && i > 0 && i < holes - 1) {
         g.beginPath();
-        g.moveTo(x, cy - 7);
-        g.lineTo(x, cy - 5);
-        g.moveTo(x, cy + 5);
-        g.lineTo(x, cy + 7);
+        g.moveTo(x, cy - 7 * k);
+        g.lineTo(x, cy - 5 * k);
+        g.moveTo(x, cy + 5 * k);
+        g.lineTo(x, cy + 7 * k);
         g.strokeStyle = 'rgba(58, 36, 16, 0.7)';
         g.lineWidth = 1;
         g.stroke();
@@ -324,9 +325,9 @@ export function pegboardUrl(w: number, h: number, holes: number): { url: string;
     // The quota hole at the end: a brass ring.
     const qx = xs[xs.length - 1];
     g.beginPath();
-    g.arc(qx, cy, 5.2, 0, Math.PI * 2);
+    g.arc(qx, cy, 5.2 * k, 0, Math.PI * 2);
     g.strokeStyle = '#d8a83a';
-    g.lineWidth = 2.2;
+    g.lineWidth = 2.2 * k;
     g.stroke();
     g.strokeStyle = '#3a2410';
     g.lineWidth = 0.8;

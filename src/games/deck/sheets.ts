@@ -280,9 +280,9 @@ export class Sheets {
       'Bonuses come from what stands next to a crop on the night it is pulled. A radish pulled tonight gives nothing to a carrot that ripens tomorrow. Hold a card to see what it would do; a greyed bonus is one the night will not pay.',
       'Fill the pegboard by the sixth night, or the run ends. Coins carry over and buy cards at the stall between seasons.',
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
-      'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on.',
+      'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on. An engine\'s page never works on radishes and carrots: each engine wants its own crops.',
       'From year 2 the stall sells your engine\'s page at its next level, such as Busy Bees II, then III. Each level makes it pay more, and the quotas climb to match.',
-      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you plant most. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota: what it would cost you, plus what the other would bring. Pick one; it holds all season.',
+      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on the row you plant most. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota, by about what it would cost you and a little more. Pick one; it holds all season.',
       'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
       'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late sowing is picked next season and counts for its quota.',
@@ -429,6 +429,9 @@ export class Sheets {
     }
     wrap.append(btn('sb-plain', pick ? 'Not now' : 'Close the tin', () => this.back()));
     this.show('deck', wrap);
+    // Round 10: a tin that scrolls says so (the tenth playtest's improve and throw-out sheets cut off their last row, the
+    // watering cans and the compost, at the screen's foot with no sign; the sheet scrolled 76 px).
+    this.shadeMore(wrap);
   }
   private doneCard: Card | null = null;
 

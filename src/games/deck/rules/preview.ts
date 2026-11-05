@@ -243,6 +243,10 @@ const MANY: readonly CardId[] = ['beans'];
  */
 export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId | null): string | null {
   if (p.harvest?.never) return 'Too late to ripen before the end.';
+  // Round 10: a seed that ripens after the season's last night says so first: its pay counts for next season. The tenth
+  // playtest's corn on autumn day 6 previewed "12 x 3.2 = 38" with "The beans are pulled before the corn ripens.", and
+  // the run ended that night without it.
+  if (p.harvest?.late) return 'Ripens next season.';
   const kind = (i: number | null) => (i === null ? null : (s.plots[i]?.crop?.kind ?? (i === aim ? seed : null)));
   const name = (k: SeedId) => CARDS[k].name.toLowerCase();
   const many = (k: SeedId) => MANY.includes(k);
@@ -263,7 +267,6 @@ export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId
     if (r.risk.from === aim) return 'The crow may take it before the harvest.';
     return giver ? `The crow may take the ${name(giver)} first.` : 'The crow may take its neighbour first.';
   }
-  if (p.harvest?.late) return 'Ripens next season.';
   return null;
 }
 

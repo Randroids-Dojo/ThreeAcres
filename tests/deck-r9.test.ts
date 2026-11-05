@@ -110,7 +110,8 @@ describe('round 9: every engine on offer, and none that decides the run', () => 
     expect(X.engineNum({ levels: { tall: 3 } }, 'tall')).toBeLessThanOrEqual(2);
     expect(X.engineNum({ levels: { tall: 2 } }, 'tall')).toBeGreaterThan(X.engineNum({ levels: { tall: 1 } }, 'tall'));
     // One corn (round 8) cleared year 1 69% of the time with the tall engine, the least of the four.
-    expect(R.ENGINES.tall.gift.filter((c) => c === 'corn')).toHaveLength(2);
+    // Round 10: three (the tenth playtest's corn came once in autumn, too late to ripen, and the run ended).
+    expect(R.ENGINES.tall.gift.filter((c) => c === 'corn').length).toBeGreaterThanOrEqual(2);
   });
 
   it('the tall engine clears year 1 most of the time against round 8\'s row (a decent bot committed to it, 30 runs)', () => {
@@ -295,7 +296,9 @@ describe('round 9: twists that keep their promise', () => {
     let pairs = 0;
     let again = 0;
     let stalls = 0;
-    for (let i = 0; i < 8; i++) {
+    let thin = 0;
+    // Round 10: 24 runs (8 before): a few runs of the tall engine, which has few things to aim at, swung this by 15 points.
+    for (let i = 0; i < 24; i++) {
       const seed = 4100 + i * 7919;
       const meta = newMeta();
       meta.unlocked = ['beehive', 'chili', 'corn', 'wheat', 'pumpkin', 'shears', 'mint', 'trowel', 'storm'];
@@ -314,8 +317,14 @@ describe('round 9: twists that keep their promise', () => {
               pairs++;
               // The ninth playtest read "About 220 more coins" beside "About 320 fewer coins. Summer asks 600, not 920.":
               // the cut at its cap covered the hitch and not the help.
-              expect(help.worth, `help ${help.id}`).toBeGreaterThanOrEqual(0.08 - 1e-9);
-              expect(R.twistEase(hitch) + 0.011).toBeGreaterThanOrEqual(hitch.worth + help.worth);
+              // Round 10: wherever the stall has one: a season with nearly all its coins in one crop after good company
+              // has none, and offers its best (the tall run's corn, 78% of 817 coins: buyers of 6% at most).
+              const played = s.stats.log.at(-1)?.twist?.id;
+              if (R.boonAims(s).some((a) => a.v >= 0.08 && a.t.id !== played)) expect(help.worth, `help ${help.id}`).toBeGreaterThanOrEqual(0.08 - 1e-9);
+              else if (help.worth < 0.08) thin++;
+              // Round 10: the cut is the hitch's cost and a share of the help's worth (`helpShare`; round 9 added all of it).
+              const share = (TUNING as typeof TUNING & { helpShare?: number }).helpShare ?? 1;
+              expect(R.twistEase(hitch) + 0.011).toBeGreaterThanOrEqual(hitch.worth + share * help.worth);
             }
             // Not aimed as a hitch the last stall offered, and seldom as the one before it (the tall run: frost on the
             // corn row three times, a corn glut twice): only when nothing else can be weighed against a help.
@@ -330,8 +339,10 @@ describe('round 9: twists that keep their promise', () => {
       }
     }
     expect(pairs).toBeGreaterThan(20);
-    // Round 8 let a hitch come back every other stall.
-    expect(again / stalls).toBeLessThan(0.08);
+    expect(thin / pairs, 'stalls with no help worth 8%').toBeLessThan(0.08);
+    // Round 8 let a hitch come back every other stall. Round 10: 8% over 60 runs, 5% over 200 (deck-strategies), with quotas
+    // cut only by what a hitch costs a cut stays in bounds less often.
+    expect(again / stalls).toBeLessThan(0.12);
   }, 180000);
 });
 

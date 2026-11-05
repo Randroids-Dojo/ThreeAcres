@@ -96,6 +96,11 @@
 .sb-peg.tick .sb-pin.front { animation: sb-peg 0.3s ease; }
 @keyframes sb-peg { 40% { margin-top: -14px; } }
 .sb-peg.met .sb-pin.front { background: #e8b830; }
+/* Round 10: the desktop's taller board takes larger pegs. */
+.sb[data-layout='wide'] .sb-pin { left: -7px; width: 14px; height: 14px; margin-top: -12px; }
+.sb[data-layout='wide'] .sb-pin::after { left: 4px; top: 11px; width: 6px; height: 8px; }
+.sb[data-layout='wide'] .sb-peg.tick .sb-pin.front { animation-name: sb-peg-wide; }
+@keyframes sb-peg-wide { 40% { margin-top: -18px; } }
 /* The quota met: the peg drops into the brass hole and the board gilds for a beat. */
 .sb-peg.home { animation: sb-home 1.1s ease; }
 @keyframes sb-home { 0%, 100% { filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.45)); } 35% { filter: drop-shadow(0 0 10px rgba(255, 214, 110, 0.95)) drop-shadow(0 0 3px #fff2c0); } }
@@ -388,6 +393,8 @@
   background: #2e4a3c; border: 3px solid #1d3027; border-radius: 10px; box-shadow: inset 0 0 0 6px #355a4a, inset 0 0 40px rgba(0, 0, 0, 0.45), 0 14px 30px rgba(0, 0, 0, 0.5);
   touch-action: pan-y;
 }
+/* Round 10: a tin with more below says so, with a soft shade at its foot (the improve sheet cut off its last row). */
+.sb-tinview.more { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 34px), rgba(0, 0, 0, 0.3)); mask-image: linear-gradient(180deg, #000 calc(100% - 34px), rgba(0, 0, 0, 0.3)); }
 .sb-tinview h2 { margin: 0; font-size: 24px; font-style: italic; }
 .sb-tinview .sb-sub { color: #cfdcc8; margin-bottom: 12px; }
 /* Room above the grid, so a lifted card never covers the line that says what it would do. */

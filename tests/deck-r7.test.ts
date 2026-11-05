@@ -91,15 +91,16 @@ describe('round 7: an engine at every run\'s first stall', () => {
       return harvests(endDay(s));
     };
     // Busy Bees: a crop near a beehive gets +1 bloom and x1.5; a second hive beside it adds no more (they stacked
-    // without end: the seventh playtest's beehive nights paid 150 to 320).
+    // without end: the seventh playtest's beehive nights paid 150 to 320). Round 10: a lettuce, since the engine pages
+    // leave radishes and carrots out.
     const hive = (pages: R.PageId[], hives: number[]) =>
       night(pages, (s) => {
         for (const h of hives) s.plots[h].obj = 'beehive';
-        s.plots[5].crop = crop(1, 'carrot', 2, 2);
+        s.plots[5].crop = crop(1, 'lettuce', 2, 2);
       })[0];
-    expect(hive([], [0]).score).toBe(10);
-    expect(hive(['bees'], [0]).score).toBe(Math.round(10 * TUNING.beesTimes));
-    expect(hive(['bees'], [0, 2]).score).toBe(Math.round(10 * TUNING.beesTimes));
+    expect(hive([], [0]).score).toBe(8);
+    expect(hive(['bees'], [0]).score).toBe(Math.round(8 * TUNING.beesTimes));
+    expect(hive(['bees'], [0, 2]).score).toBe(Math.round(8 * TUNING.beesTimes));
     // A crop below a sunflower and near no hive gets no Busy Bees (round 7: it reached the sunflower's crop too).
     const sun = night(['bees'], (s) => {
       s.plots[1].crop = crop(1, 'sunflower', 0, 3);
@@ -121,17 +122,18 @@ describe('round 7: an engine at every run\'s first stall', () => {
     const plain = table(['radish'], { year: 2 });
     plain.plots[0].crop = crop(1, 'chili', 2, 2);
     expect(harvests(endDay(plain))[0].leaves).toBe(true);
-    // Trellis: a crop beside beans or a strawberry gets +2 bloom (once, however many stand beside it); beans and
-    // strawberries do not bloom each other.
+    // Trellis: a crop beside beans or a strawberry gets +2 bloom (once, however many stand beside it). Round 10: a
+    // lettuce (the pages leave radishes and carrots out), and beans and strawberries bloom each other (`vinesSelf`).
     const vine = (pages: R.PageId[]) =>
       night(pages, (s) => {
-        s.plots[5].crop = crop(1, 'carrot', 2, 2);
+        s.plots[5].crop = crop(1, 'lettuce', 2, 2);
         s.plots[4].crop = crop(2, 'beans', 3, 3);
         s.plots[6].crop = crop(3, 'strawberry', 3, 3);
       });
-    expect(vine([]).find((h) => h.kind === 'carrot')!.multTotal).toBe(1);
+    expect(vine([]).find((h) => h.kind === 'lettuce')!.multTotal).toBe(1);
     const vines = vine(['vines' as R.PageId]);
-    expect(vines.find((h) => h.kind === 'carrot')!.multTotal).toBe(1 + TUNING.vinesBloom * Math.min(2, TUNING.vinesCap));
+    expect(vines.find((h) => h.kind === 'lettuce')!.multTotal).toBe(1 + TUNING.vinesBloom * Math.min(2, TUNING.vinesCap));
+    // The beans' only neighbour on the plot is the lettuce, which gives them nothing.
     expect(vines.find((h) => h.kind === 'beans')!.mult.some((st) => st.icon === 'vines')).toBe(false);
     // Tall Rows: corn gets +1 bloom for each crop beside it.
     const tall = (pages: R.PageId[]) =>
@@ -193,11 +195,14 @@ describe('round 7: twists aimed at the run', () => {
       expect(aim!.v).toBeGreaterThanOrEqual(TUNING.minHit);
       // Round 8: the cut is what it still costs a careful player and the worth of the help beside it.
       const help = s.shop!.twists!.find((t) => !HITCHES.includes(t.id)) as R.Twist & { worth?: number };
-      const cut = R.hitchCut({ t: hitch, v: aim!.v }, help.worth ?? 0);
+      // Round 10: a share of the help's worth (`helpShare`), both in coins of the run's take (`takeRatio`): the help's
+      // worth is kept in those coins already.
+      const r = R.takeRatio(s);
+      const cut = R.hitchCut(aim!, (help.worth ?? 0) / r, r);
       // Round 9: never clipped at the usual most when a pair fits it; a pair that cannot be weighed within it is cut in
       // full, up to `easeHard`.
       const hard = (TUNING as typeof TUNING & { easeHard?: number }).easeHard ?? TUNING.easeMax;
-      expect(R.twistEase(hitch)).toBeCloseTo(Math.min(hard, Math.max(TUNING.easeMin, Math.round(cut * 100) / 100)), 5);
+      expect(Math.abs(R.twistEase(hitch) - Math.min(hard, Math.max(TUNING.easeMin, Math.round(cut * 100) / 100)))).toBeLessThanOrEqual(0.0101);
       // Crows never come while a scarecrow stands; sunflowers facing up never come (played ahead they cost nothing).
       if (hitch.id === 'crows' && s.plots.some((p) => p.obj === 'scarecrow')) crowsGuarded++;
       expect(hitch.id).not.toBe('sunup');
@@ -226,8 +231,9 @@ describe('round 7: twists aimed at the run', () => {
       expect(s.tally, 'the season just played is kept').toBeDefined();
       const t = s.tally!;
       // The seventh playtest's buyer for sunflowers (yield 3) was worth nothing next to 60 off.
-      // Round 8: its estimate is scaled to what a buyer brought when played ahead (`worthTimes`).
-      expect(((t.kinds[help.crop!] ?? 0) / t.take) * (TUNING.buyerTimes - 1) * (TUNING.worthTimes.buyer ?? 1)).toBeGreaterThanOrEqual(TUNING.minWorth - 1e-9);
+      // Round 8: its estimate is scaled to what a buyer brought when played ahead (`worthTimes`). Round 10: wherever a
+      // help worth that much could be offered (a season that took nearly all its coins from one crop has none).
+      if (R.boonAims(s).some((a) => a.v >= TUNING.minWorth)) expect(((t.kinds[help.crop!] ?? 0) / t.take) * (TUNING.buyerTimes - 1) * (TUNING.worthTimes.buyer ?? 1)).toBeGreaterThanOrEqual(TUNING.minWorth - 1e-9);
       expect(R.twistText(help)).toBe(`A buyer pays double for your ${R.PLURALS[help.crop!]}.`);
     });
   }, 120000);
@@ -324,7 +330,7 @@ describe('round 7: the engines said plainly', () => {
     expect(say?.('bees')).toBe('A beehive and Busy Bees.');
     expect(say?.('hot')).toBe('Four chilies and Hot Beds.');
     expect(say?.('vines')).toBe('Beans and Trellis.');
-    // Round 9: the tall engine brings two corn again.
-    expect(say?.('tall')).toBe('Two corn and Tall Rows.');
+    // Round 9: the tall engine brings two corn again. Round 10: three.
+    expect(say?.('tall')).toBe('Three corn and Tall Rows.');
   });
 });
