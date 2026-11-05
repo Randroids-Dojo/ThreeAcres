@@ -22,6 +22,10 @@
 // at a brook Pull drew dewberries instead. This one plays like that (and
 // scripts/ranch-catch-real.mjs plays the same thumbs with real touch, with
 // three faults of the playtest's chase put right).
+//
+// Round 11 adds two thumbs (TWO, TWO_IDLE, TWO_SLOW): the right thumb on Pull or looking, never both, 180 ms between; once
+// the tug is on it stays on Pull, and the view holds on the downy by itself. The three-finger thumbs now move the view
+// as the game's look does and tell the sim so (`Controls.look`), which takes over from the hold.
 //   npx tsx scripts/ranch-catch.ts [tries per kind]
 import { pathToFileURL } from 'node:url';
 import type { DownyKind } from '../src/games/ranch/defs';
@@ -59,6 +63,14 @@ export interface Thumb {
    * a fake one only shivers, the ring pale). It presses again a reaction after it lets go, having seen it was fake.
    */
   fooled: number;
+  /**
+   * Round 11, two thumbs (the eleventh playtest: "with two thumbs I'd guess about 4"): the right thumb is on Pull or
+   * looking, never both, `travel` seconds to move between. It looks until the crosshair marks the downy, moves to Pull
+   * and stays there while the tug is on (the view holds on the downy by itself); it goes back to looking only once the
+   * tug is over (a slip, a getaway) or a press found nothing. The left thumb walks (`stick`), or (false) stays idle once
+   * a tug is on. Not set: three fingers, a look finger that moves all through the fight.
+   */
+  two?: { travel: number; stick: boolean };
 }
 
 /** Radians of view per px of a look drag on touch (the game's). */
@@ -85,6 +97,14 @@ export const CARELESS: Thumb = { name: 'careless', lag: 0.18 + LOOP_LAG, gain: 0
 export const CAREFUL: Thumb = { name: 'careful', lag: 0.07 + LOOP_LAG, gain: 0.8, noise: 1.5 * SENS, run: true, react: [0.2, 0.35], fooled: 0.2 };
 /** A thumb that never reads the tug: holds Pull all the way (the seventh playtest's way, for the control). */
 export const HOLDER: Thumb = { ...CAREFUL, name: 'holds on', react: null };
+/** Round 11: 180 ms to move the right thumb between looking and Pull (the playtest's). */
+export const THUMB_TRAVEL = 0.18;
+/** Round 11, two thumbs: the good thumb's eyes and reactions (200 to 350 ms), the right thumb on Pull, the left on the stick. */
+export const TWO: Thumb = { ...CAREFUL, name: 'two thumbs', two: { travel: THUMB_TRAVEL, stick: true } };
+/** The same, the left thumb idle once a tug is on. */
+export const TWO_IDLE: Thumb = { ...CAREFUL, name: 'two, idle', two: { travel: THUMB_TRAVEL, stick: false } };
+/** Two thumbs, the slow reader (450 to 650 ms, the careless thumb's aim while it looks). */
+export const TWO_SLOW: Thumb = { ...CARELESS, name: 'two, slow', two: { travel: THUMB_TRAVEL, stick: true } };
 
 /** The game's frame, and how often the look finger moves. */
 const DT = 1 / 60;
@@ -138,6 +158,9 @@ export interface Try {
   /** Round 9: fake puffs it made, and how many the thumb let go on. */
   feints: number;
   fooled: number;
+  /** Round 11: how fast the view turned by itself while no look moved it (rad/s, the fastest), and the most it changed that turn in a frame. */
+  holdFast: number;
+  holdJerk: number;
 }
 
 /**
@@ -184,8 +207,26 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       return { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
     };
     // The thumb starts on it, with a little error.
-    let { yaw, pitch } = dir(d.x, d.y + 0.25, d.z);
-    yaw += (Math.random() - 0.5) * 0.04;
+    const start0 = dir(d.x, d.y + 0.25, d.z);
+    p.yaw = start0.yaw + (Math.random() - 0.5) * 0.04;
+    p.pitch = start0.pitch;
+    // Round 11, two thumbs: where the right thumb is, when it gets there, and when it pressed.
+    const two = thumb.two;
+    let right: 'look' | 'pull' = 'look';
+    let there = 0;
+    let lastYaw = p.yaw;
+    let lastPitch = p.pitch;
+    let lastTurn = 0;
+    let holdFast = 0;
+    let holdJerk = 0;
+    const eyeAim = (): Aim => {
+      const cp = Math.cos(p.pitch);
+      const ax = -Math.sin(p.yaw) * cp;
+      const ay = Math.sin(p.pitch);
+      const az = -Math.cos(p.yaw) * cp;
+      const eyY = p.y + 1.6;
+      return { ex: p.x, ey: eyY, ez: p.z, dx: ax, dy: ay, dz: az, mx: p.x + ax * 0.6 + 0.15, my: eyY - 0.2, mz: p.z + az * 0.6 };
+    };
     const hist: { t: number; x: number; y: number; z: number }[] = [];
     let caught = false;
     let escapes = 0;
@@ -211,6 +252,8 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     let caughtAt = 0;
     let blockedT = 0;
     let sideT = 0;
+    let lookedLast = false;
+    let pressed = -1;
     const side = seed % 2 ? 1 : -1;
     const aboard = () => s.slots.reduce((a, q) => a + (q.t && !isDowny(q.t) ? q.n : 0), 0);
     const kept0 = () => s.slots.reduce((a, q) => a + (q.t === kind ? q.n : 0), 0);
@@ -218,6 +261,8 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     const limit = 20;
     for (; t < limit && !caught && !gone; t += DT) {
       hist.push({ t, x: d.x, y: d.y, z: d.z });
+      let looked = 0;
+      const looking = !two || (right === 'look' && t >= there);
       if (t >= tick) {
         tick += TICK;
         // What the thumb sees is `lag` seconds old.
@@ -229,16 +274,26 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
           }
         }
         const want = dir(seen.x, seen.y + 0.25, seen.z);
-        let ey = want.yaw - yaw;
+        let ey = want.yaw - p.yaw;
         while (ey > Math.PI) ey -= Math.PI * 2;
         while (ey < -Math.PI) ey += Math.PI * 2;
         const my = Math.max(-60 * SENS, Math.min(60 * SENS, ey * thumb.gain + (Math.random() - 0.5) * 2 * thumb.noise));
-        const mp = Math.max(-40 * SENS, Math.min(40 * SENS, (want.pitch - pitch) * thumb.gain + (Math.random() - 0.5) * 2 * thumb.noise));
-        yaw += my;
-        pitch += mp;
+        const mp = Math.max(-40 * SENS, Math.min(40 * SENS, (want.pitch - p.pitch) * thumb.gain + (Math.random() - 0.5) * 2 * thumb.noise));
+        // (A look finger moves the view as the game's look does, and tells the sim it did: it takes over from the view hold.)
+        if (looking) {
+          p.yaw += my;
+          p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch + mp));
+          looked = Math.abs(my) + Math.abs(mp);
+        }
       }
-      p.yaw = yaw;
-      p.pitch = pitch;
+      // The view's turn by itself, frame to frame (what the sim's hold did last frame), while no look moved it.
+      if (!looked && !lookedLast) {
+        const turn = Math.hypot(p.yaw - lastYaw, p.pitch - lastPitch) / DT;
+        holdFast = Math.max(holdFast, turn);
+        holdJerk = Math.max(holdJerk, Math.abs(turn - lastTurn));
+        lastTurn = turn;
+      } else lastTurn = 0;
+      lookedLast = looked > 0;
       const dist = Math.hypot(d.x - p.x, d.z - p.z);
       closest = Math.min(closest, dist);
       if (d.drawn <= 0) near = Math.min(near, dist);
@@ -282,21 +337,32 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       wasTell = tell;
       wasFeint = feint;
       if (fought < 0 && d.strain > 0) fought = t;
+      // Two thumbs: from looking to Pull once the crosshair marks it, back once the tug is over or a press found nothing.
+      if (two) {
+        if (right === 'look' && t >= there && dist < 7.4 && d.noPull <= 0 && sim.aimedDowny(eyeAim()) === d) {
+          right = 'pull';
+          there = t + two.travel;
+          pressed = there;
+        } else if (right === 'pull' && t >= there && d.strain <= 0 && d.drawn <= 0 && t - pressed > 0.35) {
+          right = 'look';
+          there = t + two.travel;
+          letGo = false;
+          releaseAt = pressAt = -1;
+        }
+        if (d.strain > 0 || d.drawn > 0) pressed = t;
+      }
       // Walking into a rock or the crag, a thumb steps aside round it (the harness used to walk on into it).
       if (walking && Math.hypot(p.vx, p.vz) < 1) blockedT += DT;
       else blockedT = 0;
       if (blockedT > 0.3 && sideT <= 0) sideT = 1.2;
       sideT -= DT;
-      const c: Controls = { moveX: sideT > 0 ? side : 0, moveZ: walking ? 0.73 : 0, sprint: thumb.run && kind === 'thistle' && walking, jump: false, jumpPressed: false, draw: dist < 7.6 && !letGo, puff: false, puffPressed: false };
-      const cp = Math.cos(pitch);
-      const ax = -Math.sin(yaw) * cp;
-      const ay = Math.sin(pitch);
-      const az = -Math.cos(yaw) * cp;
-      const ex = p.x;
-      const eyY = p.y + 1.6;
-      const ez = p.z;
-      const aim: Aim = { ex, ey: eyY, ez, dx: ax, dy: ay, dz: az, mx: ex + ax * 0.6 + 0.15, my: eyY - 0.2, mz: ez + az * 0.6 };
-      sim.update(DT, c, aim);
+      // (Two thumbs, the left one idle: no walking once a tug is on.)
+      const walk = walking && !(two && !two.stick && d.strain > 0);
+      const onPull = !two || (right === 'pull' && t >= there);
+      const c: Controls = { moveX: sideT > 0 && walk ? side : 0, moveZ: walk ? 0.73 : 0, sprint: thumb.run && kind === 'thistle' && walk, jump: false, jumpPressed: false, draw: (dist < 7.6 || d.strain > 0) && !letGo && onPull, puff: false, puffPressed: false, look: looked };
+      lastYaw = p.yaw;
+      lastPitch = p.pitch;
+      sim.update(DT, c, eyeAim());
       for (const e of sim.events) {
         if (e.t === 'escape') {
           escapes++;
@@ -316,14 +382,14 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
         caughtAt = t;
       } else if (d.gone) gone = true;
     }
-    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips, feints, fooled: fooledN };
+    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips, feints, fooled: fooledN, holdFast, holdJerk };
   } finally {
     Math.random = realRandom;
   }
 }
 
 /** Share of tries caught, for a kind and a thumb. */
-export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1, rare: '' | 'lured' | 'wary' = ''): { rate: number; first: number; secs: number; fight: number; escaped: number; slipped: number; backs: number; food: number; under: number; fights: number[]; firstBacks: number; feints: number; fooled: number } {
+export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 1, rare: '' | 'lured' | 'wary' = ''): { rate: number; first: number; secs: number; fight: number; escaped: number; slipped: number; backs: number; food: number; under: number; fights: number[]; firstBacks: number; feints: number; fooled: number; holdFast: number; holdJerk: number } {
   let n = 0;
   let first = 0;
   let secs = 0;
@@ -337,6 +403,8 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
   let firstBacks = 0;
   let feints = 0;
   let fooled = 0;
+  let holdFast = 0;
+  let holdJerk = 0;
   for (let k = 0; k < tries; k++) {
     const r = rare ? tryCatch(kind, thumb, seed0 + k * 7919, rare === 'lured' ? 8 : 12, rare) : tryCatch(kind, thumb, seed0 + k * 7919);
     if (r.caught) {
@@ -351,6 +419,8 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
     }
     feints += r.feints;
     fooled += r.fooled;
+    holdFast = Math.max(holdFast, r.holdFast);
+    holdJerk = Math.max(holdJerk, r.holdJerk);
     if (r.escaped) esc++;
     if (r.slips > 0) slipped++;
     backs += r.backs;
@@ -358,7 +428,7 @@ export function catchRate(kind: DownyKind, thumb: Thumb, tries: number, seed0 = 
     if (r.near < 1) under++;
   }
   fights.sort((a, b) => a - b);
-  return { rate: n / tries, first: first / tries, secs: n ? secs / n : 0, fight: first ? fight / first : 0, escaped: esc / tries, slipped: slipped / tries, backs: backs / tries, food: food / tries, under: under / tries, fights, firstBacks: first ? firstBacks / first : 0, feints: feints / tries, fooled: fooled / tries };
+  return { rate: n / tries, first: first / tries, secs: n ? secs / n : 0, fight: first ? fight / first : 0, escaped: esc / tries, slipped: slipped / tries, backs: backs / tries, food: food / tries, under: under / tries, fights, firstBacks: first ? firstBacks / first : 0, feints: feints / tries, fooled: fooled / tries, holdFast, holdJerk };
 }
 
 /**
@@ -426,6 +496,25 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const f = (r: ReturnType<typeof catchRate>) => `${q(r.fights, 0.5).toFixed(1)} s (${q(r.fights, 0.25).toFixed(1)} to ${q(r.fights, 0.75).toFixed(1)}), ${r.firstBacks.toFixed(1)} backs, ${r.feints.toFixed(2)} fakes, ${r.feints ? Math.round((r.fooled / r.feints) * 100) : 0}% let go`;
     console.log(`   ${name.padEnd(13)} good ${f(g)}   |   slow ${f(sl)}`);
   }
+  // Round 11: two thumbs. The right thumb on Pull (180 ms from looking), the view holding on the downy by itself; the
+  // left thumb on the stick, or idle once a tug is on. Targets for the good thumb, in 20 s: clover 90%+, ember and thistle
+  // 80%+, brook 75%+, rares 60%+, its fights within about a fifth of three fingers'. The slow thumb's brooks and thistles
+  // about 40 to 60%.
+  console.log(`\n   two thumbs (right thumb on Pull, ${THUMB_TRAVEL * 1000} ms from looking; view held by itself): first try, in 20 s, the middle fight on a first try against three fingers', slipped, got away`);
+  console.log('   kind          good, left thumb on the stick                         |  good, left thumb idle    |  slow (450 to 650 ms)');
+  const mid = (a: number[]) => q(a, 0.5);
+  let fast = 0;
+  let jerk = 0;
+  for (const [name, kind, rare] of [['clover', 'clover', ''], ['ember', 'ember', ''], ['brook', 'brook', ''], ['thistle', 'thistle', ''], ['rare clover', 'clover', 'lured'], ['rare ember', 'ember', 'lured'], ['rare brook', 'brook', 'lured']] as [string, DownyKind, '' | 'lured'][]) {
+    const three = catchRate(kind, CAREFUL, tries, 1, rare);
+    const g = catchRate(kind, TWO, tries, 1, rare);
+    const i = catchRate(kind, TWO_IDLE, tries, 1, rare);
+    const sl = catchRate(kind, TWO_SLOW, tries, 1, rare);
+    fast = Math.max(fast, g.holdFast, i.holdFast);
+    jerk = Math.max(jerk, g.holdJerk, i.holdJerk);
+    console.log(`   ${name.padEnd(13)} ${pct(g.first)} ${pct(g.rate)}  fight ${mid(g.fights).toFixed(1)} s (three fingers ${mid(three.fights).toFixed(1)})  ${pct(g.slipped)} slipped ${pct(g.escaped)} away  |  ${pct(i.first)} ${pct(i.rate)}  ${mid(i.fights).toFixed(1)} s      |  ${pct(sl.first)} ${pct(sl.rate)}  ${mid(sl.fights).toFixed(1)} s  ${pct(sl.slipped)} slipped ${pct(sl.escaped)} away`);
+  }
+  console.log(`   the view's own turn, good thumb, all kinds: fastest ${fast.toFixed(2)} rad/s, the most it changed in a frame ${jerk.toFixed(2)} rad/s`);
   // Closing on a clover that has seen you, walking against running (taught now: the running lesson in the meadow).
   for (const run of [false, true]) {
     const rows = Array.from({ length: 12 }, (_, k) => chaseGap(run, 31 + k * 7919));

@@ -377,7 +377,7 @@ void counted;
 await frames(page, 6);
 const tagSays = await page.evaluate(() => ({ count: window.ranch.pads.countTag(1), board: window.ranch.boardOrders() }));
 check('a pen post\'s count tag says how many are in it, of ten', tagSays.count === '8', JSON.stringify(tagSays));
-check('the price board chalks up the morning\'s offers: what (by noon, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by noon|by dusk|after 9 pm)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
+check('the price board chalks up the morning\'s offers: what (by 10 am, by dusk or after dark, or the rare one and where it was seen) and what each pays', tagSays.board.length >= 2 && tagSays.board.every((t) => /^(\d+ clover (fluff|downies) (by 10 am|by dusk|after 9 pm)|gold clover downy, the [a-z ]+), pays [\d,]+$/.test(t)), JSON.stringify(tagSays.board));
 // Round 10: the first order runs to the next day's dusk; the chalk says "by dusk tomorrow", as its tag does (it said
 // "by dusk" beside a tag reading "By dusk tomorrow").
 const firstSays = await page.evaluate(() => {
@@ -398,8 +398,8 @@ const boardTags = await page.evaluate(() => {
 });
 // Round 5: each says what the order itself pays (a fluff order on top of its sales, so "168 more" beside "165" is not misread).
 // Round 6: the rare one's says where it was seen, what it pays, and that it stays (penned, for good).
-// Round 8: each with its condition first (due by noon, by dusk or after dark; the hunt's in its title).
-check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By noon|By dusk|By dusk tomorrow|Sell after 9 pm)\. Pays [\d,]+ on top of sales|(Caught by noon|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
+// Round 8: each with its condition first (due by 10 am, by dusk or after dark; the hunt's in its title).
+check("the board's tags: one per offer, saying its condition and what it pays, every word on the tag", boardTags.length >= 2 && boardTags.every((t) => /^((By 10 am|By dusk|By dusk tomorrow|Sell after 9 pm)\. Pays [\d,]+ on top of sales|(Caught by 10 am|Caught by dusk|Caught today\. Sell after 9 pm)\. Pays [\d,]+|By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days))$/.test(t.note) && t.fit !== false), JSON.stringify(boardTags));
 // Round 8: every condition's tag fits at its longest (big numbers, the longest kind names).
 const condTags = await page.evaluate(() => {
   const r = window.ranch;

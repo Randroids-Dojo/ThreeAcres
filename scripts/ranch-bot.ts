@@ -18,7 +18,7 @@
 //   (a module: used by ranch-first15.ts and ranch-hunt.ts)
 import { isDowny, isFood, isTuft, wantedFood, type DownyKind, type Food } from '../src/games/ranch/defs';
 import * as lessonsMod from '../src/games/ranch/lessons';
-import { Tutor, type Say } from '../src/games/ranch/lessons';
+import { Tutor, catchMore, type Say } from '../src/games/ranch/lessons';
 import { Sim, padSpots, type Aim, type Controls, type Ev, type Interactable } from '../src/games/ranch/sim';
 import type { Downy, Item, RanchState } from '../src/games/ranch/state';
 import { BOARD, CRATES, DOOR, GATES, MAXX, MAXZ, MINX, MINZ, PADS, PEN_R, WORKBENCH, zoneAt } from '../src/games/ranch/world';
@@ -598,7 +598,7 @@ function gardenWith(s: RanchState, f: Food): number {
 }
 
 /** Pull a food from a garden (its bed ripens for the lessons); true while doing it. */
-function fetchFood(b: Bot, f: Food, want = 3): boolean {
+function fetchFood(b: Bot, f: Food, want = 3, wait = true): boolean {
   const s = b.s;
   const aboard = s.slots.reduce((a, q) => a + (q.t === f ? q.n : 0), 0);
   if (aboard >= want) return false;
@@ -611,7 +611,7 @@ function fetchFood(b: Bot, f: Food, want = 3): boolean {
     b.pullItem(it);
     return true;
   }
-  if (aboard > 0) return false;
+  if (aboard > 0 || !wait) return false;
   // The bed is bare: wait by it for the next crop.
   b.goTo(P.x, P.z + (P.z < 35 ? PEN_R + 0.5 : -PEN_R - 0.5), 1.5);
   return true;
@@ -673,10 +673,10 @@ function penDowny(b: Bot, kind?: DownyKind): boolean {
 }
 
 /** Feed a hungry downy of yours its favourite: food aboard (else fetch it), then blow some at its feet. */
-function feedDowny(b: Bot, d: Downy): boolean {
+function feedDowny(b: Bot, d: Downy, wait = true): boolean {
   const s = b.s;
   const f = wantedFood(d.kind);
-  if (!has(s, (t) => t === f)) return fetchFood(b, f, 3);
+  if (!has(s, (t) => t === f)) return fetchFood(b, f, 3, wait);
   b.choose((t) => t === f);
   // In a pen: from outside the fence, at the floor near it; loose: at its feet.
   if (d.pen >= 0) {
@@ -687,8 +687,12 @@ function feedDowny(b: Bot, d: Downy): boolean {
   return true;
 }
 
-/** Tend the ranch: fluff to the crate, hungry downies fed. True if there was something to do. */
-export function tend(b: Bot): boolean {
+/**
+ * Tend the ranch: fluff to the crate, hungry downies fed. True if there was something to do. wait: stand by a bare bed for
+ * a hungry downy's next crop (round 11: with more downies kept someone is nearly always hungry, and an eager player goes
+ * on to the goal instead of standing there; it stood for 363 s under "Catch an ember downy.").
+ */
+export function tend(b: Bot, wait = true): boolean {
   const s = b.s;
   if (has(s, isTuft) && (ranchFluff(s, b).length === 0 || s.slots.some((q) => q.t && isTuft(q.t) && q.n >= 6))) return sellFluff(b);
   const fl = nearest(s, ranchFluff(s, b));
@@ -699,7 +703,7 @@ export function tend(b: Bot): boolean {
   if (has(s, isTuft)) return sellFluff(b);
   const hungry = s.downies.filter((d) => mine(d) && d.hunger > 0.5 && d.drawn === 0);
   const h = nearest(s, hungry);
-  if (h) return feedDowny(b, h);
+  if (h) return feedDowny(b, h, wait);
   return false;
 }
 
@@ -958,7 +962,7 @@ export function eager(b: Bot): void {
     const forThem = s.pads.some((p, i) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === i).every((d) => d.kind === k));
     if (forThem && penDowny(b, k)) return;
   }
-  if (tend(b)) return;
+  if (tend(b, false)) return;
   const g = sim.openGoals(1)[0];
   // More downies for the pen (the herd goal, and the loop's way to more fluff): catch them and pen them. (Round 10: the
   // goal counts the pen, "3 so far", so out in the meadow it catches as many as the pen still wants before going back.)
@@ -971,19 +975,28 @@ export function eager(b: Bot): void {
   }
   // An ember to catch once the ridge is open (round 10: the bot stood about for minutes under "Catch an ember downy."):
   // out to the ridge for one, and with embers aboard and a pen for them, into it (the journal says to build one first).
-  if (g && g.id === 'ember' && s.gates.ridge) {
-    if (has(s, (t) => t === 'ember')) {
-      const forThem = s.pads.some((p, i) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === i).every((d) => d.kind === 'ember'));
-      if (forThem) penDowny(b, 'ember');
+  // (Round 11: and a brook, once the Hollow is open.)
+  if (g && ((g.id === 'ember' && s.gates.ridge) || (g.id === 'brook' && s.gates.hollow))) {
+    const k = g.id as DownyKind;
+    if (has(s, (t) => t === k)) {
+      const forThem = s.pads.some((p, i) => p.kind === 'pen' && s.downies.filter((d) => !d.gone && d.pen === i).every((d) => d.kind === k));
+      if (forThem) penDowny(b, k);
       return;
     }
-    catchWild(b, 'ember');
+    catchWild(b, k);
     return;
   }
   // A goal with a place (a gate you can open now): go and open it.
   if (g && (g.id === 'ridge' || g.id === 'hollow') && !s.gates[g.id] && s.coins >= GATES[g.id].cost && sim.knows('gates')) {
     b.useAt('gate', GATES[g.id].x + (g.id === 'ridge' ? 0.6 : -0.6), GATES[g.id].z, () => `gate:${g.id}`, 2.6);
+    return;
   }
+  // Round 11: "Catch more. Ten fit in a pen." under a goal waiting on coins, as the line says: up to five a trip.
+  const more = catchMore(g?.id, s);
+  const aboard = s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? q.n : 0), 0);
+  if (aboard > 0 && (zoneAt(s.player.x, s.player.z) === 'ranch' || aboard >= 5 || !more)) penDowny(b);
+  else if (more) catchWild(b, more);
+  else tend(b);
 }
 
 /** A fresh game, as a new phone player starts it: the lessons on, the view where the game puts it. */

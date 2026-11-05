@@ -172,6 +172,7 @@ export type GoalId =
   | 'ember'
   | 'feeder'
   | 'hollow'
+  | 'brook'
   | 'thistle'
   | 'orders5'
   | 'prized'
@@ -205,6 +206,8 @@ export const GOALS: { id: GoalId; text: string; reward: number }[] = [
   { id: 'ember', text: 'Catch an ember downy.', reward: 80 },
   { id: 'feeder', text: 'Build a feeder in a pen.', reward: 100 },
   { id: 'hollow', text: 'Open the gate to Brook Hollow.', reward: 150 },
+  // (Round 11: paying 1,200 for the Hollow moved the page straight to thistles, with no word about what it opened.)
+  { id: 'brook', text: 'Catch a brook downy.', reward: 120 },
   { id: 'thistle', text: 'Catch a thistle downy.', reward: 250 },
   { id: 'orders5', text: 'Fill five orders.', reward: 150 },
   { id: 'prized', text: 'Fill a prized order.', reward: 250 },
@@ -283,7 +286,7 @@ export interface Order {
   until?: number;
   /**
    * The hour it must be filled by on its day (round 8: every offer has a condition, and the eighth playtest's
-   * picks were rarely a real decision): noon (`ORDER_NOON`) or dusk (`ORDER_BY`, when not set).
+   * picks were rarely a real decision): the morning (`ORDER_MORN`) or dusk (`ORDER_BY`, when not set).
    */
   by?: number;
   /** The hour from which it counts (a night one, after dark: `ORDER_NIGHT`); fluff sold or downies blown in before then go as plain sales. */
@@ -295,8 +298,11 @@ export const RARE_NAME: Record<DownyKind, string> = { clover: 'gold clover', emb
 
 /** Orders close at dusk. */
 export const ORDER_BY = 19;
-/** A morning order's deadline (round 8): the board's offers are due by noon, by dusk, or after dark. */
-export const ORDER_NOON = 12;
+/**
+ * A morning order's deadline: the board's offers are due by 10 am, by dusk, or after dark. (Round 11: it was noon, 3 real
+ * minutes after waking, and a trip takes about one, so the eleventh playtest found nothing could fail. Now it is 2.)
+ */
+export const ORDER_MORN = 10;
 /** A night order (round 8: "night only"): it counts from 9 pm and runs to midnight. */
 export const ORDER_NIGHT = { from: 21, by: 24 };
 /** The board posts the day's orders in the morning (from dawn until noon; a later start waits for the next morning). */

@@ -14,6 +14,11 @@
 //   Pull at a mixed pen: two embers, aimed at one at a time, and nothing else.
 //   An empty Blow at a pest: 5.3 m off it goes rolling with no note, 9 m off it says
 //     "Get closer.", and with no pest in front "Nothing in the jar."
+//   Round 11, with the real buttons and the real page: aimed at the crate the fluff is chosen for you, and a Blow sells it;
+//     a held Blow at a hopper 7.5 m off with no mark sends one berry and stops; at dusk "Fluff blows away at dawn."
+//     under the crosshair, once; thistles to the ridge top with 22 kept at the count; under a goal waiting on coins, "Catch
+//     more. Ten fit in a pen." on the journal, with an arrow out of the ranch; "Pull" on a wild one with no look finger, the
+//     real view holding on it (and a real look drag taking over).
 //   RANCH_URL=http://localhost:5247 node scripts/ranch-pen-real.mjs
 import { launch, openRanch, frames, touchSession, checker } from './ranch-lib.mjs';
 
@@ -322,6 +327,214 @@ async function kit(page, ctx) {
   const none = await blowAt(null);
   check('with no pest in front it says "Nothing in the jar."', none.say === 'Nothing in the jar.', JSON.stringify(none));
   check('no console problems (pest)', problems.length === 0, problems.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
+// ------------------------------------------------------------------ round 11
+{
+  const { ctx, page, problems } = await openRanch(b, { ...VIEW, query: 'touch' });
+  const k = await kit(page, ctx);
+  await page.waitForTimeout(300);
+  await page.evaluate(SETUP, { clovers: 4 });
+
+  // Aimed at the crate with clover heads chosen: the fluff's window is chosen for you, and a real Blow sells it.
+  const chosen = await page.evaluate(() => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    s.slots[0] = { t: 'cloverhead', n: 5 };
+    s.slots[1] = { t: 'tuft-clover', n: 3, mix: ['tuft-clover', 'tuft-clover', 'tuft-clover'] };
+    s.sel = 0;
+    s.player.x = -6.5;
+    s.player.z = 31.5;
+    s.player.y = r.sim.phys.floor(-6.5, 31.5);
+    r.aimAt(5, 10, 5);
+    return s.sel;
+  });
+  await page.waitForTimeout(250);
+  const before = await page.evaluate(() => window.ranch.sim.s.sel);
+  await page.evaluate(() => { const r = window.ranch; r.aimAt(-6.5, r.sim.phys.floor(-6.5, 36.5) + 0.7, 36.5); });
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => { const s = window.ranch.sim.s; return { sel: s.sel, sold: s.stats.sold }; });
+  check('aimed at the crate, the fluff is chosen for you (not before)', chosen === 0 && before === 0 && after.sel === 1, JSON.stringify({ chosen, before, after }));
+  await k.hold('.rt-puff', 90);
+  await page.waitForTimeout(1200);
+  const sold = await page.evaluate(() => window.ranch.sim.s.stats.sold);
+  check('and a real Blow sells it', sold > after.sold, `${after.sold} to ${sold}`);
+
+  // A held Blow at a hopper 7.5 m off, aimed over it (no mark): one berry, then it stops; the same hold with the mark runs on.
+  await page.evaluate(SETUP, { clovers: 2 });
+  const over = await page.evaluate(() => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    s.slots[0] = { t: 'dewberry', n: 12 };
+    s.sel = 0;
+    s.player.x = 17 + 3.2 + 7.5;
+    s.player.z = 26.5 + 3 + 1;
+    s.player.y = r.sim.phys.floor(s.player.x, s.player.z);
+    r.aimAt(17 + 3.2, r.sim.phys.floor(20, 29) + 6, 26.5 + 3);
+    const p = s.player;
+    const cp = Math.cos(p.pitch);
+    return r.sim.wouldFeed({ ex: p.x, ey: p.y + 1.6, ez: p.z, dx: -Math.sin(p.yaw) * cp, dy: Math.sin(p.pitch), dz: -Math.cos(p.yaw) * cp, mx: p.x, my: p.y + 1.4, mz: p.z });
+  });
+  await page.waitForTimeout(120);
+  await k.hold('.rt-puff', 1500);
+  await page.waitForTimeout(100);
+  const left = await page.evaluate(() => window.ranch.sim.s.slots[0].n);
+  check('a held Blow at long range with no mark sends one, and stops', left === 11 && over < 0, `${left} of 12 left, the mark says ${over}`);
+
+  // Dusk: fluff lying, and a note under the crosshair, once.
+  await page.evaluate(SETUP, { clovers: 2 });
+  await page.evaluate(() => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    for (const x of [8, 9, 10, 11, 12]) {
+      const d = r.sim.spawn('clover', x, 34, true);
+      d.shedQ = 1;
+      d.shedT = 0;
+      d.hunger = 0.1;
+    }
+    s.hour = 18.05;
+  });
+  let said = '';
+  let saidN = 0;
+  let was = false;
+  for (let i = 0; i < 140; i++) {
+    const now = await page.evaluate(() => {
+      const e = document.querySelector('.rh-say');
+      return e.classList.contains('on') ? e.textContent : '';
+    });
+    const on = now === 'Fluff blows away at dawn.';
+    if (on && !was) {
+      said = now;
+      saidN++;
+    }
+    was = on;
+    await page.waitForTimeout(50);
+  }
+  check('with fluff lying at dusk: "Fluff blows away at dawn." under the crosshair, once', said === 'Fluff blows away at dawn.' && saidN === 1, `${said} ${saidN}`);
+
+  // A goal waiting on coins: the line under it on the page, and an arrow out of the ranch.
+  await page.evaluate(SETUP, { clovers: 6 });
+  const saving = await page.evaluate(async () => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    s.hour = 10;
+    s.coins = 43;
+    s.orders = [];
+    s.gates.ridge = true;
+    r.sim.phys.gates = { ...s.gates };
+    const done = ['catch', 'pen', 'feed', 'herd', 'sell', 'plant', 'order', 'ridge', 'ember', 'feeder'];
+    s.goals = done;
+    s.player.x = 5;
+    s.player.z = 35;
+    s.player.y = r.sim.phys.floor(5, 35);
+    await new Promise((res) => setTimeout(res, 700));
+    const m = r.tutor.mark;
+    return { rows: [...document.querySelectorAll('.rh-page.up li span')].map((e) => e.textContent), on: m.on, x: m.x, z: m.z };
+  });
+  check('under "Open the Brook Hollow gate, 43 of 1,200.", "Catch more. Ten fit in a pen.", the arrow out of the ranch', saving.rows.includes('Open the Brook Hollow gate, 43 of 1,200.') && saving.rows.includes('Catch more. Ten fit in a pen.') && saving.on && saving.z < 20, JSON.stringify(saving));
+  check('no console problems (round 11)', problems.length === 0, problems.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
+// Thistles at the count, through the real page (the eleventh playtest's P1).
+{
+  const { ctx, page } = await openRanch(b, { ...VIEW, query: 'touch' });
+  const got = await page.evaluate(async () => {
+    const r = window.ranch;
+    const sim = r.sim;
+    const s = sim.s;
+    r.closeMenu();
+    s.gates.ridge = s.gates.hollow = true;
+    sim.phys.gates = { ...s.gates };
+    s.hour = 18.1;
+    s.pads[1].kind = 'pen';
+    s.pads[4].kind = 'pen';
+    sim.phys.setPads(s.pads);
+    for (const d of s.downies) if (d.kind === 'thistle') d.gone = true;
+    for (let i = 0; i < 22; i++) {
+      const d = sim.spawn(i < 11 ? 'clover' : 'ember', (i < 11 ? 17 : 26) + Math.cos(i) * 2, 26.5 + Math.sin(i) * 2, true);
+      d.pen = i < 11 ? 1 : 4;
+      d.hunger = 0.1;
+    }
+    const alive = () => s.downies.filter((d) => !d.gone).length;
+    while (alive() > 56) s.downies.find((d) => !d.gone && !d.tame && !d.keep).gone = true;
+    while (alive() < 56) sim.spawn('clover', -16, -9, false);
+    s.player.x = -60;
+    s.player.z = -26;
+    s.player.y = sim.phys.floor(-60, -26);
+    const t0 = performance.now();
+    const count = alive();
+    while (performance.now() - t0 < 12000) {
+      if (s.downies.some((d) => !d.gone && !d.tame && d.kind === 'thistle')) return { secs: (performance.now() - t0) / 1000, count };
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    return { secs: -1, count };
+  });
+  check('at 56 with 22 kept, on the ridge top at dusk: a thistle within 10 s', got.count === 56 && got.secs >= 0 && got.secs < 10, JSON.stringify(got));
+  await ctx.close();
+}
+
+// Pull with no look finger: the real view holds on a wild one; a real look drag takes over at once.
+{
+  const { ctx, page } = await openRanch(b, { ...VIEW, query: 'touch' });
+  const t = await touchSession(ctx, page);
+  await t.send('touchStart', [[300, 300, 1]]);
+  await page.waitForTimeout(60);
+  await t.send('touchEnd', []);
+  await page.waitForTimeout(250);
+  const draw = await page.evaluate(() => { const r = document.querySelector('.rt-draw').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.evaluate(() => {
+    const r = window.ranch;
+    const s = r.sim.s;
+    r.sim.wild = false;
+    s.hour = 10;
+    s.downies = s.downies.filter((d) => d.tame || d.keep);
+    for (const q of s.slots) { q.t = null; q.n = 0; }
+    s.player.x = -16;
+    s.player.z = -2;
+    s.player.y = r.sim.phys.floor(-16, -2);
+    const d = r.sim.spawn('clover', -16, -7.4, false);
+    d.hunger = 0.2;
+    window.__w = d;
+    r.aimAt(d.x, d.y + 0.25, d.z);
+  });
+  await t.send('touchStart', [[draw[0], draw[1], 7]]);
+  const yaw0 = await page.evaluate(() => window.ranch.sim.s.player.yaw);
+  let on = 0;
+  let n = 0;
+  for (let i = 0; i < 18; i++) {
+    await page.waitForTimeout(40);
+    const o = await page.evaluate(() => {
+      const r = window.ranch;
+      const d = window.__w;
+      const p = r.sim.s.player;
+      const cp = Math.cos(p.pitch);
+      const hit = r.sim.aimedDowny({ ex: p.x, ey: p.y + 1.6, ez: p.z, dx: -Math.sin(p.yaw) * cp, dy: Math.sin(p.pitch), dz: -Math.cos(p.yaw) * cp, mx: p.x, my: p.y + 1.4, mz: p.z }) === d;
+      d.beats = 0;
+      d.feints = 0;
+      d.backT = 99;
+      return { hit, strain: d.strain };
+    });
+    if (o.strain > 0) {
+      n++;
+      if (o.hit) on++;
+    }
+  }
+  const yaw1 = await page.evaluate(() => window.ranch.sim.s.player.yaw);
+  check('Pull with no look finger: the real view holds on it, the crosshair on its body', n > 8 && on / n > 0.9 && Math.abs(yaw1 - yaw0) > 0.005, `${on} of ${n}, turned ${(yaw1 - yaw0).toFixed(3)} rad`);
+  // A real drag on the look side takes over: the view goes where it is dragged, nothing pulling it back while the finger moves.
+  const y0 = await page.evaluate(() => window.ranch.sim.s.player.yaw);
+  await t.send('touchStart', [[draw[0], draw[1], 7], [300, 430, 8]]);
+  let x = 300;
+  for (let i = 0; i < 10; i++) {
+    x += 12;
+    await t.send('touchMove', [[draw[0], draw[1], 7], [x, 430, 8]]);
+    await page.waitForTimeout(30);
+  }
+  const y1 = await page.evaluate(() => window.ranch.sim.s.player.yaw);
+  await t.send('touchEnd', []);
+  check('a real look drag takes over at once (120 px: 0.74 rad)', Math.abs(Math.abs(y1 - y0) - 0.744) < 0.08, `turned ${(y1 - y0).toFixed(3)} rad`);
   await ctx.close();
 }
 

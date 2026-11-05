@@ -478,15 +478,15 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
         expect(os.length, `${kinds.join('+')} day ${d}: three offers`).toBe(3);
         for (const o of os) {
           expect(prev.has(key!(o)), `${kinds.join('+')} day ${d}: ${key!(o)} was offered yesterday`).toBe(false);
-          deadlines.add(o.from !== undefined ? 'after dark' : o.by === 12 ? 'noon' : 'dusk');
+          deadlines.add(o.from !== undefined ? 'after dark' : o.by === 10 ? 'morning' : 'dusk');
           // Its tag says its condition.
           const tag = sim.offerTag(o);
-          expect(`${tag.title} ${tag.note}`).toMatch(/by noon|by dusk|By noon|By dusk|Sell after 9 pm/);
+          expect(`${tag.title} ${tag.note}`).toMatch(/by 10 am|by dusk|By 10 am|By dusk|Sell after 9 pm/);
           if (o.rare) expect(tag.note).toMatch(/^By the /);
         }
         prev = new Set(os.map((o) => key!(o)));
       }
-      expect([...deadlines].sort()).toEqual(['after dark', 'dusk', 'noon']);
+      expect([...deadlines].sort()).toEqual(['after dark', 'dusk', 'morning']);
     }
   });
 
@@ -500,12 +500,12 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
       if (!r) continue;
       const each = { clover: 66, ember: 110, brook: 140, thistle: 300 }[r.kind];
       const cap = trip ? Math.round(trip.n * trip.pay / 2 / 5) * 5 : 1e9;
-      expect(r.pay).toBe(Math.min(Math.round((each * (r.by === 12 ? 1.5 : 1)) / 5) * 5, cap));
+      expect(r.pay).toBe(Math.min(Math.round((each * (r.by === 10 ? 1.5 : 1)) / 5) * 5, cap));
       if (trip) expect(r.pay).toBeLessThanOrEqual(trip.n * trip.pay / 2);
     }
   });
 
-  it('an order for after dark counts its fluff from 9 pm only, and says why before then; a noon order goes at noon', () => {
+  it('an order for after dark counts its fluff from 9 pm only, and says why before then; a morning order goes at 10 am', () => {
     const sim = ranch(['clover'], false);
     const s = sim.s;
     s.orders = [{ kind: 'clover', n: 4, got: 0, paid: 0, mult: 2, pay: 96, state: 'offer', by: 24, from: 21 } as never];
@@ -519,13 +519,13 @@ describe('P2: every offer has a condition (noon, dusk, after dark, a set place),
     s.hour = 21.2;
     for (let k = 0; k < 4; k++) sim.sellFluff('clover', true);
     expect(s.orders[0].state).toBe('filled');
-    // A noon one: taken at 7, missed at noon.
+    // A morning one: taken at 7, missed at 10 am.
     const sim2 = ranch(['clover'], false);
-    sim2.s.orders = [{ kind: 'clover', n: 30, got: 0, paid: 0, mult: 2, pay: 720, state: 'offer', by: 12 } as never];
+    sim2.s.orders = [{ kind: 'clover', n: 30, got: 0, paid: 0, mult: 2, pay: 720, state: 'offer', by: 10 } as never];
     sim2.s.orderDay = sim2.s.day;
     sim2.s.hour = 7;
     expect(sim2.takeOrder(0)).toBe(true);
-    sim2.s.hour = 11.98;
+    sim2.s.hour = 9.98;
     for (let t = 0; t < 2; t += 1 / 20) sim2.update(1 / 20, idle, ahead(sim2));
     expect(sim2.s.orders[0].state).toBe('missed');
   });

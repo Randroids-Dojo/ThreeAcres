@@ -21,7 +21,7 @@ import { wantedFood, type Food } from '../src/games/ranch/defs';
 import * as lessonsMod from '../src/games/ranch/lessons';
 import { teachAll } from '../src/games/ranch/lessons';
 import { rng } from '../src/games/ranch/noise';
-import { Sim, rareLured } from '../src/games/ranch/sim';
+import { RARE_WARY, Sim, rareLured } from '../src/games/ranch/sim';
 import type { Downy, Item } from '../src/games/ranch/state';
 import { BOARD, PADS, SIGHTINGS } from '../src/games/ranch/world';
 import { Bot } from './ranch-bot';
@@ -30,7 +30,7 @@ const SEEDS = Number(process.argv[2]) || 3;
 const L = lessonsMod as unknown as { rareStep: (s: unknown) => string };
 const G_ITEM = 16;
 /** A thumb's throw: off by up to this much either way (rad), and a throw every so many seconds (aiming, judging, blowing). */
-const THROW = { yaw: 0.06, pitch: 0.05, every: 2.5 };
+let THROW = { yaw: 0.06, pitch: 0.05, every: 2.5 };
 
 interface Hunt {
   spot: string;
@@ -39,6 +39,8 @@ interface Hunt {
   heard: number;
   away: number;
   lureSecs: number;
+  /** Round 11: throws it took. */
+  throws: number;
 }
 
 /** Where a blow from here would land (the item's flight, roughly as the sim flies it), for a pitch. */
@@ -104,6 +106,7 @@ function hunt(spot: number, seed: number): Hunt {
   let nextThrow = 0;
   let thrownAt = -9;
   let throwErr = { yaw: 0, pitch: 0 };
+  let throws = 0;
   const rare = (): Downy | null => s.downies.find((d) => !d.gone && d.rare && !d.tame) ?? null;
   for (let i = 0; i < 6 * 60 * 60 && !caught; i++) {
     const d = rare();
@@ -159,10 +162,11 @@ function hunt(spot: number, seed: number): Hunt {
         const ex = p.x - Math.sin(yaw) * 10;
         const ez = p.z - Math.cos(yaw) * 10;
         b.lookAt(ex, p.y + 1.6 + Math.tan(bestPitch) * 10, ez);
-        const blownNear = s.items.some((it) => !it.gone && it.type === f && it.blown && Math.hypot(it.x - d.x, it.z - d.z) < 11);
+        const blownNear = s.items.some((it) => !it.gone && it.type === f && it.blown && Math.hypot(it.x - d.x, it.z - d.z) < RARE_WARY.smell - 1);
         if (!blownNear && thrownAt < nextThrow - THROW.every && Math.abs(s.player.pitch - bestPitch) < 0.03 && Math.hypot(p.vx, p.vz) < 0.3) {
           b.pressPuff();
           thrownAt = b.t;
+          throws++;
         }
       }
     } else if (step === 'pull') {
@@ -178,7 +182,7 @@ function hunt(spot: number, seed: number): Hunt {
       waitHome = true;
     }
   }
-  return { spot: SIGHTINGS[spot].name, secs: b.t, caught, heard, away, lureSecs };
+  return { spot: SIGHTINGS[spot].name, secs: b.t, caught, heard, away, lureSecs, throws };
 }
 
 console.log(`Thistledown, the rare one's hunt for a careful player (from the clue to the catch), ${SEEDS} seeds a place:`);
@@ -193,3 +197,24 @@ for (let spot = 0; spot < SIGHTINGS.length; spot++) {
 }
 const ok = all.filter((r) => r.caught).map((r) => r.secs).sort((a, b) => a - b);
 console.log(`   all: caught ${ok.length} of ${all.length}; middle ${(ok[Math.floor(ok.length / 2)] / 60).toFixed(1)} min, the middle half ${(ok[Math.floor(ok.length / 4)] / 60).toFixed(1)} to ${(ok[Math.floor((ok.length * 3) / 4)] / 60).toFixed(1)} min; spooked ${all.reduce((a, r) => a + r.heard, 0)} times in ${all.length} hunts`);
+
+// Round 11 (the eleventh playtest: "the hunt can't fail"): what the smaller lure radius asks. The same hunter with a rough
+// thumb (throws off by up to 0.2 rad of turn and 0.12 of tilt), at today's radius and at the 12 m it was; and how many
+// hunts are done in the 2 real minutes from waking to 10 am, or the 1 minute from a late start at 8.
+function table(name: string): void {
+  const rows: Hunt[] = [];
+  for (let spot = 0; spot < SIGHTINGS.length; spot++) for (let k = 0; k < SEEDS; k++) rows.push(hunt(spot, 11 + k * 7919 + spot * 31));
+  const ok = rows.filter((r) => r.caught).map((r) => r.secs).sort((a, b) => a - b);
+  const throws = rows.reduce((a, r) => a + r.throws, 0) / rows.length;
+  console.log(`   ${name}: caught ${ok.length} of ${rows.length}, middle ${(ok[Math.floor(ok.length / 2)] ?? 0).toFixed(0)} s, slowest ${(ok[ok.length - 1] ?? 0).toFixed(0)} s; ${throws.toFixed(1)} throws a hunt; done in 120 s ${ok.filter((v) => v <= 120).length}, in 60 s ${ok.filter((v) => v <= 60).length}`);
+}
+const smell = RARE_WARY.smell;
+console.log('\n   the lure radius, throws a hunt and hunts done by a 10 am deadline:');
+table(`careful thumb, ${smell} m`);
+THROW = { yaw: 0.2, pitch: 0.12, every: 2.5 };
+table(`rough thumb, ${smell} m`);
+RARE_WARY.smell = 12;
+table('rough thumb, 12 m (as it was)');
+THROW = { yaw: 0.06, pitch: 0.05, every: 2.5 };
+table('careful thumb, 12 m (as it was)');
+RARE_WARY.smell = smell;

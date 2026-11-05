@@ -9,10 +9,10 @@
 // the world instead (an arrow, a ring, the favourite food over a head); the
 // longer notes live on the pause page.
 
-import { BENCH_UPS, BUILD_COST, FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_NOON, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type DownyKind, type Food, type GoalId, type Order } from './defs';
+import { BENCH_UPS, BUILD_COST, FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_MORN, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type DownyKind, type Food, type GoalId, type Order } from './defs';
 import { BED_HALF } from './physics';
 import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev } from './sim';
-import type { Downy, Item, RanchState } from './state';
+import { slotCap, type Downy, type Item, type RanchState } from './state';
 import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, CRATES, DOOR, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
 
 export type Dev = 'touch' | 'mouse' | 'pad';
@@ -327,9 +327,10 @@ const FARM = {
   pen: 'Blow the downy into a pen.',
 };
 
+// (Round 11: there is no line for choosing the fluff: aimed at a crate it is chosen for you, see Sim.autoFluff. "Tap the
+// fluff's window" came up twice in the first 2.5 minutes, then again the next day.)
 const SELL = {
   blow: 'Blow the fluff into the sell crate.',
-  choose: (q: Say) => (q.dev === 'touch' ? "Tap the fluff's window to choose it." : q.dev === 'pad' ? 'Press LB or RB to choose the fluff.' : 'Press Q until the fluff is chosen.'),
   pull: 'Pull up the fluff the downy dropped.',
   feed: 'Feed the downy again for more fluff.',
 };
@@ -555,6 +556,15 @@ const STRAY = {
   pull: 'Pull in the downy that got out.',
   blow: 'Blow the downy into the pen.',
   other: 'Blow the downy into another pen.',
+  // (Round 11: on a full jar it said to pull, and the pull's refusal said "No window free.": the two fought. Now the line says what the note does.)
+  room: (q: Say) => (q.dev === 'touch' ? 'Hold a window to empty it.' : q.dev === 'pad' ? 'Hold LB to empty a window.' : 'Hold Q to empty a window.'),
+};
+/** Is there a window for this kind of downy (its own with room, or an empty one)? */
+const jarTakes = (s: RanchState, k: DownyKind) => s.slots.some((q) => q.t === k && q.n < slotCap(s, q)) || s.slots.some((q) => q.t === null);
+/** A stray with no window to come into. */
+const strayNoRoom = (s: RanchState) => {
+  const d = nearestDowny(s, (q) => q.strayFrom >= 0 && q.pen < 0);
+  return !!d && !jarTakes(s, d.kind);
 };
 
 /** The pen with a feeder to fill: the nearest. */
@@ -631,6 +641,8 @@ function onPost(m: Mark, i: number, floor: Floor, padRing: boolean): boolean {
 
 /** What the bigger jar costs: the workbench lesson waits for it. */
 const JAR_COST = BENCH_UPS.find((u) => u.id === 'cap')!.costs[0];
+/** The jar has filled: it has refused something, or a window is full now. */
+const jarHasFilled = (s: RanchState, n: N) => n('full') >= 1 || s.slots.some((q) => q.t !== null && q.n >= slotCap(s, q));
 
 /** A pen with room for one more of a kind: one that holds that kind already, or an empty one. */
 function penFor(s: RanchState, k: DownyKind): boolean {
@@ -664,7 +676,18 @@ const HOME = {
 };
 function homeLine(s?: RanchState): string {
   const k = s ? (homeless(s)[0] ?? 'ember') : 'ember';
+  if (s && oneMoreOf(s)) return MEADOW.more;
   return !s || s.coins >= BUILD_COST.pen ? HOME.build(k) : HOME.save(k, s.coins);
+}
+/**
+ * Round 11: out where it lives with just the one aboard, and another near: one more first, as a first clover asks (the
+ * eleventh playtest's first ember brought "Build a pen for your embers." at once, 12 s from home). The downy to go for, or null.
+ */
+function oneMoreOf(s: RanchState): Downy | null {
+  if (zoneAt(s.player.x, s.player.z) === 'ranch') return null;
+  const k = homeless(s)[0];
+  if (!k || s.slots.reduce((a, q) => a + (q.t === k ? q.n : 0), 0) !== 1) return null;
+  return nearestDowny(s, (d) => !d.tame && !d.keep && !d.rare && d.kind === k, 26);
 }
 
 // ---------------------------------------------------------------- the lessons
@@ -749,12 +772,12 @@ const LESSONS: Lesson[] = [
     then: ['coins'],
     ready: () => true,
     // Feeding drops fluff on the ground; the line follows each step from there.
-    text: (q, s) => {
+    text: (_q, s) => {
       const step = s ? sellStep(s) : 'blow';
       if (step === 'feed') return s && feedStep(s) === 'pull' ? FEED.pull : SELL.feed;
-      return step === 'choose' ? SELL.choose(q) : SELL[step];
+      return step === 'choose' ? SELL.blow : SELL[step];
     },
-    also: (q) => [SELL.choose(q), SELL.pull, SELL.feed, FEED.pull],
+    also: () => [SELL.pull, SELL.feed, FEED.pull],
     // Only fluff you blew in counts: the crate drawing in fluff that fell beside it is not a sale you made.
     done: (_s, n) => n('sell:blown') >= 1,
     each: (s) => {
@@ -766,15 +789,11 @@ const LESSONS: Lesson[] = [
     },
     mark: (s, m, floor) => {
       const step = sellStep(s);
-      if (step === 'blow') {
+      if (step === 'blow' || step === 'choose') {
         const cr = crateFor(s);
         arrow(m, cr.x, floor(cr.x, cr.z) + 2.3, cr.z);
         ring(m, cr.x, cr.z, 1.2);
         return true;
-      }
-      if (step === 'choose') {
-        m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
-        return false;
       }
       if (step === 'feed') return feedMark(s, m, floor);
       // The fluff your downy dropped, on the ranch; never a wild one's out in the meadow.
@@ -883,21 +902,17 @@ const LESSONS: Lesson[] = [
     },
     text: (q, s) => {
       const step = s ? farmStep(s) : 'feed';
-      return step === 'blow' ? SELL.blow : step === 'choose' ? SELL.choose(q) : step === 'build' ? plotLine(q, 'Pen') : FARM[step];
+      return step === 'blow' || step === 'choose' ? SELL.blow : step === 'build' ? plotLine(q, 'Pen') : FARM[step];
     },
     also: (q) => [SELL.blow, FARM.pull, FARM.food, FARM.catch, FARM.pen, plotLine(q, 'Pen')],
     done: (_s, n) => n('cycle') - n('farm:from') >= FARM_CYCLES,
     mark: (s, m, floor) => {
       const step = farmStep(s);
-      if (step === 'blow') {
+      if (step === 'blow' || step === 'choose') {
         const cr = crateFor(s);
         arrow(m, cr.x, floor(cr.x, cr.z) + 2.3, cr.z);
         ring(m, cr.x, cr.z, 1.2);
         return true;
-      }
-      if (step === 'choose') {
-        m.slot = s.slots.findIndex((q) => q.t !== null && q.n > 0 && isTuft(q.t));
-        return false;
       }
       if (step === 'pen') {
         // The pen with room, and a chevron over the downy's window if it is not chosen.
@@ -1221,9 +1236,10 @@ const LESSONS: Lesson[] = [
     tag: 'bench:cap',
     // Round 10: not while you carry downies with no pen for them, unless you can pay for the pen too (the tenth
     // playtest's jar line came with 435 coins and 3 embers aboard; buying it left 35, and the embers went into the
-    // clover pen).
-    ready: (s) => s.coins >= JAR_COST && (!homeless(s).length || s.coins >= JAR_COST + BUILD_COST.pen),
-    lapse: (s) => homeless(s).length > 0 && s.coins < JAR_COST + BUILD_COST.pen,
+    // clover pen). Round 11: and not until the jar has first filled (the eleventh playtest's line took 400 of 443 coins
+    // with no window ever over 9, and left the gate's savings gone for nothing).
+    ready: (s, n) => s.coins >= JAR_COST && jarHasFilled(s, n) && (!homeless(s).length || s.coins >= JAR_COST + BUILD_COST.pen),
+    lapse: (s) => s.coins < JAR_COST || (homeless(s).length > 0 && s.coins < JAR_COST + BUILD_COST.pen),
     text: () => 'Buy a bigger jar at the workbench.',
     done: (_s, n) => n('bench') >= 1,
     mark: (_s, m, floor) => arrow(m, WORKBENCH.x, floor(WORKBENCH.x, WORKBENCH.z) + 2.7, WORKBENCH.z),
@@ -1294,11 +1310,12 @@ const LESSONS: Lesson[] = [
     urgent: true,
     repeat: true,
     ready: (s) => strays(s).length > 0,
-    text: (_q, s) => {
+    text: (q, s) => {
       const step = s ? strayStep(s) : 'pull';
+      if (s && step === 'pull' && strayNoRoom(s)) return STRAY.room(q);
       return step === 'blow' ? STRAY.blow : step === 'other' ? STRAY.other : STRAY.pull;
     },
-    also: () => [STRAY.blow, STRAY.other],
+    also: (q) => [STRAY.blow, STRAY.other, STRAY.room(q)],
     done: (s) => strayStep(s) === null,
     // While one is loose, remember its pen and how many downies have come down in pens so far.
     start: (s) => {
@@ -1336,9 +1353,13 @@ const LESSONS: Lesson[] = [
     tag: 'build:pen',
     ready: (s) => homeless(s).length > 0 && s.pads.some((p) => p.kind === 'empty'),
     text: (_q, s) => homeLine(s),
-    also: () => (['clover', 'ember', 'brook'] as const).flatMap((k) => [HOME.build(k), HOME.save(k, 35)]),
+    also: () => [MEADOW.more, ...(['clover', 'ember', 'brook'] as const).flatMap((k) => [HOME.build(k), HOME.save(k, 35)])],
     done: (s) => !homeless(s).length || !s.pads.some((p) => p.kind === 'empty'),
-    mark: (s, m, floor) => (s.coins >= BUILD_COST.pen ? onPost(m, plotForPen(s), floor, true) : false),
+    mark: (s, m, floor) => {
+      const next = oneMoreOf(s);
+      if (next) return onDowny(m, next);
+      return s.coins >= BUILD_COST.pen ? onPost(m, plotForPen(s), floor, true) : false;
+    },
   },
 ];
 
@@ -1748,6 +1769,8 @@ export class Pages {
    * holds the next one back while a page waits: `Tutor.pageWaiting`).
    */
   static readonly READ = 6;
+  /** Seconds before a page goes that the next lesson may come up, so the journal goal never shows between the two (round 11). */
+  static readonly HANDOVER = 0.25;
   private queue: Page[] = [];
   /** The page up now, if any, and its seconds left. */
   showing: Page | null = null;
@@ -1807,6 +1830,7 @@ export function goalDoable(id: GoalId, s: RanchState): boolean {
   if (id === 'feeder') return s.coins >= need!.cost && s.pads.some((p) => p.kind === 'pen' && !p.ups.includes('feeder'));
   if (id === 'pen') return s.coins >= need!.cost || s.pads.some((p) => p.kind === 'pen');
   if (id === 'ember') return s.gates.ridge;
+  if (id === 'brook') return s.gates.hollow;
   if (id === 'thistle') return s.gates.ridge;
   return true;
 }
@@ -1872,11 +1896,59 @@ export function goalSpot(id: GoalId, s: RanchState, m: Mark, floor: Floor): bool
     if (d) return onDowny(m, d);
     return arrow(m, RIDGE_TOP.x, floor(RIDGE_TOP.x, RIDGE_TOP.z) + 3, RIDGE_TOP.z);
   }
+  // (Round 11: a kind just opened: the way to it, then the nearest one.)
+  if ((id === 'ember' && s.gates.ridge) || (id === 'brook' && s.gates.hollow)) return catchSpot(id, s, m, floor);
   // (Round 9: only a gate you can open now: short of its price the line counts the coins, with no arrow.)
   if ((id !== 'ridge' && id !== 'hollow') || s.gates[id] || !goalDoable(id, s)) return false;
   const g = GATES[id];
   const x = g.x + (id === 'ridge' ? 0.6 : -0.6);
   return arrow(m, x, floor(x, g.z) + 3.6, g.z);
+}
+
+/** Round 11: the line under a goal waiting on coins. */
+export const CATCH_MORE = 'Catch more. Ten fit in a pen.';
+/** Round 11: the dusk note when fluff lies about. */
+export const FLUFF_LINE = 'Fluff blows away at dawn.';
+
+/** Room for more of a kind: spaces in the pens that hold it or stand empty, less those aboard already. */
+function roomFor(s: RanchState, k: DownyKind): number {
+  let room = 0;
+  s.pads.forEach((p, i) => {
+    if (p.kind !== 'pen') return;
+    const here = s.downies.filter((d) => !d.gone && d.pen === i);
+    if (!here.length || here.some((d) => d.kind === k)) room += Math.max(0, PEN_MAX - here.length);
+  });
+  return room - s.slots.reduce((a, q) => a + (q.t === k ? q.n : 0), 0);
+}
+
+/**
+ * Round 11: the saving stretch was thin. After all were fed the eleventh playtest had 30 s with nothing to do under
+ * "Sell 20 fluff, 10 so far.", then 276 s under "Open the Brook Hollow gate, 43 of 1,200." with no line at all, and only
+ * got through it by choosing to catch more: nothing suggested the best move. With a goal waiting on coins (or with
+ * nothing to sell under the sell goal), by day, with no order in hand, room in a pen and no downy aboard to pen first:
+ * the kind to catch, the dearest you can reach with room for it. Else null.
+ */
+export function catchMore(id: GoalId | undefined, s: RanchState): DownyKind | null {
+  if (!id || s.hour < 5.5 || s.hour >= 18) return null;
+  const saving = (id === 'ridge' || id === 'hollow') ? !s.gates[id] && s.coins < GATES[id].cost : (id === 'feeder' || id === 'pen') && !goalDoable(id, s) && s.coins < GOAL_NEEDS[id]!.cost;
+  const nothingToSell = id === 'sell' && sellStep(s) === 'feed' && !hungryOne(s);
+  if (!saving && !nothingToSell) return null;
+  if (s.orders.some((o) => o.state === 'offer' || (o.state === 'open' && (o.live || o.rare) && o.got < o.n))) return null;
+  // (Downies aboard back on the ranch: pen those first. Out in the wilds, you are already at it.)
+  if (carrying(s, isDowny) && zoneAt(s.player.x, s.player.z) === 'ranch') return null;
+  for (const k of ['brook', 'ember', 'clover'] as const) {
+    if ((k === 'brook' && !s.gates.hollow) || (k === 'ember' && !s.gates.ridge)) continue;
+    if (roomFor(s, k) > 0) return k;
+  }
+  return null;
+}
+
+/** Where wild ones of a kind are: the nearest one on your side of the valley's walls; else the way to them. */
+export function catchSpot(k: DownyKind, s: RanchState, m: Mark, floor: Floor): boolean {
+  const here = zoneAt(s.player.x, s.player.z);
+  const d = nearestDowny(s, (q) => !q.tame && !q.keep && !q.rare && q.kind === k && zoneAt(q.x, q.z) === here, 26);
+  if (d) return onDowny(m, d);
+  return wayTo(s, m, k, floor);
 }
 
 /** Today's rare order, with no lesson up: an arrow where it was seen, on the downy once near, on the crate once aboard. */
@@ -1890,9 +1962,9 @@ const KIND_WORD: Record<string, string> = { clover: 'Clover', ember: 'Ember', br
 function openLines(s: RanchState, say: Say): string[] {
   return s.orders
     .filter((o) => o.state === 'open' && o.got < o.n)
-    // (One due by noon says so: "Clover fluff by noon, 2 of 10.")
+    // (One due by 10 am says so: "Clover fluff by 10 am, 2 of 10.")
     .map((o) => {
-      const due = o.from !== undefined ? ' after 9 pm' : o.by === ORDER_NOON ? ' by noon' : '';
+      const due = o.from !== undefined ? ' after 9 pm' : o.by === ORDER_MORN ? ' by 10 am' : '';
       return o.rare ? rareLine(s, o, say) : o.live ? `${KIND_WORD[o.kind]} downies${due}, ${o.got} of ${o.n}.` : `${KIND_WORD[o.kind]} fluff${due}, ${o.got} of ${o.n}.`;
     });
 }

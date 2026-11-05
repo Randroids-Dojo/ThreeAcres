@@ -32,7 +32,7 @@
 //    penned), the coins alone (the most pay on the tag), and a hunt while a
 //    pen has no rare one, then the most pay.
 //   npx tsx scripts/ranch-orders.ts
-import { FEEDER_CAP, HOUR, LIVE_EACH, TUFT_KIND, isFood, isTuft, type DownyKind, type Food, type Order } from '../src/games/ranch/defs';
+import { FEEDER_CAP, HOUR, LIVE_EACH, ORDER_MORN, TUFT_KIND, isFood, isTuft, type DownyKind, type Food, type Order } from '../src/games/ranch/defs';
 import { rng } from '../src/games/ranch/noise';
 import { Sim, GARDEN_SRC, PEN_MEALS, orderKey, type Aim, type Controls } from '../src/games/ranch/sim';
 import { newItem } from '../src/games/ranch/state';
@@ -183,13 +183,14 @@ function pick(sim: Sim, os: Order[], thumb: 'careful' | 'careless'): Order | und
 }
 
 /**
- * Round 8: the chance of filling an offer before its deadline. A trip or a hunt leaves at 8 am: due by noon it has
- * 4 game hours (120 real s), by dusk 11 (330 s); one that takes longer than that, at the catcher's odds, fills that
- * share of the time. A fluff order fills (the board asks only for what the ranch can make by then).
+ * Round 8: the chance of filling an offer before its deadline. A trip or a hunt leaves at about 7 am (round 11; it was 8,
+ * and the morning's deadline noon): due by 10 am it has 3 game hours (90 real s), by dusk 12 (360 s); one that takes longer
+ * than that, at the catcher's odds, fills that share of the time. A fluff order fills (the board asks only for what the
+ * ranch can make by then).
  */
 function fills(sim: Sim, o: Order, thumb: 'careful' | 'careless'): number {
   if (!o.live) return 1;
-  const window = ((o.by ?? 19) - 8) * 30;
+  const window = ((o.by ?? 19) - 7) * 30;
   const secs = ask(sim, o, thumb).trip;
   return secs <= window ? 1 : window / secs;
 }
@@ -243,7 +244,7 @@ for (const r of RANCHES) {
   let repeats = 0;
   let three = 0;
   let prevKeys = new Set<string>();
-  const conds: Record<string, number> = { noon: 0, dusk: 0, 'after dark': 0, 'set place': 0 };
+  const conds: Record<string, number> = { '10 am': 0, dusk: 0, 'after dark': 0, 'set place': 0 };
   // Round 9: a prized order's pay against the day's plain fluff order by dusk, and offers of a sort and kind back within
   // two mornings (and of those, how many the board could have avoided with another kind of that sort).
   let prized = 0;
@@ -271,7 +272,7 @@ for (const r of RANCHES) {
     repeats += keys.filter((k) => prevKeys.has(k)).length;
     prevKeys = new Set(keys);
     if (os.length >= 3) three++;
-    for (const o of os) conds[o.from !== undefined ? 'after dark' : o.by === 12 ? 'noon' : 'dusk']++;
+    for (const o of os) conds[o.from !== undefined ? 'after dark' : o.by === ORDER_MORN ? '10 am' : 'dusk']++;
     for (const o of os) if (o.rare) conds['set place']++;
     if (os.some((o) => o.live)) trips++;
     for (const k of new Set(os.map((o) => o.kind))) asked[k] = (asked[k] ?? 0) + 1;
@@ -472,11 +473,11 @@ function play(r: Ranch, way: Way, days = 5): { coins: number; filled: number; ta
         const o = os[i];
         sim.takeOrder(i);
         taken++;
-        // A live order (or the rare one): out at 8 am, away for the trip; the hand tends nothing meanwhile.
+        // A live order (or the rare one): out straight after (round 11: 7:12 am; it was 8, and the morning's deadline noon), away for the trip; the hand tends nothing meanwhile.
         if (o.live) trip = { kind: o.kind, n: o.n, back: -1, rare: !!o.rare };
       }
       const secs = (q: NonNullable<typeof trip>) => (q.rare ? rareSecs(q.kind, thumb) : tripSecs(q.kind, q.n, thumb));
-      if (trip && trip.back < 0 && s.hour >= 8) trip.back = t + secs(trip);
+      if (trip && trip.back < 0 && s.hour >= 7.2) trip.back = t + secs(trip);
       if (trip && trip.back >= 0 && t >= trip.back) {
         away += secs(trip);
         if (trip.rare) {

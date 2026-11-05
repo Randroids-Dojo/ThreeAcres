@@ -198,10 +198,10 @@ describe('P1: daily orders at the sell crate, a goal every day', () => {
     expect(sim.takeOrder(s.orders.findIndex((q) => !q.live))).toBe(true);
     const o = s.orders[0];
     expect(o.kind).toBe('clover');
-    // (Round 8: due by noon, by dusk or after dark; one for after dark counts from 9 pm, and a noon or night one
+    // (Round 8: due by 10 am, by dusk or after dark; one for after dark counts from 9 pm, and a morning or night one
     // pays twice its fluff's price on top.)
     if (o.from !== undefined) s.hour = o.from + 0.2;
-    const k = o.from !== undefined || o.by === 12 ? 2 : 1;
+    const k = o.from !== undefined || o.by === 10 ? 2 : 1;
     const evs: Ev[] = [];
     const c0 = s.coins;
     // From the lane, blow the order's fluff into the crate, one at a time.

@@ -21,10 +21,10 @@ import {
 } from 'three';
 import type { GameContext } from '../../shell/types';
 import { PRESETS } from '../../sim/presets';
-import { CAPS, GOALS, KIND, KINDS, ORDER_BY, ORDER_NOON, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
+import { CAPS, GOALS, KIND, KINDS, ORDER_BY, ORDER_MORN, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, buzz, type Frame } from './input';
-import { Pages, Tutor, allLines, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
+import { CATCH_MORE, FLUFF_LINE, Pages, Tutor, allLines, catchMore, catchSpot, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
 import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
@@ -502,6 +502,8 @@ export class Ranch {
     c.draw = f.draw && !busy && knows('bellows');
     c.puff = f.puff && !busy && knows('puff');
     c.puffPressed = f.puffPressed && !busy && knows('puff');
+    // (Round 11: a look drag takes over from the tug's view hold.)
+    c.look = Math.abs(f.lookX) + Math.abs(f.lookY);
     if (f.moveX || f.moveZ) {
       this.walked += dt;
       this.tutor.add(s, 'walk', dt);
@@ -681,7 +683,7 @@ export class Ranch {
   private boardText(o: Order): string {
     const name = KIND[o.kind].name.replace(' downy', '');
     // (Round 10: the first order runs to the next day's dusk, and the chalk says so as its tag does.)
-    const due = o.from !== undefined ? 'after 9 pm' : (o.by ?? ORDER_BY) === ORDER_NOON ? 'by noon' : (o.until ?? this.sim.s.day) > this.sim.s.day ? 'by dusk tomorrow' : 'by dusk';
+    const due = o.from !== undefined ? 'after 9 pm' : (o.by ?? ORDER_BY) === ORDER_MORN ? 'by 10 am' : (o.until ?? this.sim.s.day) > this.sim.s.day ? 'by dusk tomorrow' : 'by dusk';
     if (o.rare) return `${RARE_NAME[o.kind]} downy, ${SIGHTINGS[o.rare.spot].name}`;
     return o.live ? `${o.n} ${name} downies ${due}` : `${o.n} ${name} fluff ${due}`;
   }
@@ -894,6 +896,12 @@ export class Ranch {
         // The rare one heard you coming, unlured, and bolted.
         this.hud.note('It heard you. Lure it from further off.', 2.6);
         break;
+      case 'fluffnote':
+        this.hud.note(FLUFF_LINE, 3.4);
+        break;
+      case 'autofluff':
+        this.cue('ranch.slot', undefined, undefined, undefined, 0.6);
+        break;
       case 'hungrynight':
         // Dusk, and a pen with downies has nothing for the night: say so while there is light to fill it.
         {
@@ -990,15 +998,17 @@ export class Ranch {
     this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
     this.hud.showPage(page.title, page.lines, Pages.SECS);
-    // It stays its few seconds: no new lesson takes the page meanwhile (the first order's went to dusk at once).
-    this.tutor.hold = Pages.SECS;
+    // It stays its few seconds: no new lesson takes the page meanwhile (the first order's went to dusk at once). The next
+    // lesson comes up just before the page goes, so it hands straight over (round 11: the journal goal showed for about
+    // 0.1 s between the two, at 13.1 s and 40.8 s).
+    this.tutor.hold = Pages.SECS - Pages.HANDOVER;
   }
 
   private readonly pages = new Pages();
 
   /** The calm page with no lesson up: the day's orders (news with no box), then the next goal. */
-  private goalRows(goal: string, orders: string[]): { text: string; done: boolean; plain?: boolean }[] {
-    return [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : [])];
+  private goalRows(goal: string, orders: string[], saving: DownyKind | null = null): { text: string; done: boolean; plain?: boolean }[] {
+    return [...orders.map((text) => ({ text, done: false, plain: NEWS.has(text) })), ...(goal ? [{ text: goal, done: false }] : []), ...(saving ? [{ text: CATCH_MORE, done: false, plain: true }] : [])];
   }
 
   /** For checks (round 10): the next journal goal as the page words it (some count: "Sell 20 fluff, 7 so far."). */
@@ -1064,7 +1074,9 @@ export class Ranch {
     // (J hides them until something changes).
     const goal = v.line ? '' : this.goalLine();
     const orders = v.line ? [] : orderLines(s, say);
-    const key = [...orders, goal].join('|');
+    // (Round 11: a goal waiting on coins says what to do meanwhile.)
+    const saving = goal ? catchMore(this.sim.openGoals(1)[0]?.id, s) : null;
+    const key = [...orders, goal, saving ? CATCH_MORE : ''].join('|');
     if (key !== this.goalShown) {
       // A new goal, or the rare order's next step: its edge chevron shows again for a few seconds.
       const ok = (orders[0] ?? '').split(' ').slice(0, 1).join(' ');
@@ -1077,7 +1089,7 @@ export class Ranch {
     }
     // The day's orders all filled, or offers waiting at the board: news, a line with no box (round 8: "Order filled.
     // New ones come at dawn." got a box and a strike); an order's tally keeps its box.
-    this.hud.setGoal(this.goalHidden ? [] : this.goalRows(goal, orders));
+    this.hud.setGoal(this.goalHidden ? [] : this.goalRows(goal, orders, saving));
     // The rare order (where it was seen, the downy, then the crate), or a goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
     // (Round 9: a goal on the page that can be done brings in what it needs, the gate's price board or the Feeder tag,
@@ -1087,6 +1099,9 @@ export class Ranch {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
     } else if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
+      this.tutor.mark.on = true;
+      this.goalSpotT += dt;
+    } else if (g && saving && !this.tutor.mark.on && catchSpot(saving, s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
     } else if (!g) this.goalSpotT = 0;

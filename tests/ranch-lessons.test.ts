@@ -300,7 +300,7 @@ describe('the lessons in order', () => {
 });
 
 describe('selling, step by step', () => {
-  it('says where the fluff is: feed for it, pull it up, choose it, then blow it in', () => {
+  it('says where the fluff is: feed for it, pull it up, then blow it in', () => {
     const { sim, tutor, run, view } = ranch();
     const s = sim.s;
     const home = s.downies.find((q) => q.keep)!;
@@ -357,7 +357,7 @@ describe('selling, step by step', () => {
     expect(Math.abs(tutor.mark.x - fluff.x)).toBeLessThan(0.01);
     stray.gone = true;
     wildFluff.gone = true;
-    // Aboard, but clover heads are chosen (Blow would send those): choose the fluff, a chevron over its window.
+    // Aboard, but clover heads are chosen (round 11: aimed at a crate the fluff is chosen for you, so the line only says to blow it in).
     fluff.gone = true;
     s.slots[0].t = 'cloverhead';
     s.slots[0].n = 3;
@@ -366,8 +366,8 @@ describe('selling, step by step', () => {
     s.sel = 0;
     tutor.add(s, 'slot');
     run(0.5);
-    expect(view().line).toBe("Tap the fluff's window to choose it.");
-    expect(tutor.mark.slot).toBe(1);
+    expect(view().line).toBe('Blow the fluff into the sell crate.');
+    expect(tutor.mark.slot).toBe(-1);
     // Chosen: blow it into the crate, the arrow on the crate, no window pointer.
     s.sel = 1;
     run(0.5);
@@ -412,7 +412,9 @@ describe('selling, step by step', () => {
     d.hunger = 0.7;
     sim.drop('cloverhead', -4.7, 35.4);
     run(10);
-    expect(s.stats.sold).toBeGreaterThanOrEqual(1);
+    // (Round 11: during this lesson the crate leaves lying fluff alone, so the first sale is the player's own.)
+    expect(s.stats.sold).toBe(0);
+    expect(s.items.some((i) => !i.gone && i.type.startsWith('tuft'))).toBe(true);
     expect(tutor.current).toBe('sell');
     expect(Tutor.finished(s, 'sell')).toBe(false);
     // Now a real blow from in front of the crate.

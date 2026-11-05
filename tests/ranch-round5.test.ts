@@ -328,7 +328,7 @@ describe("P1: each morning the board posts one rare wild downy", () => {
       expect(offers.filter((o) => o.live && !o.rare).length).toBeLessThanOrEqual(1);
       const tag = sim.offerTag(r);
       // (Round 8: its deadline in the title, its set place in the note.)
-      expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook), by (noon|dusk)$/);
+      expect(tag.title).toMatch(/^(Gold clover|Rose ember|Silver brook), by (10 am|dusk)$/);
       // (Round 7: what it is worth a day once penned, as a number, when it has a pen to join.)
       expect(tag.note).toMatch(/^By the [a-z ]+\. Pays [\d,]+, (and stays|then [\d,]+ over \d+ days)$/);
       places.add(tag.note.split('.')[0]);
@@ -537,6 +537,8 @@ describe('P3: the cheap fixes', () => {
     s.gates.ridge = true;
     go(3);
     s.coins = 450;
+    // (Round 11: and the jar has filled once.)
+    s.learnCount.full = 1;
     go(1);
     expect(tutor.current).toBe('bench');
   });
@@ -546,8 +548,8 @@ describe('P3: the cheap fixes', () => {
     sim.postOrders(true);
     const notes = sim.offers().map((o) => sim.offerTag(o).note);
     // (Round 8: each with its deadline first.)
-    expect(notes.find((n) => n.endsWith('on top of sales'))).toMatch(/^By (noon|dusk)\. Pays [\d,]+ on top of sales$/);
-    expect(notes.find((n) => n.startsWith('Caught by'))).toMatch(/^Caught by (noon|dusk)\. Pays [\d,]+$/);
+    expect(notes.find((n) => n.endsWith('on top of sales'))).toMatch(/^By (10 am|dusk)\. Pays [\d,]+ on top of sales$/);
+    expect(notes.find((n) => n.startsWith('Caught by'))).toMatch(/^Caught by (10 am|dusk)\. Pays [\d,]+$/);
     expect(notes.some((n) => /more by dusk/.test(n))).toBe(false);
   });
 

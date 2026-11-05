@@ -271,8 +271,9 @@ describe('P1: the jar lesson waits while downies aboard have no pen, and the jou
     for (let k = 0; k < 3; k++) dropIn(sim, plot, 'ember', evs, k * 0.6 - 0.6);
     go(3);
     expect(line(tutor)).not.toMatch(/pen for your|jar/);
-    // With the jar's price as well (the pen bought), the jar lesson comes.
+    // With the jar's price as well (the pen bought), and the jar once full (round 11), the jar lesson comes.
     s.coins = 450;
+    s.learnCount.full = 1;
     go(3);
     expect(line(tutor)).toBe('Buy a bigger jar at the workbench.');
   });

@@ -15,7 +15,15 @@
 // its look finger never lifted, clamped at the screen's edge, so a thumb that
 // tracked well ran out of room to turn. Its look moves also came every 67 ms,
 // not 40: paced to 40 here.
-//   RANCH_URL=http://localhost:5247 node scripts/ranch-catch-real.mjs [tries] [kinds]
+//
+// Round 11, two thumbs (the eleventh playtest: three fingers 36 of 36, two thumbs clover 1 of 3 and brook 1 of 5): two,
+// two-idle and two-slow keep the right thumb on the look side until the crosshair marks the downy, take 180 ms to move
+// to Pull, and stay on Pull while the tug is on, with no look finger at all (the view holds on the downy by itself);
+// the left thumb walks in, or (two-idle) rests once the tug is on. A rAF sampler reads the view each frame: how fast it
+// turned by itself, the most that turn changed in a frame, and the share of the tug the crosshair was on the downy.
+// With a third argument of keys, one more run plays with the keyboard only on a desktop: W to walk in, F to pull, no
+// mouse moved at all.
+//   RANCH_URL=http://localhost:5247 node scripts/ranch-catch-real.mjs [tries] [kinds] [thumbs, comma separated; or keys]
 import { launch, openRanch, touchSession } from './ranch-lib.mjs';
 
 const tries = Number(process.argv[2]) || 6;
@@ -29,11 +37,17 @@ const kinds = (process.argv[3] || 'clover,ember,brook,thistle,rare-clover,rare-e
 // holds: never reads it (holds Pull all the way: the seventh playtest's way, a control).
 // fooled (round 9, fake puffs): the share of fake puffs it takes for a real tell and lets go on, pressing again a
 // reaction after (the ring stays pale on a fake one and shivers; a real tell turns it gold): as ranch-catch.ts.
-const THUMBS = {
+const ALL = {
   careless: { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650], fooled: 0.6 },
   careful: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350], fooled: 0.2 },
   ...(process.env.CONTROL ? { holds: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: null, fooled: 0 } } : {}),
+  two: { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350], fooled: 0.2, two: { travel: 180, stick: true } },
+  'two-idle': { lag: 70, gain: 0.8, wobble: 1.5, run: true, react: [200, 350], fooled: 0.2, two: { travel: 180, stick: false } },
+  'two-slow': { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650], fooled: 0.6, two: { travel: 180, stick: true } },
 };
+const pick = (process.argv[4] || '').split(',').filter(Boolean);
+const keysOnly = pick.includes('keys');
+const THUMBS = Object.fromEntries(Object.entries(ALL).filter(([n]) => !pick.length || pick.includes(n)));
 const SENS = 0.0062;
 const wrap = (a) => {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -53,6 +67,35 @@ const draw = await page.evaluate(() => {
   const e = document.querySelector('.rt-draw');
   const r = e.getBoundingClientRect();
   return [r.x + r.width / 2, r.y + r.height / 2];
+});
+
+// The view by the frame (round 11), through the hook: how fast it turns while no look moves it, and whether the crosshair is on the downy.
+await page.evaluate(() => {
+  const v = (window.__view = { on: false, fast: 0, jerk: 0, turns: [], tug: 0, onBody: 0, last: null, lastTurn: 0, lastT: 0 });
+  const step = (now) => {
+    requestAnimationFrame(step);
+    const r = window.ranch;
+    const s = r.sim.s;
+    const p = s.player;
+    if (v.on && v.last) {
+      const dt = (now - v.lastT) / 1000;
+      const d = r.sim.tugged();
+      if (d && dt > 0) {
+        const turn = Math.hypot(p.yaw - v.last[0], p.pitch - v.last[1]) / dt;
+        v.fast = Math.max(v.fast, turn);
+        v.jerk = Math.max(v.jerk, Math.abs(turn - v.lastTurn));
+        v.turns.push(turn);
+        v.lastTurn = turn;
+        const cp = Math.cos(p.pitch);
+        const aim = { ex: p.x, ey: p.y + 1.6, ez: p.z, dx: -Math.sin(p.yaw) * cp, dy: Math.sin(p.pitch), dz: -Math.cos(p.yaw) * cp, mx: p.x, my: p.y + 1.4, mz: p.z };
+        v.tug++;
+        if (r.sim.aimedDowny(aim) === d) v.onBody++;
+      } else v.lastTurn = 0;
+    }
+    v.last = [p.yaw, p.pitch];
+    v.lastT = now;
+  };
+  requestAnimationFrame(step);
 });
 
 async function chase(which, thumb, seed) {
@@ -125,6 +168,17 @@ async function chase(which, thumb, seed) {
   await t.send('touchMove', stick());
   await t.send('touchStart', [...stick(), [lx, ly, 41]]);
   let prev = [...stick(), [lx, ly, 41]];
+  // Two thumbs: where the right thumb is, when it gets there, and when it last pressed with nothing to show for it.
+  const two = thumb.two;
+  let right = 'look';
+  let there = 0;
+  let pressed = -1;
+  await page.evaluate((on) => {
+    const v = window.__view;
+    v.on = on;
+    v.last = null;
+    v.lastTurn = 0;
+  }, !!two);
   const hist = [];
   const t0 = Date.now();
   let result = 'timeout';
@@ -157,7 +211,10 @@ async function chase(which, thumb, seed) {
       const ring = window.ranch.hud.tugState();
       // The note under the crosshair, as on screen: a slip ("It slipped free...") or a getaway.
       const say = document.querySelector('.rh-say.on')?.textContent ?? '';
-      return { ring, say, p: { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch }, d: d && { x: d.x, y: d.y + 0.25, z: d.z, gone: d.gone }, caught: s.slots.some((q) => q.t === window.ranch.sim.s.downies.find((x) => x.id === id)?.kind && q.n > 0), food: s.slots.reduce((a, q) => a + (q.t && !['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0), kind: d?.kind, aboard: s.slots.reduce((a, q) => a + (['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0) };
+      const cp = Math.cos(p.pitch);
+      const aim = { ex: p.x, ey: p.y + 1.6, ez: p.z, dx: -Math.sin(p.yaw) * cp, dy: Math.sin(p.pitch), dz: -Math.cos(p.yaw) * cp, mx: p.x, my: p.y + 1.4, mz: p.z };
+      const marked = !!d && !d.gone && window.ranch.sim.aimedDowny(aim) === d;
+      return { marked, strain: d ? d.strain : 0, drawn: d ? d.drawn : 0, noPull: d ? d.noPull : 0, ring, say, p: { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch }, d: d && { x: d.x, y: d.y + 0.25, z: d.z, gone: d.gone }, caught: s.slots.some((q) => q.t === window.ranch.sim.s.downies.find((x) => x.id === id)?.kind && q.n > 0), food: s.slots.reduce((a, q) => a + (q.t && !['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0), kind: d?.kind, aboard: s.slots.reduce((a, q) => a + (['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0) };
     }, setup.id);
     food = o.food;
     if (o.say !== lastSay) {
@@ -193,18 +250,39 @@ async function chase(which, thumb, seed) {
     // At the edge of the look side the finger lifts and comes down in the middle again, as a thumb does. (The
     // playtest's chase kept it down and clamped it at the screen's edge, so a thumb that tracked well ran out
     // of room to turn after about 0.7 rad and lost the downy: an artifact, not the game.)
-    lx += mx;
-    ly += my;
+    const looking = !two || (right === 'look' && now >= there);
+    if (looking) {
+      lx += mx;
+      ly += my;
+    }
     if (lx < 214 || lx > 404 || ly < 80 || ly > 860) {
       lx = 310;
       ly = 450;
       fid++;
     }
-    if (walking && dist < (rare ? 4 : 5.5)) walking = false;
-    else if (!walking && dist > 7) {
+    const onLine = o.strain > 0;
+    if (walking && (dist < (rare ? 4 : 5.5) || (two && !two.stick && onLine))) walking = false;
+    else if (!walking && dist > 7 && !(two && !two.stick && onLine)) {
       walking = true;
       walkTicks = 0;
     } else if (walking) walkTicks++;
+    // Two thumbs: from looking to Pull once the crosshair marks it; back once the tug is over or a press found nothing.
+    if (two) {
+      if (right === 'look' && now >= there && dist < 7.4 && o.noPull <= 0 && o.marked) {
+        right = 'pull';
+        there = now + two.travel;
+        pressed = there;
+      } else if (right === 'pull' && now >= there && o.strain <= 0 && o.drawn <= 0 && now - pressed > 350) {
+        right = 'look';
+        there = now + two.travel;
+        letGo = false;
+        releaseAt = pressAt = -1;
+        lx = 310;
+        ly = 450;
+        fid++;
+      }
+      if (o.strain > 0 || o.drawn > 0) pressed = now;
+    }
     // The ring shows a pull back: let go of Pull (a reaction late), and press again (a reaction after it stops).
     const back = !!o.ring.back;
     const tell = !!o.ring.tell;
@@ -244,15 +322,16 @@ async function chase(which, thumb, seed) {
     wasFeint = feint;
     // A slip or a getaway ends the fight: the ring goes, and the thumb presses again when it next comes in reach.
     if (o.ring.tug <= 0 && !back) letGo = false;
-    pulling = dist < 7.6 && !letGo;
-    const next = [...stick(), ...btn(), [lx, ly, fid]];
+    const onPull = !two || (right === 'pull' && now >= there);
+    pulling = (dist < 7.6 || onLine) && !letGo && onPull;
+    const next = [...stick(), ...btn(), ...(two && !(right === 'look' && now >= there) ? [] : [[lx, ly, fid]])];
     // CDP's touchEnd releases the points it lists (the playtest's chase listed the ones to keep, so when it
     // stopped walking it let go of Pull and the look finger and kept walking): list only those to lift.
     const removed = prev.filter((q) => !next.some((n) => n[2] === q[2]));
     const added = next.filter((q) => !prev.some((n) => n[2] === q[2]));
     if (removed.length) await t.send('touchEnd', removed);
     if (added.length) await t.send('touchStart', next);
-    else await t.send('touchMove', next);
+    else if (next.length) await t.send('touchMove', next);
     prev = next;
     ticks++;
     // A look move every 40 ms, the harness's own time included (a fixed 40 ms wait made it 67 ms, and a careful
@@ -261,14 +340,15 @@ async function chase(which, thumb, seed) {
   }
   const secs = (Date.now() - t0) / 1000;
   const fps = ((await page.evaluate(() => window.ranch.frames)) - f0) / secs;
-  await t.send('touchEnd', []);
+  // (Two thumbs can have no finger down at all here, and CDP refuses a touchEnd with no touch to end.)
+  if (prev.length) await t.send('touchEnd', []);
   await page.waitForTimeout(250);
   const first = result === 'caught' && slips === 0 && escapes === 0;
   return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips, feints };
 }
 
 console.log(`Real-touch catches on the Pixel viewport, ${tries} tries per kind and thumb (${process.env.RANCH_URL || 'default url'})`);
-for (const kind of kinds) {
+for (const kind of keysOnly ? [] : kinds) {
   for (const [name, thumb] of Object.entries(THUMBS)) {
     let n = 0;
     let first = 0;
@@ -299,7 +379,96 @@ for (const kind of kinds) {
     }
     fights.sort((a, b) => a - b);
     const mid = fights.length ? fights[Math.floor(fights.length / 2)].toFixed(1) : '-';
-    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 20 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s (middle ${mid}); ${(backs / tries).toFixed(1)} pull backs a try, ${(feints / tries).toFixed(1)} fake puffs, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)`);
+    // Round 11: the view by the frame, with no look finger down (two thumbs only).
+    const view = thumb.two
+      ? await page.evaluate(() => {
+          const v = window.__view;
+          const q = [...v.turns].sort((a, b) => a - b);
+          const out = { fast: v.fast, jerk: v.jerk, p99: q.length ? q[Math.floor(q.length * 0.99)] : 0, on: v.tug ? v.onBody / v.tug : 0 };
+          v.fast = v.jerk = v.tug = v.onBody = 0;
+          v.turns = [];
+          return out;
+        })
+      : null;
+    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 20 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s (middle ${mid}); ${(backs / tries).toFixed(1)} pull backs a try, ${(feints / tries).toFixed(1)} fake puffs, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)${view ? `  view: fastest ${view.fast.toFixed(2)} rad/s (99% under ${view.p99.toFixed(2)}), changed at most ${view.jerk.toFixed(2)} rad/s in a frame, crosshair on it ${Math.round(view.on * 100)}% of the tug` : ''}`);
   }
+}
+await page.close();
+
+// Round 11: the keyboard alone on a desktop, no mouse moved: W walks in (the view starts on the downy), F pulls, read off the same ring.
+if (keysOnly) {
+  const { page: dp } = await openRanch(browser, { width: 1280, height: 800, dpr: 1 });
+  await dp.mouse.move(640, 400);
+  for (const kind of kinds.filter((k) => !k.startsWith('rare-'))) {
+    let n = 0;
+    let yawMoved = 0;
+    for (let k = 0; k < tries; k++) {
+      const homes = { clover: [[-16, -9], [14, -4]], ember: [[-45, -19], [-55, -1]], brook: [[43, 4], [65, 9]], thistle: [[-60, -26]] };
+      const start = await dp.evaluate(([kind, H]) => {
+        const r = window.ranch;
+        const sim = r.sim;
+        const s = sim.s;
+        sim.wild = false;
+        s.downies = s.downies.filter((d) => d.tame || d.keep);
+        s.hour = kind === 'thistle' ? 18.6 : 10;
+        s.gates.ridge = s.gates.hollow = true;
+        sim.phys.gates = { ...s.gates };
+        for (const q of s.slots) {
+          q.t = null;
+          q.n = 0;
+        }
+        const d = sim.spawn(kind, H[0], H[1], false);
+        const p = s.player;
+        p.x = H[0] + 5.5;
+        p.z = H[1] + 2;
+        p.y = sim.phys.floor(p.x, p.z);
+        p.vx = p.vz = p.vy = 0;
+        r.aimAt(d.x, d.y + 0.25, d.z);
+        return { id: d.id, yaw: p.yaw };
+      }, [kind, homes[kind][k % homes[kind].length]]);
+      let down = false;
+      let got = false;
+      const t0 = Date.now();
+      let releaseAt = -1;
+      let pressAt = -1;
+      let wasTell = false;
+      let wasBack = false;
+      while (Date.now() - t0 < 20000) {
+        const o = await dp.evaluate((id) => {
+          const r = window.ranch;
+          const s = r.sim.s;
+          const d = s.downies.find((q) => q.id === id);
+          return { ring: r.hud.tugState(), aboard: s.slots.some((q) => ['clover', 'ember', 'brook', 'thistle'].includes(q.t) && q.n > 0), yaw: s.player.yaw, gone: !d || d.gone };
+        }, start.id);
+        if (o.aboard) {
+          got = true;
+          yawMoved = Math.max(yawMoved, Math.abs(o.yaw - start.yaw));
+          break;
+        }
+        if (o.gone) break;
+        yawMoved = Math.max(yawMoved, Math.abs(o.yaw - start.yaw));
+        const now = Date.now() - t0;
+        if (o.ring.tell && !wasTell) releaseAt = now + 250;
+        if (!o.ring.back && wasBack && releaseAt < 0) pressAt = now + 250;
+        wasTell = o.ring.tell;
+        wasBack = o.ring.back;
+        const letGo = (releaseAt >= 0 && now >= releaseAt) || pressAt >= 0;
+        if (releaseAt >= 0 && now >= releaseAt) releaseAt = -1;
+        if (pressAt >= 0 && now >= pressAt) pressAt = -1;
+        const want = !letGo && !(down === false && (o.ring.tell || o.ring.back));
+        if (want !== down) {
+          if (want) await dp.keyboard.down('f');
+          else await dp.keyboard.up('f');
+          down = want;
+        }
+        await dp.waitForTimeout(40);
+      }
+      if (down) await dp.keyboard.up('f');
+      if (got) n++;
+      await dp.waitForTimeout(200);
+    }
+    console.log(`   ${kind.padEnd(11)} keys only, no mouse moved: in 20 s ${n} of ${tries}; the view turned by itself by up to ${yawMoved.toFixed(2)} rad`);
+  }
+  await dp.close();
 }
 await browser.close();

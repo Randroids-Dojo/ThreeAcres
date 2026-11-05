@@ -326,7 +326,7 @@ await p.evaluate(() => window.ranch.sim.takeOrder(window.ranch.sim.offers().find
 await p.waitForTimeout(600);
 const og = await pageNow();
 const apart = (a, c) => a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
-check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff( by noon| after 9 pm)?, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
+check('the order taken shows its tally on the journal, and the next goal', og.lines.length === 2 && /^(Clover|Ember) fluff( by 10 am| after 9 pm)?, 0 of \d+\.$/.test(og.lines[0]) && og.lines[1] === og.goal, JSON.stringify(og.lines));
 check('with the order and the goal, the journal clears the stick, the pause button, the coins and the shell corner', og.page.b < 838 * 0.32 && apart(og.page, og.pause) && apart(og.page, og.coins) && !(og.page.l < 60 && og.page.t < 60), JSON.stringify(og));
 await p.evaluate(() => window.ranch.hud.showZone('Ember Ridge'));
 await p.waitForTimeout(700);
@@ -361,7 +361,9 @@ await touch('touchStart', [[pullBtn.x, pullBtn.y, 23]]);
 // 0.25 or less let go is only a short Pull, which leaves a wild downy where it is.)
 let tugMax = 0;
 for (let i = 0; i < 50 && tugMax <= 0.36; i++) {
-  await p.evaluate(() => { const d = window.__wild; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
+  // (Round 11: no pull back in this one: what is checked is a pull let go, and held through a pull back it slipped free,
+  // one run in about three.)
+  await p.evaluate(() => { const d = window.__wild; d.beats = 0; d.feints = 0; d.backT = 99; d.tell = 0; window.ranch.aimAt(d.x, d.y + 0.25, d.z); });
   await p.waitForTimeout(60);
   tugMax = Math.max(tugMax, await p.evaluate(() => window.__wild.tug));
 }
