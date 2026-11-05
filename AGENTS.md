@@ -4,7 +4,7 @@ Rules for any coding agent working in Three Acres.
 
 ## Product
 
-Three separate farming games for the browser, phone first, under one shell: Thistledown (first-person creature ranch), Sunup (homestead life sim) and Seedbound (roguelike deckbuilder). Each has its own world, rules, controls, look, music and save; the shell's corner button switches between them. Read `docs/DESIGN.md`, then the game's own doc (`docs/RANCH.md`, `docs/SUNUP.md`, `docs/DECK.md`), `docs/ARCHITECTURE.md` and `docs/AUDIO_CUES.md`.
+Three separate farming games for the browser, phone first, under one shell: Thistledown (first-person creature ranch), Sunup (homestead life sim) and Seedbound (roguelike deckbuilder). Each has its own world, rules, controls, look, music and save; the shell's corner button switches between them. Read `docs/DESIGN.md`, then the game's own doc (`docs/RANCH.md`, `docs/SUNUP.md`, `docs/DECK.md`), `docs/ARCHITECTURE.md` and `docs/AUDIO_CUES.md`. Known open findings are in `docs/BACKLOG.md`.
 
 ## Rules
 
