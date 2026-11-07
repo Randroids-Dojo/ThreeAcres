@@ -231,9 +231,19 @@ export const GOALS: { id: GoalId; text: string; reward: number }[] = [
  */
 export function journalGoals(done: GoalId[]): { text: string; done: boolean }[] {
   const rows = done.map((id) => GOALS.find((g) => g.id === id)).filter((g): g is (typeof GOALS)[number] => !!g).map((g) => ({ text: g.text, done: true }));
-  const current = GOALS.find((g) => !done.includes(g.id));
+  const current = nextGoals(done)[0];
   if (current) rows.push({ text: current.text, done: false });
   return rows;
+}
+
+/**
+ * The goals not yet done, in the order the journal takes them: a kind's catch goal first once its gate is open
+ * (round 12: paying for the ridge gate with 20 fluff not yet sold dropped the page back to the sell goal).
+ */
+export function nextGoals(done: GoalId[]): typeof GOALS {
+  const left = GOALS.filter((g) => !done.includes(g.id));
+  const opened = (id: GoalId) => (id === 'ember' && done.includes('ridge')) || (id === 'brook' && done.includes('hollow'));
+  return [...left.filter((g) => opened(g.id)), ...left.filter((g) => !opened(g.id))];
 }
 
 /** The full-pen goals: how many of a kind in one pen. */

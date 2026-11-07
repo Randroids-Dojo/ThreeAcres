@@ -161,6 +161,12 @@ export interface Try {
   /** Round 11: how fast the view turned by itself while no look moved it (rad/s, the fastest), and the most it changed that turn in a frame. */
   holdFast: number;
   holdJerk: number;
+  /**
+   * Backlog, round 12 (three of the tester's four "It got away." came before any tell): getaways that came before the
+   * fight showed a tell, a pull back or a fake puff, and why each was (the escape event's reason).
+   */
+  early: number;
+  earlyWhy: string[];
 }
 
 /**
@@ -168,7 +174,7 @@ export interface Try {
  * rare: the board's rare one instead, lured (it has just eaten the food you blew near it, so it lets you come
  * in: the fight is what is measured) or not (it hears you coming and bolts).
  */
-export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = kind === 'thistle' ? 16 : 12, rare: '' | 'lured' | 'wary' = ''): Try {
+export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = kind === 'thistle' ? 16 : 12, rare: '' | 'lured' | 'wary' = '', group = false): Try {
   const realRandom = Math.random;
   Math.random = rng(seed);
   try {
@@ -186,6 +192,17 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     if (rare) {
       d.rare = true;
       if (rare === 'lured') d.calm = RARE_WARY.calm;
+    }
+    // (Backlog, round 12: with its group about, as the valley has them, two more of its kind a metre or two off. The
+    // harness had the one alone, and another hopping nearer the crosshair took the pull from it: a getaway with no tell.)
+    if (group) {
+      for (const [ox, oz] of [
+        [1.6, 0.8],
+        [-1.2, 1.4],
+      ]) {
+        const e = sim.spawn(kind, h.x + ox, h.z + oz, false);
+        e.hunger = 0.2;
+      }
     }
     const p = s.player;
     // A side to come from: dry land in the downy's own zone, inside the valley.
@@ -254,6 +271,9 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
     let sideT = 0;
     let lookedLast = false;
     let pressed = -1;
+    let told = false;
+    let early = 0;
+    const earlyWhy: string[] = [];
     const side = seed % 2 ? 1 : -1;
     const aboard = () => s.slots.reduce((a, q) => a + (q.t && !isDowny(q.t) ? q.n : 0), 0);
     const kept0 = () => s.slots.reduce((a, q) => a + (q.t === kind ? q.n : 0), 0);
@@ -362,12 +382,21 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
       const c: Controls = { moveX: sideT > 0 && walk ? side : 0, moveZ: walk ? 0.73 : 0, sprint: thumb.run && kind === 'thistle' && walk, jump: false, jumpPressed: false, draw: (dist < 7.6 || d.strain > 0) && !letGo && onPull, puff: false, puffPressed: false, look: looked };
       lastYaw = p.yaw;
       lastPitch = p.pitch;
+      const onLine0 = d.strain > 0;
+      if (!onLine0) told = false;
       sim.update(DT, c, eyeAim());
+      if (d.tell > 0 || d.back > 0 || d.feint > 0) told = true;
+      // (Its own getaway, not one of its group's: its fight ended and the bellows leaves it be for GOT_AWAY.)
+      const mine = onLine0 && d.strain <= 0 && d.noPull > 1.2;
       for (const e of sim.events) {
-        if (e.t === 'escape') {
+        if (e.t === 'escape' && mine) {
           escapes++;
           letGo = false;
           releaseAt = pressAt = -1;
+          if (!told) {
+            early++;
+            earlyWhy.push(e.why);
+          }
         }
         if (e.t === 'pullback') backs++;
         if (e.t === 'slip') {
@@ -377,12 +406,13 @@ export function tryCatch(kind: DownyKind, thumb: Thumb, seed: number, start = ki
         }
       }
       sim.events.length = 0;
-      if (kept0() > 0) {
+      // (With its group about, only this one in the jar counts.)
+      if (kept0() > 0 && (!group || (d.gone && !d.dive))) {
         caught = true;
         caughtAt = t;
       } else if (d.gone) gone = true;
     }
-    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips, feints, fooled: fooledN, holdFast, holdJerk };
+    return { caught, escaped: escapes > 0, escapes, secs: t, closest, food: aboard(), near, first: caught && escapes === 0 && slips === 0, fight: caught && fought >= 0 ? caughtAt - fought : 0, backs, slips, feints, fooled: fooledN, holdFast, holdJerk, early, earlyWhy };
   } finally {
     Math.random = realRandom;
   }
@@ -515,6 +545,28 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(`   ${name.padEnd(13)} ${pct(g.first)} ${pct(g.rate)}  fight ${mid(g.fights).toFixed(1)} s (three fingers ${mid(three.fights).toFixed(1)})  ${pct(g.slipped)} slipped ${pct(g.escaped)} away  |  ${pct(i.first)} ${pct(i.rate)}  ${mid(i.fights).toFixed(1)} s      |  ${pct(sl.first)} ${pct(sl.rate)}  ${mid(sl.fights).toFixed(1)} s  ${pct(sl.slipped)} slipped ${pct(sl.escaped)} away`);
   }
   console.log(`   the view's own turn, good thumb, all kinds: fastest ${fast.toFixed(2)} rad/s, the most it changed in a frame ${jerk.toFixed(2)} rad/s`);
+  // Backlog, round 12: three of the tester's four "It got away." came before any tell. Getaways before the fight showed a
+  // tell, a pull back or a fake puff, for the two-thumb players, with the downy alone and with its group of three about
+  // (as the valley has them), and why (the note says it). Target for the good reader: none.
+  console.log('\n   getaways before any tell (round 12), two thumbs: of all getaways, and why; alone, then with its group of three about');
+  for (const th of [TWO, TWO_IDLE, TWO_SLOW]) {
+    for (const group of [false, true]) {
+      const parts: string[] = [];
+      for (const [name, kind, rare] of [['clover', 'clover', ''], ['ember', 'ember', ''], ['brook', 'brook', ''], ['thistle', 'thistle', ''], ['rare clover', 'clover', 'lured'], ['rare ember', 'ember', 'lured'], ['rare brook', 'brook', 'lured']] as [string, DownyKind, '' | 'lured'][]) {
+        let all = 0;
+        let early = 0;
+        const why: Record<string, number> = {};
+        for (let k = 0; k < tries; k++) {
+          const r = tryCatch(kind, th, 1 + k * 7919, rare ? 8 : kind === 'thistle' ? 16 : 12, rare, group);
+          all += r.escapes;
+          early += r.early;
+          for (const w of r.earlyWhy) why[w] = (why[w] ?? 0) + 1;
+        }
+        parts.push(`${name} ${early} of ${all}${early ? ` (${Object.entries(why).map(([w, n]) => `${w} ${n}`).join(', ')})` : ''}`);
+      }
+      console.log(`   ${th.name.padEnd(11)} ${group ? 'group' : 'alone'}  ${parts.join('; ')}`);
+    }
+  }
   // Closing on a clover that has seen you, walking against running (taught now: the running lesson in the meadow).
   for (const run of [false, true]) {
     const rows = Array.from({ length: 12 }, (_, k) => chaseGap(run, 31 + k * 7919));

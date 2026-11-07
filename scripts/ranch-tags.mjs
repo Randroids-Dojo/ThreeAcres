@@ -856,5 +856,29 @@ await b.close();
   await dk.screenshot({ path: '/tmp/ranch-tags-desk.png' });
   await b3.close();
 }
+// Round 12: on a desktop with the mouse not captured, "Click to look around" covered the Garden tag's note. While tags
+// hang it is down; with none it is up (the control: it shows in this state at all).
+{
+  const b4 = await launch();
+  const { page: dc } = await openRanch(b4, { width: 1280, height: 800, query: '&taught' });
+  await dc.mouse.move(640, 400);
+  await dc.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.coins = 3000; s.pads[1].kind = 'garden'; s.pads[1].crop = 'cloverhead'; s.pads[1].ups = []; r.sim.phys.setPads(s.pads); r.pads.sync(s.pads); const p = s.player; p.x = 16; p.z = 34; p.y = r.sim.phys.floor(16, 34); r.aimAt(15.2, 5.6, 31.8); });
+  await frames(dc, 8);
+  const c0 = await dc.evaluate(() => ({ lock: window.ranch.input.lockAvailable, locked: window.ranch.input.locked, on: document.querySelector('.rh-click').classList.contains('on'), menu: window.ranch.menuOpen() }));
+  check('desk, mouse not captured, no tags: "Click to look around" is up (the control)', c0.lock && !c0.locked && c0.on && !c0.menu, JSON.stringify(c0));
+  await dc.keyboard.press('KeyE');
+  await dc.waitForTimeout(900);
+  const c1 = await dc.evaluate(() => {
+    const r = window.ranch;
+    const e = document.querySelector('.rh-click');
+    const q = e.getBoundingClientRect();
+    const box = r.tags.screenBox(r.camera, innerWidth, innerHeight, { x0: 0, y0: 0, x1: 0, y1: 0 });
+    const op = Number(getComputedStyle(e).opacity);
+    const over = !!box && Math.min(q.right, box.x1) > Math.max(q.left, box.x0) && Math.min(q.bottom, box.y1) > Math.max(q.top, box.y0);
+    return { menu: r.menuOpen(), opts: r.menuOptions(), on: e.classList.contains('on'), opacity: op, over };
+  });
+  check('desk, mouse not captured, the Garden post\'s tags hanging: "Click to look around" is down, over no tag', c1.menu && !c1.on && (c1.opacity < 0.05 || !c1.over), JSON.stringify(c1));
+  await b4.close();
+}
 console.log(failed() ? `TAGS FAILED (${failed()})` : 'TAGS OK');
 process.exit(failed() ? 1 : 0);

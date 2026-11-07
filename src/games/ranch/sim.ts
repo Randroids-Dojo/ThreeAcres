@@ -18,6 +18,7 @@ import {
   GARDEN_YIELD,
   GARDEN_YIELD_SOIL,
   GOALS,
+  nextGoals,
   HOUR,
   LIVE_EACH,
   HUNGER_RATE,
@@ -156,8 +157,11 @@ export type Ev =
   | { t: 'eased'; x: number; y: number; z: number; kind: DownyKind; eased: boolean }
   /** You held on through its pull back: it slipped free a few metres off (still there, try again). */
   | { t: 'slip'; x: number; y: number; z: number; kind: DownyKind }
-  /** A wild downy broke free of the pull and got away (dove: into the water). */
-  | { t: 'escape'; x: number; y: number; z: number; kind: DownyKind; dove: boolean; slack?: boolean }
+  /**
+   * A wild downy broke free of the pull and got away (dove: into the water); why (backlog, round 12: three of the
+   * tester's four "It got away." came with no tell and nothing to say why): see `Getaway`.
+   */
+  | { t: 'escape'; x: number; y: number; z: number; kind: DownyKind; dove: boolean; slack?: boolean; why: Getaway }
   /** An order moved: posted (an offer on the board), taken, counted towards (got of n), filled (bonus: what filling paid, or a live order's whole sum), or missed at dusk. */
   | { t: 'order'; kind: DownyKind; live: boolean; got: number; n: number; state: 'posted' | 'taken' | 'progress' | 'filled' | 'missed'; bonus: number; x: number; z: number; rare?: boolean }
   /** A downy of yours blown into the sell crate for a live order. */
@@ -331,6 +335,13 @@ export const SHAKE_LOOSE = 0.34;
 /** Seconds the bellows cannot take a downy that just got away. */
 export const GOT_AWAY = 1.6;
 /**
+ * Why a wild one got away (backlog, round 12), for the note under the crosshair. slack: left slack too long after a pull
+ * back. time: a brook's or thistle's time ran out. off: the pull slipped off it (the crosshair off its body) once it was a
+ * third of the way in. let: Pull let go then, with no pull back to let go for. far: it got past the line's reach. twice:
+ * a second slip while wary from the first (one with a time). unlured: the rare one, pulled at unlured.
+ */
+export type Getaway = 'slack' | 'time' | 'off' | 'let' | 'far' | 'twice' | 'unlured';
+/**
  * A downy that got away runs flat out for this long (a thistle longer), and
  * stays wary for a while after: it hears you from further off and fights the
  * next pull harder. So a getaway costs a chase (the fourth playtest's careless
@@ -452,7 +463,7 @@ export const SLIP = { speed: 3.4, up: 3.6, noPull: 0.8, wary: 8 };
  * stays off for `off` seconds after the last of the drag; dragged more than `leave` rad off the downy, it stays off (you
  * have left it). The first press still has to land on the downy.
  */
-export const TUG_VIEW = { turn: 8, tilt: 5, most: 2, dead: 0.3, ramp: 0.25, ease: 16, drag: 0.02, fade: 6, off: 0.3, leave: 0.8 };
+export const TUG_VIEW = { turn: 8, tilt: 5, most: 2, dead: 0.3, ramp: 0.25, ease: 16, drag: 0.02, fade: 6, off: 0.3, leave: 0.8, grab: 0.15 };
 /**
  * Round 11: metres past Pull's reach that a wild one already on the line stays on it. Its pulls back and shifts edge it
  * away, and a press from the edge of Pull's reach lost it with the left thumb idle (brooks 25%, thistles 40%): moving
@@ -533,6 +544,11 @@ function feederTake(fd: Feeder, food: Food): boolean {
 export const HOPPER_PULL = 0.14;
 /** How near the crosshair's line must pass a hopper's middle to pull from it (m). */
 export const HOPPER_AIM = 0.6;
+/**
+ * Round 12: the "aim higher" mark comes for a hopper this far off at most (m), the crosshair's line passing this near
+ * its middle in plan (m), from `under` m below it to `over` m above it.
+ */
+export const AIM_HIGHER = { reach: 10, off: 0.7, under: 1.2, over: 3 };
 /** Seconds after a press that a steady aim settling on a penned downy still makes it a sort (round 10). */
 export const SORT_LATE = 0.3;
 /** How near the crosshair's line must pass a piece of food or fluff for you to be on it, not the downy past it (m). */
@@ -567,16 +583,25 @@ export function orderKey(o: { kind: DownyKind; live?: boolean; rare?: unknown; b
  * The pen a rare one would join: the fullest of yours with room and no rare one in it yet, so it adds the
  * most (one more fluff a meal from everyone in its pen, once: a second rare in a pen adds nothing). A rare one
  * in the jar, not yet penned, takes the first such pen. -1: none.
+ * Given its kind (backlog, round 12: the hunt's arrow sent a gold clover into the ember pen, where nothing in the
+ * feeder fed it and a feed run then skipped the pen), a pen of its own kind comes first, where most are its kind
+ * before one with a few; then an empty pen; a pen where it would be the only one of its kind only if no other has room.
  */
-export function rarePenOf(s: RanchState, countAboard = true): number {
+export function rarePenOf(s: RanchState, countAboard = true, kind?: DownyKind): number {
   const n = s.pads.map(() => 0);
+  const own = s.pads.map(() => 0);
   const has = s.pads.map(() => false);
   for (const d of s.downies) {
     if (d.gone || d.pen < 0) continue;
     n[d.pen]++;
+    if (d.kind === kind) own[d.pen]++;
     if (d.rare && d.tame) has[d.pen] = true;
   }
-  const open = s.pads.map((_p, i) => i).filter((i) => s.pads[i].kind === 'pen' && !has[i] && n[i] < PEN_MAX).sort((a, b) => n[b] - n[a]);
+  const tier = (i: number) => (!kind ? 0 : own[i] * 2 > n[i] ? 0 : own[i] > 0 ? 1 : n[i] === 0 ? 2 : 3);
+  const open = s.pads
+    .map((_p, i) => i)
+    .filter((i) => s.pads[i].kind === 'pen' && !has[i] && n[i] < PEN_MAX)
+    .sort((a, b) => tier(a) - tier(b) || n[b] - n[a]);
   const aboard = countAboard ? s.slots.reduce((a, q) => a + (q.t && isDowny(q.t) ? (q.downs ?? []).filter((r) => r.rare).length : 0), 0) : 0;
   return open[aboard] ?? -1;
 }
@@ -780,6 +805,8 @@ export class Sim {
   private holdTilt = 0;
   private holdDrag = 0;
   private holdOff = 0;
+  /** The downy the hold was last on (round 12: a new tug starts clear of the look that aimed it). */
+  private holdFor: Downy | null = null;
   /** A fresh press of Blow has yet to send its one (round 11: a held Blow's repeats can be stopped, a press never is). */
   private pressShot = false;
   /** The crate check for choosing the fluff (round 11): when next, and whether the aim was on a crate. */
@@ -1591,13 +1618,15 @@ export class Sim {
     this.onCrate = on;
   }
 
-  /** The wild downy you have a tug on (the one under the pull first, else the one with most of its pull in), or null. */
+  /** The wild downy you have a tug on (the one under the pull first, once it has `TUG_VIEW.grab` of a pull, else the one with most of its pull in), or null. */
   tugged(): Downy | null {
     let best: Downy | null = null;
     let bs = 0;
     for (const d of this.s.downies) {
       if (d.gone || d.tame || d.keep || d.strain <= 0 || d.drawn > 0) continue;
-      const score = (d.held ? 100 : 0) + d.tug + 1e-3;
+      // (Round 12: one just grabbed counts as under the pull once it has a pull on it. Another of its group hopping onto
+      // the crosshair was grabbed for a frame, the view went after it, and the fight you were in slipped off and got away.)
+      const score = (d.held && d.tug >= TUG_VIEW.grab ? 100 : 0) + d.tug + 1e-3;
       if (score > bs) {
         bs = score;
         best = d;
@@ -1614,10 +1643,19 @@ export class Sim {
   private holdView(dt: number, c: Controls): void {
     const p = this.s.player;
     const V = TUG_VIEW;
+    // (Backlog, round 12: a look that aimed the press is not a look taking over the tug. A two-thumb player's last drag,
+    // as the crosshair came onto it, kept the hold off for up to 0.75 s into the fight, a jink in that time left the
+    // crosshair off it, and it got away before any tell: most of the harness's early getaways with a good thumb.)
+    const on = this.tugged();
+    if (on && on !== this.holdFor && !((c.look ?? 0) > 0)) {
+      this.holdDrag = 0;
+      this.holdOff = 0;
+    }
+    this.holdFor = on;
     this.holdDrag = this.holdDrag * Math.exp(-V.fade * dt) + (c.look ?? 0);
     if (this.holdDrag > V.drag) this.holdOff = V.off;
     else if (this.holdOff > 0) this.holdOff -= dt;
-    const d = this.holdOff > 0 ? null : this.tugged();
+    const d = this.holdOff > 0 ? null : on;
     let wantYaw = 0;
     let wantTilt = 0;
     if (d) {
@@ -1684,12 +1722,15 @@ export class Sim {
   }
 
   /** What the crosshair is on: something drawable, a prickly nettleback, or nothing. */
-  aimTarget(aim: Aim): 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | null {
+  aimTarget(aim: Aim): 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | 'higher' | null {
     const s = this.s;
     for (const n of s.nettles) if (!n.gone && this.inCone(aim, n.x, n.y + 0.2, n.z) > 0) return 'prickly';
     if (this.wouldSell(aim)) return 'sell';
     if (this.wouldPen(aim) >= 0) return 'pen';
     if (this.wouldFeed(aim) >= 0) return 'feeder';
+    // (Round 12: with food chosen, aimed at a hopper that would take it but a blow would fall short of: "aim higher".
+    // From 6 m with roots chosen the crosshair showed the pull mark, and the blow fell short.)
+    if (this.blowShort(aim) >= 0) return 'higher';
     if (this.aimedDowny(aim)) return 'target';
     // Only what is under the crosshair and within Pull's reach: not something at the cone's edge while you aim past it.
     for (const it of s.items) if (!it.gone && it.noPull <= 0 && this.underAim(aim, it.x, it.y, it.z)) return 'target';
@@ -1848,6 +1889,7 @@ export class Sim {
     let bs = 1;
     let ba = 0;
     let penned = false;
+    let line: Downy | null = null;
     for (const d of s.downies) {
       if (d.gone || (d.flyT >= 0 && d.flyT < 0.35) || d.noPull > 0) continue;
       const dx = d.x - aim.ex;
@@ -1862,13 +1904,21 @@ export class Sim {
       const give = !d.tame && !d.keep ? CATCH[d.kind].give * (d.rare ? RARE_FIGHT.give : 1) : 0.3;
       let tol = inPen ? Math.max(Math.atan2(d.r, dist), 0.035) : Math.max(Math.atan2(d.r + give, dist), 0.07 * (give / 0.3));
       if (d.tug > 0) tol *= 1.3;
-      if (ang / tol < bs) {
+      if (ang / tol >= 1) continue;
+      // (Backlog, round 12: a wild one already on the line keeps it. Another of its group hopping nearer the crosshair took
+      // the pull, so the first one's lapsed and it got away before any tell: 7 of 11 getaways in the catch harness with
+      // the group about, the tester's "It got away." with no tell three times in four.)
+      // (Two on the line, the one with the most of its pull in: the fight you are in, not one just grabbed.)
+      if (!d.tame && !d.keep && (d.strain > 0 || d.tug > 0) && (!line || d.tug > line.tug)) line = d;
+      // (Backlog, round 12: and nothing hidden from you starts one: a tug began on a brook behind a bush, the ring on the leaves.)
+      if (ang / tol < bs && (d.strain > 0 || d.tug > 0 || d.drawn > 0 || this.phys.inSight(aim.ex, aim.ey, aim.ez, d.x, d.y, d.z, d.r))) {
         bs = ang / tol;
         best = d;
         ba = ang;
         penned = inPen;
       }
     }
+    if (line) return line;
     if (!best) return null;
     // A wild one already tugging against you keeps the pull: food in the cone never steals it (the fourth
     // playtest's careful pulls at a brook drew dewberries in 3 tries of 4).
@@ -2017,7 +2067,7 @@ export class Sim {
     // (Round 11: one with a time that slips free while wary from the last slip is gone: a getaway. A slow thumb's tries were
     // free, and with the view held it landed 21 brooks of 22 in 20 s. A good reader never slips.)
     if (CATCH[d.kind].limit > 0 && d.wary > 0) {
-      this.escape(d);
+      this.escape(d, 'twice');
       return;
     }
     d.tug = 0;
@@ -2119,7 +2169,8 @@ export class Sim {
    * for a moment. A brook by the pond leaps into the water and is gone; a
    * thistle bolts.
    */
-  private escape(d: Downy, slack = false): void {
+  private escape(d: Downy, why: Getaway): void {
+    const slack = why === 'slack';
     const p = this.s.player;
     d.tug = 0;
     d.strain = 0;
@@ -2161,7 +2212,7 @@ export class Sim {
     d.hopT = 0.05;
     d.squashV += 4;
     this.emit({ t: 'squeak', x: d.x, y: d.y, z: d.z, kind: d.kind });
-    this.emit({ t: 'escape', x: d.x, y: d.y, z: d.z, kind: d.kind, dove, ...(slack ? { slack } : {}) });
+    this.emit({ t: 'escape', x: d.x, y: d.y, z: d.z, kind: d.kind, dove, ...(slack ? { slack } : {}), why });
   }
 
   private firstDraw(): void {
@@ -2511,7 +2562,9 @@ export class Sim {
       if (d.sinceFeint > FEINT.after) d.sinceFeint = -1;
     }
     if (wild && !d.keep && d.strain > 0 && !d.held && (d.feint > 0 || d.sinceFeint >= 0) && d.back <= 0 && d.tell <= 0 && d.slackT < 0 && !this.drawing) {
-      d.tug = Math.max(0, d.tug - FEINT.cost * this.tugNeed(d));
+      // (Backlog, round 12: never all of it. Early in a fight the cost took the pull to nothing, and a pull at nothing once
+      // past a third is a getaway: let go on a fake puff, it was gone at once, with no tell and no slack to pull again in.)
+      d.tug = Math.max(Math.min(d.tug * 0.5, 0.02), d.tug - FEINT.cost * this.tugNeed(d));
       d.easeT = Math.max(d.easeT, EASE_HOLD);
       d.slackT = 0;
       d.sinceFeint = -1;
@@ -2554,7 +2607,7 @@ export class Sim {
         // (Only while Pull is let go: pressed but off it, the pull fades as any lapse does.)
         d.slackT += dt;
         if (this.knows('ease') && d.slackT > this.tugRule(d).slack) {
-          this.escape(d, true);
+          this.escape(d, 'slack');
           return;
         }
       }
@@ -2594,7 +2647,13 @@ export class Sim {
       // without (a clover, an ember) when the pull lapses once it was a third of the way in. (The fifth
       // playtest's careless thumb lost all ten brooks to a lapse, each into the pond.)
       const lim = fightLimit(d);
-      if ((lim > 0 && d.strain >= lim) || (lim <= 0 && d.tug <= 0 && d.peak >= SHAKE_LOOSE)) this.escape(d);
+      if (lim > 0 && d.strain >= lim) this.escape(d, d.rare && !(d.calm > 0 || d.eatT > 0) ? 'unlured' : 'time');
+      else if (lim <= 0 && d.tug <= 0 && d.peak >= SHAKE_LOOSE) {
+        // (Why the pull lapsed, for the note: out past the line's reach, Pull let go, or the crosshair off it.)
+        // (The rare one unlured is the reason whatever else: a fight with it then cannot be won.)
+        const far = Math.hypot(d.x - px, d.y + 0.25 - (s.player.y + EYE), d.z - pz) > this.range + 0.4 + TUG_REACH - 0.1;
+        this.escape(d, d.rare && !(d.calm > 0 || d.eatT > 0) ? 'unlured' : far ? 'far' : !this.drawing ? 'let' : 'off');
+      }
       else if (d.tug <= 0 && d.back <= 0 && d.tell <= 0 && d.feint <= 0) {
         d.strain = 0;
         d.peak = 0;
@@ -3449,6 +3508,78 @@ export class Sim {
   private ghostFood: Item | undefined;
 
   /**
+   * Round 12: the pen whose hopper the crosshair is on (within AIM_HIGHER.reach, the line within AIM_HIGHER.off of its
+   * middle), with food chosen that its feeder takes, when a blow now would come down short of it (or under it); -1 else.
+   * The crosshair says "aim higher" there (wouldFeed has the hopper mark once the aim is right).
+   */
+  blowShort(aim: Aim): number {
+    const s = this.s;
+    const slot = s.slots[s.sel];
+    if (!slot.t || slot.n <= 0 || !isFood(slot.t)) return -1;
+    const food = slot.t;
+    let pen = -1;
+    let bd = Infinity;
+    let hx = 0;
+    let hy = 0;
+    let hz = 0;
+    for (let i = 0; i < s.pads.length; i++) {
+      const p = s.pads[i];
+      if (p.kind !== 'pen' || !p.ups.includes('feeder') || this.feederRefuses(i, food)) continue;
+      const h = padSpots(i).hopper;
+      const y = this.phys.floor(h.x, h.z) + h.y;
+      // (In plan: the crosshair's line over the hopper, from a little under it to well over it, so following "aim
+      // higher" up keeps the mark until the hopper mark takes over.)
+      const flat = Math.hypot(aim.dx, aim.dz) || 1;
+      const ux = aim.dx / flat;
+      const uz = aim.dz / flat;
+      const dx = h.x - aim.ex;
+      const dz = h.z - aim.ez;
+      const along = dx * ux + dz * uz;
+      if (along <= 0 || along > AIM_HIGHER.reach) continue;
+      const off = Math.abs(dx * uz - dz * ux);
+      const over = aim.ey + (aim.dy / flat) * along - y;
+      if (over < -AIM_HIGHER.under || over > AIM_HIGHER.over) continue;
+      if (off < AIM_HIGHER.off && off < bd) {
+        bd = off;
+        pen = i;
+        hx = h.x;
+        hy = y;
+        hz = h.z;
+      }
+    }
+    if (pen < 0) return -1;
+    // Fly it ahead as wouldFeed does: where is it when it reaches the hopper's distance, or where it comes down first?
+    const p = s.player;
+    const b = (this.ghostFood ??= newItem(s, 'cloverhead', 0, 0, 0));
+    b.x = aim.mx + aim.dx * 0.3;
+    b.y = aim.my + aim.dy * 0.3;
+    b.z = aim.mz + aim.dz * 0.3;
+    b.vx = aim.dx * 14 + p.vx * 0.5;
+    b.vy = aim.dy * 14 + 1.4;
+    b.vz = aim.dz * 14 + p.vz * 0.5;
+    b.grounded = false;
+    const far = Math.hypot(hx - b.x, hz - b.z) - 0.4;
+    const x0 = b.x;
+    const z0 = b.z;
+    const dt = 1 / 60;
+    for (let t = 0; t < 2.5; t += dt) {
+      b.vy -= G_ITEM * dt;
+      const drag = Math.exp(-0.12 * dt);
+      b.vx *= drag;
+      b.vz *= drag;
+      const ox = b.x;
+      const oz = b.z;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.z += b.vz * dt;
+      this.phys.collide(b, ox, oz, 'item');
+      if (Math.hypot(b.x - x0, b.z - z0) >= far) return b.y < hy ? pen : -1;
+      if (b.y <= this.phys.floor(b.x, b.z)) return pen;
+    }
+    return -1;
+  }
+
+  /**
    * Would a blow now land the chosen food in a feeder that takes it? Flies it
    * ahead the way a real blown thing flies and returns the pen, or -1. The
    * crosshair shows a little hopper when it would (the feeder had no mark).
@@ -3980,8 +4111,15 @@ export class Sim {
 
   /**
    * The pen a garden's feed run fills: a neighbour on the same row with a
-   * feeder that takes this crop (the same food in it, or empty with downies
-   * that eat it) and has room, the emptier first. -1 for none.
+   * feeder that takes this crop and has room, where most of its downies eat
+   * the crop (or nobody is in it yet), the emptier first; failing that one
+   * where a third or more do. -1 for none.
+   * (Backlog, round 12: it skipped an empty feeder if anyone in the pen would
+   * not eat the crop, and took a food anyone ate. A gold clover in the ember
+   * pen kept the sweetroots out of its empty feeder, five of seven embers
+   * starved, and the garden filled the brook feeder with 13 sweetroots for the
+   * one thistle there. Now a pen's run goes by its majority: a guest neither
+   * keeps its kind's food out nor brings its own food in.)
    */
   runTarget(i: number): number {
     const s = this.s;
@@ -3993,13 +4131,21 @@ export class Sim {
       if (j < 0 || j >= s.pads.length || Math.floor(j / 3) !== Math.floor(i / 3)) continue;
       const p = s.pads[j];
       if (p.kind !== 'pen' || !p.ups.includes('feeder') || this.feederRefuses(j, crop)) continue;
-      // (Round 10: a food it holds already, or one a downy in the pen eats, so a mixed pen's feeder gets both.)
-      const holds = feederFoods(p.feeder).some((q) => q.t === crop);
-      if (!holds && feederTotal(p.feeder) > 0 && !s.downies.some((d) => !d.gone && d.pen === j && eats(d.kind, crop))) continue;
-      if (feederTotal(p.feeder) === 0 && s.downies.some((d) => !d.gone && d.pen === j && !eats(d.kind, crop))) continue;
-      const n = feederTotal(p.feeder);
-      if (n < bn) {
-        bn = n;
+      let here = 0;
+      let eat = 0;
+      for (const d of s.downies) {
+        if (d.gone || d.pen !== j) continue;
+        here++;
+        if (eats(d.kind, crop)) eat++;
+      }
+      // (A pen where a good share eat it, a third or more, still takes what a pen where most do cannot: a mixed pen's
+      // feeder holds both its foods. Fewer than that, as one thistle among brooks, never.)
+      if (here > 0 && eat * 3 < here) continue;
+      const most = here === 0 || eat * 2 > here;
+      // (Where most eat it first, then the emptier; even, the one where more eat it.)
+      const score = (most ? 0 : 1e6) + feederTotal(p.feeder) - eat * 1e-3;
+      if (score < bn) {
+        bn = score;
         best = j;
       }
     }
@@ -4795,9 +4941,9 @@ export class Sim {
    * About how many coins a day a rare one adds once penned: one more fluff a meal from every downy in the pen
    * it would join (see rarePenOf), at today's prices, rounded to ten.
    */
-  rareWorth(): number {
+  rareWorth(kind?: DownyKind): number {
     const s = this.s;
-    const i = rarePenOf(s);
+    const i = rarePenOf(s, true, kind);
     if (i < 0) return 0;
     return Math.round(this.rareDaily(i) / 10) * 10;
   }
@@ -4823,8 +4969,8 @@ export class Sim {
    * RARE_DAYS days, as "then 140 more today" on a week's last day read as paying later today): its pen's extra fluff
    * a day (`rareWorth`), capped (RARE_EXTRA), times RARE_DAYS.
    */
-  rareWeek(): { coins: number; days: number } {
-    return { coins: Math.round((this.rareWorth() * RARE_DAYS) / 10) * 10, days: RARE_DAYS };
+  rareWeek(kind?: DownyKind): { coins: number; days: number } {
+    return { coins: Math.round((this.rareWorth(kind) * RARE_DAYS) / 10) * 10, days: RARE_DAYS };
   }
 
   /** The board's rare downy, wild and waiting where it was seen, if it is out today. */
@@ -4849,7 +4995,8 @@ export class Sim {
       // What it is worth once penned, as a number (the seventh playtest read "Its pen sheds more." and picked the
       // biggest pay), over the rest of the week rather than "a day" (round 9: "140 a day" against a one-off 255 read as
       // the obvious pick, whatever the days left).
-      const w = this.rareWeek();
+      // (Round 12: the pen its arrow will point at, by its kind.)
+      const w = this.rareWeek(o.kind);
       return { title: `${r[0].toUpperCase()}${r.slice(1)}, by ${due}`, note: w.coins > 0 ? `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, then ${fmtCoins(w.coins)} over ${w.days} days` : `By ${SIGHTINGS[o.rare.spot].name}. Pays ${fmtCoins(o.pay)}, and stays` };
     }
     // (Round 9: "Caught today, after dark" read as "catch them after dark".)
@@ -4885,9 +5032,13 @@ export class Sim {
     }
   }
 
-  /** The next goals to show: the first two not yet done. */
+  /**
+   * The next goals to show: the first two not yet done. A kind's catch goal comes first once its gate is open (backlog,
+   * round 12: paying for the ridge gate with 20 fluff not yet sold dropped the page back to "Sell 20 fluff", with no
+   * word or arrow for the ridge just paid for).
+   */
   openGoals(n = 2): typeof GOALS {
-    return GOALS.filter((g) => !this.s.goals.includes(g.id)).slice(0, n);
+    return nextGoals(this.s.goals).slice(0, n);
   }
 
   // ------------------------------------------------------------ interacting

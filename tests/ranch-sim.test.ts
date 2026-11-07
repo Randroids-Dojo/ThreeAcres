@@ -425,7 +425,8 @@ describe('the journal and the save', () => {
     sim.complete('ridge');
     sim.complete('catch');
     expect(sim.s.coins).toBe(c + 200 + 20);
-    expect(sim.openGoals(2).map((g) => g.id)).toEqual(['pen', 'feed']);
+    // (Round 12: the ridge open, its catch goal comes first.)
+    expect(sim.openGoals(2).map((g) => g.id)).toEqual(['ember', 'pen']);
   });
 
   it('round-trips through the save exactly', () => {

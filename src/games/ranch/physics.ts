@@ -3,7 +3,7 @@
 // with a height; walls are straight lines with gate gaps; pens are rings that
 // keep a body on the side it was on unless it clears the fence.
 
-import { PEN_R, PADS, HOUSE, WINDMILL, CRATES, BOARD, WORKBENCH, GATE_SIGN, GATES, GATE_HALF, RIDGE_X, HOLLOW_X, RANCH_Z, MINX, MAXX, MINZ, MAXZ, TREES, PINES, WILLOWS, ROCKS, OAK, DEAD_TREE, CRAG, heightAt, waterAt, crossings, type GateId } from './world';
+import { PEN_R, PADS, HOUSE, WINDMILL, CRATES, BOARD, WORKBENCH, GATE_SIGN, GATES, GATE_HALF, RIDGE_X, HOLLOW_X, RANCH_Z, MINX, MAXX, MINZ, MAXZ, TREES, PINES, WILLOWS, ROCKS, BERRY_BUSHES, OAK, DEAD_TREE, CRAG, heightAt, waterAt, crossings, type GateId } from './world';
 import type { Body, Pad } from './state';
 
 export interface Circ {
@@ -72,8 +72,74 @@ export const CRATE_BOXES = CRATES.map((c) => ({ x0: c.x - 0.7, z0: c.z - 0.7, x1
 export const CRATE = CRATE_BOXES[0];
 export const PORCH = { x0: HOUSE.x - 3.6, z0: HOUSE.z - HOUSE.d / 2 - 1.5, x1: HOUSE.x + 3.6, z1: HOUSE.z - HOUSE.d / 2, y: 0.32 };
 
+/**
+ * Something you cannot see through, for a line of sight (backlog, round 12: a tug began on a brook hidden behind a
+ * bush). Its plan-view bounds (x, z, r) and a test for a point inside it. Shapes follow the drawn props a little inside
+ * their edges (leaves are ragged), so a downy you can half see is still in sight.
+ */
+interface Blocker {
+  x: number;
+  z: number;
+  r: number;
+  inside(x: number, y: number, z: number): boolean;
+}
+
+function sphere(cx: number, cy: number, cz: number, r: number, sy = 1): Blocker {
+  return { x: cx, z: cz, r, inside: (x, y, z) => (x - cx) ** 2 + ((y - cy) / sy) ** 2 + (z - cz) ** 2 < r * r };
+}
+
+function column(cx: number, cz: number, r: number, y0: number, y1: number): Blocker {
+  return { x: cx, z: cz, r, inside: (x, y, z) => y > y0 && y < y1 && (x - cx) ** 2 + (z - cz) ** 2 < r * r };
+}
+
+/** What blocks the view (made once: the props never move). */
+function blockers(): Blocker[] {
+  const out: Blocker[] = [];
+  // Dewberry bushes: three leafy lumps each (scene/props.ts), turned and scaled as drawn.
+  for (const b of BERRY_BUSHES) {
+    const g = heightAt(b.x, b.z);
+    const c = Math.cos(b.r);
+    const sn = Math.sin(b.r);
+    for (const [lx, ly, lz, lr] of [
+      [0, 0.5, 0, 0.62],
+      [0.45, 0.42, 0.2, 0.5],
+      [-0.35, 0.44, -0.3, 0.48],
+    ]) {
+      out.push(sphere(b.x + (lx * c + lz * sn) * b.s, g + ly * b.s, b.z + (-lx * sn + lz * c) * b.s, lr * b.s * 0.85));
+    }
+  }
+  // Rocks: a squashed lump, sunk a little.
+  for (const r of ROCKS) out.push(sphere(r.x, heightAt(r.x, r.z) - 0.15, r.z, 0.8 * r.s, 0.7));
+  // Trunks; a pine's skirt of branches from about knee height.
+  for (const t of [...TREES, ...WILLOWS]) out.push(column(t.x, t.z, 0.24 * t.s, heightAt(t.x, t.z) - 1, heightAt(t.x, t.z) + 3 * t.s));
+  for (const t of PINES) {
+    const g = heightAt(t.x, t.z);
+    out.push(column(t.x, t.z, 0.18 * t.s, g - 1, g + 2 * t.s));
+    out.push({
+      x: t.x,
+      z: t.z,
+      r: 1.5 * t.s,
+      inside: (x, y, z) => {
+        const h = (y - g) / t.s;
+        const d = Math.hypot(x - t.x, z - t.z) / t.s;
+        for (let k = 0; k < 4; k++) {
+          const base = 0.75 + k * 1.05;
+          if (h > base && h < base + 1.9 && d < (1.5 - k * 0.32) * (1 - (h - base) / 1.9) * 0.85) return true;
+        }
+        return false;
+      },
+    });
+  }
+  out.push(column(OAK.x, OAK.z, 0.9, heightAt(OAK.x, OAK.z) - 1, heightAt(OAK.x, OAK.z) + 6));
+  out.push(column(DEAD_TREE.x, DEAD_TREE.z, 0.45, heightAt(DEAD_TREE.x, DEAD_TREE.z) - 1, heightAt(DEAD_TREE.x, DEAD_TREE.z) + 5));
+  out.push(column(CRAG.x, CRAG.z, 3.1, -INF, INF));
+  out.push(column(WINDMILL.x, WINDMILL.z, 1.5, -INF, INF));
+  return out;
+}
+
 export class Physics {
   private grid = new Map<number, Circ[]>();
+  private sightBlockers: Blocker[] = blockers();
   private statics: Circ[] = [];
   private padCircs: Circ[] = [];
   boxes: Box[] = [];
@@ -307,6 +373,53 @@ export class Physics {
     if (b.z < MINZ + 2) (b.z = MINZ + 2), (b.vz = Math.abs(b.vz) * 0.3), (hit = true);
     if (b.z > MAXZ - 2) (b.z = MAXZ - 2), (b.vz = -Math.abs(b.vz) * 0.3), (hit = true);
     return hit;
+  }
+
+  /**
+   * Can you see a downy (feet at x, y, z; body radius r) from the eye? Yes if any of its middle, top and two sides can be
+   * seen: nothing that blocks the view (a bush, a rock, a trunk, a pine's branches, the house, a crate, a silo, the
+   * ground) lies between (backlog, round 12: a tug began on a brook hidden behind a bush).
+   */
+  inSight(ex: number, ey: number, ez: number, x: number, y: number, z: number, r: number): boolean {
+    const dx = x - ex;
+    const dz = z - ez;
+    const flat = Math.hypot(dx, dz) || 1;
+    // Sideways across the view, for its two sides.
+    const sx = (-dz / flat) * r * 0.8;
+    const sz = (dx / flat) * r * 0.8;
+    const mid = y + 0.25;
+    const pts: [number, number, number][] = [
+      [x, mid, z],
+      [x, mid + r * 0.8, z],
+      [x + sx, mid, z + sz],
+      [x - sx, mid, z - sz],
+    ];
+    // Only what lies near the line in plan is looked at.
+    const near = (bx: number, bz: number, br: number) => {
+      const t = Math.max(0, Math.min(1, ((bx - ex) * dx + (bz - ez) * dz) / (flat * flat)));
+      return Math.hypot(bx - ex - dx * t, bz - ez - dz * t) < br + r + 0.1;
+    };
+    const props = this.sightBlockers.filter((b) => near(b.x, b.z, b.r));
+    const circs = this.padCircs.filter((c) => c.r > 0.5 && near(c.x, c.z, c.r));
+    const boxes = this.boxes.filter((q) => near((q.x0 + q.x1) / 2, (q.z0 + q.z1) / 2, Math.hypot(q.x1 - q.x0, q.z1 - q.z0) / 2));
+    const clear = (tx: number, ty: number, tz: number) => {
+      const len = Math.hypot(tx - ex, ty - ey, tz - ez);
+      const n = Math.max(2, Math.ceil(len / 0.12));
+      for (let i = 1; i < n; i++) {
+        const t = i / n;
+        // (Not right at the eye: you may stand in a bush's leaves.)
+        if (t * len < 0.5) continue;
+        const px = ex + (tx - ex) * t;
+        const py = ey + (ty - ey) * t;
+        const pz = ez + (tz - ez) * t;
+        if (heightAt(px, pz) > py + 0.05) return false;
+        for (const b of props) if (b.inside(px, py, pz)) return false;
+        for (const c of circs) if (py < heightAt(c.x, c.z) + c.h && (px - c.x) ** 2 + (pz - c.z) ** 2 < c.r * c.r) return false;
+        for (const q of boxes) if (px > q.x0 && px < q.x1 && pz > q.z0 && pz < q.z1 && py < heightAt((q.x0 + q.x1) / 2, (q.z0 + q.z1) / 2) + q.h) return false;
+      }
+      return true;
+    };
+    return pts.some(([px, py, pz]) => clear(px, py, pz));
   }
 
   /** The pen a point is inside, or -1. */

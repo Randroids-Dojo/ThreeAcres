@@ -333,6 +333,59 @@ await p.waitForTimeout(700);
 const oz = await p.evaluate(() => { const a = document.querySelector('.rh-zone').getBoundingClientRect(); const b = document.querySelector('.rh-page').getBoundingClientRect(); return { clear: a.top >= b.bottom || a.bottom <= b.top || a.left >= b.right || a.right <= b.left, zone: Math.round(a.top), page: Math.round(b.bottom) }; });
 check("with the order and the goal up, the zone's name still sits clear of the journal page", oz.clear, JSON.stringify(oz));
 await p.screenshot({ path: '/tmp/ranch-thumbs-orders.png' });
+// Round 12: three goals took four rows and about 115 px of a 900 px phone. With the order's tally, a gate's goal short of
+// its coins and "Catch more" on the page, walking with the stick shows one line (the one the arrow is for); standing
+// still a moment, all three again. The page's lines read every frame through the walk.
+await p.evaluate(() => {
+  const s = window.ranch.sim.s;
+  for (const g of ['catch', 'pen', 'feed', 'herd', 'sell', 'plant', 'order', 'ridge', 'ember', 'feeder']) if (!s.goals.includes(g)) s.goals.push(g);
+  s.coins = 43;
+  s.hour = 9;
+  const pl = s.player;
+  pl.x = 0;
+  pl.z = 34;
+  pl.y = window.ranch.sim.phys.floor(0, 34);
+  pl.vx = pl.vz = 0;
+  pl.yaw = Math.PI;
+});
+await p.waitForTimeout(1500);
+const pageRows = () => p.evaluate(() => { const e = document.querySelector('.rh-page'); const r = e.getBoundingClientRect(); return { lines: [...e.querySelectorAll('.rh-page.up li span')].map((q) => q.textContent), h: Math.round(r.height) }; });
+const still3 = await pageRows();
+await p.evaluate(() => {
+  const w = (window.__walkPage = { rows: [], on: true });
+  const step = () => {
+    if (!w.on) return;
+    requestAnimationFrame(step);
+    const e = document.querySelector('.rh-page');
+    const pl = window.ranch.sim.s.player;
+    w.rows.push([Math.hypot(pl.vx, pl.vz), e.querySelectorAll('.rh-page.up li').length]);
+  };
+  requestAnimationFrame(step);
+});
+await touch('touchStart', [[100, 760, 61]]);
+for (let i = 1; i <= 6; i++) {
+  await touch('touchMove', [[100, 760 - i * 7, 61]]);
+  await p.waitForTimeout(16);
+}
+await p.waitForTimeout(1600);
+const walking = await pageRows();
+await touch('touchEnd', [[100, 718, 61]]);
+await p.waitForTimeout(1600);
+const stillAgain = await pageRows();
+const walkLog = await p.evaluate(() => {
+  const w = window.__walkPage;
+  w.on = false;
+  return w.rows;
+});
+// Frames well into the walk (over 40 frames walking) with more than one line on the page.
+let walkFrames = 0;
+let longWalkMulti = 0;
+for (const [sp, n] of walkLog) {
+  walkFrames = sp > 1 ? walkFrames + 1 : 0;
+  if (walkFrames > 40 && n > 1) longWalkMulti++;
+}
+check('round 12: walking, the journal page shows one line (the one the arrow is for); still, all three', still3.lines.length === 3 && walking.lines.length === 1 && stillAgain.lines.length === 3 && walking.lines[0] === 'Catch more. Ten fit in a pen.' && longWalkMulti === 0, JSON.stringify({ still: still3, walking, stillAgain, longWalkMulti }));
+check('round 12: the walking page is far shorter than the three-line one', walking.h <= still3.h * 0.6, `${still3.h} px to ${walking.h} px`);
 // The order lesson's page (when the first order is posted): clear of the pause button and the coins too.
 await p.evaluate(() => { const r = window.ranch; const s = r.sim.s; s.learn = s.learn.filter((w) => w !== 'lesson:order'); s.learnCount['order:taken'] = 0; s.orders = []; r.sim.postOrders(true); const pl = s.player; pl.x = 0; pl.z = 30; pl.y = r.sim.phys.floor(0, 30); });
 await p.waitForTimeout(800);

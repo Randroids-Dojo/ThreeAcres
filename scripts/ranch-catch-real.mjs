@@ -23,7 +23,11 @@
 // turned by itself, the most that turn changed in a frame, and the share of the tug the crosshair was on the downy.
 // With a third argument of keys, one more run plays with the keyboard only on a desktop: W to walk in, F to pull, no
 // mouse moved at all.
-//   RANCH_URL=http://localhost:5247 node scripts/ranch-catch-real.mjs [tries] [kinds] [thumbs, comma separated; or keys]
+// Backlog, round 12 (three of the tester's four "It got away." came before any tell): every run counts getaways that came
+// before the fight showed a tell, a pull back or a fake puff on the ring, with the note each one put up; GROUP=1 puts two
+// more of its kind a metre or two off, as the valley's groups are (another of the group hopping nearer the crosshair took
+// the pull, and the first got away with no tell).
+//   RANCH_URL=http://localhost:5247 [GROUP=1] node scripts/ranch-catch-real.mjs [tries] [kinds] [thumbs, comma separated; or keys]
 import { launch, openRanch, touchSession } from './ranch-lib.mjs';
 
 const tries = Number(process.argv[2]) || 6;
@@ -46,6 +50,7 @@ const ALL = {
   'two-slow': { lag: 180, gain: 0.55, wobble: 6, run: false, react: [450, 650], fooled: 0.6, two: { travel: 180, stick: true } },
 };
 const pick = (process.argv[4] || '').split(',').filter(Boolean);
+const GROUP = !!process.env.GROUP;
 const keysOnly = pick.includes('keys');
 const THUMBS = Object.fromEntries(Object.entries(ALL).filter(([n]) => !pick.length || pick.includes(n)));
 const SENS = 0.0062;
@@ -104,7 +109,7 @@ async function chase(which, thumb, seed) {
   const rare = which.startsWith('rare-');
   const kind = rare ? which.slice(5) : which;
   // A fresh wild downy of the kind at one of its homes, 12 m off on a dry side (a lured rare one 8 m); nothing else wild.
-  const setup = await page.evaluate(([kind, seed, rare]) => {
+  const setup = await page.evaluate(([kind, seed, rare, group]) => {
     const r = window.ranch;
     const sim = r.sim;
     const s = sim.s;
@@ -132,6 +137,15 @@ async function chase(which, thumb, seed) {
       d.rare = true;
       d.calm = 9;
     }
+    if (group) {
+      for (const [ox, oz] of [
+        [1.6, 0.8],
+        [-1.2, 1.4],
+      ]) {
+        const e = sim.spawn(kind, H[0] + ox, H[1] + oz, false);
+        e.hunger = 0.2;
+      }
+    }
     const p = s.player;
     let a = seed * 2.399;
     const start = rare ? 8 : kind === 'thistle' ? 16 : 12;
@@ -148,7 +162,7 @@ async function chase(which, thumb, seed) {
     p.vx = p.vz = p.vy = 0;
     r.aimAt(d.x, d.y + 0.25, d.z);
     return { id: d.id };
-  }, [kind, seed, rare]);
+  }, [kind, seed, rare, GROUP]);
   let lx = 300;
   let ly = 430;
   let fid = 41;
@@ -199,6 +213,10 @@ async function chase(which, thumb, seed) {
   let escapes = 0;
   let fightAt = -1;
   let lastSay = '';
+  // (Round 12: a fight's tell seen yet, and the getaways that came before one, with their notes.)
+  let told = false;
+  let wasLine = false;
+  const early = [];
   let caughtAt = 0;
   // (Round 9: a fight is two to five beats, 4 to 10 s, so a try runs to 20 s; it was 14.)
   while (Date.now() - t0 < 20000) {
@@ -217,9 +235,16 @@ async function chase(which, thumb, seed) {
       return { marked, strain: d ? d.strain : 0, drawn: d ? d.drawn : 0, noPull: d ? d.noPull : 0, ring, say, p: { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch }, d: d && { x: d.x, y: d.y + 0.25, z: d.z, gone: d.gone }, caught: s.slots.some((q) => q.t === window.ranch.sim.s.downies.find((x) => x.id === id)?.kind && q.n > 0), food: s.slots.reduce((a, q) => a + (q.t && !['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0), kind: d?.kind, aboard: s.slots.reduce((a, q) => a + (['clover', 'ember', 'brook', 'thistle'].includes(q.t) ? q.n : 0), 0) };
     }, setup.id);
     food = o.food;
+    if (o.strain > 0 && !wasLine) told = false;
+    wasLine = o.strain > 0;
+    if (o.ring.tell || o.ring.back || o.ring.feint) told = true;
     if (o.say !== lastSay) {
-      if (/slipped free/.test(o.say)) slips++;
-      if (/got away|into the water/.test(o.say)) escapes++;
+      if (/slipped free(?! twice)/.test(o.say)) slips++;
+      // (Its own getaway, not one of its group's: the bellows leaves it be for 1.6 s after.)
+      if (/got away|into the water/.test(o.say) && o.noPull > 1) {
+        escapes++;
+        if (!told) early.push(o.say);
+      }
       lastSay = o.say;
     }
     if (o.aboard > 0) {
@@ -344,10 +369,10 @@ async function chase(which, thumb, seed) {
   if (prev.length) await t.send('touchEnd', []);
   await page.waitForTimeout(250);
   const first = result === 'caught' && slips === 0 && escapes === 0;
-  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips, feints };
+  return { result, secs, food, tickMs: (secs * 1000) / Math.max(1, ticks), fps, first, fight: first && fightAt >= 0 ? (caughtAt - fightAt) / 1000 : 0, backs, slips, feints, escapes, early };
 }
 
-console.log(`Real-touch catches on the Pixel viewport, ${tries} tries per kind and thumb (${process.env.RANCH_URL || 'default url'})`);
+console.log(`Real-touch catches on the Pixel viewport, ${tries} tries per kind and thumb${GROUP ? ", each with two more of its kind about" : ""} (${process.env.RANCH_URL || "default url"})`);
 for (const kind of keysOnly ? [] : kinds) {
   for (const [name, thumb] of Object.entries(THUMBS)) {
     let n = 0;
@@ -359,6 +384,8 @@ for (const kind of keysOnly ? [] : kinds) {
     let tick = 0;
     let fps = 0;
     let feints = 0;
+    let escapesN = 0;
+    const earlyNotes = [];
     const fights = [];
     const out = [];
     for (let k = 0; k < tries; k++) {
@@ -370,6 +397,8 @@ for (const kind of keysOnly ? [] : kinds) {
         fights.push(r.fight);
       }
       feints += r.feints;
+      escapesN += r.escapes;
+      earlyNotes.push(...r.early);
       backs += r.backs;
       if (r.slips) slipped++;
       if (r.food > 0) food++;
@@ -390,7 +419,7 @@ for (const kind of keysOnly ? [] : kinds) {
           return out;
         })
       : null;
-    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 20 s ${n}; fight ${first ? (fight / first).toFixed(1) : '-'} s (middle ${mid}); ${(backs / tries).toFixed(1)} pull backs a try, ${(feints / tries).toFixed(1)} fake puffs, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)${view ? `  view: fastest ${view.fast.toFixed(2)} rad/s (99% under ${view.p99.toFixed(2)}), changed at most ${view.jerk.toFixed(2)} rad/s in a frame, crosshair on it ${Math.round(view.on * 100)}% of the tug` : ''}`);
+    console.log(`   ${kind.padEnd(11)} ${name.padEnd(9)} first try ${first} of ${tries}, in 20 s ${n}; getaways ${escapesN}, before any tell ${earlyNotes.length}${earlyNotes.length ? ` (${earlyNotes.join(' | ')})` : ''}; fight ${first ? (fight / first).toFixed(1) : '-'} s (middle ${mid}); ${(backs / tries).toFixed(1)} pull backs a try, ${(feints / tries).toFixed(1)} fake puffs, slipped in ${slipped}; food drawn in ${food}  [${out.join(' ')}]  (a look move every ${Math.round(tick)} ms, ${Math.round(fps)} fps)${view ? `  view: fastest ${view.fast.toFixed(2)} rad/s (99% under ${view.p99.toFixed(2)}), changed at most ${view.jerk.toFixed(2)} rad/s in a frame, crosshair on it ${Math.round(view.on * 100)}% of the tug` : ''}`);
   }
 }
 await page.close();

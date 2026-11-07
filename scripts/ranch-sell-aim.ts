@@ -317,3 +317,103 @@ function tryPen(x: number, z: number, tx: number, tz: number, m: { f: number; r:
   console.log(`live downies into the crate: ${row.join('  ')}   overall ${Math.round((ok / all) * 100)}%`);
   console.log(`downy sell mark: matched ${agreeD}, promised a sale that missed ${yesD}, sold unpromised ${noD}`);
 }
+
+// Round 12: food blown at a feeder's hopper (the tester's roots, aimed at a hopper from 6 m, fell short under the pull
+// mark). From 2 to 9 m on the lane side of an ember pen with a feeder, at angles across it, the crosshair on the hopper
+// and a thumb's error round it, sweetroots chosen: what the crosshair said (the hopper mark, "aim higher", the pull mark
+// or nothing), whether the blow landed in the feeder, and, following "aim higher" up in 5 cm steps until the hopper mark
+// shows, whether that blow lands.
+import { padSpots } from '../src/games/ranch/sim';
+{
+  const pad = 1;
+  const h = padSpots(pad).hopper;
+  function feederSim(x: number, z: number): Sim {
+    const sim = new Sim(null);
+    const s = sim.s;
+    sim.wild = false;
+    s.downies = [];
+    s.items = [];
+    s.learn.push('coins', 'bellows', 'draw', 'puff');
+    s.pads[pad].kind = 'pen';
+    s.pads[pad].ups = ['feeder'];
+    s.pads[pad].feeder = { t: 'sweetroot', n: 5 };
+    sim.phys.setPads(s.pads);
+    const p = s.player;
+    p.x = x;
+    p.z = z;
+    p.y = sim.phys.floor(x, z);
+    p.vx = p.vy = p.vz = 0;
+    s.slots[0] = { t: 'sweetroot', n: 3 };
+    s.sel = 0;
+    return sim;
+  }
+  function blow(x: number, z: number, ty: number, tx: number, tz: number): { said: string; landed: boolean } {
+    const sim = feederSim(x, z);
+    const aim = aimFrom(sim, tx, ty, tz, MUZZLES.phone);
+    const said = sim.aimTarget(aim) ?? 'none';
+    const n0 = sim.s.pads[pad].feeder.n;
+    sim.puff(aim);
+    for (let t = 0; t < 3; t += 1 / 60) sim.update(1 / 60, idle, aim);
+    return { said, landed: sim.s.pads[pad].feeder.n > n0 };
+  }
+  const hy = probe.phys.floor(h.x, h.z) + h.y;
+  const ls = padSpots(pad).ls;
+  const ferrs: [number, number][] = [
+    [0, 0],
+    [-0.3, 0],
+    [0.3, 0],
+    [0, 0.3],
+    [0, -0.3],
+  ];
+  const said: Record<string, number> = {};
+  let feederAgree = 0;
+  let feederLied = 0;
+  let higherShort = 0;
+  let higherAll = 0;
+  let followed = 0;
+  let followLanded = 0;
+  const row: string[] = [];
+  for (const d of [2, 3, 4, 5, 6, 7, 8, 9]) {
+    let n = 0;
+    let ok = 0;
+    let higher = 0;
+    for (const a of [-40, -20, 0, 20, 40].map((q) => (q * Math.PI) / 180)) {
+      const x = h.x + Math.sin(a) * d;
+      const z = h.z + ls * Math.cos(a) * d;
+      const sx = Math.cos(a);
+      const sz = -ls * Math.sin(a);
+      for (const [side, up] of ferrs) {
+        n++;
+        const tx = h.x + sx * side;
+        const tz = h.z + sz * side;
+        const r = blow(x, z, hy + up, tx, tz);
+        said[r.said] = (said[r.said] ?? 0) + 1;
+        if (r.landed) ok++;
+        if (r.said === 'feeder') {
+          if (r.landed) feederAgree++;
+          else feederLied++;
+        }
+        if (r.said === 'higher') {
+          higher++;
+          higherAll++;
+          if (!r.landed) higherShort++;
+          // Follow it: up in 5 cm steps until the hopper mark shows (at most 3 m), then blow.
+          for (let lift = 0.05; lift <= 3; lift += 0.05) {
+            const sim = feederSim(x, z);
+            const t = sim.aimTarget(aimFrom(sim, tx, hy + up + lift, tz, MUZZLES.phone));
+            if (t === 'higher') continue;
+            if (t === 'feeder') {
+              followed++;
+              if (blow(x, z, hy + up + lift, tx, tz).landed) followLanded++;
+            }
+            break;
+          }
+        }
+      }
+    }
+    row.push(`${d} m ${Math.round((ok / n) * 100)}% (aim higher ${higher} of ${n})`);
+  }
+  console.log(`roots at a feeder's hopper, the crosshair on it: ${row.join('  ')}`);
+  console.log(`   the crosshair said: ${Object.entries(said).map(([k, v]) => `${k} ${v}`).join(', ')}; the hopper mark matched ${feederAgree}, promised and missed ${feederLied}`);
+  console.log(`   "aim higher" ${higherAll} times, the blow short ${higherShort} of them; followed up to the hopper mark ${followed}, landed ${followLanded}`);
+}

@@ -11,7 +11,7 @@
 
 import { BENCH_UPS, BUILD_COST, FOOD_INFO, GARDEN_HOURS, GOALS, ORDER_BY, ORDER_MORN, PEN_MAX, PEN_UPS, RARE_NAME, eats, fmtCoins, isDowny, isFood, isTuft, wantedFood, type DownyKind, type Food, type GoalId, type Order } from './defs';
 import { BED_HALF } from './physics';
-import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev } from './sim';
+import { NOTICE_RUN, RARE_SEEN, padSpots, rareLured, rarePenOf, type Ev, type Getaway } from './sim';
 import { slotCap, type Downy, type Item, type RanchState } from './state';
 import { BERRY_BUSHES, BOARD, CLOVER_PATCHES, CRATES, DOOR, GATES, PADS, PEN_R, POND, RANCH_GATE, RIDGE_TOP, ROOT_PATCHES, SIGHTINGS, VENTS, WORKBENCH, zoneAt } from './world';
 
@@ -421,8 +421,8 @@ function rareMark(s: RanchState, m: Mark, floor: Floor): boolean {
   const step = rareStep(s);
   if (step === 'pen') {
     if (s.slots[s.sel]?.t !== o.kind) m.slot = s.slots.findIndex((q) => q.t === o.kind && q.n > 0);
-    // The pen it adds most to: the fullest with room and no rare one yet.
-    const best = rarePenOf(s, false);
+    // The pen it adds most to: the fullest with room and no rare one yet, of its own kind first (round 12).
+    const best = rarePenOf(s, false, o.kind);
     const i = best >= 0 ? best : penWithRoom(s);
     if (i < 0) return false;
     const p = PADS[i];
@@ -673,11 +673,28 @@ const KIND_PLURAL: Record<DownyKind, string> = { clover: 'clovers', ember: 'embe
 const HOME = {
   build: (k: DownyKind) => `Build a pen for your ${KIND_PLURAL[k]}.`,
   save: (k: DownyKind, coins: number) => `Save for ${k === 'ember' ? 'an' : 'a'} ${k} pen, ${fmtCoins(coins)} of ${fmtCoins(BUILD_COST.pen)}.`,
+  // (Round 12: and then into it. With the ember pen bought at 18:23, "Sleep at the front door" took the page with two embers aboard.)
+  blow: (k: DownyKind) => `Blow the ${KIND_PLURAL[k]} into the pen.`,
 };
+const HOME_KINDS: DownyKind[] = ['clover', 'ember', 'brook', 'thistle'];
+/** Round 12: the kind the home lesson is about, while it is up (-1: none yet). */
+const homeKind = (s: RanchState): DownyKind | null => HOME_KINDS[s.learnCount['home:kind'] ?? -1] ?? null;
+/** Its pen built, they are still aboard: the pen step. */
+const homePenStep = (s: RanchState) => {
+  const k = homeKind(s);
+  return !!k && !homeless(s).length && s.slots.some((q) => q.t === k && q.n > 0) && penFor(s, k);
+};
+/** Seconds the pen step waits for them before the line goes quietly (it is urgent, and must not hold the evening's lines for good). */
+const HOME_PEN_WAIT = 45;
 function homeLine(s?: RanchState): string {
+  if (s && homePenStep(s)) return HOME.blow(homeKind(s)!);
   const k = s ? (homeless(s)[0] ?? 'ember') : 'ember';
   if (s && oneMoreOf(s)) return MEADOW.more;
   return !s || s.coins >= BUILD_COST.pen ? HOME.build(k) : HOME.save(k, s.coins);
+}
+/** The pen they go in: the nearest with room that is for their kind, or an empty one. */
+function homePen(s: RanchState, k: DownyKind): number {
+  return nearestPad(s, (i) => s.pads[i].kind === 'pen' && penCount(s, i) < PEN_MAX && (penCount(s, i) === 0 || penKinds(s, i).includes(k)));
 }
 /**
  * Round 11: out where it lives with just the one aboard, and another near: one more first, as a first clover asks (the
@@ -1353,9 +1370,30 @@ const LESSONS: Lesson[] = [
     tag: 'build:pen',
     ready: (s) => homeless(s).length > 0 && s.pads.some((p) => p.kind === 'empty'),
     text: (_q, s) => homeLine(s),
-    also: () => [MEADOW.more, ...(['clover', 'ember', 'brook'] as const).flatMap((k) => [HOME.build(k), HOME.save(k, 35)])],
-    done: (s) => !homeless(s).length || !s.pads.some((p) => p.kind === 'empty'),
+    also: () => [MEADOW.more, ...(['clover', 'ember', 'brook'] as const).flatMap((k) => [HOME.build(k), HOME.save(k, 35), HOME.blow(k)])],
+    // (Round 12: built, it goes on to "Blow the embers into the pen." until they are in, or you have gone off with them.)
+    start: (s) => {
+      s.learnCount['home:kind'] = HOME_KINDS.indexOf(homeless(s)[0] ?? 'ember');
+      s.learnCount['home:pen'] = 0;
+    },
+    each: (s, dt) => {
+      const k = homeless(s)[0];
+      if (k) s.learnCount['home:kind'] = HOME_KINDS.indexOf(k);
+      if (homePenStep(s)) s.learnCount['home:pen'] = (s.learnCount['home:pen'] ?? 0) + dt;
+    },
+    done: (s) => (homeless(s).length ? !s.pads.some((p) => p.kind === 'empty') : !homePenStep(s)),
+    lapse: (s) => homePenStep(s) && (zoneAt(s.player.x, s.player.z) !== 'ranch' || (s.learnCount['home:pen'] ?? 0) > HOME_PEN_WAIT),
     mark: (s, m, floor) => {
+      if (homePenStep(s)) {
+        const k = homeKind(s)!;
+        const i = homePen(s, k);
+        if (i < 0) return false;
+        if (s.slots[s.sel]?.t !== k) m.slot = s.slots.findIndex((q) => q.t === k && q.n > 0);
+        const p = PADS[i];
+        arrow(m, p.x, floor(p.x, p.z) + 2.6, p.z);
+        ring(m, p.x, p.z, PEN_R);
+        return true;
+      }
       const next = oneMoreOf(s);
       if (next) return onDowny(m, next);
       return s.coins >= BUILD_COST.pen ? onPost(m, plotForPen(s), floor, true) : false;
@@ -1771,10 +1809,16 @@ export class Pages {
   static readonly READ = 6;
   /** Seconds before a page goes that the next lesson may come up, so the journal goal never shows between the two (round 11). */
   static readonly HANDOVER = 0.25;
+  /**
+   * Real seconds a page stays up at the least, however fast the game runs meanwhile (backlog, round 12: "Earned 150
+   * coins" was up 0.5 s and "Earned 52 coins" under 0.1 s, the game run on fast by the tester's script).
+   */
+  static readonly MIN_REAL = 1.6;
   private queue: Page[] = [];
-  /** The page up now, if any, and its seconds left. */
+  /** The page up now, if any, and its seconds left (game time, and real time). */
   showing: Page | null = null;
   left = 0;
+  realLeft = 0;
 
   add(p: Page): void {
     this.queue.push(p);
@@ -1789,16 +1833,18 @@ export class Pages {
    * Once a frame: the page to put up now (returned once, as it goes up), else null. v: the tutor's view; age: how
    * long its line has read as it does (Tutor.lineAge); cut: a line that cuts in is up (Tutor.cutting).
    */
-  update(dt: number, v: { line: string; done: boolean }, age: number, cut: boolean, paused = false): Page | null {
+  update(dt: number, v: { line: string; done: boolean }, age: number, cut: boolean, paused = false, real = dt): Page | null {
     if (this.showing) {
       this.left -= dt;
-      if (this.left > 0) return null;
+      this.realLeft -= real;
+      if (this.left > 0 || this.realLeft > 0) return null;
       this.showing = null;
     }
     if (!this.queue.length || paused) return null;
     if (v.line && (v.done || cut || age < Pages.READ)) return null;
     this.showing = this.queue.shift()!;
     this.left = Pages.SECS;
+    this.realLeft = Pages.MIN_REAL;
     return this.showing;
   }
 
@@ -1806,6 +1852,7 @@ export class Pages {
     this.queue.length = 0;
     this.showing = null;
     this.left = 0;
+    this.realLeft = 0;
   }
 }
 
@@ -1910,13 +1957,50 @@ export const CATCH_MORE = 'Catch more. Ten fit in a pen.';
 /** Round 11: the dusk note when fluff lies about. */
 export const FLUFF_LINE = 'Fluff blows away at dawn.';
 
-/** Room for more of a kind: spaces in the pens that hold it or stand empty, less those aboard already. */
+/**
+ * The note when a wild one gets away, saying why (backlog, round 12: three of the tester's four "It got away." came
+ * before any tell, with nothing to say what went wrong). Eight words or fewer, in the button's words.
+ */
+export function getawayNote(why: Getaway, dove: boolean, dev: Dev): string {
+  if (dove) return 'It slipped into the water.';
+  switch (why) {
+    case 'slack':
+      return 'It got away. Pull again once it stops.';
+    case 'time':
+      return 'Its time ran out. It got away.';
+    case 'far':
+      return 'It pulled too far. It got away.';
+    case 'let':
+      return dev === 'touch' ? 'It got away. Hold Pull until it comes.' : dev === 'pad' ? 'It got away. Hold LT until it comes.' : 'It got away. Hold right click longer.';
+    case 'off':
+      return 'It got away. Keep the crosshair on it.';
+    case 'twice':
+      return 'It slipped free twice. It got away.';
+    case 'unlured':
+      return 'It got away. Lure it first.';
+  }
+}
+
+/**
+ * The kinds a pen is for: those most of its downies are (the rare ones not counted, unless that is all it holds), every
+ * kind tied for most. Empty: none (backlog, round 12: a gold clover in the ember pen made it count as holding clover).
+ */
+export function penKinds(s: RanchState, i: number): DownyKind[] {
+  const here = s.downies.filter((d) => !d.gone && d.pen === i);
+  const plain = here.filter((d) => !d.rare);
+  const by = new Map<DownyKind, number>();
+  for (const d of plain.length ? plain : here) by.set(d.kind, (by.get(d.kind) ?? 0) + 1);
+  const most = Math.max(0, ...by.values());
+  return [...by.keys()].filter((k) => by.get(k) === most);
+}
+
+/** Room for more of a kind: spaces in the pens for it (by their majority) or standing empty, less those aboard already. */
 function roomFor(s: RanchState, k: DownyKind): number {
   let room = 0;
   s.pads.forEach((p, i) => {
     if (p.kind !== 'pen') return;
-    const here = s.downies.filter((d) => !d.gone && d.pen === i);
-    if (!here.length || here.some((d) => d.kind === k)) room += Math.max(0, PEN_MAX - here.length);
+    const n = penCount(s, i);
+    if (!n || penKinds(s, i).includes(k)) room += Math.max(0, PEN_MAX - n);
   });
   return room - s.slots.reduce((a, q) => a + (q.t === k ? q.n : 0), 0);
 }
@@ -1938,7 +2022,8 @@ export function catchMore(id: GoalId | undefined, s: RanchState): DownyKind | nu
   if (carrying(s, isDowny) && zoneAt(s.player.x, s.player.z) === 'ranch') return null;
   for (const k of ['brook', 'ember', 'clover'] as const) {
     if ((k === 'brook' && !s.gates.hollow) || (k === 'ember' && !s.gates.ridge)) continue;
-    if (roomFor(s, k) > 0) return k;
+    // (Round 12: and room in the jar for it. Seven embers filled the jar, and the line still sent you for a clover.)
+    if (roomFor(s, k) > 0 && jarTakes(s, k)) return k;
   }
   return null;
 }

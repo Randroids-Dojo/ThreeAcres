@@ -24,7 +24,7 @@ import { PRESETS } from '../../sim/presets';
 import { CAPS, GOALS, KIND, KINDS, ORDER_BY, ORDER_MORN, RARE_NAME, fmtCoins, isDowny, isFood, isTuft, thingColor, thingName, type DownyKind, type GoalId, type Order, type Thing } from './defs';
 import { Hud, type PageLine, type SlotIcon } from './hud';
 import { Input, buzz, type Frame } from './input';
-import { CATCH_MORE, FLUFF_LINE, Pages, Tutor, allLines, catchMore, catchSpot, creditLessons, fullNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
+import { CATCH_MORE, FLUFF_LINE, Pages, Tutor, allLines, catchMore, catchSpot, creditLessons, fullNote, getawayNote, goalSpot, goalText, orderLines, orderSpot, orderTally, teachAll, type Say } from './lessons';
 import { edgeSpot, type EdgeSpot } from './edge';
 import { TagChoice, type PickDev } from './menu';
 import { angleDiff, clamp, damp } from './noise';
@@ -58,6 +58,8 @@ const FIRST: Record<DownyKind, [string, string]> = {
 
 /** Journal lines that are news, not tasks: shown with no box to tick. */
 const NEWS = new Set(['Order filled. New ones come at dawn.']);
+/** Round 12: the goal page shows one line while you walk (over this speed, m/s, this long, s) and all of them once you have stood still a moment. */
+const GOAL_WALK = { speed: 1, after: 0.35, still: 0.8 };
 const CHIRP_PITCH: Record<DownyKind, number> = { clover: 1, ember: 0.88, brook: 1.12, thistle: 1.3 };
 /** The motes about the board's rare downy, by kind. */
 const RARE_GLINT: Record<DownyKind, number> = { clover: 0xffe08a, ember: 0xffb6c8, brook: 0xe8f0ff, thistle: 0xf0e0ff };
@@ -157,7 +159,7 @@ export class Ranch {
   private prevMenuZ = 0;
   private quality: 'low' | 'high';
   private nanArmed = false;
-  private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | null = null;
+  private crossTarget: 'target' | 'prickly' | 'sell' | 'pen' | 'feeder' | 'higher' | null = null;
   /** Seconds the journal goal's spot (a gate) has been pointed at: the edge chevron shows only at first. */
   private goalSpotT = 0;
   private rareT = 0;
@@ -812,7 +814,8 @@ export class Ranch {
         this.ctx.audio.loop('ranch.wind', true, { gain: 1 });
         this.fx.burst(g.x, y + 1.5, g.z, 0xf2c890, 60, 5);
         if (!this.ctx.settings().reducedMotion) this.dipV -= 1.2;
-        if (!this.tutor.busy) this.hud.showPage(`Day ${s.day}`, [{ text: `The way to ${g.name} is open.`, done: true, fresh: true }], 5);
+        // (Round 12: never over a page of something done that is up: the gate's own page follows at once.)
+        if (!this.tutor.busy && !this.pages.showing) this.hud.showPage(`Day ${s.day}`, [{ text: `The way to ${g.name} is open.`, done: true, fresh: true }], 5);
         break;
       }
       case 'nettle':
@@ -864,7 +867,7 @@ export class Ranch {
         const [title, line] = FIRST[e.kind];
         this.fx.burst(a.mx + a.dx * 1.2, a.my + a.dy * 1.2, a.mz + a.dz * 1.2, KIND[e.kind].body, 30, 2.2);
         this.cue('ranch.chirp', undefined, undefined, undefined, 1, CHIRP_PITCH[e.kind]);
-        if (!this.tutor.busy) {
+        if (!this.tutor.busy && !this.pages.showing) {
           this.hud.showPage(title, [{ text: line, done: false, fresh: false }], 5);
           this.hud.el.querySelector('.rh-page')?.classList.add('note');
         }
@@ -917,7 +920,8 @@ export class Ranch {
         break;
       case 'escape':
         // It broke free: say so plainly (a brook into the pond, the rest off and away; left slack after a pull back, what to do).
-        this.hud.note(e.dove ? 'It slipped into the water.' : e.slack ? 'It got away. Pull again once it stops.' : 'It got away.', e.slack ? 2.4 : 1.8);
+        // (Backlog, round 12: and why, whatever it was. Three of the tester's four "It got away." came before any tell.)
+        this.hud.note(getawayNote(e.why, e.dove, this.say.dev), e.dove ? 1.8 : 2.4);
         break;
       case 'tell':
         // It puffs up to pull back: a soft intake of breath (it swells, and the ring goes pale gold).
@@ -993,11 +997,20 @@ export class Ranch {
    * clover and trip all filled under lines that stayed up, with only the coins to say so).
    */
   private pageTick(dt: number, v: { line: string; done: boolean }): void {
-    const page = this.pages.update(dt, v, this.tutor.lineAge, this.tutor.cutting, this.paused);
+    // (Round 12: and real seconds too, so a page is never gone in a blink however fast the game runs: the tester's
+    // "Earned 52 coins" was up under 0.1 s.)
+    const now = performance.now();
+    const real = this.pageClock ? Math.min(0.25, (now - this.pageClock) / 1000) : dt;
+    this.pageClock = now;
+    const was = this.pages.showing;
+    const page = this.pages.update(dt, v, this.tutor.lineAge, this.tutor.cutting, this.paused, real);
+    // Its time is up (by the Pages, which count real seconds too): what comes next takes the page.
+    if (was && !this.pages.showing) this.hud.endPage();
     if (!page) return;
     this.goalHidden = false;
     this.hud.el.querySelector('.rh-page')?.classList.remove('note');
-    this.hud.showPage(page.title, page.lines, Pages.SECS);
+    // (The Pages say when it goes: see endPage above.)
+    this.hud.showPage(page.title, page.lines, 1e9);
     // It stays its few seconds: no new lesson takes the page meanwhile (the first order's went to dusk at once). The next
     // lesson comes up just before the page goes, so it hands straight over (round 11: the journal goal showed for about
     // 0.1 s between the two, at 13.1 s and 40.8 s).
@@ -1005,6 +1018,7 @@ export class Ranch {
   }
 
   private readonly pages = new Pages();
+  private pageClock = 0;
 
   /** The calm page with no lesson up: the day's orders (news with no box), then the next goal. */
   private goalRows(goal: string, orders: string[], saving: DownyKind | null = null): { text: string; done: boolean; plain?: boolean }[] {
@@ -1087,25 +1101,48 @@ export class Ranch {
       if (key.replace(/\d+/g, '#') !== this.goalShown.replace(/\d+/g, '#')) this.goalHidden = false;
       this.goalShown = key;
     }
-    // The day's orders all filled, or offers waiting at the board: news, a line with no box (round 8: "Order filled.
-    // New ones come at dawn." got a box and a strike); an order's tally keeps its box.
-    this.hud.setGoal(this.goalHidden ? [] : this.goalRows(goal, orders, saving));
     // The rare order (where it was seen, the downy, then the crate), or a goal with a place (a gate): an arrow over it, as a lesson would.
     const g = !v.line && !this.goalHidden && goal ? this.sim.openGoals(1)[0] : undefined;
     // (Round 9: a goal on the page that can be done brings in what it needs, the gate's price board or the Feeder tag,
     // whatever the hour: the ninth playtest's "Open the gate to Ember Ridge." sent it to a gate with no Gate button.)
     if (g) this.tutor.goalShown(s, g.id);
+    let marked: 'order' | 'goal' | 'catch' | null = null;
     if (!v.line && !this.goalHidden && !this.tutor.mark.on && orderSpot(s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
+      marked = 'order';
     } else if (g && !this.tutor.mark.on && goalSpot(g.id, s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
+      marked = 'goal';
     } else if (g && saving && !this.tutor.mark.on && catchSpot(saving, s, this.tutor.mark, this.floor)) {
       this.tutor.mark.on = true;
       this.goalSpotT += dt;
+      marked = 'catch';
     } else if (!g) this.goalSpotT = 0;
+    // The day's orders all filled, or offers waiting at the board: news, a line with no box (round 8: "Order filled.
+    // New ones come at dawn." got a box and a strike); an order's tally keeps its box.
+    const rows = this.goalRows(goal, orders, saving);
+    // (Round 12: three goals took four rows, about 115 px of a 900 px phone. While you walk, one line: the one the arrow
+    // is for, else the first that is not news; standing still a moment, all of them.)
+    const sp = Math.hypot(s.player.vx, s.player.vz);
+    this.walkT = sp > GOAL_WALK.speed ? this.walkT + dt : 0;
+    this.stillT = sp > GOAL_WALK.speed ? 0 : this.stillT + dt;
+    if (this.walkT >= GOAL_WALK.after) this.goalShort = true;
+    else if (this.stillT >= GOAL_WALK.still) this.goalShort = false;
+    let shown = rows;
+    if (this.goalShort && rows.length > 1) {
+      const want = marked === 'goal' ? goal : marked === 'catch' ? CATCH_MORE : '';
+      const pick = (want && rows.find((r) => r.text === want)) || (marked === 'order' && rows.find((r) => !r.plain && orders.includes(r.text))) || rows.find((r) => !r.plain) || rows[0];
+      shown = [pick];
+    }
+    this.hud.setGoal(this.goalHidden ? [] : shown);
   }
+
+  /** Round 12: seconds of walking before the goal page shows one line, of standing still before it shows them all. */
+  private walkT = 0;
+  private stillT = 0;
+  private goalShort = false;
 
   /** Is the arrow on screen a journal goal's (not a lesson's)? */
   private get goalMarked(): boolean {
@@ -1523,8 +1560,8 @@ export class Ranch {
       this.input.setAct(null);
     }
     this.edgePointer();
-    // The look lesson already says to click the view.
-    hud.setClick(!touch && !this.input.locked && this.input.lockAvailable && !this.paused && this.device() !== 'pad' && this.tutor.current !== 'look');
+    // The look lesson already says to click the view. (Round 12: and not while tags hang: it covered the Garden tag's note.)
+    hud.setClick(!touch && !this.input.locked && this.input.lockAvailable && !this.paused && !this.menu && this.device() !== 'pad' && this.tutor.current !== 'look');
     // Tap targets over the slot windows.
     const showSlots = (touch || !this.input.locked) && knows('slots');
     // Reused objects: nothing allocated per frame here.
