@@ -1,6 +1,6 @@
 # Backlog
 
-What the round 12 playtests found and left open. None of it is game-breaking or major: all three testers said a typical new player meets no major problem and the first 15 minutes feel good.
+What is still open after the round 12 playtests and the bug pass that followed them. None of it is game-breaking or major: all three testers said a typical new player meets no major problem and the first 15 minutes feel good.
 
 | Game | First 15 minutes | Whole game |
 |---|---|---|
@@ -8,28 +8,15 @@ What the round 12 playtests found and left open. None of it is game-breaking or 
 | Sunup | 8 | 6.5 |
 | Seedbound | 8 | 7 |
 
-All three games are thin late on, so the top item for each is the tester's biggest fun change. Every play was scripted in headless Chrome. No person has played these builds on a phone, pointer lock is unchecked, and sound was not judged.
+The bugs, misleading lines and polish items those playtests found are fixed (see the round 12 sections of `docs/RANCH.md`, `docs/SUNUP.md` and `docs/DECK.md`). What is left is mostly depth: all three games are thin late on, so the top item for each is the tester's biggest fun change. Every play so far was scripted in headless Chrome. No person has played these builds on a phone, pointer lock is unchecked, and sound was not judged.
 
-## Bugs and misleading lines, fix these first
+## Balance to watch
 
-**Thistledown**
-- Feed runs starve mixed pens. The hunt's arrow sent a gold clover into the ember pen, and `runTarget` then skips an empty feeder if anyone in the pen won't eat the crop. Five of seven embers starved. Send the crop to a pen where most eat it.
-- "It got away." came before any tell on three of four getaways, cause unknown. Say why, or give more grace.
-- With seven embers filling the jar, "Catch more" stayed up and pointed at a wild clover, because the gold clover's pen counts as holding clover.
-- A tug can start on a downy hidden behind a bush. Refuse the first press without a line of sight.
+These shifted in the bug pass and want a look in the next playtest.
 
-**Sunup**
-- The drag fights the walk stick in close view with field 3 owned. Rows 12 and 13 sit under the drawn stick; pushing north planted beans there, which cost 60 coins and can't be removed. Inside the stick's ring, the stick should always win.
-- A row tap on a nearly empty can drops the rest of the row with no word. Refill first, or requeue the rest.
-- "In time for the fair" contradicts "Plant by tomorrow": `forFair` only checks `s.day + days`, not whether there is soil today.
-- "Fair Autumn 10: 1 of 5 taken this season, in full." counts filled requests, and runs to 10 words. Try "Fair Autumn 10: 1 of 5 filled."
-- Sleep's crow question gives no size, and the card never names crows. It cost 7 crops once and 2 another time.
-
-**Seedbound**
-- Hitch numbers don't weigh. At all 13 hand-played stalls the help beat the hitch on both margin and purse, and a glut you can dodge cost far less than it said (said 320, cost about 80).
-- "Drag a card too dear today to Spent." fired for a can and rain that were fine tomorrow. Limit it to cards above the bench's size.
-- Corn's face prints 4 moons under Tall Rows, but it ripens in 2.
-- "Its neighbour is pulled first." doesn't say which neighbour, and reason lines can cover column letters.
+- **Seedbound is easier past year 1 for a player who weighs twists well.** Hitches are now priced fairly, so the bots stopped wasting them. Over 200 runs the decent bot wins 44 to 60 percent by engine, up from 33 to 39, and the greedy player 51 to 62, up from 33 to 46. A player who always takes the help wins about as before (45 percent). Hitch cuts average 35 to 46 percent of a quota, and the merchant pays 560 to 620 coins. Hot Beds is now the decent bot's weakest engine (44 percent), because frost on a chili row also costs the bloom it gave other rows.
+- **Sunup's fair is easier to win.** With "in time for the fair" read correctly, the careful bot wins 45 of 48 fairs, up from 40.
+- **Thistledown's feeder mark** promises a blow at a hopper's edge that then misses about 4 percent of the time.
 
 ## Fun and depth
 
@@ -47,30 +34,7 @@ All three games are thin late on, so the top item for each is the tester's bigge
 - From Summer 4 it is a tidy chore loop: a simple script did the chores from Summer 7 and lost nothing but one early Sleep's crops.
 
 **Seedbound**
-- Make engine levels change the garden's shape, not add a small percentage (Bees II reaches 5 by 5, Hot Beds II counts diagonals), and raise year 3 to match. Levels now read "19, not 18" for 800 coins, and runs end with 12,000 coins unspent.
+- Make engine levels change the garden's shape, not add a small percentage (Bees II reaches 5 by 5, Hot Beds II counts diagonals), and raise year 3 to match. Levels read "19, not 18" for 800 coins, and runs end with 12,000 coins unspent.
 - Off-engine pages decide runs: Trellis costs 110, and with it year 2 went 1566/770 up to 2961/1140. Price other engines' pages higher, or halve their effect.
 - Trellis alone is the weak engine (best harvest 100 against corn's 441 and Hot's 570), yet it prints the biggest number at the pick.
 - Year 3 doesn't fight strong boards, and from year 2 the scoop budget stops mattering.
-
-## Polish
-
-**Thistledown**
-- Paying for the ridge gate drops the page to the sell goal; show "Catch an ember downy." first.
-- "Sleep at the front door" took the page with two embers aboard, just after the ember pen was bought.
-- "Earned" pages flashed for 0.5 s and under 0.1 s here.
-- With roots chosen, aiming at a hopper from 6 m shows the pull mark and the blow falls short.
-- Three goals take about 115 px of the phone's page.
-- On desktop, "Click to look around" covers the Garden tag's note.
-
-**Sunup**
-- A toast covers the board's Close on the phone.
-- Desktop says "Tap Hands." where it should say "Press 1."
-- The crow line stays about 10 s after the crow has gone.
-- "Picks again" never says the plot stays all season.
-- Close view cuts field 2's right column.
-
-**Seedbound**
-- The aimed slip can cover a neighbour's chip.
-- "A 10 coin crop" has no referent, since start crops pay 2 to 5, and "Crops beside it add 10 coins" reads as neighbours gaining coins.
-- The hive's permanence isn't stated when you place it.
-- The hand shows faintly through the tin sheet's foot.
