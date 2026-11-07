@@ -2,8 +2,8 @@
 // plays cards for energy, and End day resolves the night. Every function here
 // mutates the run and returns what happened as events.
 
-import { CARDS, costOf, ENGINE_IDS, ENGINES, isSeed, PAGES, PRICE, SEEDS, START_DECK, START_POOL, UNLOCK_AT, UNLOCK_ORDER } from './cards';
-import { bySeason, emptyPlot, energyMax, frosted, handSize, isEmpty, isFinal, isRipe, LEVELLED, MAX_LEVEL, neighbours, newTally, nextSeason, pageLevel, pageOn, perennial, runQuota, seasonIndex, TUNING } from './board';
+import { CARDS, costOf, ENGINE_IDS, ENGINES, isSeed, PAGES, PRICE, SEASON_NAMES, SEEDS, START_DECK, START_POOL, UNLOCK_AT, UNLOCK_ORDER } from './cards';
+import { bySeason, emptyPlot, energyMax, frosted, seedDays, handSize, twistEase, isEmpty, isFinal, isRipe, LEVELLED, MAX_LEVEL, neighbours, newTally, nextSeason, pageLevel, pageOn, perennial, runQuota, seasonIndex, TUNING } from './board';
 import { applyHarvest, night, scoreHarvest, snapshot } from './night';
 import { mixSeed, pick, rand, shuffle } from './rng';
 import type { Card, CardId, EngineId, Ev, Meta, PageId, Rarity, RunState, Season, SeedId, Shop, Tally, Twist, TwistId } from './types';
@@ -356,8 +356,8 @@ export function playCard(s: RunState, handIdx: number, plot: number | null, to?:
     const p = s.plots[i];
     const kind = card.id;
     const uid = s.nextUid++;
-    // Tall Rows (checks: tallFast) may bring corn in a night sooner.
-    const days = SEEDS[kind].days - (kind === 'corn' && pageOn(s, 'tall') ? Number(TUNING.tallFast) : 0);
+    // Tall Rows (checks: tallFast) brings corn in sooner.
+    const days = seedDays(s, kind);
     p.crop = { uid, kind, age: 0, days, up: card.up, compost: 0, rot: pageOn(s, 'rotation') && !!p.last && p.last !== kind, picks: 0, pest: 0, sprout: false };
     ev.push({ t: 'plant', plot: i, kind, uid });
   } else {
@@ -771,6 +771,23 @@ export function frostShare(t: Tally, row: number): number {
   return Math.max(a.least, Math.min(a.most, a.top - a.per * room));
 }
 
+/**
+ * Round 12: the share of a glutted crop's lost half a player still pays, by what of it will really stay planted. A crop
+ * stays planted if the run's engine was given it (corn, chilies, beans: the engine runs on it), it is a perennial (beans,
+ * strawberries: they stand and pick for days), a slow crop is already in the ground (four nights or more: a pumpkin), or
+ * the run holds `glutStays.cards` of it or more; its glut costs about its whole lost half. Any other is dodged by planting
+ * something else, so its glut costs little, and cuts little. The twelfth playtest's sunflower glut said 160 and cost
+ * about nothing; deck-twists' play-ahead (400 runs each, decent bot and greedy player): a glut that stays planted cost
+ * 0.86 to 1.06 of its lost half, any other 0.26 to 0.52.
+ */
+export function glutStays(s: RunState, k: SeedId): number {
+  const g = TUNING.glutStays;
+  const given = !!s.engine && ENGINES[s.engine].gift.includes(k);
+  const slow = SEEDS[k].days >= 4 && s.plots.some((p) => p.crop?.kind === k);
+  const held = allCards(s).filter((c) => c.id === k).length + s.plots.filter((p) => p.crop?.kind === k).length;
+  return given || perennial(k) || slow || held >= g.cards ? g.keep : g.dodge;
+}
+
 /** Round 10: a crop no hitch is aimed at: a free one (a radish), which the run can sow again anywhere for nothing. */
 export function freeCrop(k: SeedId): boolean {
   return !TUNING.freeHitch && CARDS[k].cost === 0;
@@ -801,7 +818,8 @@ export function hitchAims(s: RunState): Aim[] {
   // quota can be cut (the ninth playtest's corn: "About 320 fewer coins" against a help of 220, the cut at its cap).
   // Round 10: never a glut of a free crop, nor frost on a row that paid mostly in free crops (the tenth playtest's "Frost on
   // your radishes' row" cut 280 off a quota and cost nothing: radishes go anywhere), and frost names the row's paid crop.
-  for (const k of byCoins(t.kinds).filter((k) => !freeCrop(k)).slice(0, 3)) out.push({ t: { id: 'glut', crop: k }, v: (1 - TUNING.glutTimes) * ((t.kinds[k] ?? 0) / t.take) });
+  // Round 12: a glut is priced by what of its crop will really stay planted (`glutStays`).
+  for (const k of byCoins(t.kinds).filter((k) => !freeCrop(k)).slice(0, 3)) out.push({ t: { id: 'glut', crop: k }, v: (1 - TUNING.glutTimes) * ((t.kinds[k] ?? 0) / t.take), f: glutStays(s, k) });
   const freeOf = (i: number) => (Object.keys(t.rowKinds[i] ?? {}) as SeedId[]).filter(freeCrop).reduce((a, k) => a + (t.rowKinds[i][k] ?? 0), 0);
   const rows = t.rows.map((v, i) => ({ v, i })).filter((r) => r.v > 0 && freeOf(r.i) < 0.5 * r.v).sort((a, b) => b.v - a.v).slice(0, 3);
   for (const r of rows) out.push({ t: { id: 'frost', row: r.i, crop: byCoins(t.rowKinds[r.i] ?? {}).filter((k) => !freeCrop(k))[0] }, v: r.v / t.take, f: frostShare(t, r.i) });
@@ -936,7 +954,8 @@ export function offerTwists(s: RunState): Twist[] {
     const opts = hs
       .filter((x) => x.v >= TUNING.minHit)
       .map((x) => {
-        const want = pairWorth(hitchCost(x), r);
+        // Round 12: the help nearest what the hitch costs, so the merchant's numbers stay near twice it.
+        const want = TUNING.pairCost ? hitchCost(x) : pairWorth(hitchCost(x), r);
         const from = gs.filter((y) => fits(x, y)).map((y) => ({ y, off: Math.abs(y.v - want) }));
         return { x, from, best: Math.min(...from.map((p) => p.off)) };
       })
@@ -986,13 +1005,18 @@ export function offerTwists(s: RunState): Twist[] {
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /**
- * Round 11: the coins the merchant pays for a hitch, so its margin (its cut, less what it costs, and this) comes to the
- * help's coins, all in the numbers the two clippings say. The eleventh playtest's help beat the hitch at all ten stalls:
- * +310 against 490 less 410, +910 against 450 less 220.
+ * The coins the merchant pays for a hitch, in the numbers the two clippings say. Round 12: what the hitch costs and the
+ * help's coins, so the hitch leaves the purse where the help would (the merchant's coins less what it costs come to the
+ * help's coins), as its cut leaves the margin (`hitchCut`: the cost and the help's worth). Harvest coins are purse coins
+ * too, and round 11 forgot it: the twelfth playtest's help beat the hitch on both at all 13 stalls (+280 on both,
+ * against a glut that cost 240 with a cut of 270 and 250 paid: +30 and +10).
  */
 export function hitchPay(s: RunState, help: Twist, hitch: Twist): number {
-  const margin = twistQuota(s, null) - twistQuota(s, hitch) - twistCoins(s, hitch);
-  const owed = twistCoins(s, help) - margin;
+  const level = twistCoins(s, hitch) + twistCoins(s, help);
+  // A cut held at its most (`easeHard`: Tall Rows resting, 65% of a season) leaves the season short of the help's coins:
+  // the merchant pays that too, so the two still come to the same coins in all, and the clipping says how they split.
+  const short = level - (twistQuota(s, null) - twistQuota(s, hitch));
+  const owed = TUNING.payBoth ? level + (short > Math.max(10, 0.02 * twistQuota(s, null)) ? short : 0) : twistCoins(s, help) - (twistQuota(s, null) - twistQuota(s, hitch) - twistCoins(s, hitch));
   return owed <= 0 ? 0 : owed >= 100 ? Math.round(owed / 10) * 10 : Math.max(5, Math.round(owed / 5) * 5);
 }
 
@@ -1007,12 +1031,44 @@ export function twistCoins(s: RunState, t: Twist): number {
 }
 
 /**
- * A twist's number, the same short line on both clippings under the twist's own line, so they can be weighed at a
- * glance: "About 320 more coins." for a help, "About 300 fewer coins." for a hitch (null for a save from before round 8).
+ * What a twist leaves the season and the purse, against no twist, in the numbers the clippings say: the margin (a help's
+ * coins; a hitch's cut, less what it costs) and the purse (a help's coins; the merchant's, less what the hitch costs).
+ * Round 12: both clippings say these two numbers in the same words, so they weigh at a glance.
+ */
+export function twistNet(s: RunState, t: Twist): { margin: number; purse: number } {
+  const c = twistCoins(s, t);
+  if (!HITCHES.includes(t.id)) return { margin: c, purse: c };
+  return { margin: twistQuota(s, null) - twistQuota(s, t) - c, purse: (t.pay ?? 0) - c };
+}
+
+/**
+ * A twist's number line, the same words on both clippings under the twist's own line: round 12, what it leaves the
+ * season and the purse ("270 toward spring, 270 to spend."), worked out for a hitch from its cost, its cut and the
+ * merchant's coins, which its trade line says. Round 8 said "About 320 more coins." on the help and "About 300 fewer
+ * coins." on the hitch, and the help's coins counted twice (they are purse coins too): the twelfth playtest weighed them
+ * by hand at every stall. Null for a save from before round 8; a save from before round 12 keeps the old line.
  */
 export function twistNote(s: RunState, t: Twist): string | null {
   if (t.worth === undefined) return null;
-  return `About ${twistCoins(s, t)} ${HITCHES.includes(t.id) ? 'fewer' : 'more'} coins.`;
+  const hitch = HITCHES.includes(t.id);
+  if (hitch && !t.pay) return `About ${twistCoins(s, t)} fewer coins.`;
+  const n = twistNet(s, t);
+  const season = SEASON_NAMES[nextSeason(s).season];
+  return `${Math.max(0, n.margin)} toward ${season}, ${Math.max(0, n.purse)} to spend.`;
+}
+
+/**
+ * Round 12: a hitch's own line under the twist's, one sentence: what it costs, what the season asks less and what the
+ * merchant pays ("It costs about 110: spring asks 240 less, the merchant pays 250."), so the line above it adds up. A save
+ * from before round 11 (no pay) says the quota as before ("Spring asks 510, not 900.").
+ */
+export function hitchTrade(s: RunState, t: Twist): string | null {
+  if (!HITCHES.includes(t.id) || !twistEase(t)) return null;
+  const season = SEASON_NAMES[nextSeason(s).season];
+  const q0 = twistQuota(s, null);
+  const q = twistQuota(s, t);
+  if (!t.pay) return `${season[0].toUpperCase()}${season.slice(1)} asks ${q}, not ${q0}.`;
+  return `It costs about ${twistCoins(s, t)}: ${season} asks ${q0 - q} less, the merchant pays ${t.pay}.`;
 }
 
 // ---------------------------------------------------------------- the run's engine

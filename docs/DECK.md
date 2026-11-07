@@ -28,6 +28,8 @@ A roguelike deckbuilder about one small plot and a run of seasons. Original rule
 
 **A first free season that can be met, no one solved engine, a hitch that pays.** The eleventh playtest scored the first quarter hour 6 of 10 (clear 8, smooth 8, engaging 6, feel-good at the end 3) and the game 6: "I'd start another run to try another engine, but not after finding the chili block, because then the game is over." It followed every lesson and preview and went from 102 of 75 to 259 of 330, "The run ends here", with 309 coins unspent: the bot clears that season, the new player does not look ahead, and the hive came to hand on day 3. A greedy script following the previews won with Hot Beds (harvests of 257 and 347 in year 2, a night of 668, its takes 2.4 and 2.6 times the quotas) and died in year 1 with Trellis and Tall Rows. The help beat the hitch at all ten stalls: +310 coins against 490 less 410. Now the guided summer deals the engine's card in its first hand and asks 270, a crop takes bloom from two chilies at most, a hitch's margin comes to the help's coins with the merchant paying the rest ("Spring asks 700. The merchant pays 140."), Tall Rows brings a scoop, a run's first hand differs from run to run, and the engine pages say what a 10 coin crop pays. See Balance, round 11.
 
+**Hitches that weigh, and lines that say what they mean.** The twelfth playtest found no major problem (the first quarter hour 8 of 10, the game 7) and left a cleanup: the help beat the hitch on the season and the purse at all 13 stalls, the spent heap was taught for cards fine the next morning, corn's face printed four moons under Tall Rows, "Its neighbour is pulled first." named no neighbour, a slip hid a neighbour's chip, "a 10 coin crop" pointed at nothing, the hive's permanence went unsaid and the hand showed through the tin's foot. Now a hitch's cut and the merchant's coins each make up its cost and the help's coins, both clippings say what they leave in the same words, a glut is priced by what stays planted, and the bots weigh coin for coin; the rest is in its place below. See Balance, round 12.
+
 ## Run structure
 
 - **Run:** three years, twelve seasons. The last winter (year 3) is the finish line: meet it and the run is won (`TUNING.years`), **the night it is met**: the days left are not played (the playtest's winning run stood at 959 of 960 after day 4, and days 5 and 6 were busywork). The stall before it points "On to the last winter", the almanac says "Season 7 of 12", and a note at its first dawn says "The last winter: meet it to win."
@@ -222,6 +224,14 @@ From year 2 spring (`TUNING.twistFrom`), each stall offers two twists for the se
 - **The bots count the purse** when they weigh the two (`twistWorth`: a third of what the season does to the purse, over the quota, beside the take over the quota), so the merchant's coins count in their pick.
 - **Frost names the row** ("Frost on the second row."): a row is aimed at for the crop that paid most there last season, and that crop may have moved on (the playtest's "Frost on your chilies' row." froze a row with no chilies on it).
 
+**Round 12: the two weigh on the season and the purse.** At all 13 of the twelfth playtest's stalls the help beat the hitch on both counts: "+280 coins" against a glut said to cost 240, a cut of 270 and 250 paid, so +30 on the season and +10 in the purse against +280 on both, since harvest coins are purse coins too. Played, the gluts were dodged (a sunflower glut said 160 and cost about nothing). Now:
+
+- **The cut and the merchant's coins are each the cost and the help's coins** (`helpShare` 1, `payBoth`, `hitchPay`): by the estimate the hitch leaves the season's margin and the purse each where the help would. A cut held at its most (`easeMax` 0.5, 0.45 before; `easeHard`) leaves the season short, and the merchant pays that too, so the two still come out level in all.
+- **Both clippings say it in the same words** (`twistNote`, `twistNet`): "160 toward spring, 160 to spend." on each, the hitch's from its own numbers, with its trade line under it (`hitchTrade`): "It costs about 110: spring asks 280 less, the merchant pays 270." Round 8's "About 320 more coins." beside "About 300 fewer coins." counted the help's coins once.
+- **A help near what the hitch costs** (`pairCost`), so the merchant's numbers stay near twice the cost.
+- **A glut priced by what of its crop stays planted** (`glutStays`): the engine's own seed (corn, chilies, beans), a perennial, a slow crop already in the ground (a pumpkin) or one the run holds six of keeps its whole lost half (`keep` 0.8); any other is planted round (`dodge` 0.35). Frost is 15% dearer (`frostRoom`).
+- **The bots weigh a season by its margin in coins** (`twistWorth` in `bot.ts`, `playTwist` in `deck-players.ts`): the take less the quota asked, over the plain quota. As the take over the quota asked, a cut counted many times over (a 40% cut lifts the ratio by two thirds), so both bots took a hitch about half the time that lost on both counts by its own numbers.
+
 | Twist | Kind | Aimed at, and priced by | Line |
 |---|---|---|---|
 | Glut | in the way | the crop that took the most; half its coins | "Your carrots sell for half." (x0.5 bloom) |
@@ -279,10 +289,10 @@ The shop opens between seasons.
 |---|---|---|
 | Rain Barrel | 80 | Column A grows an extra night every night |
 | Root Cellar | 100 | Radishes and carrots get +2 yield, and +1 bloom beside each other |
-| Busy Bees | 110 | Near a beehive, a 10 coin crop pays 16. Not radishes or carrots (x1.6; the bee engine's page; II x1.75, III x2, IV x2.3) |
-| Hot Beds | 110 | Chilies pick for 3 nights. A 10 coin crop pays 18 beside one, 31 beside two (x1.75 each, two chilies at most, radishes and carrots the chili's own x1.5; the hot engine's page; II x1.85, III x1.95, IV x2.05) |
-| Trellis | 110 | By beans or strawberries, a 10 coin crop pays 23. Not radishes or carrots (+1.25 bloom, each other too, once; the vines engine's page; II +1.45, III +1.7, IV +1.9) |
-| Tall Rows | 110 | One more scoop a day. Corn ripens two nights sooner. Crops beside it add 10 coins (+0.8 bloom on corn and sunflowers for each neighbour; the tall engine's page; II +1.15, III +1.4, IV +1.6) |
+| Busy Bees | 110 | A strawberry pays 4 alone, 13 near a beehive. Not radishes or carrots (x1.6; the bee engine's page; II x1.75, III x2, IV x2.3) |
+| Hot Beds | 110 | Chilies pick for 3 nights. A chili pays 6 alone, 11 beside another, 18 beside two (x1.75 each, two chilies at most, radishes and carrots the chili's own x1.5; the hot engine's page; II x1.85, III x1.95, IV x2.05) |
+| Trellis | 110 | Beans pay 3 alone, 11 beside other beans. Not radishes or carrots (+1.25 bloom, each other too, once; the vines engine's page; II +1.45, III +1.7, IV +1.9) |
+| Tall Rows | 110 | One more scoop a day. Corn ripens two nights sooner. Corn pays 12 alone, 22 beside one crop (+0.8 bloom on corn and sunflowers for each neighbour; the tall engine's page; II +1.15, III +1.4, IV +1.6) |
 | Green Thumb | 170 | One more seed scoop every day (pinned only for a bench that ran short last season) |
 | Big Basket | 140 | Hand size +1 |
 | Crop Rotation | 100 | Sow a different crop where one was just pulled: +4 yield |
@@ -308,7 +318,7 @@ Round 7. A run's first stall (the guided run's after its guided spring, any othe
 | Vines | beans | Trellis: beans and strawberries give neighbours +1.25 bloom, not radishes or carrots | +1.45, +1.7, +1.9 | beans, strawberries |
 | Tall | three corn | Tall Rows: one more scoop a day; corn ripens two nights sooner; tall crops get +0.8 bloom for each neighbour | +1.15, +1.4, +1.6 | corn, sunflowers |
 
-**Round 11: what each engine says.** The pick says what the engine wants planted, one short line under its page (`plant` in `ENGINES`; spring teaches carrot rings, and three engine pages then say to stop): "Plant beans and strawberries round the hive.", "Plant chilies in pairs, with beans beside them.", "Plant beans and strawberries side by side.", "Plant crops first, then corn among them." Every page and level line says what a 10 coin crop pays, or what a corn gains (`levelText`, `levelChange`): "Neighbours get x1.7 bloom, radishes and carrots x1.5." and "+1.25 bloom" were words no one grokked. With Hot Beds kept the chili's own line and every face of it say the page's number (`cardLine`, `faceBonus`), in the stall, the tin and the end pages. Tall Rows brings a scoop (`tallScoop`), and its bloom is gentler (+0.8 from +1): more corn, each a smaller feast.
+**Round 11: what each engine says.** The pick says what the engine wants planted, one short line under its page (`plant` in `ENGINES`; spring teaches carrot rings, and three engine pages then say to stop): "Plant beans and strawberries round the hive.", "Plant chilies in pairs, with beans beside them.", "Plant beans and strawberries side by side.", "Plant crops first, then corn among them." Every page and level line says what a 10 coin crop pays, or what a corn gains (`levelText`, `levelChange`): "Neighbours get x1.7 bloom, radishes and carrots x1.5." and "+1.25 bloom" were words no one grokked. With Hot Beds kept the chili's own line and every face of it say the page's number (`cardLine`, `faceBonus`), in the stall, the tin and the end pages. Tall Rows brings a scoop (`tallScoop`), and its bloom is gentler (+0.8 from +1): more corn, each a smaller feast. Round 12: on a crop of the engine's own, as the plot pays it (`engineCase`): "a 10 coin crop" pointed at nothing (start crops pay 2 to 5) and "Crops beside it add 10 coins" read as the neighbours gaining coins. "A strawberry pays 4 alone, 13 near a beehive.", "A chili pays 6 alone, 11 beside another, 18 beside two.", "Beans pay 3 alone, 11 beside other beans.", "Corn pays 12 alone, 22 beside one crop."; each level "A strawberry near a beehive pays 14, not 13."; a chili with Hot Beds "It pays 6 alone, 18 beside two other chilies." deck-r12 scores each number on a plot at every level.
 
 **Round 10: each engine a different way to play.** The tester's biggest fun change: "every board is the same carrot ring". No engine page's bonus lands on a radish or a carrot (`isRoot`, `TUNING.engineRoots`; they keep what their own cards and the Root Cellar give, a chili's own x1.5 and a beehive's +1 bloom), so each engine pays only on its own crops and needs its own layout:
 
@@ -378,6 +388,11 @@ A card game on a warm oak table, with the plot as a painted almanac plate. Its o
 - **Round 11: a flying bonus goes behind its slip** (`z-index`), so it never covers the sum on the slip's top line; the playtest's chips covered the x3. deck-overlap reads the stacking at every frame of a corn with seven bonuses.
 - **Round 11: a scarecrow fits its own plot,** scaled like a tall crop (`SCARECROW_FIT`); its hat tangled with the crop above. deck-overlap reads the plot above: at most a few pixels change.
 - **Round 11: "A crow took your carrot."** names the crop. The way on from an end page says "Start a new run" ("Turn to a fresh page" was the only line on the page a newcomer had to work out).
+- **Round 12: the aimed slip covers no chip.** It straddles the aimed plot's foot where it covers none of the chips (else inside the foot, shifted to the plot's edge, over its top edge or its middle), never a key letter or the caption: the twelfth playtest's "3 x 3.2 = 10" hid a "+2" on the plot below, and a "287" an "x2" on five columns.
+- **Round 12: a reason line names the crop beside it and where.** A bonus with no one giver (good company counts every crop beside it) said "Its neighbour is pulled first."; it now names a crop beside it pulled first, "The lettuce in B2 is pulled first." where the plate shows row numbers, "The lettuce below it is pulled first." where it shows the letters alone (the phone). Reason lines also stay off the key letters and numbers ("Ripens next season." sat over the C of a first-row plot).
+- **Round 12: an aimed hive says it stays,** before it is set out: "The hive stays here for the run." beside crops, "Blooms crops around it, here for the run." alone; a scarecrow "Keeps crows off here for the run."
+- **Round 12: a seed's moons are the nights it needs with the run's pages** (`seedDays`): corn under Tall Rows printed four and ripened in two. The hand, the stall, the tin, the end pages and the card's sentence ("Ripe in 2 nights.") all read it.
+- **Round 12: the tin's foot is opaque.** Its shade at the foot is the tin's own green over the cards, not a see-through mask: the hand showed faintly through it (deck-overlap compares the foot's pixels with the hand shown and hidden).
 - **The plate's caption** sits between the bed and the printed frame; the margin under the bed is sized from the caption and the frame's two rules, so the rules never strike through it at any size.
 
 ## Teaching: the guided first season
@@ -405,7 +420,7 @@ The lessons, in the order they come in the guided season (touch wording; mouse s
 | 9 | Day 5 | the seed tin | "Tap the tin to see your cards." (keys: "Press D to see your cards.") |
 | 9b | Day 5, a can in hand and a crop it would hurry | | "Water a row to grow it faster." (the row's crops show a moon +1) |
 | 10 | A weather card in hand that would bring a crop in tonight (never one that would change nothing) | tonight's clippings by the lantern | "Drop the weather anywhere on the plot." |
-| 11 | From day 6, a card in hand with nowhere to go (no plot it can be played on), or (round 8) a hand stuck with cards the scoops cannot pay for today: nothing else in it can be played (`dearCard`) | the spent heap | "Drag a spare card to Spent." / "Drag a card too dear today to Spent." (keys: "Take a card up, then press X." / "Press Shift 2, then X.") Put away unfinished, to come back, once no spare or stuck card is left. Guided day 6 used to say it with all three cards needed, and kept it up with the hand empty; it now comes in summer. Round 7: not for a card that is only dear while another can still be played (the seventh playtest was told to toss a strawberry the bench could not pay for that day, and threw out a good card). Round 8: the eighth playtest's corn runs ended days with three to five three-scoop corn cards in hand and never met the heap. |
+| 11 | From day 6, a card in hand with nowhere to go (no plot it can be played on), or (round 12) a card dearer than the bench can ever hold (`dearCard`, `benchMost`: the refill and the two scoops a night can put back) | the spent heap | "Drag a spare card to Spent." / "Drag a card too dear to Spent." (keys: "Take a card up, then press X." / "Press Shift 2, then X.") Put away unfinished, to come back, once no spare or stuck card is left. Guided day 6 used to say it with all three cards needed, and kept it up with the hand empty; it now comes in summer. Round 7: not for a card that is only dear while another can still be played (the seventh playtest was told to toss a strawberry the bench could not pay for that day, and threw out a good card). Round 8: the eighth playtest's corn runs ended days with three to five three-scoop corn cards in hand and never met the heap. Round 12: no longer for a hand stuck with cards dear only today (round 8's three-scoop corn): the twelfth playtest was told "Drag a card too dear today to Spent." for a can and rain after spending its scoops on purpose, cards fine the next morning. |
 | 12a | The first season's end | the engine (round 7) | in the stall: "Pick one to take home, free." (round 8: the stall's own line over the engines, every run, so it is not said twice; large cards (round 9: four, two by two on the phone), each a card and its page, free; the way on asks for a pick first) |
 | 12 | The first season's end, once the engine is picked | coins (the purse) | in the stall: "Buy a seed with your coins." |
 | 13 | The second stall, once its engines are picked if it offers them | almanac pages on the cork board | "Pin a page to change the rules." |
@@ -974,6 +989,37 @@ The eleventh playtest scored the first quarter hour 6 of 10 and the game 6. Meas
 
 **Re-measured, no new sink:** coins left when a run ends, median and p90: greedy hot 4,852 and 7,643 before, 3,859 and 6,747 after; the others 2,650 to 3,950 and 5,790 to 6,580 before, 2,950 to 3,090 and 6,100 to 7,170 after; the decent bot 1,260 to 2,280 before, 1,850 to 2,210 after. Still more than a run can spend. Year 3: every season's pass rate for the greedy player sits at 80 to 94%; greedy hot's was 95 to 98% before, 85 to 91% after, so a Hot run's year 3 has a scare again.
 
+### Round 12: a hitch that weighs, a glut priced by what stays planted
+
+Measured before (the committed round 11 build, a `git archive` copy, with this round's scripts) and after.
+
+**The twists** (`deck-twists.ts 400 --depth=2 --buys`, and `--player=greedy`; each pick played ahead three times):
+
+| | Decent bot before | after | Greedy player before | after |
+|---|---|---|---|---|
+| Hitch picked | 49% | 53% | 46% | 51% |
+| Said: help, hitch season, hitch purse | +280, +27, -64 | +299, +296, +301 | +315, +31, -43 | +338, +332, +342 |
+| Played: help, hitch season, hitch purse | +285, +30, -62 | +281, +270, +274 | +280, -6, -80 | +285, +276, +285 |
+| Help ahead on both by what they say | 100% | 0% | 100% | 0% |
+| Played cost over said, median: frost, glut, rest | 0.79, 0.93, 1.00 | 1.00, 0.97, 1.02 | 1.09, 1.06, 0.99 | 1.16, 1.06, 1.11 |
+
+- Before, both bots took a hitch about half the time that, by their own numbers, lost to the help on the season and the purse: they weighed the take over the quota asked, which counts a cut many times over. A player who took the help every time (the playtest did) had the season the round 11 quotas were set for.
+- Gluts by crop, before: the engine's own crop and the perennials cost 0.79 to 1.07 of their lost half, carrots and sunflowers 0.08 to 0.72, a pumpkin 0.53 with none in the ground and 0.99 with one. After, a dodged sunflower glut says 72 to 79 (about 160 before) and costs about that.
+- A hitch's cut now averages 35 to 46% of the quota by hitch (18 to 34% before; `easeMax` 0.5), and the merchant pays about as much again (556 to 623 coins on average, 253 to 285 before): a hitch is a trade and not a coupon only while what it says it costs is what it plays, which deck-twists measures.
+
+**The balance** (200 runs each):
+| Wins, before and after | Bees | Hot | Vines | Tall |
+|---|---|---|---|---|
+| Decent bot (`deck-strategies.ts`) | 35%, 60% | 36%, 44% | 33%, 57% | 39%, 55% |
+| Greedy player | 37%, 51% | 46%, 62% | 33%, 57% | 35%, 53% |
+| Decent bot taking the help every time | 44%, 53% | 39%, 34% | 43%, 45% | 44%, 48% |
+
+- **Year 1 is untouched** (no twists): 77 to 92% for every policy, before and after. `deck-seasons.ts`: years 1, 2 and 3 cleared, decent 89, 64, 39% before and 89, 72, 51% after; strict 89, 46, 28% and 89, 60, 44%; guided 97, 72, 37% and 97, 83, 52%; second run 88, 64, 36% and 88, 72, 56%; greedy 79, 63, 42% and 79, 71, 57%; the novice's guided year 65% both, its year 2 8% and 18%.
+- **Years 2 and 3 are easier for the bots, not for a player who took the help.** Before, each bot threw away the twist at about half its stalls (a hitch that played +30 on the season and -60 in the purse against the help's +285 on both); a bot that takes the help every time wins about as often before and after (42 and 45% on average), and the playtest took the help at every stall. What the bots gain now is the choice: two twists level by the estimate, and the better one picked by play-ahead. Year 3 not fighting strong boards stays open in the backlog's Fun and depth list.
+- **The engines stay close:** the decent bot's wins spread 33 to 39% before and 44 to 60% after, the greedy player's 33 to 46% and 51 to 62%. Hot is the decent bot's weakest (44%; 34% taking the help every time): a frost on a Hot Beds row loses the bloom its chilies gave the rows beside it, which the row's own coins leave out (played over said 1.35 to 1.97 in hot runs before frost was made 15% dearer).
+- The hitch is picked 53 to 57% by the decent and strict bots in `deck-seasons.ts` (46 to 47% before), 49% by the greedy player (45%).
+- Take over quota is now the take less the quota asked over the plain quota (`deck-strategies.ts`, `deck-seasons.ts`): a cut of 40% would lift the take over the quota asked by two thirds. Year 2's median by season: the decent bot 1.30 to 1.46 before, 1.44 to 1.63 after; the greedy player 1.37 to 1.51, 1.42 to 1.71.
+
 ## Checks
 
 With a dev server running (`npx vite --config scripts/deck-vite.config.ts` on 5252, or the lead server on 5247; each script takes a base url as its first argument):
@@ -1041,6 +1087,16 @@ npx vitest run tests/deck-r11.test.ts    # round 11: the engine's card in the gu
                                          #   none about pages under the engine pick. The rules changes' tests fail on round 10 on an assertion (a
                                          #   `git archive` copy); five guards pass there too (a later guided season draws as usual, the guided run
                                          #   keeps its set hands, a corn puts one scoop back, an old save's hitch pays nothing, the dealt carrot and radish)
+npx vitest run tests/deck-r12.test.ts    # round 12: a hitch that leaves the season and the purse each where the help would, in the numbers
+                                         #   said and the same words on both; the merchant paying the cost and the help's coins; a glut priced
+                                         #   by what stays planted; the spent lesson only for a card the bench can never pay for; corn's two
+                                         #   moons with Tall Rows; a reason naming the crop beside it and its plot (pulled first, or still
+                                         #   standing); engine lines on a crop of their own, each number scored on a plot. All 12 fail on round
+                                         #   11 on an assertion (a `git archive` copy)
+npx tsx scripts/deck-twists.ts 50 --first=n --depth=2 --buys --player=greedy --json=path, then --merge=a,b,...
+                                         # round 12: --player=greedy plays the run and every season ahead with the greedy preview player;
+                                         #   each hitch's played cost over what its clipping says (median by hitch), gluts by what of the
+                                         #   crop stood, and both twists on the margin and the purse, said and played, with the share of picks
 npx tsx scripts/deck-seasons.ts 200 --only=novice [--upto=4] [--engine=id] [--tune=key:value]
                                          # round 11: the careful first-timer through the guided run, by season and by engine
 npx tsx scripts/deck-strategies.ts 200 eBees eHot eVines eTall gBees gHot gVines gTall --seasons
@@ -1057,7 +1113,8 @@ node scripts/deck-returning.mjs          # round 8: a returning player's second 
                                          #   tap, every piece of the table there from the first dawn (the spent heap and the
                                          #   weather too), the first stall's line "Pick one to take home, free." with three cards
                                          #   large enough to read, no tray and no engine card for sale until a pick, a real tap
-                                         #   picking one, the spent lesson on a hand stuck with three-scoop corn
+                                         #   picking one; round 12: no spent lesson for three-scoop corn with one scoop left (fine
+                                         #   tomorrow), and the spent lesson for a card with nowhere to go
 npx tsx scripts/deck-twists.ts 30 [--policy=name]
                                          # round 7: each twist offered at the bot's stalls played ahead against no twist (same
                                          #   dice and bot): its expected cost or worth when offered against its played one, and
@@ -1182,6 +1239,10 @@ node scripts/deck-overlap.mjs            # no two labels, buttons, cards or slip
                                          # round 11 (ONLY="round 11"): the scarecrow inside its own plot, by pixel readback; every slip at a
                                          #   full stall read for clipping, and a chili with Hot Beds' number at its level; a plant line on each
                                          #   engine at the pick; a guided run's "Try this next run"; a flying bonus behind its slip at every frame
+                                         # round 12 (ONLY="round 12"): the aimed slip covers no chip on four and five columns; a reason line names the crop
+                                         #   beside it and its plot and covers no key letter in any first-row plot; an aimed hive says it stays
+                                         #   for the run; corn under Tall Rows wears its own face; the tin's foot hides the hand (pixels with
+                                         #   the hand shown and hidden). Each fails on round 11's build
                                          # deck-lessons, round 9: guided day 3's pair ringed with "or", its line, the previews of
                                          #   the trade, the other back in the tin; deck-returning: four engines at the pick
 node scripts/deck-caption.mjs            # the plate's caption against the printed frame at eight sizes, by pixel readback

@@ -1152,12 +1152,16 @@ async function round6(label, viewport, touch) {
     }
   });
   await wait(500);
-  const offer = await p.evaluate(() => ({ cards: [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ line: e.querySelector('span')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })), head: document.querySelector('.sb-purse-line').textContent }));
+  const offer = await p.evaluate(() => ({ cards: [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ line: e.querySelector('span')?.textContent ?? '', worth: e.querySelector('.sb-worth')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })), head: document.querySelector('.sb-purse-line').textContent }));
   const hi = offer.cards.findIndex((c) => c.trade);
-  // Round 11: the hitch's line is "Spring asks 700. The merchant pays 140."; the head says what spring asks without it.
-  const m = offer.cards[hi]?.trade.match(/^Spring asks (\d+)\. The merchant pays (\d+)\.$/);
+  // Round 11: the hitch says what spring asks with it and what the merchant pays; the head says what spring asks without it.
+  // Round 12: "It costs about 80: spring asks 200 less, the merchant pays 200.", and both clippings say what they leave
+  // the season and the purse in the same words ("120 toward spring, 120 to spend.").
   const plain = Number(offer.head.match(/asks (\d+)/)?.[1]);
-  check(`${label}: the hitch says what spring asks with it and what the merchant pays, the help says nothing`, offer.cards.length === 2 && offer.cards.filter((c) => c.trade).length === 1 && !!m && Number(m[1]) < plain && Number(m[2]) > 0, JSON.stringify(offer));
+  const t = offer.cards[hi]?.trade.match(/^It costs about (\d+): spring asks (\d+) less, the merchant pays (\d+)\.$/);
+  const m = t ? [t[0], String(plain - Number(t[2])), t[3]] : null;
+  const same = offer.cards.every((c) => /^\d+ toward spring, \d+ to spend\.$/.test(c.worth));
+  check(`${label}: the hitch says what it costs, what spring asks less and what the merchant pays, the help says nothing; both say what they leave in the same words`, offer.cards.length === 2 && offer.cards.filter((c) => c.trade).length === 1 && !!m && Number(m[1]) < plain && Number(m[2]) > 0 && same, JSON.stringify(offer));
   await p.screenshot({ path: `${out}/${label}-r6-trade.png` });
   if (hi >= 0) await tap(...(await at('.sb-twistcard', hi)));
   const head2 = await p.evaluate(() => document.querySelector('.sb-purse-line').textContent);

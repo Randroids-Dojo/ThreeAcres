@@ -43,6 +43,16 @@ import { costOf, energyMax, newMeta, newRun, type Ev, type Harvest } from '../sr
 import { ALL, o, POL } from './deck-policies';
 import { GREEDY, readerDay, readerShop, type Reader } from './deck-players';
 
+/**
+ * Round 12: a season's take over its quota, as the take less the quota asked over the plain quota (the hitch's cut taken
+ * back out): a hitch's cut now takes off the help's whole worth with its cost, and the take over the quota asked counted
+ * the cut many times over. It reads the same on older builds, so before and after compare.
+ */
+function plainRatio(earned: number, quota: number, tw: R.Twist | null | undefined): number {
+  const plain = quota / Math.max(0.1, 1 - R.twistEase(tw ?? null));
+  return 1 + (earned - quota) / plain;
+}
+
 // The greedy player, one policy per engine. --read has it read the two clippings for its twist, not play them ahead.
 const twistBy: Reader['twist'] = process.argv.includes('--read') ? 'read' : 'play';
 const READERS: Record<string, Reader> = {
@@ -329,8 +339,8 @@ for (const name of policies.length ? policies : Object.keys(POL)) {
             a[0]++;
             if (l.cleared) a[1]++;
           }
-          ratio[l.year - 1].push(l.earned / l.quota);
-          byK[k].push(l.earned / l.quota);
+          ratio[l.year - 1].push(plainRatio(l.earned, l.quota, l.twist));
+          byK[k].push(plainRatio(l.earned, l.quota, l.twist));
         }
       }
     }

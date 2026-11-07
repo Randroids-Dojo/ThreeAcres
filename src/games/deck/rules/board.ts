@@ -320,8 +320,12 @@ export const TUNING = {
    */
   easeTimes: { glut: 1, frost: 1, crows: 1, rest: 1 } as Partial<Record<TwistId, number>>,
   easeMin: 0.05,
-  /** Round 10: 0.45 (0.35): a cut is in coins of a take that can be 1.6 times its quota (`takeRatio`). */
-  easeMax: 0.45,
+  /**
+   * Round 10: 0.45 (0.35): a cut is in coins of a take that can be 1.6 times its quota (`takeRatio`). Round 12: 0.5, since
+   * the cut takes off the help's whole worth with the cost (`helpShare`): at 0.45 fewer pairs fit and a hitch came back
+   * from two stalls before at 19% of stalls.
+   */
+  easeMax: 0.5,
   /**
    * Round 9: when no pair of twists keeps the cut within `easeMax`, the lightest pair is offered with its cut in full,
    * up to this, so the hitch still takes off what it costs and a share of what the help brings (the cap used to clip it).
@@ -333,9 +337,10 @@ export const TUNING = {
    * page at rest). Round 8 measured frost at 10.5% played against 25.3% expected (0.6 before), and then, with the
    * levels, frost 13.7 against 33.2, a glut 27.0 against 29.3, a rest 20.6 against 27.2 (deck-twists, 30 runs).
    * Round 10 (glut 0.92, rest 0.85 before): a glut said 294 coins and cost 231 played, a rest said 551 and cost 602
-   * (deck-twists, 200 runs played ahead two plays deep after the stall's shopping); frost is priced by `frostRoom`.
+   * (deck-twists, 200 runs played ahead two plays deep after the stall's shopping); frost is priced by `frostRoom`. Round 12:
+   * a rest 0.85 (0.95): it said 329 and cost 286 for the decent bot; a glut is priced by `glutStays`.
    */
-  adapt: { glut: 0.72, frost: 0.42, crows: 0.6, rest: 0.95 } as Partial<Record<TwistId, number>>,
+  adapt: { glut: 0.72, frost: 0.42, crows: 0.6, rest: 0.85 } as Partial<Record<TwistId, number>>,
   /**
    * A help's estimate from the season just played, times this, is what it brought when played ahead (deck-twists, the
    * bot's own buying with every card: a buyer brought about half its crop's coins, since the crop is grown less once
@@ -377,9 +382,23 @@ export const TUNING = {
    * ran about twice what the hitch cost when played and the hitch was nearly always the better pick: frost cut 348 coins
    * and cost 158, a glut cut 399 and cost 211, and the bot took the hitch at 62% of stalls). Round 11: 0.1 (0.25): the rest of
    * the help's worth comes as the merchant's coins (`hitchPay`), and with more of it on the quota the bots took the hitch
-   * at 48 to 60% of stalls.
+   * at 48 to 60% of stalls. Round 12: 1, with the merchant paying the cost and the help's coins too (`payBoth`).
    */
-  helpShare: 0.1,
+  helpShare: 1,
+  /**
+   * Round 12: the merchant pays what the hitch costs and the help's coins (`hitchPay`), and the cut takes off the cost and
+   * the help's whole worth (`helpShare` 1), so by the estimate the hitch leaves the margin and the purse each where the
+   * help would. Round 11 paid the help's coins less the cut's margin and forgot the help's coins are purse coins too: the
+   * twelfth playtest's help beat the hitch on both at all 13 stalls. False pays as round 11 did (checks).
+   */
+  payBoth: true,
+  /** Round 12: a hitch is paired with the help nearest what it costs (false: `pairWorth`, round 10's ratio pairing). */
+  pairCost: true,
+  /**
+   * Round 12: a glut's careful cost, as a share of the half it takes, by what of its crop will stay planted (`glutStays`):
+   * `keep` for a crop the run keeps planting, `dodge` for one it plants round.
+   */
+  glutStays: { keep: 0.76, dodge: 0.35, cards: 6 },
   /**
    * Round 10: a twist's share of a season's take is said, and cut, in coins of the take the run is making: its last
    * season's take over its quota, between 1 and this. The stall said a share of the quota, so a run taking 1.45 times its
@@ -395,9 +414,11 @@ export const TUNING = {
    * dusk (bare plots on the other rows, on average): `top - per x room`, between `least` and `most`. Measured with the
    * play-ahead of deck-twists (591 rows priced, decent bot): 1.13 with under one bare plot, 0.97 with one or two, 0.75
    * with two or three, 0.62 with three to five, 0.52 with more. Scaled to what it cost in all (at 1.3 - 0.18 x room it
-   * said 201 coins and cost 174).
+   * said 201 coins and cost 174). Round 12: 15% dearer (0.97, 0.134, 0.45, 1 before): with the lighter hitches now
+   * paired, frost cost 1.11 (the decent bot) and 1.39 (the greedy player) of what it said, and a Hot Beds row's chilies
+   * bloom the rows beside it.
    */
-  frostRoom: { top: 0.97, per: 0.134, least: 0.45, most: 1 },
+  frostRoom: { top: 1.12, per: 0.154, least: 0.52, most: 1.15 },
   /** Round 10: checks only. True aims hitches at free crops too (a glut of radishes, frost on their row), as before. */
   freeHitch: false,
 };
@@ -443,47 +464,66 @@ export function levelName(name: string, level: number): string {
 }
 
 /**
- * An engine page's rule at a level, in the page's own words ("Crops near a beehive get x1.5 bloom."), so the stall
- * says what the next level does in the same terms as the page. Level I is the page as printed.
+ * Round 12: what an engine page does, said on a crop of its own engine as the plot pays it, so the number has something
+ * to point at: a strawberry near a beehive, a chili beside two other chilies, beans beside other beans, corn beside one
+ * crop. Round 11 said "a 10 coin crop", and start crops pay 2 to 5; "Crops beside it add 10 coins" read as the
+ * neighbours gaining coins.
+ */
+export function engineCase(id: PageId, level: number): number {
+  const n = levelNum(id, level);
+  switch (id) {
+    case 'bees':
+      // The hive's own +1 bloom, times Busy Bees.
+      return Math.round(SEEDS.strawberry.base * 2 * n);
+    case 'hot':
+      return Math.round(SEEDS.chili.base * n * n);
+    case 'vines':
+      // The other beans' +2 yield, and Trellis' bloom once.
+      return Math.round((SEEDS.beans.base + 2) * (1 + n));
+    case 'tall':
+      return Math.round(SEEDS.corn.base * (1 + n));
+    default:
+      return 0;
+  }
+}
+
+/**
+ * An engine page's rule at a level, in the page's own words, so the stall says what the next level does in the same
+ * terms as the page. Level I is the page as printed. Round 12: on a crop of its own (`engineCase`).
  */
 export function levelText(id: PageId, level: number, roots = true): string | null {
   const n = levelNum(id, level);
-  // Round 10: an engine page never blooms radishes and carrots, and says so in a short line of its own. Round 11: every
-  // number said as what a 10 coin crop pays, or what a corn gains: "x1.7 bloom" and "+1.25 bloom" read as sums.
+  // Round 10: an engine page never blooms radishes and carrots, and says so in a short line of its own.
   const not = roots && !TUNING.engineRoots ? ' Not radishes or carrots.' : '';
+  const k = engineCase(id, level);
   switch (id) {
     case 'bees':
-      return `Near a beehive, a 10 coin crop pays ${tenCoin(n)}.${not}`;
+      return `A strawberry pays ${SEEDS.strawberry.base} alone, ${k} near a beehive.${not}`;
     case 'hot':
       // A chili's own x1.5 stays on radishes and carrots: the chili's card says so (`cardLine`), not the page.
-      return hotLevels() ? `Chilies pick for ${TUNING.hotPicks} nights. A 10 coin crop pays ${tenCoin(n)} beside one, ${tenCoin(n * n)} beside two.` : `Chilies stay and pick for ${n} nights.`;
+      return hotLevels() ? `Chilies pick for ${TUNING.hotPicks} nights. A chili pays ${SEEDS.chili.base} alone, ${Math.round(SEEDS.chili.base * n)} beside another, ${k} beside two.` : `Chilies stay and pick for ${n} nights.`;
     case 'vines':
-      return `By beans or strawberries, a 10 coin crop pays ${tenCoin(1 + n)}.${not}`;
+      return `Beans pay ${SEEDS.beans.base} alone, ${k} beside other beans.${not}`;
     case 'tall':
-      return `One more scoop a day. Corn ripens two nights sooner. Crops beside it add ${Math.round(SEEDS.corn.base * n)} coins.`;
+      return `One more scoop a day. Corn ripens two nights sooner. Corn pays ${SEEDS.corn.base} alone, ${k} beside one crop.`;
     default:
       return null;
   }
 }
 
-const tenCoin = (times: number) => Math.round(10 * times);
-
-/**
- * What the next level does, said against what it does now: "Near a beehive, a 10 coin crop pays 17, not 15." (the page's
- * own line says it leaves radishes and carrots out).
- */
+/** What the next level does, said against what it does now: "A strawberry near a beehive pays 14, not 13." */
 export function levelChange(id: PageId, to: number): string | null {
-  const n = levelNum(id, to);
-  const was = levelNum(id, to - 1);
+  const n = engineCase(id, to);
+  const was = engineCase(id, to - 1);
   switch (id) {
     case 'bees':
-      return `Near a beehive, a 10 coin crop pays ${tenCoin(n)}, not ${tenCoin(was)}.`;
+      return `A strawberry near a beehive pays ${n}, not ${was}.`;
     case 'hot':
-      return hotLevels() ? `A 10 coin crop pays ${tenCoin(n)} beside a chili, not ${tenCoin(was)}.` : `Chilies stay and pick for ${n} nights, not ${was}.`;
+      return hotLevels() ? `A chili beside two others pays ${n}, not ${was}.` : `Chilies stay and pick for ${levelNum(id, to)} nights, not ${levelNum(id, to - 1)}.`;
     case 'vines':
-      return `By beans or strawberries, a 10 coin crop pays ${tenCoin(1 + n)}, not ${tenCoin(1 + was)}.`;
+      return `Beans beside other beans pay ${n}, not ${was}.`;
     case 'tall':
-      return `Crops beside a corn add ${Math.round(SEEDS.corn.base * n)} coins, not ${Math.round(SEEDS.corn.base * was)}.`;
+      return `Corn beside one crop pays ${n}, not ${was}.`;
     default:
       return null;
   }
@@ -494,7 +534,8 @@ export function levelChange(id: PageId, to: number): string | null {
  * eleventh playtest's stall slip still said x1.5 with Hot Beds IV kept.
  */
 export function cardLine(id: CardId, up: boolean, s: Partial<Pick<RunState, 'pages' | 'levels'>>): string {
-  if (id === 'chili' && s.pages?.includes('hot') && hotLevels()) return `A 10 coin crop beside it pays ${tenCoin(engineNum(s, 'hot'))}. Two chilies at most.`;
+  // Round 12: on the chili itself, as the page says it ("a 10 coin crop" had nothing to point at).
+  if (id === 'chili' && s.pages?.includes('hot') && hotLevels()) return `It pays ${SEEDS.chili.base} alone, ${engineCase('hot', pageLevel(s, 'hot'))} beside two other chilies. Two chilies at most.`;
   return cardText(id, up);
 }
 
@@ -618,6 +659,22 @@ export function perennial(kind: SeedId): boolean {
 /** The bench's morning refill: three scoops, one more for Green Thumb, one for the Long Furrow, one for Tall Rows (round 11), and any bought for good. */
 export function energyMax(s: Pick<RunState, 'pages' | 'scoops'>): number {
   return TUNING.energy + (s.pages.includes('thumb') ? 1 : 0) + (s.pages.includes('furrow') ? 1 : 0) + (s.pages.includes('tall') ? TUNING.tallScoop : 0) + (s.scoops ?? 0);
+}
+
+/**
+ * Round 12: the nights a seed sown now needs to ripen, with the run's pages: Tall Rows brings corn in two nights sooner
+ * (`tallFast`). The face, the slips and the stall printed corn's four moons under Tall Rows, and it ripened in two.
+ */
+export function seedDays(s: Pick<RunState, 'pages' | 'twist' | 'day'>, kind: SeedId): number {
+  return SEEDS[kind].days - (kind === 'corn' && pageOn(s, 'tall') ? Number(TUNING.tallFast) : 0);
+}
+
+/**
+ * Round 12: the most scoops the bench can hold on any morning: the refill and the most pulled crops put back in a night.
+ * A card dearer than this can never be played; the spent heap's lesson comes for it, not for a card dear only today.
+ */
+export function benchMost(s: Pick<RunState, 'pages' | 'scoops'>): number {
+  return energyMax(s) + TUNING.scoopCap;
 }
 
 /** Cards drawn up to each morning: five, and one more for Big Basket. */

@@ -18,6 +18,7 @@ import {
   giveUp,
   guarded,
   isFinal,
+  isSeed,
   marketTonight,
   maxPages,
   moveTargets,
@@ -35,6 +36,7 @@ import {
   RETIRED,
   ripeTonight,
   SEASON_NAMES,
+  seedDays,
   SEEDS,
   targetsFor,
   toGo,
@@ -58,7 +60,7 @@ import { crowLine, earnTable, learnedAll, newLearn, PIECES, REFRESH, Tutor, type
 import { ease, Seq } from './view/anim';
 import { lanternUrl, pegboardUrl, scoopUrl, tinUrl, woodUrl } from './view/art';
 import { Board, type PreviewMark } from './view/board';
-import { costBoxes, faceBonus, faceBoxes, faceUrl } from './view/faces';
+import { bonusKey, costBoxes, faceBonus, faceBoxes, faceUrl } from './view/faces';
 import { iconUrl, twistUrl } from './view/icons';
 import { Sheets } from './sheets';
 
@@ -960,8 +962,9 @@ export class Table {
     const day = this.run.phase === 'day';
     hand.forEach((card, i) => {
       let c = this.cards.get(card.uid);
-      const bonus = faceBonus(card.id, this.run.pages, this.run.levels);
-      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonus ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}${bonus.hot ? `h${bonus.hot}` : ''}` : ''}`;
+      // Round 12: a seed's moons are the nights it needs with the run's pages (corn under Tall Rows: two).
+      const bonus = faceBonus(card.id, this.run.pages, this.run.levels, isSeed(card.id) ? seedDays(this.run, card.id) : undefined);
+      const key = `${card.id}${card.up ? '+' : ''}${showCost ? '' : '-'}${bonusKey(bonus)}`;
       if (!c) {
         const d = el('div', 'sb-card');
         const img = el('img');
@@ -1293,12 +1296,18 @@ export class Table {
     // "The other corn is pulled before this one ripens."), and a bonus a crow about tonight may take says so.
     let reason: { plot: number; text: string } | null = null;
     if (aim !== null && valid) {
-      const text = previewReason(s, { plot: aim, harvest: total ? { ...total, late: !!total.late } : null, marks, tonight: [], market: [] }, aim, def.type === 'seed' ? (card.id as SeedId) : null);
+      // Round 12: a crop beside it pulled first is named with its plot where the plate shows row numbers ("in B2"), else
+      // by where it stands ("above it"), as the readings name plots.
+      const named = this.board.keyBoxes().some((k) => /\d/.test(k.text));
+      const text = previewReason(s, { plot: aim, harvest: total ? { ...total, late: !!total.late } : null, marks, tonight: [], market: [] }, aim, def.type === 'seed' ? (card.id as SeedId) : null, named);
       if (text) reason = { plot: aim, text };
+      // Round 12: an object stays where it is set out for the rest of the run; say so while it is aimed, before the play
+      // (the twelfth playtest placed its hive with nothing saying it could never move).
+      else if (card.id === 'beehive' && marks.length) reason = { plot: aim, text: 'The hive stays here for the run.' };
     }
     let none: { plot: number | null; text: string } | null = null;
     // An object stands for the rest of the run: a scarecrow set out before the crows come is not wasted.
-    const later = card.id === 'scarecrow' ? 'Keeps crows off from now on.' : card.id === 'beehive' ? 'Blooms crops around it from now on.' : 'No effect now.';
+    const later = card.id === 'scarecrow' ? 'Keeps crows off here for the run.' : card.id === 'beehive' ? 'Blooms crops around it, here for the run.' : 'No effect now.';
     if (!marks.length && !total && (def.target === 'board' || (aim !== null && def.type !== 'seed' && targetsFor(s, idx).includes(aim)))) none = { plot: def.target === 'board' ? null : aim, text: later };
     // What the play would change about tonight: crops it brings in get tonight's moon, and Market Day's stamp moves.
     const after = def.target === 'board' ? previewPlay(s, idx, null) : valid && aim !== null ? (def.target === 'move' ? previewPlay(s, idx, this.held!.from!, aim) : previewPlay(s, idx, aim)) : null;

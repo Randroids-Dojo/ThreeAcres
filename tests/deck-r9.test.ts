@@ -323,8 +323,10 @@ describe('round 9: twists that keep their promise', () => {
               if (R.boonAims(s).some((a) => a.v >= 0.08 && a.t.id !== played)) expect(help.worth, `help ${help.id}`).toBeGreaterThanOrEqual(0.08 - 1e-9);
               else if (help.worth < 0.08) thin++;
               // Round 10: the cut is the hitch's cost and a share of the help's worth (`helpShare`; round 9 added all of it).
+              // Round 12: all of it again; where the cut is held at its most, the merchant pays what it leaves short.
               const share = (TUNING as typeof TUNING & { helpShare?: number }).helpShare ?? 1;
-              expect(R.twistEase(hitch) + 0.011).toBeGreaterThanOrEqual(hitch.worth + share * help.worth);
+              const short = hitch.worth + share * help.worth - R.twistEase(hitch);
+              if (short > 0.011) expect((hitch as Twist & { pay?: number }).pay ?? 0, `${hitch.id} short ${short}`).toBeGreaterThanOrEqual(R.twistCoins(s, hitch) + R.twistCoins(s, help) + short * R.twistQuota(s, null) - Math.max(25, 0.025 * R.twistQuota(s, null)));
             }
             // Not aimed as a hitch the last stall offered, and seldom as the one before it (the tall run: frost on the
             // corn row three times, a corn glut twice): only when nothing else can be weighed against a help.

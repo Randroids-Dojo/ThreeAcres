@@ -89,8 +89,9 @@ describe('round 10: each engine on its own crops', () => {
     expect(bonus(vines, 'carrot', 'vines')).toBeUndefined();
     // Each page says so in its own words.
     for (const id of ['bees', 'vines'] as PageId[]) expect(PAGES[id].text).toMatch(/not radishes or carrots/i);
-    // Round 11: Hot Beds says what a 10 coin crop pays (a chili's own x1.5 stays on radishes and carrots: above).
-    expect(PAGES.hot.text).toMatch(/10 coin crop pays \d+ beside one, \d+ beside two/);
+    // Round 11: Hot Beds says what a crop pays beside one chili and two (a chili's own x1.5 stays on radishes and carrots:
+    // above). Round 12: said on a chili ("a 10 coin crop" pointed at nothing).
+    expect(PAGES.hot.text).toMatch(/A chili pays \d+ alone, \d+ beside another, \d+ beside two/);
   });
 
   it('the tall engine takes three corn home, so a season seldom goes without one', () => {
@@ -137,9 +138,11 @@ describe('round 10: hitches priced by what they cost, never aimed at a free card
     expect(X.hitchCost(full)).toBeGreaterThan(0.9 * full.v);
     // Round 8 cut a quota by the hitch's cost and the help's whole worth beside it, so the cut ran 2 to 3 times what the
     // hitch cost when played (deck-twists: frost cut 380 and cost 159) and the tenth playtest took the hitch at all
-    // nine stalls. Now the help adds at most a small share.
+    // nine stalls. Round 10 added a small share of the help. Round 12: the whole worth again, with the merchant paying
+    // the cost and the help's coins, now that what a hitch says it costs is what it plays (deck-twists, both players):
+    // the hitch leaves the season and the purse each where the help would (deck-r12).
     const worth = 0.2;
-    expect(X.hitchCut(full, worth) - X.hitchCost(full)).toBeLessThanOrEqual(0.35 * worth);
+    expect(X.hitchCut(full, worth) - X.hitchCost(full)).toBeCloseTo(TUNING.helpShare * worth, 6);
   });
 });
 
@@ -202,7 +205,7 @@ describe('round 10: a twist said and paired in coins of the run\'s own take', ()
     expect(X.hitchCut(aim, 0.1, 1.5)).toBeCloseTo(1.5 * X.hitchCut(aim, 0.1, 1), 5);
   });
 
-  it('a help beside a hitch is worth about what the hitch is worth to this run, and every kind still comes', () => {
+  it('a help beside a hitch is worth about what the hitch costs this run, and every kind still comes', () => {
     const seen = new Set<string>();
     for (let seed = 1; seed <= 60; seed++) {
       const s = rich(seed);
@@ -213,7 +216,8 @@ describe('round 10: a twist said and paired in coins of the run\'s own take', ()
       seen.add(hitch.id);
       const r = X.takeRatio?.(s) ?? 1;
       const aim = X.hitchAims(s).find((a) => R.sameAim(a.t, hitch))!;
-      const want = X.pairWorth?.(X.hitchCost(aim), r) ?? -1;
+      // Round 12: the help nearest what the hitch costs (`pairCost`; round 10's `pairWorth` weighed a take over a quota).
+      const want = TUNING.pairCost ? X.hitchCost(aim) : (X.pairWorth?.(X.hitchCost(aim), r) ?? -1);
       expect(want, 'the worth that weighs the same').toBeGreaterThanOrEqual(0);
       const worth = (help as Twist & { worth?: number }).worth ?? 0;
       expect(Math.abs(worth / r - want), `${hitch.id} beside ${help.id}`).toBeLessThanOrEqual(TUNING.pairSpread + TUNING.pairNear + 0.01);

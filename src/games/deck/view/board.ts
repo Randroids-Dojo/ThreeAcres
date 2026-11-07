@@ -899,9 +899,19 @@ export class Board {
       // The yield by its basket when the arithmetic shows, and the coins it pays by a coin.
       const w = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3 + icon * (showBloom ? 2 : 1) + 12 + (showBloom ? 3 : 0);
       const h = big + 8;
-      // Straddling the plot's bottom edge, clear of a thumb on the plot.
-      const x0 = c.x - w / 2;
-      const y0 = c.y + T / 2 - h * 0.45;
+      // Straddling the plot's bottom edge, clear of a thumb on the plot. Round 12: where it covers no chip (the twelfth
+      // playtest's "3 x 3.2 = 10" hid the "+2" on the plot below, and a "287" the "x2" beside it on five columns): inside the
+      // plot's foot, then shifted to the plot's left or right edge, then straddling its top edge or its middle.
+      const keys = this.keyBoxes();
+      const cap = this.captionBox();
+      const clampX = (x: number) => Math.max(this.px0 + 2, Math.min(this.px0 + this.pw - 2 - w, x));
+      const xs = [c.x - w / 2, c.x - T / 2 + 2, c.x + T / 2 - 2 - w].map(clampX);
+      const ys = [c.y + T / 2 - h * 0.45, c.y + T / 2 - h - 2, c.y - T / 2 - h * 0.55, c.y - h / 2];
+      const spots = ys.flatMap((y) => xs.map((x) => ({ x, y })));
+      const covers = (r: { x: number; y: number }) => [...this.chips, ...keys, cap].some((b) => r.x < b.x + b.w - 0.5 && r.x + w > b.x + 0.5 && r.y < b.y + b.h - 0.5 && r.y + h > b.y + 0.5);
+      const spot = spots.find((r) => !covers(r)) ?? spots[0];
+      const x0 = spot.x;
+      const y0 = spot.y;
       ctx.beginPath();
       ctx.roundRect(x0, y0, w, h, 5);
       // Round 10: a seed that ripens next season shows its pay on a pale slip with a dashed edge and grey ink, clearly
@@ -951,10 +961,12 @@ export class Board {
       const clampY = (y: number) => Math.max(this.py0 + 2, Math.min(y, this.py0 + this.ph - h - 4));
       const bedTop = this.by;
       const bedFoot = this.by + this.rows * T;
-      const tries = [under >= 0 ? under : at.y + T / 2 + 2, at.y - T / 2 - h - 2, bedFoot + 2, bedTop - h - 2, at.y - h / 2].map(clampY);
-      // Round 9: never over the plate's caption either (the ninth playtest's reason line sat on it).
+      const tries = [under >= 0 ? under : at.y + T / 2 + 2, at.y - T / 2 - h - 2, bedFoot + 2, bedTop - h - 2, at.y - h / 2, at.y + T / 2 - h - 2, at.y - T / 2 + 2].map(clampY);
+      // Round 9: never over the plate's caption either (the ninth playtest's reason line sat on it). Round 12: nor the key
+      // letters and numbers ("Ripens next season." sat over the C of a first-row plot).
       const cap = this.captionBox();
-      const hits = (y: number) => [...this.chips, ...(slip ? [slip] : []), cap].some((r) => x0 < r.x + r.w && x0 + w > r.x && y < r.y + r.h && y + h > r.y);
+      const keys = this.keyBoxes();
+      const hits = (y: number) => [...this.chips, ...(slip ? [slip] : []), cap, ...keys].some((r) => x0 < r.x + r.w && x0 + w > r.x && y < r.y + r.h && y + h > r.y);
       const y0 = tries.find((y) => !hits(y)) ?? tries[0];
       ctx.beginPath();
       ctx.roundRect(x0, y0, w, h, 3);

@@ -393,8 +393,13 @@
   background: #2e4a3c; border: 3px solid #1d3027; border-radius: 10px; box-shadow: inset 0 0 0 6px #355a4a, inset 0 0 40px rgba(0, 0, 0, 0.45), 0 14px 30px rgba(0, 0, 0, 0.5);
   touch-action: pan-y;
 }
-/* Round 10: a tin with more below says so, with a soft shade at its foot (the improve sheet cut off its last row). */
-.sb-tinview.more { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 34px), rgba(0, 0, 0, 0.3)); mask-image: linear-gradient(180deg, #000 calc(100% - 34px), rgba(0, 0, 0, 0.3)); }
+/* Round 10: a tin with more below says so, with a soft shade at its foot (the improve sheet cut off its last row).
+   Round 12: the shade is the tin's own green over the cards, not a see-through mask: the hand showed faintly through
+   the foot of the sheet. It sticks to the foot of the scroll, over the padding too. */
+.sb-tinview.more::after {
+  content: ''; display: block; position: sticky; bottom: -18px; height: 40px; margin: -40px -16px -18px; pointer-events: none;
+  background: linear-gradient(180deg, rgba(46, 74, 60, 0), #2e4a3c 80%);
+}
 .sb-tinview h2 { margin: 0; font-size: 24px; font-style: italic; }
 .sb-tinview .sb-sub { color: #cfdcc8; margin-bottom: 12px; }
 /* Room above the grid, so a lifted card never covers the line that says what it would do. */
@@ -550,7 +555,8 @@
 .sb .sb-twistcard.picked { background: #fbf4dc; border-left-color: #b8352a; transform: translateY(-2px) rotate(0deg); box-shadow: 0 0 0 2px #b8352a, 0 8px 10px -4px rgba(0, 0, 0, 0.6); }
 .sb .sb-twistcard.other { opacity: 0.62; }
 .sb-twists.ask .sb-twistcard { animation: sb-cue 1.2s ease-in-out 2; }
-.sb[data-layout='wide'] .sb-twistcard { max-width: 380px; }
+/* Round 12: wide enough for the hitch's trade sentence on one line, so the clippings stay as short as before. */
+.sb[data-layout='wide'] .sb-twistcard { max-width: 500px; }
 .sb[data-layout='wide'] .sb-twistcard span { font-size: 15.5px; }
 .sb[data-layout='wide'] .sb-twistcard img:first-child { height: 32px; }
 /* A stall body with more below it says so, with a soft shade at its foot. */
@@ -794,6 +800,13 @@
 .sb .sb-twistcard .sb-worth b { font-size: 14px; font-weight: 750; }
 .sb[data-layout='phone'] .sb-twistcard .sb-worth { font-size: 11.5px; line-height: 1.12; }
 .sb[data-layout='phone'] .sb-twistcard .sb-worth b { font-size: 12.5px; }
+/* Round 12: both clippings say what they leave the season and the purse, and the hitch its trade in a sentence under it:
+   a little tighter on the phone, so the year's fullest stall still fits without a scroll. */
+.sb[data-layout='phone'] .sb-twistcard { gap: 1px; }
+.sb .sb-twistcard .sb-worth .sb-nw { white-space: nowrap; font: inherit; }
+.sb[data-layout='phone'] .sb-twistcard .sb-worth, .sb[data-layout='phone'] .sb-twistcard .sb-trade { font-size: 11px; line-height: 1.08; }
+.sb[data-layout='phone'] .sb-twistcard .sb-worth b { font-size: 12px; }
+.sb[data-layout='phone'] .sb-twistcard img:first-child { height: 17px; }
 .sb[data-layout='wide'] .sb-twistcard .sb-worth { font-size: 14.5px; }
 .sb[data-layout='wide'] .sb-twistcard .sb-worth b { font-size: 16px; }
 /* Round 8: the engine page's next level, and room for one more page, side by side on the cork board. */
@@ -821,8 +834,6 @@
 /* Round 11: what the engine wants planted around it, at the pick; what to try next, on a first run's last page. */
 .sb-engplant { display: block; margin-top: 4px; font-style: normal; font-weight: 650; }
 .sb-trynext { font-weight: 650; }
-/* Round 11: the hitch's two sentences break between them, in the trade line's own type. */
-.sb .sb-twistcard .sb-trade .sb-say { display: inline-block; font: inherit; color: inherit; white-space: nowrap; }
 /* Round 11: a flying bonus goes behind the slip, so it never covers the sum on its top line (it covered the x3). */
 .sb-slip { z-index: 2; }
 .sb-arc { z-index: 1; }

@@ -7,7 +7,7 @@
 // so a run that strays from the guided deals still gets each one when it
 // first matters.
 
-import { CARDS, costOf, crowReach, energyMax, extraGrowth, isRipe, MASS, neighbours, nextSeason, PLURALS, ripeTonight, SEASON_NAMES, targetsFor, TUNING, type Card, type CardId, type RunState, type SeedId } from './rules';
+import { benchMost, CARDS, costOf, crowReach, energyMax, extraGrowth, isRipe, MASS, neighbours, nextSeason, PLURALS, ripeTonight, SEASON_NAMES, targetsFor, TUNING, type Card, type CardId, type RunState, type SeedId } from './rules';
 
 /** Pieces of the table that arrive with a lesson. The plot, the hand and the almanac are always there. */
 export type Piece = 'lantern' | 'peg' | 'scoops' | 'bloom' | 'coins' | 'tin' | 'spent' | 'tonight' | 'pages' | 'services';
@@ -89,15 +89,13 @@ export function spareCard(s: RunState): Card | undefined {
   return s.hand.find((c, i) => CARDS[c.id].target !== 'board' && targetsFor(s, i).length === 0);
 }
 /**
- * Round 8: a card the scoops cannot pay for today, once nothing else in the hand can be played: the hand is stuck. The
- * eighth playtest's corn runs ended days with three to five three-scoop corn cards in hand and never met the spent
- * heap, whose lesson came only for a card with no plot. A card that is merely dear while others can still be played
- * is not one (round 7: the playtest tossed a strawberry it would have sown the next morning).
+ * A card the bench can never pay for: it costs more than the bench holds on its fullest morning (`benchMost`). Round 8
+ * taught the spent heap on any hand stuck with cards too dear today (the eighth playtest's corn runs ended days with
+ * three-scoop corn in hand); round 12's tester was told "Drag a card too dear today to Spent." for a can and rain after
+ * spending the day's scoops on purpose, cards that were fine the next morning. A card dear only today is never one.
  */
 export function dearCard(s: RunState): Card | undefined {
-  const playable = (c: Card, i: number) => costOf(c.id, c.up) <= s.energy && (CARDS[c.id].target === 'board' || targetsFor(s, i).length > 0);
-  if (s.hand.some(playable)) return undefined;
-  return s.hand.find((c, i) => costOf(c.id, c.up) > s.energy && (CARDS[c.id].target === 'board' || targetsFor(s, i).length > 0));
+  return s.hand.find((c) => costOf(c.id, c.up) > benchMost(s));
 }
 const standing = (s: RunState, obj: 'scarecrow' | 'beehive') => s.plots.some((p) => p.obj === obj);
 /** The pair in hand that is one or the other (round 9), if any. */
@@ -309,13 +307,13 @@ const LESSONS: Lesson[] = [
     after: ['tin'],
     unlocks: ['spent'],
     where: 'table',
-    // A card with nowhere to go, or (round 8) a hand stuck with cards the scoops cannot pay for today.
+    // A card with nowhere to go, or (round 12) one the bench can never pay for; not one only dear today.
     ready: (v) => v.s.phase === 'day' && !v.s.tossed && v.s.hand.length >= 2 && (!!spareCard(v.s) || !!dearCard(v.s)) && (v.s.day >= 6 || v.s.season > 0 || v.s.year > 1),
     text: (v) => {
       const spare = spareCard(v.s);
       const dear = spare ? undefined : dearCard(v.s);
       if (v.dev === 'key') return dear ? `Press Shift ${v.s.hand.indexOf(dear) + 1}, then X.` : 'Take a card up, then press X.';
-      return dear ? 'Drag a card too dear today to Spent.' : 'Drag a spare card to Spent.';
+      return dear ? 'Drag a card too dear to Spent.' : 'Drag a spare card to Spent.';
     },
     point: () => 'heap',
     done: (v) => v.n('toss') >= 1 || nightPassed(v, 'spent'),

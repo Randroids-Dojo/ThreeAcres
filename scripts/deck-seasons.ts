@@ -19,7 +19,7 @@
 // pick. A line of the guided year's clears by engine follows its table.
 // npx tsx scripts/deck-seasons.ts [runs] [--only=decent|strict|guided|careful|loose|second|novice|greedy] [--upto=n] [--engine=id]
 import { botDay, botShop, Dice } from '../src/games/deck/bot';
-import { BOONS, newMeta, newRun, SEASON_NAMES, TUNING, type EngineId } from '../src/games/deck/rules';
+import { BOONS, newMeta, newRun, SEASON_NAMES, TUNING, twistEase, type EngineId } from '../src/games/deck/rules';
 import { GREEDY, NOVICE, readerDay, readerShop, type Reader } from './deck-players';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -125,8 +125,9 @@ function play(noise: number, guided: boolean, second = false, depth = 2, reader?
       if (end && end.t === 'seasonEnd') {
         t.played[k]++;
         if (end.cleared) t.cleared[k]++;
-        t.ratio[k].push(end.earned / end.quota);
         const tw = s.stats.log[s.stats.log.length - 1]?.twist;
+        // Round 12: the take less the quota asked, over the plain quota (a hitch's cut now takes off the help's worth too).
+        t.ratio[k].push(1 + (end.earned - end.quota) / (end.quota / Math.max(0.1, 1 - twistEase(tw ?? null))));
         if (tw) {
           const a = t.after[(BOONS as readonly string[]).includes(tw.id) ? 'boon' : 'hitch'];
           a[0]++;

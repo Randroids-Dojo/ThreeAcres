@@ -19,6 +19,7 @@ import {
   pageLevel,
   levelText,
   twistNote,
+  hitchTrade,
   canRemove,
   scoopOnSale,
   scoopsIdle,
@@ -31,6 +32,7 @@ import {
   engineText,
   costOf,
   isFinal,
+  isSeed,
   leaveShop,
   maxPages,
   nextCarry,
@@ -44,13 +46,12 @@ import {
   scoopPrice,
   SEASON_NAMES,
   seasonsToNext,
+  seedDays,
   SEEDS,
   slotOnSale,
   slotPrice,
   topCrops,
   TUNING,
-  twistEase,
-  twistQuota,
   twistText,
   upgradeCard,
   upgradeNote,
@@ -59,6 +60,7 @@ import {
   type CardId,
   type Ev,
   type PageId,
+  type RunState,
   type SeedId,
 } from './rules';
 import type { Line } from './lessons';
@@ -115,12 +117,13 @@ export function lossAdvice(s: { guided: boolean; end: { won?: boolean; gaveUp?: 
 }
 
 /** A card said in plain words: its cost, when a seed ripens, and its rule. */
-export function cardWords(id: CardId, up: boolean, s: Parameters<typeof cardLine>[2] = {}): string {
+export function cardWords(id: CardId, up: boolean, s: Parameters<typeof cardLine>[2] & Partial<Pick<RunState, 'twist' | 'day'>> = {}): string {
   const d = CARDS[id];
   const bits = [`${scoops(costOf(id, up))}.`];
   if (d.type === 'seed') {
-    const sd = SEEDS[id as SeedId];
-    bits.push(`Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}.`);
+    // Round 12: the nights it needs with this run's pages (corn under Tall Rows: two, not four).
+    const n = s.pages ? seedDays({ pages: s.pages, twist: s.twist ?? null, day: s.day ?? 1 }, id as SeedId) : SEEDS[id as SeedId].days;
+    bits.push(`Ripe in ${n} ${n === 1 ? 'night' : 'nights'}.`);
   }
   bits.push(cardLine(id, up, s));
   return bits.join(' ');
@@ -230,7 +233,7 @@ export class Sheets {
    */
   private face(id: CardId, up: boolean): string {
     const s = this.t.run;
-    return faceUrl(id, up, true, faceBonus(id, s.pages, s.levels));
+    return faceUrl(id, up, true, faceBonus(id, s.pages, s.levels, isSeed(id) ? seedDays(s, id) : undefined));
   }
 
   /** The face a run's best crop is shown with on its end page: improved if the run improved one, with the run's numbers. */
@@ -309,7 +312,7 @@ export class Sheets {
       'A quarter of what you take over the quota carries into the next season, so a strong season helps the next one.',
       'At a run\'s first stall you take an engine home, free: a card and the almanac page that makes it pay, such as a beehive and Busy Bees. The stall keeps its cards in stock from then on. An engine\'s page never works on radishes and carrots: each engine wants its own crops.',
       'From year 2 the stall sells your engine\'s page at its next level, such as Busy Bees II, then III. Each level makes it pay more, and the quotas climb to match.',
-      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on a row you plant. Each says about how many coins it would bring or cost you. The one that gets in the way asks a smaller quota, and the merchant pays you for it as you leave the stall: together about what the other would bring. Pick one; it holds all season.',
+      'From year 2, the stall offers two twists for the season ahead, both about your own plot: one that helps, such as a buyer for one of your crops, and one that gets in the way, such as frost on a row you plant. The one that gets in the way costs you coins, so the season asks less and the merchant pays you as you leave the stall. Each says what it leaves you, in the same words: coins toward the season, and coins to spend. By the merchant\'s reckoning the two come out level, so pick the one your plot will beat. It holds all season.',
       'Each season asks more than the one before, and the quotas are the same for every run: what you earn never raises them.',
       'From year 2 the stall sells seed scoops for good, but not while scoops sit unused on your bench at dusk.',
       'The plot carries over too: whatever stands at a season\'s last dusk is there at the next dawn, so a late planting is picked next season and counts for its quota.',
@@ -347,8 +350,8 @@ export class Sheets {
     const variety = def.type === 'seed' ? `, <i>${esc(VARIETY[card.id as keyof typeof VARIETY])}</i>` : '';
     notes.append(el('p', '', `<b>${esc(def.name)}</b>${variety}${card.up ? ', improved' : ''}. ${cost === 0 ? 'Free to play.' : `Costs ${cost} ${cost === 1 ? 'scoop' : 'scoops'}.`}`));
     if (def.type === 'seed') {
-      const sd = SEEDS[card.id as SeedId];
-      notes.append(el('p', '', `Ripe in ${sd.days} ${sd.days === 1 ? 'night' : 'nights'}. ${esc(cardLine(card.id, card.up, this.t.run))}`));
+      const n = seedDays(this.t.run, card.id as SeedId);
+      notes.append(el('p', '', `Ripe in ${n} ${n === 1 ? 'night' : 'nights'}. ${esc(cardLine(card.id, card.up, this.t.run))}`));
     } else notes.append(el('p', '', esc(cardText(card.id, card.up))));
     if (def.type === 'weather') notes.append(el('p', 'sb-quiet', 'Weather cards take effect tonight, before anything grows.'));
     if (def.type === 'object') notes.append(el('p', 'sb-quiet', 'It stands on its plot from season to season, for the rest of the run.'));
@@ -574,14 +577,15 @@ export class Sheets {
       row.setAttribute('aria-label', `${cap(SEASON_NAMES[coming.season])} brings one of these`);
       sh.twists.forEach((tw, i) => {
         const on = sh.twist === i;
-        // A hitch is a trade: it says what the season asks with it, and round 11 what the merchant pays ("Spring asks 700.
-        // The merchant pays 140."), so its margin reads beside the help's coins. A save from before round 11 pays nothing.
-        const asks = `${cap(SEASON_NAMES[coming.season])} asks ${twistQuota(s, tw)}`;
-        const trade = twistEase(tw) ? `<em class="sb-trade">${tw.pay ? `<span class="sb-say">${asks}.</span> <span class="sb-say">The merchant pays ${tw.pay}.</span>` : `${asks}, not ${twistQuota(s, null)}.`}</em>` : '';
-        // Round 8: both say what they would do to the season's take, in coins, from the shares the rules priced them by
-        // ("Your carrots would pay about 320 more."): the eighth playtest's help showed no number beside the hitch's.
+        // A hitch is a trade: round 12, what it costs, what the season asks less and what the merchant pays ("It costs about
+        // 110: spring asks 240 less, the merchant pays 250."), one sentence that wraps. A save from before round 11 pays nothing.
+        const line = hitchTrade(s, tw);
+        const trade = line ? `<em class="sb-trade">${esc(line)}</em>` : '';
+        // Round 12: both say, in the same words, what they leave the season and the purse ("270 toward spring, 270 to
+        // spend."): round 8's "About 320 more coins." beside "About 300 fewer coins." counted the help's coins once.
         const note = twistNote(s, tw);
-        const worth = note ? `<em class="sb-worth">${esc(note).replace(/(\d+)/, '<b>$1</b>')}</em>` : '';
+        // "N to spend." keeps to one line, so a narrow clipping breaks after the comma.
+        const worth = note ? `<em class="sb-worth">${esc(note).replace(/, (\d+ to spend\.)$/, ', <span class="sb-nw">$1</span>').replace(/(\d+)/g, '<b>$1</b>')}</em>` : '';
         const b = btn(`sb-twistcard${on ? ' picked' : sh.twist !== undefined ? ' other' : ''}`, `<img src="${twistUrl(tw, 26)}" alt=""><span>${esc(twistText(tw))}</span>${worth}${trade}${on ? `<img class="sb-pinimg" src="${pinUrl()}" alt="">` : ''}`, () => {
           if (!chooseTwist(s, i)) return;
           this.t.tutor.count('twist');

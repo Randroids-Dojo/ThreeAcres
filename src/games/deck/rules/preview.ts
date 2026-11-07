@@ -7,7 +7,7 @@
 // will be gone by then. Nothing here touches the real run or its rng.
 
 import { CARDS, isSeed } from './cards';
-import { crowReach, forecast, isFinal, isRipe, pageOn, type Fate } from './board';
+import { crowReach, forecast, isFinal, isRipe, neighbours, pageOn, type Fate } from './board';
 import { scoreHarvest, snapshot, type Snapshot } from './night';
 import { cloneRun, playCard } from './run';
 import type { CardId, Harvest, RunState, SeedId } from './types';
@@ -21,6 +21,14 @@ export interface Lost {
   why: 'gone';
   /** The plot of the crop that will be gone, for the reason. */
   from: number | null;
+  /**
+   * Round 12: the bonus counts every crop beside it (good company), so it has no one giver: `from` is a crop beside it
+   * that is pulled first, and the line names it and its plot ("The radish in B2 is pulled first."; it said "Its
+   * neighbour is pulled first.").
+   */
+  beside?: boolean;
+  /** Round 12: lost because a crop beside it still stands on its night (a pumpkin's room to sprawl): `from` is that crop. */
+  stands?: boolean;
 }
 
 /**
@@ -154,6 +162,20 @@ function without(s: RunState, i: number, fates: readonly (Fate | null)[], gone: 
 
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
 
+/** Round 12: a crop beside plot i that still stands on i's next pick, the preferred plot first, or null. */
+function besideStill(s: RunState, i: number, fates: readonly (Fate | null)[], prefer: number | null): number | null {
+  const pull = fates[i]?.pull ?? Infinity;
+  const there = neighbours(s, i).filter((j) => s.plots[j].crop && (fates[j]?.leave ?? Infinity) >= pull);
+  return there.find((j) => j === prefer) ?? there[0] ?? null;
+}
+
+/** Round 12: a crop beside plot i that leaves before i's next pick, the preferred plot first, or null. */
+function besideFirst(s: RunState, i: number, fates: readonly (Fate | null)[], prefer: number | null): number | null {
+  const pull = fates[i]?.pull ?? Infinity;
+  const gone = neighbours(s, i).filter((j) => s.plots[j].crop && (fates[j]?.leave ?? Infinity) < pull);
+  return gone.find((j) => j === prefer) ?? gone[0] ?? null;
+}
+
 /** Preview playing hand card h on a plot (null for whole-board cards). Null if the play is not allowed. */
 export function previewPlay(s: RunState, h: number, plot: number | null, to?: number): Preview | null {
   const card = s.hand[h];
@@ -211,7 +233,15 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
     const comes = f1[i]!.ripeIn === 0 && j >= 0 && f0[j]!.ripeIn !== 0;
     if (j >= 0 && (pay.yield || pay.bloom || !near(pay.times, 1) || comes)) m.total = paid1.score;
     const lost = { yield: shown.yield - pay.yield, bloom: shown.bloom - pay.bloom, times: shown.times / pay.times };
-    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) m.lost = { ...lost, why: 'gone', from: missingFrom(seen1, paid1, plot) };
+    if (lost.yield > 0 || lost.bloom > 0 || lost.times > 1 + 1e-6) {
+      const from = missingFrom(seen1, paid1, plot);
+      // Round 12: a bonus from every crop beside it (good company) has no one giver: name a crop beside it pulled before
+      // it is, the aimed plot's first (the twelfth playtest read "Its neighbour is pulled first." and could not tell which).
+      const first = from === null ? besideFirst(c, i, f1, plot) : null;
+      // Or no crop beside it is pulled first, and one still stands on its night (a pumpkin watered in sooner).
+      const still = from === null && first === null ? besideStill(c, i, f1, plot) : null;
+      m.lost = first !== null ? { ...lost, why: 'gone', from: first, beside: true } : still !== null ? { ...lost, why: 'gone', from: still, stands: true } : { ...lost, why: 'gone', from };
+    }
     // Pulled tonight with a crow about: the part of what the play adds that comes from a crop the crow may take first.
     if (f1[i]!.pull === 0 && reach1.length) {
       const givers = (h: Harvest, reach: readonly number[]) => [...new Set([...h.chips, ...h.mult].map((st) => st.from).filter((f): f is number => f !== undefined && f !== i && reach.includes(f)))];
@@ -234,6 +264,19 @@ export function previewPlay(s: RunState, h: number, plot: number | null, to?: nu
 const MANY: readonly CardId[] = ['beans'];
 
 /**
+ * Round 12: where plot j is, for a reason line: "in B2" where the plate shows row numbers, else beside plot i ("above
+ * it", "on its left").
+ */
+function where(s: Pick<RunState, 'cols'>, j: number, i: number, named: boolean): string {
+  if (named) return `in ${'ABCDE'[j % s.cols]}${Math.floor(j / s.cols) + 1}`;
+  if (j === i - s.cols) return 'above it';
+  if (j === i + s.cols) return 'below it';
+  if (j === i - 1) return 'on its left';
+  if (j === i + 1) return 'on its right';
+  return 'beside it';
+}
+
+/**
  * Why a greyed bonus won't pay, in one plain line under the aimed plot, or null: "The radish is pulled before the
  * carrot ripens." Round 9: only from a mark that involves the aimed plot (its own bonus, or one it gives); otherwise no
  * line. The ninth playtest's radish over B4 said "The other corn is pulled before this one ripens." and a carrot over B4
@@ -241,7 +284,7 @@ const MANY: readonly CardId[] = ['beans'];
  * about, a bonus from a crop it may take says so: "The crow may take the sunflower first." `seed` stands in for the
  * held seed, not on the plot yet.
  */
-export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId | null): string | null {
+export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId | null, named = true): string | null {
   if (p.harvest?.never) return 'Too late to ripen before the end.';
   // Round 10: a seed that ripens after the season's last night says so first: its pay counts for next season. The tenth
   // playtest's corn on autumn day 6 previewed "12 x 3.2 = 38" with "The beans are pulled before the corn ripens.", and
@@ -256,6 +299,11 @@ export function previewReason(s: RunState, p: Preview, aim: number, seed: SeedId
   if (l?.lost) {
     const taker = kind(l.plot);
     const giver = kind(l.lost.from);
+    // Round 12: a bonus with no one giver names a crop beside it pulled first, and where it is: its plot where the plate
+    // shows row numbers ("The radish in B2 is pulled first."), else where it stands beside the aimed plot.
+    // (When the crop pulled first is the aimed seed itself, the line below names both crops.)
+    if (giver && l.lost.from !== null && l.lost.from !== aim && l.lost.stands) return `The ${name(giver)} ${where(s, l.lost.from, l.plot, named)} still ${many(giver) ? 'stand' : 'stands'} then.`;
+    if (giver && l.lost.from !== null && l.lost.from !== aim && (l.lost.beside || !taker)) return `The ${name(giver)} ${where(s, l.lost.from, l.plot, named)} ${many(giver) ? 'are' : 'is'} pulled first.`;
     if (!taker || !giver) return 'Its neighbour is pulled first.';
     // Two of a kind side by side: "The other beans are pulled before these ripen." (it said "the beans ... the beans").
     if (taker === giver) return many(giver) ? `The other ${name(giver)} are pulled before these ripen.` : `The other ${name(giver)} is pulled before this one ripens.`;

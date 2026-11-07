@@ -103,9 +103,10 @@ describe('round 8: the help says what it would bring, in the same coins as the h
       const hitch = tw.find((t) => R.HITCHES.includes(t.id))!;
       const q = R.twistQuota(s, null);
       const note = X.twistNote?.(s, help) ?? '';
-      expect(note, `the help ${help.id} says what it would bring`).toMatch(/^About \d+ more coins\.$/);
+      // Round 12: "270 toward spring, 270 to spend.": its coins count toward the season and go in the purse.
+      expect(note, `the help ${help.id} says what it would bring`).toMatch(/^\d+ toward \w+, \d+ to spend\.$/);
       // The number is the help's worth (the share the rules paired it by) times the season's quota, rounded.
-      const n = Number(/About (\d+)/.exec(note)?.[1] ?? NaN);
+      const n = Number(/^(\d+)/.exec(note)?.[1] ?? NaN);
       const worth = (help as Twist & { worth?: number }).worth ?? -1;
       expect(Math.abs(n - worth * q)).toBeLessThanOrEqual(10);
       // It is the rules' own estimate: what `boonAims` priced it at (a fallback help has none, and says 0 more). Round 10:
@@ -113,9 +114,10 @@ describe('round 8: the help says what it would bring, in the same coins as the h
       const aim = X.boonAims?.(s).find((a) => a.t.id === help.id && a.t.crop === help.crop);
       const r = (R as unknown as { takeRatio?: (s: RunState) => number }).takeRatio?.(s) ?? 1;
       if (aim) expect(Math.abs(worth - aim.v * r)).toBeLessThanOrEqual(0.0051);
-      // The hitch says it in the same coins: what it would still cost, beside the quota it takes off.
+      // The hitch says it in the same coins: round 12, in the same words, with what it would still cost on its trade line.
       const hn = X.twistNote?.(s, hitch) ?? '';
-      expect(hn).toMatch(/^About \d+ fewer coins\.$/);
+      expect(hn).toMatch(/^\d+ toward \w+, \d+ to spend\.$/);
+      expect((X as { hitchTrade?: (s: RunState, t: Twist) => string | null }).hitchTrade?.(s, hitch) ?? '').toMatch(/^It costs about \d+: \w+ asks \d+ less, the merchant pays \d+\.$/);
       const cost = (hitch as Twist & { worth?: number }).worth ?? -1;
       expect(cost).toBeGreaterThanOrEqual(0);
       // Paired by worth: the hitch's cut less what it still costs is about the help's worth (or the margin).
@@ -171,9 +173,9 @@ describe('round 8: engine pages level up at the stall', () => {
       expect(two).toMatch(/, not [x+]?\d+(\.\d+)?\.$/);
       expect(X.levelName?.(R.PAGES[id].name, 3)).toBe(`${R.PAGES[id].name} III`);
     }
-    // Round 11: said as what a 10 coin crop pays, not as a sum.
+    // Round 11: said as what a 10 coin crop pays, not as a sum. Round 12: as what a strawberry near a beehive pays.
     const bees2 = (TUNING as unknown as { levelUp?: Record<string, number[]> }).levelUp!.bees[0];
-    expect(X.levelChange?.('bees', 2)).toBe(`Near a beehive, a 10 coin crop pays ${Math.round(10 * bees2)}, not ${Math.round(10 * TUNING.beesTimes)}.`);
+    expect(X.levelChange?.('bees', 2)).toBe(`A strawberry near a beehive pays ${Math.round(8 * bees2)}, not ${Math.round(8 * TUNING.beesTimes)}.`);
     // Hot Beds II: round 9, a chili's neighbours get more bloom (round 8: it picked one night more).
     const hot = table(['radish'], { year: 2 });
     hot.pages = ['hot'];
@@ -256,11 +258,17 @@ describe('round 8: a difficulty curve that rises with the run', () => {
         else botDay(s, o, dice);
       }
       const l = s.stats.log.find((x) => x.year === 2 && x.season === 0);
-      if (l) ratios.push(l.earned / l.quota);
+      // Round 12: the take less the quota asked, over the plain quota: a hitch's cut now takes off the help's whole worth
+      // with the cost (the merchant pays the same), so a take over the quota asked counted the cut many times over.
+      const plain = R.quotaFor(2, 0, s.pages, s.guided, { soft: s.soft });
+      if (l) ratios.push(1 + (l.earned - l.quota) / plain);
     }
     ratios.sort((a, b) => a - b);
     expect(ratios.length).toBeGreaterThan(80);
-    expect(ratios[ratios.length >> 1]).toBeLessThan(1.45);
+    // Round 12: 1.5 (1.45): the hitch now weighs as much as the help, so the bot no longer loses a twist at half its stalls
+    // (these seeds: 1.38 before, 1.45 after, met 89% and 94%); a player who took the help every time, as the twelfth
+    // playtest did, gets what it did before.
+    expect(ratios[ratios.length >> 1]).toBeLessThan(1.5);
   }, 400000);
 });
 
@@ -276,15 +284,15 @@ describe('round 8: a returning player has the whole table', () => {
     expect(fresh.seen).toEqual([]);
   });
 
-  it('the spent heap is taught on a hand stuck with cards the scoops cannot pay for today', () => {
-    // Summer, three-scoop corn twice, one scoop left, nothing else to play: the playtest's corn runs ended days so.
+  it('the spent heap is not taught on a hand of cards dear only today (round 12)', () => {
+    // Round 8 taught it on three-scoop corn with one scoop left (the playtest's corn runs ended days so). Round 12: the
+    // twelfth playtest was told "Drag a card too dear today to Spent." for a can and rain that were fine the next
+    // morning; it comes for a card the bench can never pay for (deck-r12), or one with nowhere to go.
     const s = table(['corn', 'corn', 'corn'], { season: 1, energy: 1 });
     const tutor = new L.Tutor(L.learnedAll());
     tutor.learn.done = tutor.learn.done.filter((id) => id !== 'spent');
     const { line } = tutor.update(s, 'touch', null, 0.1, false);
-    expect(line?.id).toBe('spent');
-    expect(line?.text).toBe('Drag a card too dear today to Spent.');
-    expect(L.words(line!.text)).toBeLessThanOrEqual(8);
+    expect(line?.id).not.toBe('spent');
     // A dear card while something else can still be played is not stuck (round 7's strawberry).
     const t = table(['strawberry', 'radish'], { season: 1, energy: 1 });
     expect(XL.dearCard?.(t)).toBeUndefined();

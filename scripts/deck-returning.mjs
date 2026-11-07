@@ -8,7 +8,7 @@
 //   - the run's first stall says to pick one engine and that it is free, shows the four cards large enough to read
 //     (a face 70 px wide or more on the phone, 120 on the desktop; they were about 50), lays out no tray until one is
 //     picked, and sells none of the engines' cards beside the free pick; a real tap picks one and the stall opens
-//   - a hand stuck with cards the scoops cannot pay for today brings the spent heap's lesson, in eight words or fewer
+//   - round 12: a hand of cards dear only today brings no spent lesson; a card with nowhere to go brings it, in eight words or fewer
 //   - round 9: all four engines at the pick
 //   - nothing in the shell's corner at any step
 // node scripts/deck-returning.mjs [base url]
@@ -194,12 +194,25 @@ async function session(label, viewport, touch) {
   await corner('the stall');
   await tapAt('.sb-signpost');
   await wait(600);
-  // Summer: a hand of three-scoop corn and one scoop left, nothing else to play. The spent heap's lesson comes.
-  const stuck = await p.evaluate(async () => {
+  // Summer: a hand of three-scoop corn and one scoop left. Round 12: no spent lesson, since the bench holds three every
+  // morning (the twelfth playtest was told "Drag a card too dear today to Spent." for a can and rain fine the next day).
+  const dear = await p.evaluate(async () => {
     const d = window.deck;
     const w = (ms) => new Promise((r) => setTimeout(r, ms));
     d.hand(['corn', 'corn', 'corn']);
     d.state().energy = 1;
+    d.table.syncAll();
+    await w(500);
+    return { season: d.state().season, lesson: d.lesson() };
+  });
+  check(`${label}: a hand of cards dear only today brings no spent lesson`, dear.season === 1 && dear.lesson?.id !== 'spent', JSON.stringify(dear));
+  // A card with nowhere to go (shears with nothing ripe) brings it, with the heap on the table.
+  const stuck = await p.evaluate(async () => {
+    const d = window.deck;
+    const w = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (const pl of d.state().plots) pl.crop = null;
+    d.hand(['shears', 'corn', 'corn']);
+    d.state().energy = 3;
     d.table.syncAll();
     await w(500);
     return { season: d.state().season, lesson: d.lesson(), heap: !document.querySelector('.sb-heap').classList.contains('sb-off') };
@@ -207,8 +220,8 @@ async function session(label, viewport, touch) {
   await shot('5-stuck-hand');
   const words = (stuck.lesson?.text ?? '').split(/\s+/).filter(Boolean).length;
   check(
-    `${label}: a hand stuck with cards too dear today brings the spent heap's lesson, in eight words or fewer`,
-    stuck.season === 1 && stuck.lesson?.id === 'spent' && (touch ? /too dear today to Spent/.test(stuck.lesson.text) : /Spent|press X/.test(stuck.lesson.text)) && words <= 8 && stuck.heap,
+    `${label}: a card with nowhere to go brings the spent heap's lesson, in eight words or fewer`,
+    stuck.season === 1 && stuck.lesson?.id === 'spent' && (touch ? /spare card to Spent/.test(stuck.lesson.text) : /Spent|press X/.test(stuck.lesson.text)) && words <= 8 && stuck.heap,
     JSON.stringify(stuck),
   );
   check(`${label}: no page errors`, errs.length === 0, errs.slice(0, 3).join(' | '));

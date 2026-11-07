@@ -11,7 +11,7 @@
 import { fill, ink, type Ctx } from '../../../render2d/brush';
 import { PALETTES } from '../../../render2d/palette';
 import { Rng } from '../../../render2d/rng';
-import { baseChips, CARDS, CELLAR_YIELD, costOf, engineNum, hotLevels, SEEDS, TUNING, type CardId, type PageId, type SeedId } from '../rules';
+import { baseChips, CARDS, CELLAR_YIELD, costOf, engineNum, hotLevels, isSeed, SEEDS, TUNING, type CardId, type PageId, type SeedId } from '../rules';
 import { CROP_COLOR, paintSeedCrop, paintSeedProduce, TOP } from './crops';
 import { paintGlyph } from './glyphs';
 import { basket, drawBits, loop, moon, num, pictogram, scoop, tall, type Bit } from './icons';
@@ -49,6 +49,8 @@ export interface FaceBonus {
   times?: number;
   /** Round 9: Hot Beds' bloom on the chili's face, at the run's level (x1.5 without the page). */
   hot?: number;
+  /** Round 12: the nights it needs with the run's pages, if not its own (corn under Tall Rows ripens in two, not four). */
+  days?: number;
 }
 
 /** A box on a face in card units (100 by 140). */
@@ -325,7 +327,7 @@ function packet(ctx: Ctx, id: SeedId, up: boolean, S: number, showCost: boolean,
     x += num(ctx, String(picks), x, ry, 10.5, INK) + 2;
   }
   if (SEEDS[id].tall) tall(ctx, x + 6, ry, 13);
-  const days = SEEDS[id].days;
+  const days = bonus?.days ?? SEEDS[id].days;
   for (let i = 0; i < days; i++) moon(ctx, 87 - i * 8.6, ry, 3.6);
   ctx.beginPath();
   ctx.moveTo(10, 106);
@@ -667,16 +669,26 @@ export function faceBoxes(id: CardId, up: boolean, cost = true, bonus: FaceBonus
 }
 
 function faceKey(id: CardId, up: boolean, cost: boolean, bonus: FaceBonus | null): string {
-  return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}` : ''}${bonus?.hot ? `h${bonus.hot}` : ''}`;
+  return `${id}${up ? '+' : ''}${cost ? '' : '-'}${bonusKey(bonus)}`;
 }
 
-/** What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x1.5 on the beehive (and the sunflower, while it reaches it). */
-export function faceBonus(id: CardId, pages: readonly string[], levels: Partial<Record<PageId, number>> = {}): FaceBonus | null {
+/** What a face's kept pages change, as part of its cache key (the hand keys its cards the same way). */
+export function bonusKey(bonus: FaceBonus | null): string {
+  return `${bonus && (bonus.yield || bonus.bees) ? `~${bonus.yield}${bonus.bees ? `b${bonus.times ?? ''}` : ''}` : ''}${bonus?.hot ? `h${bonus.hot}` : ''}${bonus?.days !== undefined ? `d${bonus.days}` : ''}`;
+}
+
+/**
+ * What the kept pages change on this card's face, or null: the Root Cellar's +2 on the radish and carrot, Busy Bees' x1.5
+ * on the beehive (and the sunflower, while it reaches it). Round 12: `days`, the nights a seed sown now needs with the
+ * run's pages (`seedDays`), prints its moons when they differ from its own (corn under Tall Rows: two, not four).
+ */
+export function faceBonus(id: CardId, pages: readonly string[], levels: Partial<Record<PageId, number>> = {}, days?: number): FaceBonus | null {
   const y = (id === 'radish' || id === 'carrot') && pages.includes('cellar') ? CELLAR_YIELD : 0;
   const bees = (id === 'beehive' || (id === 'sunflower' && TUNING.beesSun)) && pages.includes('bees');
+  const d = days !== undefined && isSeed(id) && days !== SEEDS[id].days ? { days } : {};
   // Round 9: with Hot Beds kept, the chili's face prints the page's bloom at its level, not x1.5.
-  if (id === 'chili' && pages.includes('hot') && hotLevels()) return { yield: 0, bees: false, hot: engineNum({ levels }, 'hot') };
-  return y || bees ? { yield: y, bees, ...(bees ? { times: engineNum({ levels }, 'bees') } : {}) } : null;
+  if (id === 'chili' && pages.includes('hot') && hotLevels()) return { yield: 0, bees: false, hot: engineNum({ levels }, 'hot'), ...d };
+  return y || bees || d.days !== undefined ? { yield: y, bees, ...(bees ? { times: engineNum({ levels }, 'bees') } : {}), ...d } : null;
 }
 
 /** A data URL of a card face, painted once. `cost` false leaves the scoops off (before the scoops are introduced). */

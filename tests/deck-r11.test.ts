@@ -170,15 +170,19 @@ describe('round 11: a hitch pays in coins', () => {
     return seen;
   }
 
-  it('its margin (the cut, less what it costs, and the merchant\'s coins) comes to the help\'s coins, in the numbers on the clippings', () => {
-    // The eleventh playtest: +310 against 490 less 410, +910 against 450 less 220. The help won all ten stalls.
+  it('its margin (the cut, less what it costs) and the merchant\'s coins (less what it costs) each come to the help\'s coins', () => {
+    // The eleventh playtest: +310 against 490 less 410, +910 against 450 less 220. The help won all ten stalls. Round 11
+    // made the margin and the merchant's coins together come to the help's coins; round 12 counts the help's coins in the
+    // purse too (the twelfth playtest: +280 on both against +30 and +10), so each comes to them (deck-r12).
     const seen = stalls(40, (s, help, hitch) => {
       const cut = R.twistQuota(s, null) - R.twistQuota(s, hitch);
-      const margin = cut - R.twistCoins(s, hitch) + (hitch.pay ?? 0);
+      const margin = cut - R.twistCoins(s, hitch);
+      const purse = (hitch.pay ?? 0) - R.twistCoins(s, hitch);
       const coins = R.twistCoins(s, help);
       expect(hitch.pay ?? 0, `${hitch.id} pays`).toBeGreaterThan(0);
       // Within a rounding of the numbers said (each to a 5 or a 10).
-      expect(Math.abs(margin - coins), `${hitch.id} margin ${margin} against ${help.id} ${coins}`).toBeLessThanOrEqual(Math.max(10, coins * 0.1));
+      expect(Math.abs(margin - coins), `${hitch.id} margin ${margin} against ${help.id} ${coins}`).toBeLessThanOrEqual(Math.max(15, coins * 0.12));
+      expect(Math.abs(purse - coins), `${hitch.id} purse ${purse} against ${help.id} ${coins}`).toBeLessThanOrEqual(Math.max(15, coins * 0.12));
     });
     expect(seen).toBeGreaterThan(20);
   });
@@ -318,12 +322,13 @@ describe('round 11: words that say what they do', () => {
       expect(R.levelChange(id, 2), id).toMatch(/, not \d+\.$/);
       expect(R.levelText(id, 1), `${id} is printed as it reads at level I`).toBe(R.PAGES[id].text);
     }
-    // What a 10 coin crop pays is the bloom at work.
-    expect(R.levelText('bees', 1)).toContain(`pays ${Math.round(10 * TUNING.beesTimes)}`);
-    expect(R.levelText('hot', 1)).toContain(`pays ${Math.round(10 * TUNING.hotTimes[0])}`);
-    expect(R.levelText('hot', 1)).toContain(`${Math.round(10 * TUNING.hotTimes[0] ** 2)} beside two`);
-    expect(R.levelText('vines', 1)).toContain(`pays ${Math.round(10 * (1 + TUNING.vinesBloom))}`);
-    expect(R.levelText('tall', 1)).toContain(`add ${Math.round(12 * TUNING.tallBloom)} coins`);
+    // What a crop pays is the bloom at work. Round 12: a crop of the engine's own, not "a 10 coin crop" (deck-r12 scores
+    // each against the plot).
+    expect(R.levelText('bees', 1)).toContain(`${Math.round(4 * 2 * TUNING.beesTimes)} near a beehive`);
+    expect(R.levelText('hot', 1)).toContain(`${Math.round(6 * TUNING.hotTimes[0])} beside another`);
+    expect(R.levelText('hot', 1)).toContain(`${Math.round(6 * TUNING.hotTimes[0] ** 2)} beside two`);
+    expect(R.levelText('vines', 1)).toContain(`${Math.round(5 * (1 + TUNING.vinesBloom))} beside other beans`);
+    expect(R.levelText('tall', 1)).toContain(`${Math.round(12 * (1 + TUNING.tallBloom))} beside one crop`);
   });
 
   it('every engine says what it wants planted around it, in one short line', () => {
@@ -336,7 +341,8 @@ describe('round 11: words that say what they do', () => {
 
   it('with Hot Beds kept a chili says the page\'s number at its level', () => {
     const line = X.cardLine?.('chili', false, { pages: ['hot'], levels: { hot: 4 } }) ?? '';
-    expect(line).toContain(String(Math.round(10 * TUNING.hotTimes[3])));
+    // Round 12: what the chili pays beside two others at that level (it said what a 10 coin crop pays).
+    expect(line).toContain(String(Math.round(6 * TUNING.hotTimes[3] ** 2)));
     expect(X.cardLine?.('chili', false, { pages: [] })).toBe(R.CARDS.chili.text);
   });
 

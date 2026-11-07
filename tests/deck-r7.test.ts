@@ -216,7 +216,10 @@ describe('round 7: twists aimed at the run', () => {
       }
       // Frost falls on the row the run's sown crops paid most from (round 9: or the next), and names the crop sown there.
       if (hitch.id === 'frost') {
-        expect([...t.rows].sort((a, b) => b - a).slice(0, 3)).toContain(t.rows[hitch.row!]);
+        // Round 10: of the rows not paid half in radishes (they are free and go anywhere).
+        const free = (i: number) => (Object.keys(t.rowKinds[i] ?? {}) as R.SeedId[]).filter((k) => R.CARDS[k].cost === 0).reduce((a, k) => a + (t.rowKinds[i][k] ?? 0), 0);
+        const paid = t.rows.filter((v, i) => v > 0 && free(i) < 0.5 * v);
+        expect([...paid].sort((a, b) => b - a).slice(0, 3)).toContain(t.rows[hitch.row!]);
         // Round 11: the line names the row (the crop named may have moved on by then).
         expect(R.twistText(hitch)).toBe(`Frost on the ${R.ROW_NAMES[hitch.row!]}.`);
       }

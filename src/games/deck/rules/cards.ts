@@ -156,8 +156,9 @@ export const PAGES: Record<PageId, PageDef> = {
   cellar: { id: 'cellar', name: 'Root Cellar', price: 100, text: 'Radishes and carrots get +2 yield, and +1 bloom beside each other.' },
   // Round 10: the engine pages leave radishes and carrots out, so each engine wants its own layout. Round 11: said with a
   // plain example, not as a sum ("Neighbours get x1.7 bloom, radishes and carrots x1.5." and "+1.25 bloom" were words no
-  // one grokked). `levelText` says the same at every level.
-  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'Near a beehive, a 10 coin crop pays 16. Not radishes or carrots.' },
+  // one grokked). Round 12: the example is a crop of the engine's own ("a 10 coin crop" pointed at nothing). `levelText`
+  // says the same at every level.
+  bees: { id: 'bees', name: 'Busy Bees', price: 110, text: 'A strawberry pays 4 alone, 13 near a beehive. Not radishes or carrots.' },
   thumb: { id: 'thumb', name: 'Green Thumb', price: 170, text: 'One more seed scoop every day.' },
   basket: { id: 'basket', name: 'Big Basket', price: 140, text: 'Hand size +1.' },
   rotation: { id: 'rotation', name: 'Crop Rotation', price: 100, text: 'Plant a different crop where one was just pulled: +4 yield.' },
@@ -167,9 +168,9 @@ export const PAGES: Record<PageId, PageDef> = {
   coldframe: { id: 'coldframe', name: 'Cold Frame', price: 80, text: 'Winter quotas are 20% lower.' },
   // Round 7: the pages that multiply the engines a run's first stall offers (Busy Bees is the beehive's).
   // Round 9: its bloom levels up (x1.7 at level I since round 10, TUNING.hotTimes), not its picks.
-  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies pick for 3 nights. A 10 coin crop pays 18 beside one, 31 beside two.' },
-  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'By beans or strawberries, a 10 coin crop pays 23. Not radishes or carrots.' },
-  tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'One more scoop a day. Corn ripens two nights sooner. Crops beside it add 10 coins.' },
+  hot: { id: 'hot', name: 'Hot Beds', price: 110, text: 'Chilies pick for 3 nights. A chili pays 6 alone, 11 beside another, 18 beside two.' },
+  vines: { id: 'vines', name: 'Trellis', price: 110, text: 'Beans pay 3 alone, 11 beside other beans. Not radishes or carrots.' },
+  tall: { id: 'tall', name: 'Tall Rows', price: 110, text: 'One more scoop a day. Corn ripens two nights sooner. Corn pays 12 alone, 22 beside one crop.' },
 };
 
 export interface EngineDef {

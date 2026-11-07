@@ -117,19 +117,27 @@ export function hitchMargin(s: RunState, t: Twist): number {
   return cut - R.twistCoins(s, t) + pay;
 }
 
-/** The two clippings read: the help's coins against the hitch's margin, a person's rough sums (15% either way). */
+/**
+ * The two clippings read: the help's coins against the hitch's margin, a person's rough sums (15% either way). Round 12:
+ * both clippings say what they leave toward the season and to spend, in the same words (`twistNet`), and those two are
+ * added; an older build reads as round 11 did.
+ */
 export function readTwist(s: RunState, dice: Dice): number {
   const tw = s.shop?.twists ?? [];
-  const val = (t: Twist) => (R.HITCHES.includes(t.id) ? hitchMargin(s, t) : R.twistCoins(s, t)) * (0.85 + dice.next() * 0.3);
+  const net = (R as unknown as { twistNet?: (s: RunState, t: Twist) => { margin: number; purse: number } }).twistNet;
+  const said = (t: Twist) => (net ? net(s, t).margin + net(s, t).purse : R.HITCHES.includes(t.id) ? hitchMargin(s, t) : R.twistCoins(s, t));
+  const val = (t: Twist) => said(t) * (0.85 + dice.next() * 0.3);
   return val(tw[0]) >= val(tw[1]) ? 0 : 1;
 }
 
 /**
  * The twist as this reader's own season played ahead would show it: the take over the quota (capped: a bigger surplus
  * carries no more) and a third of what it does to the purse in shares of the quota, so the merchant's coins count.
+ * Round 12: the take less the quota, over the plain quota, so a hitch's cut counts coin for coin, as the bot weighs it.
  */
 export function playTwist(s: RunState, r: Reader, dice: Dice): number {
   const seed = Math.floor(dice.next() * 0x7fffffff);
+  const q0 = R.twistQuota(s, null);
   const worth = (i: number) => {
     let v = 0;
     for (let k = 0; k < 2; k++) {
@@ -142,15 +150,15 @@ export function playTwist(s: RunState, r: Reader, dice: Dice): number {
       const d = new Dice(c.rng ^ 0x5bd1e995);
       for (let n = 0; n < R.TUNING.days && c.phase === 'day'; n++) readerDay(c, { ...r, slip: 0 }, d);
       const l = c.stats.log[c.stats.log.length - 1];
-      if (l) v += Math.min(1.6, l.earned / Math.max(1, l.quota)) + ((c.coins - before) / Math.max(1, l.quota)) / 3;
+      if (l) v += Math.min(1.6, 1 + (l.earned - l.quota) / Math.max(1, q0)) + ((c.coins - before) / Math.max(1, q0)) / 3;
     }
     return v;
   };
   return worth(0) >= worth(1) ? 0 : 1;
 }
 
-/** Pick the engine, shop, pick the twist and leave. */
-export function readerShop(s: RunState, r: Reader, dice: Dice): void {
+/** Pick the engine and shop, without picking the twist or leaving (deck-twists plays each twist ahead after this). */
+export function readerBuys(s: RunState, r: Reader, dice: Dice): void {
   const sh = s.shop;
   if (!sh) return;
   if (sh.engines?.length && sh.engine === undefined) {
@@ -160,6 +168,13 @@ export function readerShop(s: RunState, r: Reader, dice: Dice): void {
   const engine = sh.engines?.length && sh.engine !== undefined ? sh.engines[sh.engine] : (s.engine ?? null);
   if (r.shop === 'cheap') cheapShop(s, engine);
   else sensibleShop(s, engine);
+}
+
+/** Pick the engine, shop, pick the twist and leave. */
+export function readerShop(s: RunState, r: Reader, dice: Dice): void {
+  const sh = s.shop;
+  if (!sh) return;
+  readerBuys(s, r, dice);
   if (sh.twists?.length) chooseTwist(s, r.twist === 'read' ? readTwist(s, dice) : playTwist(s, r, dice));
   leaveShop(s);
 }

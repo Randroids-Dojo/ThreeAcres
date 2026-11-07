@@ -39,6 +39,7 @@ import {
   targetsFor,
   toss,
   TUNING,
+  twistQuota,
   UNLOCK_ORDER,
   upgradeCard,
   type CardId,
@@ -248,7 +249,12 @@ function pageValue(s: RunState, id: PageId): number {
 
 /** Samples of the coming season the bot plays ahead for each twist on offer. */
 const TWIST_SAMPLES = 2;
-/** A take past this many times the quota is worth no more to the bot: the carry is capped, and the season is met. */
+/**
+ * A take past this many times the quota is worth no more to the bot: the carry is capped, and the season is met. Round
+ * 12: the take less the quota, over the plain quota (no twist), plus one: a hitch's cut counts coin for coin. As the take
+ * over the quota a cut counted many times over (a 40% cut lifted it by two thirds), and the bot took a hitch about half
+ * the time that by its own numbers lost to the help on both counts.
+ */
 const TWIST_CAP = 1.6;
 /** Round 11: what the purse gains, over the quota, counts this much beside the take over the quota: the merchant's coins spend. */
 const TWIST_PURSE = 1 / 3;
@@ -262,6 +268,7 @@ const TWIST_PURSE = 1 / 3;
  */
 export function twistWorth(s: RunState, i: number, seed = 1): number {
   let v = 0;
+  const q0 = twistQuota(s, null);
   for (let k = 0; k < TWIST_SAMPLES; k++) {
     const c = cloneRun(s);
     c.stats = { ...c.stats, log: [...s.stats.log] };
@@ -272,7 +279,7 @@ export function twistWorth(s: RunState, i: number, seed = 1): number {
     const dice = new Dice(c.rng ^ 0x5bd1e995);
     for (let d = 0; d < TUNING.days && c.phase === 'day'; d++) botDay(c, { noise: 0, seed, depth: 1 }, dice);
     const l = c.stats.log[c.stats.log.length - 1];
-    v += l ? Math.min(TWIST_CAP, l.earned / Math.max(1, l.quota)) + (TWIST_PURSE * (c.coins - purse)) / Math.max(1, l.quota) : 0;
+    v += l ? Math.min(TWIST_CAP, 1 + (l.earned - l.quota) / Math.max(1, q0)) + (TWIST_PURSE * (c.coins - purse)) / Math.max(1, q0) : 0;
   }
   return v / TWIST_SAMPLES;
 }

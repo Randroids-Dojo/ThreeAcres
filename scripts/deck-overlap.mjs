@@ -52,11 +52,15 @@
 // and nothing moves between the taps; the scoop's slip says its price; the first stall shows its engines large and
 // alone under "Pick one to take home, free."; the almanac's word stays inside its book on the table and the stall.
 //
+// Round 12 (ONLY="round 12"): the aimed seed's slip covers no preview chip on four and five columns; a reason line names
+// the crop beside it pulled first with its plot ("The lettuce in B2 is pulled first.", or "below it" where the plate has
+// no row numbers) and covers no key letter or number in any first-row plot; an aimed hive or scarecrow says it stays for
+// the run; corn under Tall Rows wears its own face; the tin sheet's foot hides the hand behind it, by pixel readback.
 // Round 6 adds: four-digit takes and quotas (1239 of 1550, 12400 of 15500) and five-digit coins on the ledger and
 // purse, every digit inside its piece and clear of the other (the phone's purse covered "1239 of 15"); a radish aimed
 // beside a carrot paints the carrot's new total on a dark chip inside its plot, and the night pays exactly that; kept
 // pages 40 px tall on the phone stall (they were 18), and a swap by real taps; the hitch's trade line ("Spring asks
-// 370, not 430.") on the hitch only, and picking it moves the stall's head; the phone stall's goods 84 px wide and up
+// 370, not 430."; round 12 "It costs about 110: spring asks 280 less, the merchant pays 270.") on the hitch only, and picking it moves the stall's head; the phone stall's goods 84 px wide and up
 // where the stall has room (71 to 80 before); the season's note in the lesson strip with the twist stepping aside,
 // never over row 1; "the other beans", the scarecrow before the crows, the improve note counting the Root Cellar, and
 // a won run's ledger saying so.
@@ -1100,9 +1104,11 @@ async function run(label, viewport, touch) {
       const want = label === 'phone' ? 40 : 20;
       if (!q.kept.length || Math.min(...q.kept) < want) extra.push(`kept pages are ${Math.round(Math.min(...q.kept))} px tall (want ${want} and up)`);
       const trades = q.cards.filter((c) => c.trade);
-      // Round 11: "Spring asks 700. The merchant pays 140."; the head says what spring asks without it.
-      const m = trades[0]?.trade.match(/^Spring asks (\d+)\. The merchant pays (\d+)\.$/);
+      // Round 11: "Spring asks 700. The merchant pays 140."; the head says what spring asks without it. Round 12: "It costs
+      // about 110: spring asks 280 less, the merchant pays 270." (m keeps what spring asks with it, and what is paid).
       const plain = Number(q.head.match(/asks (\d+)/)?.[1]);
+      const t12 = trades[0]?.trade.match(/^It costs about (\d+): spring asks (\d+) less, the merchant pays (\d+)\.$/);
+      const m = t12 ? [t12[0], String(plain - Number(t12[2])), t12[3]] : null;
       if (trades.length !== 1 || !m || Number(m[1]) >= plain || Number(m[2]) <= 0) extra.push(`the hitch's trade line: ${JSON.stringify(q.cards)}, head "${q.head}"`);
       // Pick the hitch by a real tap: the head asks the smaller quota.
       const hi = q.cards.findIndex((c) => c.trade);
@@ -1233,7 +1239,8 @@ async function run(label, viewport, touch) {
         return { beans, scarecrow };
       });
       if (q.beans !== 'The other beans are pulled before these ripen.') extra.push(`two beans side by side read "${q.beans}"`);
-      if (q.scarecrow !== 'Keeps crows off from now on.') extra.push(`a scarecrow before the crows reads "${q.scarecrow}"`);
+      // Round 12: it says it stays for the run, as the hive does.
+      if (q.scarecrow !== 'Keeps crows off here for the run.') extra.push(`a scarecrow before the crows reads "${q.scarecrow}"`);
       // The improve sheet with the Root Cellar kept: the carrot's basket counts its +2.
       await toStall(91, 900, (s) => {
         s.pages = ['cellar'];
@@ -1602,8 +1609,9 @@ async function run(label, viewport, touch) {
       const q = await p.evaluate(() => [...document.querySelectorAll('.sb-twistcard')].map((e) => ({ worth: e.querySelector('.sb-worth')?.textContent ?? '', bold: e.querySelector('.sb-worth b')?.textContent ?? '', trade: e.querySelector('.sb-trade')?.textContent ?? '' })));
       const help = q.find((c) => !c.trade);
       const hitch = q.find((c) => c.trade);
-      if (!help || !/^About \d+ more coins\.$/.test(help.worth) || !/^\d+$/.test(help.bold)) extra.push(`the help's number: ${JSON.stringify(help)}`);
-      if (!hitch || !/^About \d+ fewer coins\.$/.test(hitch.worth) || !/^\d+$/.test(hitch.bold)) extra.push(`the hitch's number: ${JSON.stringify(hitch)}`);
+      // Round 12: the same words on both, what each leaves the season and the purse ("120 toward spring, 120 to spend.").
+      if (!help || !/^\d+ toward \w+, \d+ to spend\.$/.test(help.worth) || !/^\d+$/.test(help.bold)) extra.push(`the help's number: ${JSON.stringify(help)}`);
+      if (!hitch || !/^\d+ toward \w+, \d+ to spend\.$/.test(hitch.worth) || !/^\d+$/.test(hitch.bold)) extra.push(`the hitch's number: ${JSON.stringify(hitch)}`);
       console.log(`       ${label} twists: "${help?.worth}" | "${hitch?.worth}" "${hitch?.trade}"`);
     }],
     ['round 8: the engine page\'s next level, two taps, in its own words', async () => {
@@ -1627,7 +1635,8 @@ async function run(label, viewport, touch) {
       await tapAt('.sb-levelup');
       const after = await p.evaluate(() => ({ coins: window.deck.state().coins, levels: window.deck.state().levels, kept: [...document.querySelectorAll('.sb-keptpage')].map((e) => e.textContent), done: document.querySelector('.sb-slipspot .sb-done')?.textContent ?? '' }));
       if (!before.level || !/^Busy Bees II/.test(before.text)) extra.push(`the cork board pins no next level: ${JSON.stringify(before)}`);
-      if (!/^Busy Bees II\. Near a beehive, a 10 coin crop pays \d+, not \d+\. (Tap|Click) again to buy, \d+ coins\.$/.test(slip)) extra.push(`the next level's slip: "${slip}"`);
+      // Round 12: said on a strawberry, not "a 10 coin crop".
+      if (!/^Busy Bees II\. A strawberry near a beehive pays \d+, not \d+\. (Tap|Click) again to buy, \d+ coins\.$/.test(slip)) extra.push(`the next level's slip: "${slip}"`);
       if (one !== before.coins) extra.push(`the first tap bought the level: ${before.coins} to ${one}`);
       if (after.levels?.bees !== 2 || after.coins !== before.coins - (before.level?.price ?? 0) || !after.kept.includes('Busy Bees II')) extra.push(`the second tap: ${JSON.stringify(after)}`);
       console.log(`       ${label} next level: "${before.text}" / "${slip}" / kept ${after.kept.join(', ')} / "${after.done}"`);
@@ -1769,7 +1778,8 @@ async function run(label, viewport, touch) {
         return { same: good === plain, slip: document.querySelector('.sb-slipspot .sb-read')?.textContent ?? '' };
       });
       if (face.same) extra.push('the stall draws a plain x1.5 chili with Hot Beds kept');
-      if (!/pays 20\b/.test(face.slip)) extra.push(`the stall's chili slip does not say Hot Beds' number at its level: "${face.slip}"`);
+      // Round 12: what a chili beside two others pays at level III (6 x 1.95 x 1.95), not what "a 10 coin crop" pays.
+      if (!/\b23 beside two other chilies/.test(face.slip)) extra.push(`the stall's chili slip does not say Hot Beds' number at its level: "${face.slip}"`);
       console.log(`       ${label} stall slips: ${count} read, the most over ${worst.over} px; "${face.slip}"`);
     }],
     ['round 11: the first stall says what each engine wants planted', async () => {
@@ -2168,6 +2178,235 @@ async function run(label, viewport, touch) {
       await settle(200);
       if (q.bottom > q.H || q.top < 0) extra.push(`"Start a new run" is off the screen (${Math.round(q.top)} to ${Math.round(q.bottom)} of ${q.H})`);
       if (!/pumpkin, shears, mint, trowel and storm/.test(q.line)) extra.push(`the new cards are not a plain list: "${q.line}"`);
+    }],
+    // Round 12 (ONLY="round 12"): the aimed seed's slip covers no chip on four and five columns (the twelfth playtest's
+    // "3 x 3.2 = 10" hid a "+2", and a "287" an "x2"); a reason line names the crop beside it pulled first and its plot,
+    // and stays off the key letters and numbers ("Ripens next season." sat over the C); an aimed hive says it stays for
+    // the run; corn's face under Tall Rows is not the plain face; the tin's foot hides the hand behind it.
+    ['round 12: the aimed slip covers no chip, on four and five columns', async () => {
+      await p.evaluate(() => window.deck.table.sheets.close());
+      const seen = [];
+      for (const cols of [4, 5]) {
+        for (const at of cols === 4 ? [5, 6, 9, 10] : [6, 7, 8, 12]) {
+          await fresh(4242);
+          const q = await p.evaluate(
+            async ([cols, at]) => {
+              const d = window.deck;
+              const t = d.table;
+              const s = t.run;
+              const w = (ms) => new Promise((r) => setTimeout(r, ms));
+              const crop = (uid, kind, age, days) => ({ uid, kind, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+              s.twist = null;
+              s.crow = false;
+              s.cols = cols;
+              s.pages = cols === 5 ? ['furrow', 'market'] : [];
+              s.plots = Array.from({ length: cols * 4 }, () => ({ crop: null, obj: null, boost: 0, last: null }));
+              s.energy = 9;
+              // A sunflower above the aimed plot blooms the beans held there (the slip shows its arithmetic); carrots on
+              // every other side and the diagonals below take the beans' +2, each a chip in its top corner.
+              // It ripens with the beans, so it still stands on their night and the slip shows its sum ("3 x 3 = 9").
+              s.plots[at - cols].crop = crop(9601, 'sunflower', 0, 3);
+              for (const [k, j] of [[1, at - 1], [2, at + 1], [3, at + cols], [4, at + cols - 1], [5, at + cols + 1]]) if (j >= 0 && j < cols * 4 && Math.floor(j / cols) >= 1) s.plots[j].crop = crop(9610 + k, 'carrot', 0, 2);
+              d.hand(['beans']);
+              t.syncAll();
+              await w(200);
+              t.pickUp(s.hand[0].uid);
+              t.hover = at;
+              t.board.preview = null;
+              t.updateHighlight?.();
+              await w(300);
+              const b = t.board;
+              const out = { slip: b.totalSlip, chips: b.chips.map((c) => ({ ...c })), keys: b.keyBoxes() };
+              t.putDown(true);
+              return out;
+            },
+            [cols, at],
+          );
+          if (!q.slip || !/=/.test(q.slip.text)) {
+            extra.push(`${cols} columns, beans on ${at}: no slip with its sum (${q.slip?.text})`);
+            continue;
+          }
+          const cross = (a, c) => Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 0.5 && Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 0.5;
+          for (const c of q.chips) if (cross(q.slip, c)) extra.push(`${cols} columns, beans on ${at}: the slip "${q.slip.text}" covers the chip "${c.text}" on plot ${c.plot}`);
+          for (const k of q.keys) if (cross(q.slip, k)) extra.push(`${cols} columns, beans on ${at}: the slip covers the key ${k.text}`);
+          seen.push(`${cols}c@${at} "${q.slip.text}" ${q.chips.length} chips`);
+        }
+      }
+      console.log(`       ${label} aimed slips: ${seen.join('; ')}`);
+    }],
+    ['round 12: a reason line names the crop beside it and its plot, and stays off the key letters', async () => {
+      const lines = [];
+      const named = [];
+      for (const cols of [4, 5]) {
+        // The tester's two: good company with the crop beside it pulled first, and a seed that ripens next season, aimed
+        // at each plot of the first row.
+        for (const [kind, at] of [['company', 1], ...Array.from({ length: cols }, (_, i) => ['late', i])]) {
+          await fresh(4242);
+          const q = await p.evaluate(
+            async ([cols, kind, at]) => {
+              const d = window.deck;
+              const t = d.table;
+              const s = t.run;
+              const w = (ms) => new Promise((r) => setTimeout(r, ms));
+              const crop = (uid, k, age, days) => ({ uid, kind: k, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+              s.crow = false;
+              s.cols = cols;
+              s.pages = cols === 5 ? ['furrow'] : [];
+              s.plots = Array.from({ length: cols * 4 }, () => ({ crop: null, obj: null, boost: 0, last: null }));
+              s.energy = 9;
+              if (kind === 'company') {
+                s.day = 1;
+                s.twist = { id: 'company' };
+                s.plots[at + cols].crop = crop(9701, 'lettuce', 1, 2);
+                d.hand(['strawberry']);
+              } else {
+                s.twist = null;
+                s.day = 6;
+                d.hand(['corn']);
+              }
+              t.syncAll();
+              await w(200);
+              t.pickUp(s.hand[0].uid);
+              t.hover = at;
+              t.board.preview = null;
+              t.updateHighlight?.();
+              await w(300);
+              const b = t.board;
+              const out = { reason: b.reasonBox, keys: b.keyBoxes(), numbered: b.keyBoxes().some((k) => /\d/.test(k.text)) };
+              t.putDown(true);
+              return out;
+            },
+            [cols, kind, at],
+          );
+          if (!q.reason) {
+            extra.push(`${cols} columns, ${kind} on ${at}: no reason line`);
+            continue;
+          }
+          lines.push(q.reason.text);
+          if (kind === 'company') {
+            const want = q.numbered ? 'The lettuce in B2 is pulled first.' : 'The lettuce below it is pulled first.';
+            if (q.reason.text !== want) extra.push(`good company with the lettuce below pulled first reads "${q.reason.text}", not "${want}"`);
+            named.push(q.reason.text);
+          } else if (q.reason.text !== 'Ripens next season.') extra.push(`a late corn on ${at} reads "${q.reason.text}"`);
+          const cross = (a, c) => Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x) > 0.5 && Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y) > 0.5;
+          for (const k of q.keys) if (cross(q.reason, k)) extra.push(`${cols} columns, ${kind} on ${at}: "${q.reason.text}" covers the key ${k.text}`);
+        }
+      }
+      console.log(`       ${label} named: ${[...new Set(named)].join(' / ')}; ${lines.length} first-row reasons, none over a key letter`);
+    }],
+    ['round 12: an aimed hive says it stays for the run, before it is set out', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const d = window.deck;
+        const t = d.table;
+        const s = t.run;
+        const w = (ms) => new Promise((r) => setTimeout(r, ms));
+        const crop = (uid, k, age, days) => ({ uid, kind: k, age, days, up: false, compost: 0, rot: false, picks: 0, pest: 0, sprout: false });
+        s.twist = null;
+        s.crow = false;
+        s.energy = 9;
+        for (const pl of s.plots) { pl.crop = null; pl.obj = null; pl.boost = 0; }
+        s.plots[6].crop = crop(9801, 'strawberry', 1, 3);
+        d.hand(['beehive']);
+        await w(200);
+        const read = async (at) => {
+          t.pickUp(s.hand[0].uid);
+          t.hover = at;
+          t.board.preview = null;
+          t.updateHighlight?.();
+          await w(250);
+          const pv = d.preview();
+          t.putDown(true);
+          await w(100);
+          return pv?.reason?.text ?? pv?.none?.text ?? '';
+        };
+        const beside = await read(5);
+        const alone = await read(15);
+        return { beside, alone, placed: s.plots.filter((pl) => pl.obj === 'beehive').length };
+      });
+      if (!/for the run/.test(q.beside) || !/for the run/.test(q.alone)) extra.push(`an aimed hive reads "${q.beside}" beside a crop and "${q.alone}" alone`);
+      if (q.placed) extra.push('aiming the hive set it out');
+      console.log(`       ${label} aimed hive: "${q.beside}" / "${q.alone}"`);
+    }],
+    ['round 12: corn under Tall Rows shows its own nights in the hand', async () => {
+      await fresh(4242);
+      const q = await p.evaluate(async () => {
+        const d = window.deck;
+        const t = d.table;
+        const w = (ms) => new Promise((r) => setTimeout(r, ms));
+        const src = () => t.handEls?.get?.(t.run.hand[0].uid)?.el?.querySelector('img')?.src ?? document.querySelector('.sb-hand .sb-card img')?.src ?? '';
+        t.run.pages = [];
+        d.hand(['corn']);
+        t.syncAll();
+        await w(200);
+        const plain = src();
+        t.run.pages = ['tall'];
+        d.hand(['corn']);
+        t.syncAll();
+        await w(200);
+        const tall = src();
+        t.run.pages = [];
+        t.syncAll();
+        return { same: plain === tall, plain: plain === d.faceUrl('corn', false) };
+      });
+      if (q.same) extra.push('corn under Tall Rows wears the plain face (four moons)');
+      if (!q.plain) extra.push('corn without Tall Rows is not the plain face');
+      console.log(`       ${label} corn's face under Tall Rows differs from the plain one: ${!q.same}`);
+    }],
+    ['round 12: the tin sheet hides the hand behind its foot', async () => {
+      await fresh(4242);
+      await p.evaluate(() => {
+        const s = window.deck.state();
+        for (const id of ['beans', 'beans', 'strawberry', 'chili', 'chili', 'corn', 'compost', 'can', 'ladybirds', 'garlic', 'sunflower', 'carrot', 'radish', 'lettuce', 'wheat', 'pumpkin']) s.draw.push({ uid: s.nextUid++, id, up: false });
+        window.deck.hand(['corn', 'beans', 'strawberry', 'chili', 'carrot']);
+        window.deck.table.sheets.deck('tin');
+      });
+      await settle(400);
+      const box = await p.evaluate(() => {
+        const v = document.querySelector('.sb-tinview');
+        const r = v.getBoundingClientRect();
+        return { x: r.left + 8, y: r.bottom - 30, w: r.width - 16, h: 26, more: v.classList.contains('more'), scroll: v.scrollHeight - v.clientHeight };
+      });
+      const shot = async () => (await p.screenshot({ clip: { x: box.x, y: box.y, width: box.w, height: box.h } })).toString('base64');
+      const shown = await shot();
+      await p.evaluate(() => {
+        document.querySelector('.sb-hand').style.visibility = 'hidden';
+      });
+      await settle(150);
+      const hidden = await shot();
+      await p.evaluate(() => {
+        document.querySelector('.sb-hand').style.visibility = '';
+      });
+      const diff = await p.evaluate(async ([a, c]) => {
+        const load = (b64) => new Promise((res) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.src = `data:image/png;base64,${b64}`;
+        });
+        const [ia, ic] = await Promise.all([load(a), load(c)]);
+        const px = (im) => {
+          const cv = document.createElement('canvas');
+          cv.width = im.width;
+          cv.height = im.height;
+          const g = cv.getContext('2d');
+          g.drawImage(im, 0, 0);
+          return g.getImageData(0, 0, im.width, im.height).data;
+        };
+        const da = px(ia);
+        const dc = px(ic);
+        let n = 0;
+        let most = 0;
+        for (let i = 0; i < da.length; i += 4) {
+          const dd = Math.abs(da[i] - dc[i]) + Math.abs(da[i + 1] - dc[i + 1]) + Math.abs(da[i + 2] - dc[i + 2]);
+          if (dd > 6) n++;
+          most = Math.max(most, dd);
+        }
+        return { n, most, total: da.length / 4 };
+      }, [shown, hidden]);
+      if (box.more && diff.n > 0) extra.push(`the hand shows through the tin's foot: ${diff.n} of ${diff.total} pixels change with it (by up to ${diff.most})`);
+      if (box.scroll > 2 && !box.more) extra.push('the tin scrolls with no shade at its foot');
+      console.log(`       ${label} tin foot: scrolls ${Math.round(box.scroll)} px, shade ${box.more}, pixels changed by the hand behind it ${diff.n} of ${diff.total}`);
+      await p.evaluate(() => window.deck.table.sheets.close());
     }],
   ];
   for (const [name, setup] of states) {
