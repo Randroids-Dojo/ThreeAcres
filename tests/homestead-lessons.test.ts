@@ -12,7 +12,7 @@ describe('Sunup lesson lines', () => {
     expect(lines.length).toBeGreaterThan(10);
     for (const l of lines) {
       expect(l.split(/\s+/).filter(Boolean).length, l).toBeLessThanOrEqual(8);
-      expect(l, l).not.toMatch(/[!–—]/);
+      expect(l, l).not.toMatch(/[!\u2013\u2014]/);
     }
   });
 

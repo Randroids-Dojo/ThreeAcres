@@ -16,6 +16,10 @@
 // beside it is on screen; every seed price wears the coin. Round 10: thirteen
 // plots tapped with eight water are all watered, with a trip to the well
 // mid-queue; a real tap on the farmer lets the waiting taps go.
+// Round 12: with field 3 owned and seeds in hand, a push on the walk stick's ring (rows 12 and 13 lie under it) walks
+// and plants nothing, while a drag that starts outside the ring still plants each plot it crosses; a row tapped on a
+// copper can with one water left is finished after a trip to the well; and a toast that comes while the board is open
+// (Accept's word for the other note) waits until it closes, never over its Close.
 // node scripts/qa/sunup-queue.mjs [base url]
 import { chromium } from 'playwright-core';
 
@@ -550,6 +554,115 @@ await p.waitForTimeout(800);
   check('round 11: in the View too, a drag across plots works them', (await picked()) - h3 === 4, `${(await picked()) - h3} of 4`);
   await p.evaluate(() => window.sunup.input.push({ type: 'rules', patch: { camera: 'close' } }));
   await p.waitForTimeout(800);
+}
+
+// 13. Round 12: the stick's ring is always the stick. In close view with field 3 owned, rows 12 and 13 lie under the drawn
+// ring: with seeds in hand a push north from it began a drag there, and the farmer walked south and planted beans at
+// (3,12) and (3,13), 60 coins that cannot come back. A drag that starts outside the ring still plants what it crosses.
+{
+  const crops = () => p.evaluate(() => { const st = window.sunup.state; let n = 0; for (const q of st.plots) if (q.crop) n++; return { n, coins: st.coins }; });
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    window.sunup.input.push({ type: 'rules', patch: { camera: 'close' } });
+    Object.assign(st, { day: 3, minute: 120, coins: 500, orders: [], crowPlan: [], weather: 'sun', taps: [] });
+    st.crows = [];
+    st.parcels[2].owned = true;
+    for (const pc of st.parcels.slice(0, 3)) for (let y = pc.y; y < pc.y + pc.h; y++) for (let x = pc.x; x < pc.x + pc.w; x++) { const q = st.plots[y * st.W + x]; q.tilled = true; q.crop = null; }
+    Object.assign(st.actors[0], { x: 3.5, y: 10.5, facing: 's', task: null, path: [], aim: null });
+    window.sunup.hud.pickTool('seeds');
+    window.sunup.input.push({ type: 'seed', crop: 'radish' });
+  });
+  await p.waitForTimeout(600);
+  await p.evaluate(() => { if (window.sunup.hud.picking) window.sunup.hud.closePicker(); });
+  await p.waitForTimeout(1200);
+  const ring = await p.evaluate(() => { const r = document.querySelector('.ts-base').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 }; });
+  const pushes = [];
+  // From the ring's middle and from its rim, each over a bare plot with seeds in hand: a push north.
+  for (const [dx, dy] of [[0, 0], [44, -26]]) {
+    const at = { x: ring.x + dx, y: ring.y + dy };
+    const under = await p.evaluate(([x, y]) => window.sunup.r3d.pick(x, y), [at.x, at.y]);
+    const before = await crops();
+    const y0 = await p.evaluate(() => window.sunup.state.actors[0].y);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y, id: 9, radiusX: 6, radiusY: 6, force: 1 }] });
+    let stick = false;
+    for (let k = 1; k <= 8; k++) {
+      await p.waitForTimeout(40);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x, y: at.y - k * 7, id: 9, radiusX: 6, radiusY: 6, force: 1 }] });
+      stick ||= await p.evaluate(() => document.querySelector('.ts-base').classList.contains('active'));
+    }
+    await p.waitForTimeout(500);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await settle(3000);
+    const after = await crops();
+    const y1 = await p.evaluate(() => window.sunup.state.actors[0].y);
+    pushes.push({ under, stick, planted: after.n - before.n, spent: before.coins - after.coins, north: +(y0 - y1).toFixed(2) });
+    await p.evaluate(() => Object.assign(window.sunup.state.actors[0], { x: 3.5, y: 10.5, task: null, path: [], aim: null }));
+    await p.waitForTimeout(900);
+  }
+  check('round 12: a push north on the stick’s ring, over bare plots with seeds in hand, walks north and plants nothing (it planted 60 coins of beans)', pushes.every((q) => q.under && q.under.y >= 10 && q.stick && q.planted === 0 && q.spent === 0 && q.north > 0.3), JSON.stringify(pushes));
+  // A drag that starts outside the ring, on the same side of the screen, still plants each plot it crosses.
+  const from = await p.evaluate(() => window.sunup.r3d.project(2.5, 10.5, 0));
+  const to = await p.evaluate(() => window.sunup.r3d.project(5.5, 10.5, 0));
+  const clear = Math.min(Math.hypot(from.x - ring.x, from.y - ring.y), Math.hypot(to.x - ring.x, to.y - ring.y));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from.x, y: from.y, id: 10, radiusX: 6, radiusY: 6, force: 1 }] });
+  for (let k = 1; k <= 16; k++) {
+    await p.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + ((to.x - from.x) * k) / 16, y: from.y + ((to.y - from.y) * k) / 16, id: 10, radiusX: 6, radiusY: 6, force: 1 }] });
+  }
+  await p.waitForTimeout(40);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await settle(10000);
+  const row = await p.evaluate(() => [2, 3, 4, 5].filter((x) => window.sunup.state.plots[10 * window.sunup.state.W + x].crop?.kind === 'radish').length);
+  check('round 12: a drag that starts outside the ring still plants each bare plot it crosses', row === 4 && clear > 72 && from.x < 206, `${row} of 4, ${Math.round(clear)} px from the ring`);
+  await p.evaluate(() => { window.sunup.state.parcels[2].owned = false; window.sunup.hud.pickTool('hands'); });
+}
+
+// 14. Round 12: a row tap on a nearly empty copper can (a heat wave, one water left) ended the row wet, dry, dry, dry, with
+// no word; the farmer filled the can and moved on. Now the farmer says so, fills it, and comes back to finish the row.
+{
+  await p.evaluate(() => {
+    const st = window.sunup.state;
+    Object.assign(st, { day: 3, minute: 120, weather: 'heat', water: 1, taps: [], orders: [], crowPlan: [] });
+    st.crows = [];
+    st.tools.can = 1;
+    for (let x = 2; x < 6; x++) { const q = st.plots[6 * st.W + x]; q.tilled = true; q.crop = { id: st.nextId++, kind: 'carrot', age: 1, stage: 1, dry: 0, dead: false, bugs: 0, quality: 0, picks: 0, parched: false, planted: st.day }; q.wet = false; q.moisture = 0; }
+    Object.assign(st.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    window.sunup.hud.pickTool('can');
+    window.__ev = [];
+  });
+  await p.waitForTimeout(1200);
+  await tapTile(2, 6);
+  // (The tap reaches the farm on the next frame: wait for it before waiting for the farmer.)
+  await p.waitForTimeout(300);
+  await settle(20000);
+  const r = await p.evaluate(() => ({ wet: [2, 3, 4, 5].map((x) => window.sunup.state.plots[6 * window.sunup.state.W + x].wet), refills: window.__ev.filter((e) => e.type === 'refill').length, said: window.__ev.some((e) => e.type === 'deny' && /well first/i.test(e.reason)) }));
+  check('round 12: a row tapped on a copper can with one water left: a word, a trip to the well, and the whole row watered', r.wet.every(Boolean) && r.refills === 1 && r.said, JSON.stringify(r));
+  await p.evaluate(() => { window.sunup.state.weather = 'sun'; window.sunup.state.water = 12; window.sunup.hud.pickTool('hands'); });
+}
+
+// 15. Round 12: a toast that comes while the board is open waits until it closes (on a phone Accept's word for the other
+// note came up over the board's Close and its last note).
+{
+  await p.evaluate(async () => {
+    const st = window.sunup.state;
+    Object.assign(st, { day: 6, rep: 1, requested: 1, orders: [], coins: 300, minute: 120 });
+    for (const q of st.plots) if (q.crop && q.crop.stage < 4) q.crop = null;
+    for (let k = 0; k < 12 && st.orders.length !== 2; k++) {
+      Object.assign(st, { orders: [], requested: 1, lastOffer: '', rng: (st.rng + 7919 * (k + 1)) | 0 });
+      window.sunup.pinRequests();
+    }
+    for (const t of document.querySelectorAll('.toasts .toast')) t.remove();
+    window.sunup.dialogs.board('requests');
+    await new Promise((r) => setTimeout(r, 500));
+  });
+  const pair = await p.evaluate(() => document.querySelectorAll('.dialog.on .pair .item.req').length);
+  const accepted = await tapEl('.dialog.on .pair .item.req .btn');
+  await p.waitForTimeout(600);
+  const during = await p.evaluate(() => ({ open: window.sunup.dialogs.open, toasts: [...document.querySelectorAll('.toasts .toast')].filter((e) => e.getBoundingClientRect().height > 0).map((e) => e.textContent) }));
+  await tapEl('.dialog.on header .closebtn');
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => ({ open: window.sunup.dialogs.open, toasts: [...document.querySelectorAll('.toasts .toast')].filter((e) => e.getBoundingClientRect().height > 0).map((e) => e.textContent) }));
+  check('round 12: Accept’s word for the other note waits while the board is open, and shows once it is closed', pair === 2 && accepted && during.open && during.toasts.length === 0 && !after.open && after.toasts.some((t) => /elsewhere/.test(t)), JSON.stringify({ pair, during, after }));
 }
 
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

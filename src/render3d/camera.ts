@@ -9,6 +9,7 @@
 
 import { Matrix4, PerspectiveCamera, Vector3, Vector4 } from 'three';
 import type { CameraIntent } from '../contract';
+import { PARCELS } from '../sim/map';
 import { clamp, lerp } from './util';
 
 const FOV = 30;
@@ -50,6 +51,11 @@ const FIELDS_BOX = { x0: 1.75, z0: 4.6, x1: 16.25, z1: 14.25 };
  * the screen).
  */
 export const TALL = { pitch: (70 * Math.PI) / 180, minTiles: 8.6, maxTiles: 12, bandTop: 100, bandBottom: 96 };
+/**
+ * Round 12: on a tall screen the field the farmer stands in keeps this many px clear of the screen's sides, every plot of
+ * it whole (from field 2 at 412x900 its right column's middle sat at x 410 of 412).
+ */
+const FIELD_CLEAR = 3;
 /** Ground the close camera on a tall screen keeps to: the farm, its back row of trees, not the void past its edges. */
 const BOUNDS = { x0: 0.02, x1: 19.98, z1: 15.25 };
 /** The back row of trees, roughly: how high their crowns reach and how far in they stand. */
@@ -376,6 +382,40 @@ export function makeRig(): Rig {
     return tallTiles;
   };
 
+  /** Screen x in px of a point, for a camera placed at a pose. */
+  const screenX = (cam: PerspectiveCamera, x: number, y: number, z: number) => {
+    a.set(x, y, z).project(cam);
+    return ((a.x + 1) / 2) * w;
+  };
+
+  /**
+   * Round 12: a tall screen's close view keeps the field the farmer stands in whole, every plot of it at least
+   * `FIELD_CLEAR` px inside the screen's sides (the hold on the west side cut field 2's right column in half on a
+   * 412x900 phone). The near row is the widest on screen, so its corners decide; it slides across, never turns.
+   */
+  const keepField = (p: Pose, fx: number, fy: number) => {
+    const f = PARCELS.find((q) => fx >= q.x && fx < q.x + q.w && fy >= q.y && fy < q.y + q.h);
+    if (!f) return;
+    tmpCam.aspect = w / h;
+    for (let k = 0; k < 4; k++) {
+      place(tmpCam, p);
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const z of [f.y, f.y + f.h]) for (const x of [f.x, f.x + f.w]) {
+        const sx = screenX(tmpCam, x, 0, z);
+        lo = Math.min(lo, sx);
+        hi = Math.max(hi, sx);
+      }
+      // Px to slide the view: positive moves the camera east, so the field moves left on screen.
+      // (Zoomed in past the field's width, it is centred.)
+      const by = hi - lo > w - 2 * FIELD_CLEAR ? (lo + hi - w) / 2 : hi > w - FIELD_CLEAR ? hi - (w - FIELD_CLEAR) : lo < FIELD_CLEAR ? lo - FIELD_CLEAR : 0;
+      if (Math.abs(by) < 0.25) return;
+      const perTile = screenX(tmpCam, f.x + 1, 0, f.y + f.h) - screenX(tmpCam, f.x, 0, f.y + f.h);
+      if (perTile <= 1) return;
+      p.tx += by / perTile;
+    }
+  };
+
   const closeGoal = (intent: CameraIntent, W: number, H: number) => {
     const zoom = clamp(intent.zoom || 1, 0.6, 2.5);
     const t = Math.tan((FOV * Math.PI) / 360);
@@ -389,6 +429,11 @@ export function makeRig(): Rig {
     goal.tz = intent.focusY;
     // Both shapes keep to the farm: no void past its edges, no sky below the top of the clear band.
     keepInside(goal, W, H);
+    // Round 12: and a tall one keeps the field the farmer stands in whole.
+    if (tall) {
+      keepField(goal, intent.focusX, intent.focusY);
+      keepInside(goal, W, H);
+    }
   };
 
   const updateSpan = () => {

@@ -18,6 +18,7 @@
 //     later does); walking past the board with Space held never opens it, a fresh press facing it does; Tab
 //     reaches Pass on the board and Enter lets the pair go, and the next morning brings a fresh pair; the morning
 //     after the fair its card says the miss and why, Enter closes it, and an Escape just after it stays in Sunup.
+//   - round 12: with the can in hand the bug line says "Press 1." (it said "Tap Hands."), and 1 takes the Hands.
 // node scripts/qa/sunup-keys.mjs [url]
 import { chromium } from 'playwright-core';
 
@@ -471,6 +472,31 @@ await p.waitForTimeout(1500);
   await p.waitForTimeout(250);
   const left = await p.evaluate(() => (window.sunup.state.taps ?? []).length);
   check('round 11: a click on Stop lets the taps go', left === 0, `${left} left`);
+}
+
+// Round 12: on a desktop the bug line names the key, not the button ("Tap Hands." showed on a desktop), and the key does it.
+{
+  await p.evaluate(() => {
+    const s = window.sunup.state;
+    s.learn = s.learn.filter((w) => w !== 'lesson:bugs');
+    for (const w of ['lesson:deliver', 'lesson:requests', 'lesson:sowfor', 'lesson:choose', 'pests', 'board', 'requests']) if (!s.learn.includes(w)) s.learn.push(w);
+    Object.assign(s, { minute: 90, taps: [], crowPlan: [], weather: 'sun' });
+    s.crows = [];
+    for (let x = 2; x < 6; x++) s.plots[6 * s.W + x].crop = null;
+    const q = s.plots[6 * s.W + 3];
+    q.tilled = true;
+    q.wet = true;
+    q.crop = { id: s.nextId++, kind: 'carrot', age: 2, stage: 2, dry: 0, dead: false, bugs: 1, quality: 0, picks: 0, parched: false, planted: s.day };
+    Object.assign(s.actors[0], { x: 3.5, y: 4.5, facing: 's', task: null, path: [], aim: null });
+    window.sunup.hud.pickTool('can');
+  });
+  await p.waitForTimeout(700);
+  const before = (await S()).line;
+  await p.keyboard.press('Digit1');
+  await p.waitForTimeout(400);
+  const tool = await p.evaluate(() => window.sunup.state.tool);
+  const after = (await S()).line;
+  check('round 12: with the can in hand, the bug line on a desktop says "Press 1.", and 1 takes the Hands', before === 'Press 1. Pick bugs off the carrots.' && tool === 'hands' && after === 'Bugs on your carrots. Pick them off.', JSON.stringify({ before, tool, after }));
 }
 
 console.log(errs.length ? `FAIL page errors: ${errs.join(' | ')}` : 'ok   no page errors');

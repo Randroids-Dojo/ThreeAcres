@@ -466,6 +466,7 @@ describe('copy on short requests and the fair', () => {
   it('the board says the fair in one line', () => {
     const s = farm(31, { fields: 2, coins: 900, day: 13 });
     s.fair = { start: 11, day: 20, want: 3, got: 1 };
-    expect(dialogs.fairLines(s)).toEqual(['Fair Summer 10: 1 of 3 taken this season, in full.']);
+    // (Round 12: "1 of 3 taken this season, in full." ran to ten words.)
+    expect(dialogs.fairLines(s)).toEqual(['Fair Summer 10: 1 of 3 filled.']);
   });
 });

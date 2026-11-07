@@ -34,7 +34,7 @@
 // pointer says what a scarecrow costs and nothing else happens (no tool
 // change, no walk), and the line steps aside until one can be paid for; from
 // the second field and the field well's front the first field's left column
-// is on screen and a real tap there works; at no stamina one refusal shows and the
+// is on screen (round 12: from the second field, a finger's width of it) and a real tap there works; at no stamina one refusal shows and the
 // act button is dim.
 // Round 6: the seed picker open, a real tap on a thirsty crop takes the can
 // and closes the picker for good, so the lesson pointer comes back (it stayed
@@ -835,12 +835,16 @@ check('walking the row holding Harvest picks all four carrots without stopping a
       window.sunup.walkAim = null;
     }, [fx, fy]);
     await p.waitForTimeout(1500);
-    const q = await tilePt(2, 7);
+    // (Round 12: standing in the second field, that field is whole on screen, so at 412x900 the first field's left column
+    // sits at the screen's edge, its middle near x 0: the tap goes to the middle of the part of it in view, which must be
+    // a finger wide.)
+    const seen = await p.evaluate(() => { const a = window.sunup.r3d.project(2, 7.5, 0); const c = window.sunup.r3d.project(3, 7.5, 0); return { x0: Math.max(0, a.x), x1: c.x, y: c.y }; });
+    const q = { x: (seen.x0 + seen.x1) / 2, y: seen.y };
     const r0 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
     await tapAt(q.x, q.y, 100);
     await p.waitForTimeout(3500);
     const r1 = await p.evaluate(() => window.sunup.state.stats.harvested.radish);
-    check(`from ${label}, the first field’s left column is on screen and a real tap there harvests`, q.x > 8 && r1 === r0 + 1, JSON.stringify({ at: [Math.round(q.x), Math.round(q.y)], r0, r1 }));
+    check(`from ${label}, the first field’s left column is on screen, a finger wide, and a real tap there harvests`, seen.x1 - seen.x0 >= 20 && r1 === r0 + 1, JSON.stringify({ at: [Math.round(q.x), Math.round(q.y)], wide: Math.round(seen.x1 - seen.x0), r0, r1 }));
   }
 
   // P2: at no stamina, one refusal shows, and the act button is dim and wordless (it stayed lit with Water).

@@ -5,7 +5,8 @@
 // tool button. Each control tracks its own pointer, so walking and acting work
 // together. Round 11: a finger that lands on a plot with a job drags across
 // plots once it moves (each plot it crosses queues); one that lands anywhere
-// else is the stick. Under point control the farm itself is the control: one finger
+// else is the stick. Round 12: one that lands on the drawn ring is always the
+// stick. Under point control the farm itself is the control: one finger
 // paints jobs, two fingers pan and pinch; a clear button drops queued jobs.
 
 import type { Input } from '../game/input';
@@ -29,6 +30,12 @@ export interface TouchHost {
 
 const VERB_ICON: Record<Verb, IconId> = { till: 'hoe', water: 'can', plant: 'seeds', harvest: 'hands', tend: 'hands', clear: 'hoe', build: 'build', scare: 'hands', refill: 'can' };
 const STICK_R = 50;
+/**
+ * Round 12: a finger that lands this far (px) from the drawn ring's middle is the stick, whatever plot lies under it:
+ * the ring is 112 px across, and a thumb aimed at its rim lands a little outside it. (In close view with field 3 owned,
+ * rows 12 and 13 sit under the ring: a push north began a drag there, and planted 60 coins of beans.)
+ */
+const RING_HOLD = 72;
 const DEAD = 0.16;
 /** A touch on the stick zone that moves less than this and lifts sooner is a tap on the farm. */
 const TAP_SLOP = 10;
@@ -154,7 +161,8 @@ export class TouchControls {
     capture(this.zone, e.pointerId);
     this.origin = { x: e.clientX, y: e.clientY };
     this.press = { x: e.clientX, y: e.clientY, t: performance.now(), far: false };
-    this.sweep = this.host.input.dragAt(e.clientX, e.clientY);
+    // Round 12: inside the drawn ring the stick always wins; elsewhere a finger on a plot with a job drags across plots.
+    this.sweep = !this.onRing(e.clientX, e.clientY) && this.host.input.dragAt(e.clientX, e.clientY);
     // (A finger on a plot with a job shows no stick: a drag from here works plots, it does not walk.)
     if (this.sweep) return;
     this.place();
@@ -212,6 +220,13 @@ export class TouchControls {
     this.base.classList.remove('active');
     this.knob.style.transform = '';
     this.host.input.setStick(0, 0);
+  }
+
+  /** Round 12: does a point (client px) lie on the stick's ring as it is drawn now, or just around it? */
+  private onRing(x: number, y: number): boolean {
+    const r = this.base.getBoundingClientRect();
+    if (r.width <= 0) return false;
+    return Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2)) <= RING_HOLD;
   }
 
   private place(): void {

@@ -13,7 +13,7 @@
 // the screen (below the day card, above the rack).
 // And on a phone, the View the farm was left in comes back after a reload.
 // Round 11: and on phones with five and six fields, the View's two stops (see below). On a desktop, one more: a click pass
-// over a field keeps the camera still.
+// over a field keeps the camera still. Round 12: close up on a phone, the field the farmer stands in is whole on screen.
 // node scripts/qa/sunup-view.mjs [base url]
 import { chromium } from 'playwright-core';
 
@@ -114,6 +114,51 @@ for (const [w, h] of [[412, 900], [412, 838], [390, 844], [360, 740]]) {
     const kept = await p.evaluate(() => window.sunup.state.rules.camera);
     check('phone: the whole-farm View comes back after a reload', kept === 'wide', kept);
   }
+  await ctx.close();
+}
+
+// Round 12: close up, the field the farmer stands in is whole on a phone's screen (from field 2 at 412x900 its right
+// column's middle sat at x 410 of 412). With four fields owned, the farmer stands on the corners and the middle of each,
+// and every plot of that field, near row and far, must lie between the screen's sides in the frame drawn.
+for (const [w, h] of [[412, 900], [412, 838], [390, 844], [360, 740]]) {
+  const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+  const p = await ctx.newPage();
+  await p.goto(`${base}/?game=homestead&fresh&touch`);
+  await p.waitForFunction(() => window.sunup && window.sunup.frames > 20, null, { timeout: 180000 });
+  await setup(p);
+  await p.evaluate(() => {
+    const s = window.sunup.state;
+    for (const q of s.parcels.slice(0, 4)) {
+      q.owned = true;
+      for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) s.plots[y * s.W + x].tilled = true;
+    }
+  });
+  await camera(p, 'close');
+  const cut = [];
+  let worst = { left: Infinity, right: -Infinity };
+  let f2 = 0;
+  for (let id = 0; id < 4; id++) {
+    const pc = await p.evaluate((id) => { const q = window.sunup.state.parcels[id]; return { x: q.x, y: q.y, w: q.w, h: q.h }; }, id);
+    for (const [dx, dy] of [[0, 0], [3, 0], [0, 3], [3, 3], [1, 2]]) {
+      await stand(p, pc.x + dx + 0.5, pc.y + dy + 0.5);
+      await p.waitForTimeout(800);
+      const e = await p.evaluate((pc) => {
+        const r = window.sunup.r3d;
+        let left = Infinity;
+        let right = -Infinity;
+        for (let y = pc.y; y <= pc.y + pc.h; y++) {
+          left = Math.min(left, r.project(pc.x, y, 0).x);
+          right = Math.max(right, r.project(pc.x + pc.w, y, 0).x);
+        }
+        return { left, right, mid: r.project(pc.x + pc.w - 0.5, pc.y + pc.h - 0.5, 0).x };
+      }, pc);
+      worst = { left: Math.min(worst.left, e.left), right: Math.max(worst.right, e.right - w) };
+      if (id === 1) f2 = Math.max(f2, e.mid);
+      if (e.left < 0 || e.right > w) cut.push(`field ${id + 1} from ${pc.x + dx},${pc.y + dy} (${Math.round(e.left)}..${Math.round(e.right)})`);
+    }
+  }
+  console.log(`phone ${w}x${h}: close up, the field stood in spans at worst ${Math.round(worst.left)} px from the left edge to ${Math.round(-worst.right)} px from the right; field 2's right column's middle at most x ${Math.round(f2)} of ${w}`);
+  check(`phone ${w}x${h}: close up, the field the farmer stands in is whole on screen, from its corners and middle`, cut.length === 0, cut.slice(0, 4).join('; '));
   await ctx.close();
 }
 

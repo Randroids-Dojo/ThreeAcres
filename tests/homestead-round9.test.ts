@@ -101,8 +101,8 @@ describe('P1: a pair is a trade read at a glance', () => {
       for (const [k, o] of offer.entries()) {
         const t = tradeRead(o);
         expect(notes[k].head).toBe(`+${t.clear.toLocaleString('en-US')}`);
-        // (Round 11: a crop that regrows says so.)
-        expect(notes[k].lines[0]).toBe(`for ${t.plots} plots, ${t.days} days${CROPS[o.items[0].crop].regrow ? ', picks again' : ''}`);
+        // (Round 11: a crop that regrows says so; round 12: and that it holds its plots all season.)
+        expect(notes[k].lines[0]).toBe(CROPS[o.items[0].crop].regrow ? `for ${t.plots} plots all season, picks again` : `for ${t.plots} plots, ${t.days} days`);
         expect(notes[k].lines.join(' ')).not.toMatch(/over market|planted/);
       }
       expect(notes[0].lines.length).toBe(notes[1].lines.length);

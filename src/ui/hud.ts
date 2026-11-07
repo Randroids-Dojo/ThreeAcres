@@ -120,7 +120,8 @@ export function morningNews(s: WorldState, room = MORNING_CLAUSES, ripeNow?: num
   if (r.eaten) lost.push(`crows ate ${r.eaten}`);
   if (r.withered) lost.push(`${r.withered} withered`);
   if (r.turned) lost.push(`the turn took ${r.turned} green ${r.turned === 1 ? 'crop' : 'crops'}`);
-  if (lost.length) bits.push([1, 2, lost.join(' and ')]);
+  // (Round 12: crops crows took are always among the clauses kept, after only what the turn will take.)
+  if (lost.length) bits.push([r.eaten ? 0.2 : 1, 2, lost.join(' and ')]);
   // A request that ran out of time says so, rather than vanishing from the board; so does one that can no longer be met,
   // each with its cause (round 6).
   // Round 7: a cause the card already names among the losses is not said again ("Crows ate 1, Pell's pickles found
@@ -916,6 +917,7 @@ export class Hud {
       case 'night':
         // Words of the day go with it: a let-go note stayed up through the night onto the morning card.
         for (const n of [...this.toasts.children]) n.remove();
+        this.heldToasts = [];
         break;
       case 'harvest': {
         if (e.by === s.actors[0].id && this.touch.shown) buzz(12);
@@ -1130,8 +1132,36 @@ export class Hud {
     }, 750);
   }
 
+  /** Round 12: toasts waiting for a card to close (one covered the board's Close and its last note on a phone). */
+  private heldToasts: { html: string; kind: string; ms: number }[] = [];
+  private holding = false;
+
+  /**
+   * Round 12: while a card is open, toasts wait, those already up with them, and show in full once it closes (the last
+   * three). On a phone the board's Close and its last note sit at its foot, where a toast came up over them; and a morning
+   * card ran its seconds out while the fair's card was being read.
+   */
+  holdToasts(on: boolean): void {
+    if (on === this.holding) return;
+    this.holding = on;
+    if (on) {
+      for (const t of [...this.toasts.children] as HTMLElement[]) {
+        if (!t.classList.contains('out')) this.heldToasts.push({ html: t.innerHTML, kind: t.dataset.kind ?? '', ms: Number(t.dataset.ms) || 2400 });
+        t.remove();
+      }
+      return;
+    }
+    for (const t of this.heldToasts.splice(0).slice(-3)) this.toast(t.html, t.kind, t.ms);
+  }
+
   toast(html: string, kind: string, ms = 2400): void {
+    if (this.holding) {
+      this.heldToasts.push({ html, kind, ms });
+      return;
+    }
     const t = el('div', `toast ${kind}`, html);
+    t.dataset.kind = kind;
+    t.dataset.ms = String(ms);
     this.toasts.append(t);
     while (this.toasts.children.length > 3) this.toasts.firstElementChild!.remove();
     setTimeout(() => {

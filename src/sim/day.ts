@@ -437,6 +437,28 @@ export function guardedSure(s: WorldState, x: number, y: number): boolean {
 }
 
 /**
+ * Round 12: about how many crops crows would take if the farmer went to bed now: each crow pecking at a crop, and on a
+ * flock day each crow still to come, while there are crops no scarecrow watches for sure (`nightfall`). The sleep
+ * question says it ("Crows may take about 7 crops."; it gave no size, and a flock night cost 7 crops once, 2 another).
+ */
+export function crowsTonight(s: WorldState): number {
+  if (!homestead(s) || !s.learn.includes('lesson:pests')) return 0;
+  const pecking = s.crows.filter((c) => c.phase === 'peck' && !!s.plots[idx(c.x, c.y)].crop).length;
+  if (!s.flock || !s.crowPlan.length) return pecking;
+  let open = 0;
+  for (let y = 0; y < s.H; y++) {
+    for (let x = 0; x < s.W; x++) {
+      if (!owned(s, x, y)) continue;
+      const c = s.plots[idx(x, y)].crop;
+      if (!c || c.dead || c.stage < 1 || guardedSure(s, x, y)) continue;
+      if (s.crows.some((k) => k.x === x && k.y === y && k.phase !== 'gone')) continue;
+      open++;
+    }
+  }
+  return pecking + Math.min(s.crowPlan.length, open);
+}
+
+/**
  * Pick a crop for a crow: growing, not already someone's dinner, and open: no
  * scarecrow watching it, or (when every growing crop is watched) one at the
  * edge of a scarecrow's watch, never one right beside a scarecrow.

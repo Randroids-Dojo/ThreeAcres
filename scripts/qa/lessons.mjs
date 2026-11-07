@@ -1023,7 +1023,7 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
   // sowing, and due with its days to spare.
   const readable = pair.n === 2 && pair.or === 'or' && pair.notes.every((n) => {
     const [gain, trade, what, need, when] = n.lines.map((l) => l.text);
-    return /^\+[\d,]+$/.test(gain) && /^for \d+ plots?, \d+ days?$/.test(trade) && /^\d+ [a-z]+ for /.test(what) && /^Plant (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Due (tomorrow|[A-Z][a-z]+ \d+), (no day|a day|\d days) to spare$/.test(when) && n.stamp === 'Accept' && !n.lines.some((l) => /Pays|over market/.test(l.text));
+    return /^\+[\d,]+$/.test(gain) && /^for \d+ plots?(, \d+ days?| all season, picks again)$/.test(trade) && /^\d+ [a-z]+ for /.test(what) && /^Plant (today|by tomorrow|by [A-Z][a-z]+ \d+), seed \d+$/.test(need) && /^Due (tomorrow|[A-Z][a-z]+ \d+), (no day|a day|\d days) to spare$/.test(when) && n.stamp === 'Accept' && !n.lines.some((l) => /Pays|over market/.test(l.text));
   });
   check('the board shows the pair at a glance: what each clears first, its plots and days, what it wants, sow by, due with days to spare, an Accept stamp, "or" between them', readable, JSON.stringify(pair.notes.map((n) => [...n.lines.map((l) => l.text), n.stamp])));
   const onScreen = pair.notes.every((n) => n.box.l >= 0 && n.box.r <= pair.W && n.box.t >= 0 && n.box.b <= pair.H) && pair.notes.every((n) => n.lines.every((l) => l.size >= 12 && !l.cut));
@@ -1073,8 +1073,19 @@ check('a 6 am storm is as easy to read as a sunny 6 am', dawnLight.storm >= dawn
     }
     await q.waitForTimeout(700);
     const after = await q.evaluate((id) => ({ ids: window.sunup.state.orders.map((o) => o.id), taken: window.sunup.state.orders.find((o) => o.id === id)?.taken, toasts: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent), note: document.querySelector(`.dialog .item.req[data-id="${id}"]`)?.textContent ?? '' }), chosen.a);
+    // (Round 12: the word waits while the board is open, as every toast does, and shows once a real tap on Close closes it:
+    // on a phone it came up over the board's Close and its last note.)
+    const close = await q.evaluate(() => { const b = document.querySelector('.dialog.on header .closebtn'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    if (close) {
+      await qc.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: close[0], y: close[1], id: 6, radiusX: 6, radiusY: 6, force: 1 }] });
+      await qc.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+    await q.waitForTimeout(500);
+    const word = await q.evaluate(() => ({ open: window.sunup.dialogs.open, toasts: [...document.querySelectorAll('.toasts .toast')].map((t) => t.textContent) }));
     // (Round 9: and the seed sown before Accept does not count for it: its note still asks for all of it.)
-    check('a real tap on Accept takes one: the other goes at once, with a word, and its note counts nothing sown before Accept', !!acc && after.ids.join() === String(chosen.a) && after.taken === true && after.toasts.some((t) => /will find [a-z]+ elsewhere\.$/.test(t)) && !/1 growing/.test(after.note) && /Plant \d+/.test(after.note), JSON.stringify({ chosen, after }));
+    check('a real tap on Accept takes one: the other goes at once, with a word once the board is closed, and its note counts nothing sown before Accept', !!acc && after.ids.join() === String(chosen.a) && after.taken === true && !after.toasts.some((t) => /elsewhere/.test(t)) && !word.open && word.toasts.some((t) => /will find [a-z]+ elsewhere\.$/.test(t)) && !/1 growing/.test(after.note) && /Plant \d+/.test(after.note), JSON.stringify({ chosen, after, word }));
+    await q.evaluate(() => window.sunup.dialogs.board('requests'));
+    await q.waitForTimeout(400);
     await q.screenshot({ path: `${out}/13a-board-taken.png` });
   }
   await q.screenshot({ path: `${out}/13-board-pair.png` });

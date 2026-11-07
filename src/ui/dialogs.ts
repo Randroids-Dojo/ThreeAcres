@@ -571,8 +571,10 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
     // trade at a glance ("+415 over market" put the bigger number on the bold side nearly every time). Nothing planted
     // before Accept counts, so there is no "16 planted" any more.
     const tr = tradeOf(o);
-    // (Round 11: beans and strawberries hold their plots to the season's end, and pick again: the note says so.)
-    const lines = [`for ${tr.plots} ${tr.plots === 1 ? 'plot' : 'plots'}, ${tr.days} ${tr.days === 1 ? 'day' : 'days'}${d.regrow ? ', picks again' : ''}`, `${it.n} ${name} for ${who}`, `Plant ${when}, seed ${fmt(toSow * d.seed)}`, `Due ${dayName(s, o.due)}, ${slack}`];
+    // (Round 11: beans and strawberries pick again: the note says so. Round 12: and that they hold their plots to the
+    // season's end, which "for 4 plots, 5 days, picks again" never said.)
+    const plotWord = `${tr.plots} ${tr.plots === 1 ? 'plot' : 'plots'}`;
+    const lines = [d.regrow ? `for ${plotWord} all season, picks again` : `for ${plotWord}, ${tr.days} ${tr.days === 1 ? 'day' : 'days'}`, `${it.n} ${name} for ${who}`, `Plant ${when}, seed ${fmt(toSow * d.seed)}`, `Due ${dayName(s, o.due)}, ${slack}`];
     const cls = ['trade', 'what', 'need', 'when'];
     // While the season's fair still wants requests, each offer says whether it can count for it.
     const label = fairLabel(s, o);
@@ -614,28 +616,36 @@ export function noteText(s: WorldState, o: Order): { head: string; lines: string
 
 /**
  * Round 9: the season's fair on the board. Round 10: in one line. Round 11: with what it wants in it: a fair counts only
- * requests taken in its season and filled in full ("Fair Spring 10: 1 of 3 taken this season, in full."). None
- * before the first Accept.
+ * requests taken in its season and filled in full. Round 12: what it counts, in eight words at most ("Fair Autumn 10: 1
+ * of 5 filled."; "1 of 5 taken this season, in full." ran to ten words, and its count was of requests filled, not
+ * taken). None before the first Accept.
  */
 export function fairLines(s: WorldState): string[] {
   const f = s.fair;
   if (!f || !homestead(s)) return [];
   const when = `${SEASON_NAMES[season(f.day)]} ${dayOfSeason(f.day)}`;
-  if (s.day < f.start) return [`Fair ${when}: wants ${f.want}, taken that season, in full.`];
+  if (s.day < f.start) return [`Fair ${when}: ${f.want} filled, taken in ${SEASON_NAMES[season(f.day)].toLowerCase()}.`];
   if (f.got >= f.want) return [`Fair ${when}: the ribbon is yours.`];
-  return [`Fair ${when}: ${f.got} of ${f.want} taken this season, in full.`];
+  return [`Fair ${when}: ${f.got} of ${f.want} filled.`];
 }
 
 /**
  * Round 10: whether an offer counts for the fair, as its note says it. Round 11: "In time for the fair" while seed sown
- * today would ripen by its day, and "Too late for the fair" beside one that can; null once its ribbon is won, or no crop
+ * on the first day it can go in would ripen by its day (round 12: "Plant today for the fair" when only seed sown
+ * sooner than its plant-by day would), and "Too late for the fair" beside one that can; null once its ribbon is won, or no crop
  * can ripen by it any more. A request counts only for the fair of the season it is taken in, so there is no "For the
  * autumn fair".
  */
 export function fairLabel(s: WorldState, o: Order): { text: string; now: boolean } | null {
   const f = fairNow(s);
   if (!f || !offered(o) || f.got >= f.want) return null;
-  if (forFair(s, o)) return { text: 'In time for the fair', now: true };
+  if (forFair(s, o)) {
+    // Round 12: in time only if planted before its plant-by day, it says by when ("Plant by tomorrow" beside "In time for
+    // the fair" was in time only if planted today, and the soil was not free until tomorrow).
+    const latest = f.day - CROPS[o.items[0].crop].days;
+    if (latest < sowByOf(o)) return { text: latest <= s.day ? 'Plant today for the fair' : `Plant by ${dayName(s, latest)} for the fair`, now: true };
+    return { text: 'In time for the fair', now: true };
+  }
   return fairChances(s) > 0 ? { text: 'Too late for the fair', now: false } : null;
 }
 
@@ -720,6 +730,8 @@ export interface SleepWhy {
   bugs?: number;
   crows?: number;
   flock?: boolean;
+  /** Round 12: about how many crops crows would take tonight (`crowsTonight`): the question gave no size. */
+  crowCrops?: number;
   owed?: number;
   /** Round 11: new notes on the board nobody has read: offers go at the next dawn. */
   unread?: number;
@@ -732,8 +744,9 @@ export interface SleepWhy {
 export function sleepText(minute: number, why: SleepWhy = {}): string {
   const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const at = `It is ${clock(minute)}.`;
-  if (why.flock) return `${at} Crows still to come will take crops.`;
-  if (why.crows) return `${at} ${why.crows === 1 ? 'A crow will take its crop.' : 'Crows will take their crops.'}`;
+  // Round 12: with the size of it ("Crows may take about 7 crops."; a flock night cost 7 crops once, 2 another time).
+  if (why.flock) return `${at} ${why.crowCrops === undefined ? 'Crows still to come will take crops.' : why.crowCrops <= 1 ? 'A crow may take a crop.' : `Crows may take about ${why.crowCrops} crops.`}`;
+  if (why.crows) return `${at} ${why.crows === 1 ? 'A crow will take its crop.' : `${why.crows} crows will take their crops.`}`;
   if (why.bugs) return `${at} Bugs left on crops spread tonight.`;
   if (why.owed) return `${at} A request needs ${why.owed} more planted today.`;
   if (why.thirsty) return `${at} ${n(why.thirsty, 'crop is', 'crops are')} still thirsty.`;
@@ -750,7 +763,7 @@ const LOSS_WORD: Record<LossCause, string> = { crows: 'crows', bugs: 'bugs', dry
  * them, never inside one ("no / day to spare", "4 days to / go").
  */
 export function keepWhole(line: string): string {
-  return esc(line).replace(/(\+[\d,]+ over market|\+[\d,]+ in all|\d+ plots?,|\d+ days?$|[Pp]lant (?:\d+(?: more)? )?(?:today|by tomorrow|by [A-Z][a-z]+ \d+)|\d+ of \d+ can come|pays [\d,]+|Sow \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|seed [\d,]+|Ripe in \d+ days?|[Dd]ue (?:tomorrow|[A-Z][a-z]+ \d+)|(?:no|a|\d+) days? to spare|[Ww]anted by (?:tomorrow|[A-Z][a-z]+ \d+)|\d+ (?:growing|in the crate|lost to (?:crows|bugs|a dry night|the heat|the turn)))/g, '<span class="nw">$1</span>');
+  return esc(line).replace(/(\+[\d,]+ over market|\+[\d,]+ in all|\d+ plots? all season,|\d+ plots?,|\d+ days?$|[Pp]lant (?:\d+(?: more)? )?(?:today|by tomorrow|by [A-Z][a-z]+ \d+)|\d+ of \d+ can come|pays [\d,]+|Sow \d+(?: more)? (?:today|by tomorrow|by [A-Z][a-z]+ \d+)|seed [\d,]+|Ripe in \d+ days?|[Dd]ue (?:tomorrow|[A-Z][a-z]+ \d+)|(?:no|a|\d+) days? to spare|[Ww]anted by (?:tomorrow|[A-Z][a-z]+ \d+)|\d+ (?:growing|in the crate|lost to (?:crows|bugs|a dry night|the heat|the turn)))/g, '<span class="nw">$1</span>');
 }
 
 /** A day as the day card names it ("Spring 6"), or "tomorrow". */

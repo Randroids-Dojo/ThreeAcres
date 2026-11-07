@@ -1010,8 +1010,23 @@ function offerWith(s: WorldState, prefer: { kind?: string; crops: CropId[] } | u
 }
 
 /**
- * Round 11: could a request still count for the season's fair? An offer, if seed sown today would ripen by the fair's day.
- * A taken one, if it was taken in the fair's season and can still come in full by the fair's day.
+ * Round 12: the first day all a request still wants sown can go in: today, with the free soil for it (after what the
+ * requests taken before it still owe), else the first day enough comes free, by its last day to plant (an offer's
+ * plant-by day). The twelfth playtest's corn read "Plant by tomorrow" and "In time for the fair" on a farm with no bare
+ * soil: planted on the first day it could be, it ripened the day after the fair.
+ */
+export function firstSowOf(s: WorldState, o: Order): number {
+  const last = Math.max(s.day, lastSowOf(o));
+  const need = stillToSow(s, o);
+  const held = owed(s, offered(o) ? undefined : o).plots;
+  for (let d = s.day; d < last; d++) if (need <= roomBy(s, d) - held) return d;
+  return last;
+}
+
+/**
+ * Round 11: could a request still count for the season's fair? An offer, if seed sown on the first day it can go in
+ * would ripen by the fair's day (round 12: it was judged from today, soil or none). A taken one, if it was taken in the
+ * fair's season and can still come in full by the fair's day.
  */
 export function forFair(s: WorldState, o: Order): boolean {
   const f = fairNow(s);
@@ -1019,7 +1034,7 @@ export function forFair(s: WorldState, o: Order): boolean {
   const it = o.items[0];
   const d = CROPS[it.crop];
   const by = Math.min(o.due, f.day);
-  if (offered(o)) return s.day + d.days <= f.day;
+  if (offered(o)) return firstSowOf(s, o) + d.days <= f.day;
   if (!takenFor(f, o)) return false;
   let have = Math.min(o.got ?? 0, it.n);
   for (let i = 0; i < s.plots.length; i++) {
@@ -1027,8 +1042,8 @@ export function forFair(s: WorldState, o: Order): boolean {
     if (c && ownedPlot(s, i) && countsFor(s, o, c) && ripeBy(s, c, by)) have++;
   }
   if (have >= it.n) return true;
-  // Still to sow: it can go in today and ripen in time, and the soil and coins are there.
-  return s.day + d.days <= by && !whyNot(s, o);
+  // Still to sow: it can go in on the first day the soil is free and ripen in time, and the soil and coins are there.
+  return firstSowOf(s, o) + d.days <= by && !whyNot(s, o);
 }
 
 /** Round 10: taken requests on their way to the season's fair. Round 11: only those that can still count for it. */

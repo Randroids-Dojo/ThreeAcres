@@ -131,17 +131,33 @@ describe('the phone camera keeps the farm in view', () => {
   });
 
   // Round 5: with the farmer in the second field or at the well, the first field's left column was off screen and
-  // could not be tapped. Now the camera holds still on the west side as far as the well's front.
-  it('from the second field and the well, the middle of the first field’s left column is on screen, with room for a finger', () => {
+  // could not be tapped. Now the camera holds still on the west side as far as the well's front. Round 12: but standing
+  // in the second field, that field comes first: it is whole on screen (at 412x900 its right column's middle sat at x 410
+  // of 412), and the first field's left column still shows a finger's width.
+  it('from the well’s front and the path beside the second field, the middle of the first field’s left column is on screen, with room for a finger', () => {
     for (const h of [838, 900]) {
       // (Round 10: from the yard's well itself, at the farm's tighter tiles, the yard is in view instead: a tap queue now
       // fills the can at the nearer well on its own, the one between the fields, so no one walks to the yard's well to
       // water field 1.)
-      for (const [fx, fy] of [[10.5, 6.5], [10.5, 8.5], [9.5, 7.5]]) {
+      for (const [fx, fy] of [[6.5, 8.5], [7.5, 9.5], [6.5, 6.5]]) {
         const rig = framed(h, fx, fy);
         // Its middle 12 px or more in from the edge: with half a tile (about 20 px) to its right, a finger has 32 px.
         for (let y = 5; y < 9; y++) expect(rig.project(2.5, y + 0.5, 0)!.x, `field 1 at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(12);
         // And the farmer stays on screen.
+        const f = rig.project(fx, fy, 0)!;
+        expect(f.x).toBeLessThan(W - 16);
+      }
+    }
+  });
+
+  it('from the second field, it is whole on screen, and the first field’s left column still shows a finger’s width', () => {
+    for (const h of [838, 900]) {
+      for (const [fx, fy] of [[10.5, 6.5], [10.5, 8.5], [9.5, 7.5], [7.5, 5.5]]) {
+        const rig = framed(h, fx, fy);
+        for (let y = 5; y < 9; y++) {
+          expect(rig.project(11, y + 1, 0)!.x, `field 2's right edge at row ${y}, farmer ${fx},${fy}`).toBeLessThanOrEqual(W);
+          expect(rig.project(3, y + 0.5, 0)!.x, `field 1's left column at row ${y}, farmer ${fx},${fy}`).toBeGreaterThanOrEqual(20);
+        }
         const f = rig.project(fx, fy, 0)!;
         expect(f.x).toBeLessThan(W - 16);
       }

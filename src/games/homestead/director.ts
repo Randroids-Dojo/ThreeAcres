@@ -7,7 +7,7 @@ import { canAfford, homestead, resolve, sleepAsk } from '../../sim/actions';
 import { dragStarts, facingTile, farmer, snapAim } from '../../sim/actors';
 import { botCommands, newBot, type Bot } from '../../sim/bot';
 import { fillRequests, newRequests, owedToday } from '../../sim/goals';
-import { guardedSure } from '../../sim/day';
+import { crowsTonight, guardedSure } from '../../sim/day';
 import type { Command } from '../../sim/commands';
 import { CROP_IDS } from '../../sim/crops';
 import { step } from '../../sim/step';
@@ -421,7 +421,7 @@ export class Director {
     const unread = s.learn.includes('requests') ? newRequests(s) : 0;
     const q = sleepAsk(s, { teaching, flock, owedToday: owed, unread });
     if (q.ask) {
-      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), { ...q.left, flock, owed, unread });
+      this.dialogs.confirmSleep(s.minute, () => this.input.push({ type: 'sleep' }), { ...q.left, flock, crowCrops: flock ? crowsTonight(s) : undefined, owed, unread });
       return;
     }
     this.input.push({ type: 'sleep' });
@@ -569,6 +569,9 @@ export class Director {
     this.lessonTarget = { point: lesson.point, build: lesson.build };
     if (this.bot && !this.dialogs.open) cmds.push(...botCommands(s, this.bot, dt));
     for (const c of cmds) if (c.type === 'actAt') this.walkAim = { x: c.x, y: c.y, t: this.t };
+    // Round 12: toasts wait while a card is open (on a phone one covered the board's Close, and a morning card ran out
+    // while the fair's card was read), and show once it closes.
+    this.hud.holdToasts(this.dialogs.open);
     const ev = step(s, this.dialogs.open ? 0 : dt, cmds);
     for (const e of ev) this.dispatch(e);
     // Round 10: the fair's card, once the night is over and nothing else is open.

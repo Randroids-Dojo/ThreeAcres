@@ -4,8 +4,8 @@
 // desktop, collects the boxes of every visible HUD piece and fails on any pair
 // that overlaps, on a ruled line through words, and on any visible button a
 // tap cannot reach. Also: the seed picker never covers the plot being worked
-// and keeps every seed on screen, a toast shows over an open board (not behind
-// it), what cannot be afforded is not stamped like what can, and the board's
+// and keeps every seed on screen, a toast that comes while the board is open
+// waits until it closes (round 12; it was shown over it), what cannot be afforded is not stamped like what can, and the board's
 // tabs stay put from tab to tab.
 // Round 2: on a desktop the close camera keeps the crops a lesson is about
 // clear of the lesson line and the rack; the keys show on the buttons (1 to
@@ -185,7 +185,7 @@ async function run(label, viewport, touch) {
     ['board seeds', async () => p.evaluate(() => window.sunup.dialogs.board('seeds'))],
     // Fields you cannot afford: the stamp says what it needs and looks it.
     ['board fields, short of coins', async () => p.evaluate(() => { window.sunup.state.coins = 120; window.sunup.dialogs.board('fields'); })],
-    // A toast while the board is open shows over it, below the board.
+    // A toast while the board is open waits until it closes (round 12; it showed over it, and on a phone over its Close).
     ['board with a toast', async () => p.evaluate(() => { window.sunup.dialogs.board('requests'); window.sunup.hud.toast('<b>Mabel\u2019s bakery</b> took the crops. +80 coins, +1 reputation.', 'big', 5000); })],
     // Round 3: a pair of requests to choose between, as a morning pins them.
     ['board requests, a pair', async () => p.evaluate(async () => {
@@ -327,20 +327,31 @@ async function run(label, viewport, touch) {
     for (const q of await p.evaluate(strikeScan)) hits.push(`rule through "${q.text}" in ${q.in}`);
     // Every visible button must take a tap, not something lying over it (the stick's capture zone, say).
     for (const q of await p.evaluate(reachScan, modal ? '.dialog.on button, .shellbtn' : 'button')) hits.push(`${q.control} is under ${q.under} at ${q.at}`);
-    // A toast over an open board is on top of it, and clear of the board itself.
+    // Round 12: a toast that comes while the board is open waits for it to close (it showed under the board, which on a
+    // phone is over its Close and its last note), then shows in full, on top. The board opens again for the checks below.
     if (name === 'board with a toast') {
-      const t = await p.evaluate(() => {
-        const e = document.querySelector('.toasts .toast');
-        const r = e.getBoundingClientRect();
-        const d = document.querySelector('.dialog.on').getBoundingClientRect();
-        // Toasts take no taps, so hit testing skips them; let this one take them for the measurement.
-        e.style.pointerEvents = 'auto';
-        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-        e.style.pointerEvents = '';
-        return { onTop: !!top && e.contains(top), clear: r.top >= d.bottom - 1 || r.bottom <= d.top + 1 };
+      const t = await p.evaluate(async () => {
+        const shown = [...document.querySelectorAll('.toasts .toast')].filter((e) => e.getBoundingClientRect().height > 0).length;
+        window.sunup.dialogs.close(true);
+        await new Promise((r) => setTimeout(r, 300));
+        const e = [...document.querySelectorAll('.toasts .toast')].find((q) => /Mabel/.test(q.textContent));
+        let onTop = false;
+        if (e) {
+          const r = e.getBoundingClientRect();
+          // Toasts take no taps, so hit testing skips them; let this one take them for the measurement.
+          e.style.pointerEvents = 'auto';
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          e.style.pointerEvents = '';
+          onTop = !!top && e.contains(top);
+        }
+        for (const q of document.querySelectorAll('.toasts .toast')) q.remove();
+        window.sunup.dialogs.board('requests');
+        await new Promise((r) => setTimeout(r, 300));
+        return { shown, after: !!e, onTop };
       });
-      if (!t.onTop) hits.push('toast is behind the board');
-      if (!t.clear) hits.push('toast covers the board');
+      if (t.shown) hits.push('a toast shows while the board is open');
+      if (!t.after) hits.push('the toast held while the board was open did not show once it closed');
+      else if (!t.onTop) hits.push('the toast held for the board shows behind something');
     }
     // The pair hangs together: two notes and "or" between them, all inside the board.
     if (name === 'board requests, a pair') {
@@ -357,7 +368,7 @@ async function run(label, viewport, touch) {
       // Round 5: each offer headlines its gain, and carries an Accept stamp. Round 9: what it clears, then its plots and
       // days, the two notes side by side and the same shape (their lines at the same heights).
       const g = await p.evaluate(() => [...document.querySelectorAll('.dialog .pair .item.req')].map((e) => ({ head: e.querySelector('.tx > b')?.textContent ?? '', trade: e.querySelector('.tx .trade')?.textContent ?? '', tradeY: Math.round(e.querySelector('.tx .trade')?.getBoundingClientRect().top ?? -1), top: Math.round(e.getBoundingClientRect().top), green: getComputedStyle(e.querySelector('.tx > b')).color, size: parseFloat(getComputedStyle(e.querySelector('.tx > b')).fontSize), stamp: e.querySelector('.btn')?.textContent ?? '' })));
-      if (g.length !== 2 || g.some((x) => !/^\+[\d,]+$/.test(x.head) || !/^for \d+ plots?, \d+ days?$/.test(x.trade) || x.stamp !== 'Accept' || x.size < 15)) hits.push(`offer notes ${JSON.stringify(g)}`);
+      if (g.length !== 2 || g.some((x) => !/^\+[\d,]+$/.test(x.head) || !/^for \d+ plots?(, \d+ days?| all season, picks again)$/.test(x.trade) || x.stamp !== 'Accept' || x.size < 15)) hits.push(`offer notes ${JSON.stringify(g)}`);
       if (g.length === 2 && (Math.abs(g[0].top - g[1].top) > 3 || Math.abs(g[0].tradeY - g[1].tradeY) > 3)) hits.push(`the pair's notes are not side by side ${JSON.stringify(g)}`);
     }
     if (name === 'board requests, one taken') {

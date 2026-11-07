@@ -488,6 +488,8 @@ const LESSONS: Lesson[] = [
     },
     // Shooed, or it flew off with its dinner: either way the crow has gone (and the line was seen while it was here).
     done: (s) => !crowHere(s),
+    // Round 12: and the line goes with it ("A crow is on your sunflowers." stayed up about 10 s after the crow had gone).
+    instant: true,
   },
   {
     // The morning after the first crow: the Build tool arrives, with its own line, and points at bare soil in the
@@ -547,11 +549,12 @@ const LESSONS: Lesson[] = [
     unlocks: [],
     ready: (s) => s.learn.includes('pests') && bugsHere(s),
     // Says to take the hands when something else is in hand (the act button then says Pick). Round 11: in the rack's word.
-    text: (s) => {
+    // Round 12: on a keyboard, its key (the Hands are always the rack's first place: "Tap Hands." showed on a desktop).
+    text: (s, touch) => {
       const at = theBugs(s);
       const c = at ? s.plots[Math.floor(at.y) * s.W + Math.floor(at.x)].crop : null;
       const crop = c ? CROPS[c.kind].plural.toLowerCase() : 'crops';
-      return s.tool === 'hands' ? `Bugs on your ${crop}. Pick them off.` : `Tap Hands. Pick bugs off the ${crop}.`;
+      return s.tool === 'hands' ? `Bugs on your ${crop}. Pick them off.` : `${touch ? 'Tap Hands.' : 'Press 1.'} Pick bugs off the ${crop}.`;
     },
     point: (s) => theBugs(s),
     done: (s, n) => n('tend') >= 1 || !bugsHere(s),
@@ -620,7 +623,7 @@ export function allLines(s: WorldState): string[] {
   const withRequest = { ...s, orders: [{ id: 1, who: 'x', items: [{ crop: 'strawberry', n: 3 }], reward: 1, rep: 1, due: 9 }] } as WorldState;
   for (const l of LESSONS) out.push(l.text(withRequest, true));
   const canInHand = { ...s, tool: 'can' } as WorldState;
-  for (const l of LESSONS) out.push(l.text(canInHand, true));
+  for (const l of LESSONS) out.push(l.text(canInHand, true), l.text(canInHand, false));
   return [...new Set(out)];
 }
 

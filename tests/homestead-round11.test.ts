@@ -228,7 +228,8 @@ describe('P2: the fair can be lost', () => {
 
   it('the board says in one line what it wants; a win past it no longer reads "4 of 3"', () => {
     const s = season();
-    expect(dialogs.fairLines(s)).toEqual(['Fair Summer 10: 0 of 2 taken this season, in full.']);
+    // (Round 12: in eight words or fewer, "taken this season, in full" counted requests filled.)
+    expect(dialogs.fairLines(s)).toEqual(['Fair Summer 10: 0 of 2 filled.']);
     const card = dialogs.fairCard(s, { got: 4, want: 3, won: true, taken: 4 }, 21);
     expect(card.lines.join(' ')).not.toMatch(/4 of 3/);
     expect(card.lines).toContain('4 requests filled in full. It wanted 3.');
@@ -260,7 +261,7 @@ describe('P2: the fair can be lost', () => {
     expect(all).toBeLessThan(1);
   }, 60000);
 
-  it('over 12 farms, a careful bot wins about 65 to 80% of its fairs', () => {
+  it('over 12 farms, a careful bot wins most of its fairs, not all', () => {
     let won = 0;
     let held = 0;
     for (let i = 0; i < 12; i++) {
@@ -280,7 +281,9 @@ describe('P2: the fair can be lost', () => {
     }
     expect(held).toBe(48);
     expect(won / held).toBeGreaterThanOrEqual(0.6);
-    expect(won / held).toBeLessThanOrEqual(0.85);
+    // (Round 12: "In time for the fair" is now judged from the first day an offer's seed can go in, so the careful bot,
+    // which takes the side in time, is no longer misled by it: 40 of 48 became 45. Still not a formality.)
+    expect(won / held).toBeLessThanOrEqual(0.95);
   }, 240000);
 });
 
@@ -396,7 +399,8 @@ describe('P2: summer has pairs', () => {
     expect(g.requestCrops?.(summer)).toContain('beans');
     const beans: Order = { id: summer.nextId++, who: 'Old Tamsin', items: [{ crop: 'beans', n: 4 }], reward: 330, rep: 1, due: 18, sowBy: 12, made: 12, seen: false, kind: 'quick', taken: false };
     summer.orders = [beans];
-    expect(dialogs.noteText(summer, beans).lines[0]).toBe('for 4 plots, 5 days, picks again');
+    // (Round 12: and that it holds its plots all season.)
+    expect(dialogs.noteText(summer, beans).lines[0]).toBe('for 4 plots all season, picks again');
   });
 
   it('over 12 farms a lesson-following player sees a pair on 70% or more of mornings with room for one', () => {

@@ -509,7 +509,18 @@ function finishWalkTap(s: WorldState, a: Actor, ev: SimEvent[]): void {
   if (Math.max(Math.abs(t.x - aim.x), Math.abs(t.y - aim.y)) > 1) return;
   // A one-off build from the lesson pointer builds that; anything else is the tapped tool's job.
   const r = aim.build ? resolveBuild(s, aim.build, aim.x, aim.y) : homestead(s) && aim.tool ? tapJob(s, { x: aim.x, y: aim.y, tool: aim.tool, seed: aim.seed }).r : resolve(s, s.tool, aim.x, aim.y);
-  if (r.verb && r.ok) startAction(s, a, r, aim.x, aim.y, ev);
+  if (r.verb && r.ok && startAction(s, a, r, aim.x, aim.y, ev) && aim.tool) finishRow(s, r, aim.x, aim.y);
+}
+
+/**
+ * Round 12: a tap's watering that the can ran dry on partway through its row (a heat wave, one water left: the row ended
+ * wet, dry, dry, dry, and the farmer filled the can and moved on) waits at the front of the queue for the rest of the
+ * row: the farmer says so, fills the can at the nearer well, and comes back to finish it (`doTap`).
+ */
+function finishRow(s: WorldState, r: Resolved, x: number, y: number): void {
+  if (!homestead(s) || r.verb !== 'water' || s.water > 0) return;
+  const left = resolve(s, 'can', x, y);
+  if (left.verb === 'water' && !left.ok && left.reason.startsWith('The can is empty')) (s.taps ??= []).unshift({ x, y, tool: 'can' });
 }
 
 /** Taps that can wait their turn while the farmer is busy: three fields' worth. One more is refused, and says so. */
@@ -684,8 +695,9 @@ export function doTap(s: WorldState, a: Actor, tap: Tap, ev: SimEvent[]): void {
   }
   const t = tileOf(a);
   if (Math.max(Math.abs(t.x - tap.x), Math.abs(t.y - tap.y)) <= 1) {
-    if (r.verb && r.ok) startAction(s, a, r, tap.x, tap.y, ev);
-    else if (r.reason) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
+    if (r.verb && r.ok) {
+      if (startAction(s, a, r, tap.x, tap.y, ev) && !tap.build) finishRow(s, r, tap.x, tap.y);
+    } else if (r.reason) ev.push({ type: 'deny', x: tap.x, y: tap.y, reason: r.reason });
   } else {
     walkTo(s, a, tap.x, tap.y, !!(r.verb && r.ok), r.verb ?? undefined);
     if (a.aim) {
