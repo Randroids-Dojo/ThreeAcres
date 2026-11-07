@@ -20,3 +20,7 @@ npm run build
 ```
 
 Design: `docs/DESIGN.md`, then each game's doc (`docs/RANCH.md`, `docs/SUNUP.md`, `docs/DECK.md`). Art: `docs/ART_DIRECTION.md`. Code layout: `docs/ARCHITECTURE.md`. Sound: `docs/AUDIO_CUES.md`. Agent rules and every check script: `AGENTS.md`.
+
+## License
+
+Open source under the MIT License: anyone may use, copy, change and share the code and art. See `LICENSE`.

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Three farming games on one farm. Switch the view, the clock, the soil, the goals and the crew at any moment.",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
